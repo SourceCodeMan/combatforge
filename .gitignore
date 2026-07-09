@@ -1,0 +1,41 @@
+# PaintForge .gitignore — Unreal Engine 5.6 project.
+# NOTE: Config/ and Content/ are TRACKED. Content/ ships empty except
+# Content/Maps/.gitkeep and (once created on the PC, per contract T17)
+# Content/Maps/L_Graybox.umap.
+
+# --- Unreal Engine generated ---
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# --- Visual Studio / project files (regenerated from the .uproject) ---
+.vs/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# --- Rider / other IDEs ---
+.idea/
+.vsconfig
+*.DotSettings.user
+
+# --- Xcode (code is authored on macOS) ---
+*.xcodeproj
+*.xcworkspace
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Crash dumps / local logs outside Saved/ ---
+*.dmp

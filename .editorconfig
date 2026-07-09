@@ -1,0 +1,29 @@
+# PaintForge — editor configuration (code contract §4.1)
+root = true
+
+# Defaults for every file: UTF-8, LF, final newline.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# C++ (and C#) source: tabs, width 4 — Unreal Engine convention.
+[*.{h,hpp,cpp,inl,cs}]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+# Config / data files: 2-space indent.
+[*.{json,uproject,uplugin,yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# INI files: no indentation semantics; keep defaults.
+[*.ini]
+indent_style = space
+indent_size = 2
+
+# Markdown: trailing double-space is a hard line break — don't strip it.
+[*.md]
+trim_trailing_whitespace = false
