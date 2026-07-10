@@ -95,6 +95,12 @@ private:
 	static constexpr int32 NumChips = 8;
 	static constexpr int32 MaxSelections = 4;   // liked + disliked combined (T30)
 	static constexpr float VoteDuration = 20.f; // ring normalization (T3)
+	/**
+	 * Timeout auto-submit fires this many seconds BEFORE the phase deadline so the
+	 * ServerSubmitVote RPC lands before the server's FinalizeVotePhase timer marks
+	 * non-voters Abstained (an RPC sent at exactly 0 always loses that race).
+	 */
+	static constexpr float AutoSubmitLeadSeconds = 0.5f;
 	static constexpr float RingRadiusPx = 34.f;
 	static constexpr float RingCenterY = 70.f;
 };

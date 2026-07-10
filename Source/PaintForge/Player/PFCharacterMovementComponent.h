@@ -37,6 +37,9 @@ public:
 	bool IsSliding() const;                // MovementMode == MOVE_Custom && CustomMovementMode == CMOVE_Slide
 	bool IsSprintingEffective() const;     // sprint flag AND grounded AND input dot forward > 0.5
 	bool IsSlideGlidePhase() const;        // glide window (first 0.35 s, extended while descending)
+	bool WantsToADS() const;               // FLAG_Custom_1 state: the server-visible ADS intent from the
+	                                       // move stream — the character reads it back so the authoritative
+	                                       // spread cone matches the owning client's prediction
 
 	FPFOnSlideStateChanged OnSlideStateChanged;  // character binds for FOV kick; fired on both sides
 

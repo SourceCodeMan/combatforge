@@ -154,28 +154,33 @@ void APaintForgeGameMode::PostLogin(APlayerController* NewPlayer)
 
 void APaintForgeGameMode::Logout(AController* Exiting)
 {
-	if (APaintForgePlayerState* PS = Exiting ? Exiting->GetPlayerState<APaintForgePlayerState>() : nullptr)
+	APaintForgePlayerState* ExitingPS =
+		Exiting ? Exiting->GetPlayerState<APaintForgePlayerState>() : nullptr;
+	if (ExitingPS)
 	{
 		// The leaver's PlayerState may linger in PlayerArray briefly; take them out of the
 		// alive count NOW so the post-logout victory check below is correct.
-		PS->bAliveInRound = false;
-		if (TObjectPtr<APFTargetDummy>* Dummy = WarmupDummies.Find(PS))
+		ExitingPS->bAliveInRound = false;
+		if (TObjectPtr<APFTargetDummy>* Dummy = WarmupDummies.Find(ExitingPS))
 		{
 			if (*Dummy)
 			{
 				(*Dummy)->Destroy();
 			}
-			WarmupDummies.Remove(PS);
+			WarmupDummies.Remove(ExitingPS);
 		}
-		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s left"), *PS->GetPlayerName());
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s left"), *ExitingPS->GetPlayerName());
 	}
 
 	Super::Logout(Exiting);
 
-	// A leaver can complete an elimination victory or an all-ready condition.
+	// A leaver can complete an elimination victory, an all-ready condition, or an all-voted
+	// condition. Their PlayerState may still sit in PlayerArray here, so the ready/vote scans
+	// take it as an explicit exclusion.
 	RecountAlive();
 	CheckElimVictory();
-	NotifyReadyChanged();
+	NotifyReadyChangedInternal(ExitingPS);
+	CheckAllVotesIn(ExitingPS);
 }
 
 void APaintForgeGameMode::RestartPlayer(AController* NewPlayer)
@@ -350,6 +355,7 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			PS->bAliveInRound = true;
 			if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(PS->GetPlayerController()))
 			{
+				PC->SetEliminatedMoveLock(false);
 				if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PC->GetPawn()))
 				{
 					Pawn->GetHealth()->ResetForRound(3);
@@ -403,6 +409,7 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			PS->bAliveInRound = true;
 			if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(PS->GetPlayerController()))
 			{
+				PC->SetEliminatedMoveLock(false);
 				if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PC->GetPawn()))
 				{
 					Pawn->GetHealth()->ResetForRound(3);
@@ -473,16 +480,31 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 
 void APaintForgeGameMode::NotifyReadyChanged()
 {
+	NotifyReadyChangedInternal(nullptr);
+}
+
+void APaintForgeGameMode::NotifyReadyChangedInternal(const APaintForgePlayerState* IgnorePS)
+{
 	APaintForgeGameState* GS = GetPFGameState();
 	if (!GS)
 	{
 		return;
 	}
 
+	// Connected-player count excluding a lingering leaver (Logout path).
+	int32 Connected = 0;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		if (PSBase && PSBase != IgnorePS)
+		{
+			++Connected;
+		}
+	}
+
 	if (GS->Phase == EPFMatchPhase::Lobby)
 	{
 		// All-ready (2+ players) → 5 s countdown; a dropped ready cancels a non-forced countdown.
-		const bool bAllReady = AreAllPlayersReady() && GS->PlayerArray.Num() >= 2;
+		const bool bAllReady = AreAllPlayersReady(IgnorePS) && Connected >= 2;
 		if (bAllReady && !bLobbyCountdownActive)
 		{
 			BeginLobbyStartCountdown(/*bForced=*/false);
@@ -495,7 +517,7 @@ void APaintForgeGameMode::NotifyReadyChanged()
 	else if (GS->Phase == EPFMatchPhase::Build)
 	{
 		// Both teams 100% ready → 5 s countdown early end (§4.3); dropped ready restores the clock.
-		const bool bAllReady = AreAllPlayersReady() && GS->PlayerArray.Num() >= 1;
+		const bool bAllReady = AreAllPlayersReady(IgnorePS) && Connected >= 1;
 		const float Now = GS->GetServerWorldTimeSeconds();
 		if (bAllReady && !bBuildEarlyEndActive)
 		{
@@ -624,6 +646,7 @@ void APaintForgeGameMode::StartNextRound()
 		PS->bAliveInRound = true;
 		if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(PS->GetPlayerController()))
 		{
+			PC->SetEliminatedMoveLock(false);   // back alive; freeze-state lock reapplies below
 			if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PC->GetPawn()))
 			{
 				ResetPawnForRound(Pawn, PS, RoundHP);
@@ -694,6 +717,10 @@ void APaintForgeGameMode::BeginLiveRound()
 	// Breakout horn: clients play UPFCombatAudio::PlayBreakout from the RoundState delegate (T6).
 
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: round %d LIVE (%.0f s)"), GS->RoundNumber, Duration);
+
+	// A team can already be empty here (whole team disconnected during Freeze/Intermission).
+	// CheckElimVictory handles 0-vs-N and 0-vs-0, so the round resolves instead of running 90 s.
+	CheckElimVictory();
 }
 
 void APaintForgeGameMode::ResolveRoundOnTimer()
@@ -838,11 +865,21 @@ void APaintForgeGameMode::OnIntermissionEnd()
 	{
 		return;
 	}
-	StartNextRound();   // covers both the normal next round and the sudden-death round
+	if (bPendingSuddenDeath)
+	{
+		bPendingSuddenDeath = false;
+		StartSuddenDeath();
+	}
+	else
+	{
+		StartNextRound();
+	}
 }
 
 void APaintForgeGameMode::StartSuddenDeath()
 {
+	// The one entry point into the sudden-death round (reached from OnIntermissionEnd after a
+	// post-max-rounds deadlock flagged bPendingSuddenDeath in EndRound).
 	bPendingSuddenDeath = true;
 	StartNextRound();
 }
@@ -951,13 +988,28 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 		return;
 	}
 
-	// Round elimination (B1): out for the round, death cam → teammate spectate (T5).
+	// Round elimination (B1): out for the round, movement frozen, death cam → teammate
+	// spectate (T5). Corpse collision handling (paintball 0.5 s window, capsule off) is
+	// UPFHealthComponent's job (§3.4); the move lock here keeps the hidden pawn from being
+	// walked around for the rest of the round.
 	VictimPS->bAliveInRound = false;
 	if (APaintForgePlayerController* VictimPC = Cast<APaintForgePlayerController>(VictimPS->GetPlayerController()))
 	{
+		VictimPC->SetEliminatedMoveLock(true);
 		VictimPC->StartDeathCamera();
 	}
 	RecountAlive();
+
+	// Already-dead spectators whose view target was the victim's now-hidden pawn move on to
+	// another living teammate (or back to their own body when none remain).
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(It->Get()))
+		{
+			PC->RetargetSpectatorFrom(Victim);
+		}
+	}
+
 	CheckElimVictory();
 }
 
@@ -1000,6 +1052,12 @@ void APaintForgeGameMode::SubmitVote(APaintForgePlayerController* Voter, EPFThum
 	}
 
 	// Server re-enforces T30: valid IDs 1..8, deduped, no liked∩disliked, ≤4 combined.
+	// A tampered out-of-range thumb byte clamps to Abstained so the tally always sums to the
+	// player count on the Results screen.
+	if (Thumb != EPFThumbVote::Up && Thumb != EPFThumbVote::Down)
+	{
+		Thumb = EPFThumbVote::Abstained;
+	}
 	TArray<uint8> Liked = LikedIds;
 	TArray<uint8> Disliked = DislikedIds;
 	SanitizeVoteIds(Liked, Disliked);
@@ -1035,20 +1093,28 @@ void APaintForgeGameMode::SubmitVote(APaintForgePlayerController* Voter, EPFThum
 	}
 
 	// T3: vote auto-advances early once every connected player has voted.
-	bool bAllVoted = true;
+	CheckAllVotesIn(nullptr);
+}
+
+void APaintForgeGameMode::CheckAllVotesIn(const APaintForgePlayerState* IgnorePS)
+{
+	// T3 early-advance, re-evaluated on every vote AND on disconnect (the last non-voter
+	// leaving completes the condition; their lingering PlayerState is excluded). No abstain
+	// fill needed here — everyone counted has voted, so FinalizeVotePhase has nothing to add.
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Vote)
+	{
+		return;
+	}
 	for (APlayerState* OtherBase : GS->PlayerArray)
 	{
 		const APaintForgePlayerState* Other = Cast<APaintForgePlayerState>(OtherBase);
-		if (Other && !Other->bHasVoted)
+		if (Other && Other != IgnorePS && !Other->bHasVoted)
 		{
-			bAllVoted = false;
-			break;
+			return;
 		}
 	}
-	if (bAllVoted)
-	{
-		SetPhase(EPFMatchPhase::Results);
-	}
+	SetPhase(EPFMatchPhase::Results);
 }
 
 void APaintForgeGameMode::FinalizeVotePhase()
@@ -1205,22 +1271,28 @@ void APaintForgeGameMode::GetTeamCounts(int32& OutTeamA, int32& OutTeamB) const
 	}
 }
 
-bool APaintForgeGameMode::AreAllPlayersReady() const
+bool APaintForgeGameMode::AreAllPlayersReady(const APaintForgePlayerState* IgnorePS) const
 {
 	const APaintForgeGameState* GS = GetPFGameState();
-	if (!GS || GS->PlayerArray.Num() == 0)
+	if (!GS)
 	{
 		return false;
 	}
+	int32 Counted = 0;
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
-		if (PS && !PS->bReady)
+		if (!PS || PS == IgnorePS)
+		{
+			continue;
+		}
+		if (!PS->bReady)
 		{
 			return false;
 		}
+		++Counted;
 	}
-	return true;
+	return Counted > 0;
 }
 
 uint8 APaintForgeGameMode::FindFreeRosterIndex() const

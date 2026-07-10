@@ -2,7 +2,7 @@
 
 #include "Player/PFCameraShakes.h"
 
-#include "Camera/Shakes/WaveOscillatorCameraShakePattern.h"
+#include "Shakes/WaveOscillatorCameraShakePattern.h"
 
 namespace
 {

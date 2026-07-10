@@ -124,6 +124,11 @@ APFBuildGrid::APFBuildGrid()
 			ISMC->SetCanEverAffectNavigation(false);
 			ISMC->SetCastShadow(true);
 
+			// RemovePieceLocal's index bookkeeping assumes swap-removal (last instance fills the
+			// hole). The engine default is an ordered RemoveAt, which would shift every higher
+			// instance index and corrupt InstanceToPiece/PieceToInstance — opt in explicitly.
+			ISMC->bSupportRemoveAtSwap = true;
+
 			// Block Pawn / Visibility / Paintball / BuildTrace (§4.6); ignore everything else.
 			ISMC->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 			ISMC->SetCollisionObjectType(ECC_WorldStatic);
@@ -311,6 +316,17 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		default:
 			break;
 		}
+
+		// Structurals must also not interpenetrate placed props (mirror of the prop branch below,
+		// which rejects against StructuralBounds). Shrink so flush contact stays legal.
+		const FBox StructShrunk = Bounds.ExpandBy(-1.f);
+		for (const TPair<uint16, FBox>& Existing : PropBounds)
+		{
+			if (StructShrunk.Intersect(Existing.Value))
+			{
+				return EPFDenyReason::Overlapping;
+			}
+		}
 	}
 	else
 	{
@@ -422,6 +438,7 @@ EPFDenyReason APFBuildGrid::TryPlacePiece(APaintForgePlayerState* Placer, const 
 	FPFBuildPieceRec& Added = Pieces.Items.Add_GetRef(Rec);
 	Pieces.MarkItemDirty(Added);
 	AddPieceLocal(Added);   // server mirror — FastArray callbacks fire on clients only
+	BuilderByPieceId.Add(Rec.PieceId, Placer);   // match-stable refund identity (roster indices recycle)
 
 	OutPieceId = Rec.PieceId;
 	UE_LOG(PaintForgeLog, Verbose, TEXT("BuildGrid: %s placed %s #%u at (%d,%d,%d) rot %u"),
@@ -466,12 +483,26 @@ EPFDenyReason APFBuildGrid::TryDeletePiece(APaintForgePlayerState* Requester, ui
 		return EPFDenyReason::NotYourTeam;
 	}
 
-	// 100% refund to the ORIGINAL builder's budget (T19).
+	// 100% refund to the ORIGINAL builder's budget (T19). Roster indices are recycled by the
+	// GameMode when a player leaves, so gate the roster lookup on the builder's PlayerState
+	// recorded at placement time — otherwise deleting a leaver's pieces would mint budget for
+	// whichever newcomer inherited the index.
 	APaintForgePlayerState* Builder = GS->FindPlayerByRosterIndex(Rec.OwnerIdx);
+	const TWeakObjectPtr<APaintForgePlayerState>* StoredBuilder = BuilderByPieceId.Find(Rec.PieceId);
+	if (!StoredBuilder || StoredBuilder->Get() != Builder)
+	{
+		Builder = nullptr;   // index recycled to a different player (or builder gone) — no refund
+	}
 	if (Builder)
 	{
 		Builder->ServerRefundBudget(Rec.Type);
 	}
+	else
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("BuildGrid: no refund for piece #%u — original builder (roster %u) left"),
+			Rec.PieceId, Rec.OwnerIdx);
+	}
+	BuilderByPieceId.Remove(Rec.PieceId);
 
 	RemovePieceLocal(Rec);
 	Pieces.Items.RemoveAt(FoundIdx);
@@ -510,6 +541,7 @@ void APFBuildGrid::ClearAll()
 	WallEdges.Empty();
 	StructuralBounds.Empty();
 	PropBounds.Empty();
+	BuilderByPieceId.Empty();
 	RateWindows.Empty();
 	NextPieceId = 0;
 	bBuildFrozen = false;
@@ -542,7 +574,7 @@ void APFBuildGrid::RemovePieceLocal(const FPFBuildPieceRec& Rec)
 		{
 			const int32 InstanceIdx = *InstancePtr;
 			const int32 LastIdx = PieceISMCs[K]->GetInstanceCount() - 1;
-			PieceISMCs[K]->RemoveInstance(InstanceIdx);   // swap-removal: last instance moves into the hole
+			PieceISMCs[K]->RemoveInstance(InstanceIdx);   // bSupportRemoveAtSwap (ctor): last instance moves into the hole
 
 			if (InstanceIdx != LastIdx)
 			{

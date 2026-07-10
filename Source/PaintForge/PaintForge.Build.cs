@@ -7,6 +7,7 @@ public class PaintForge : ModuleRules
 	public PaintForge(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		bWarningsAsErrors = true;   // contract §5.17: warnings-as-errors stays on
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core", "CoreUObject", "Engine", "InputCore",

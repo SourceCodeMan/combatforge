@@ -277,10 +277,17 @@ void APaintForgePlayerController::ApplyInputForPhase()
 
 void APaintForgePlayerController::ApplyLocalMoveLock(bool bLocked)
 {
+	bPhaseMoveLock = bLocked;
+	RefreshMoveLock();
+}
+
+void APaintForgePlayerController::RefreshMoveLock()
+{
 	// SetIgnoreMoveInput stacks a refcount — reset first so repeated phase reactions stay
-	// idempotent. Look input is never ignored (look stays free in Freeze, T6).
+	// idempotent. Look input is never ignored (look stays free in Freeze, T6). The elimination
+	// lock survives phase-driven re-applies because both flags compose here.
 	ResetIgnoreMoveInput();
-	if (bLocked)
+	if (bPhaseMoveLock || bEliminatedMoveLock)
 	{
 		SetIgnoreMoveInput(true);
 	}
@@ -293,6 +300,28 @@ void APaintForgePlayerController::ApplyServerMoveLock(bool bLocked)
 		return;
 	}
 	ApplyLocalMoveLock(bLocked);
+}
+
+void APaintForgePlayerController::SetEliminatedMoveLock(bool bLocked)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	// Server copy (authoritative move-ignore) + owning-client mirror: IgnoreMoveInput does not
+	// replicate, so without the RPC a remote client's dead pawn keeps accepting move input.
+	if (bEliminatedMoveLock != bLocked)
+	{
+		bEliminatedMoveLock = bLocked;
+		RefreshMoveLock();
+	}
+	ClientSetEliminatedMoveLock(bLocked);
+}
+
+void APaintForgePlayerController::ClientSetEliminatedMoveLock_Implementation(bool bLocked)
+{
+	bEliminatedMoveLock = bLocked;
+	RefreshMoveLock();
 }
 
 void APaintForgePlayerController::CreateHUDIfNeeded()
@@ -538,6 +567,30 @@ void APaintForgePlayerController::SpectateNearestTeammate()
 	}
 	SpectateIndex = BestIdx;
 	SetViewTargetWithBlend(Teammates[BestIdx], 0.25f);
+}
+
+void APaintForgePlayerController::RetargetSpectatorFrom(APawn* EliminatedPawn)
+{
+	if (!HasAuthority() || !EliminatedPawn || GetPawn() == EliminatedPawn)
+	{
+		return;   // the victim runs its own death-cam flow
+	}
+	const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>();
+	if (!PS || PS->bAliveInRound || GetViewTarget() != EliminatedPawn)
+	{
+		return;   // only dead spectators currently viewing the eliminated pawn
+	}
+
+	TArray<APaintForgeCharacter*> Teammates;
+	GatherLivingTeammatePawns(Teammates);
+	if (Teammates.Num() > 0)
+	{
+		SpectateNearestTeammate();
+	}
+	else if (APawn* MyPawn = GetPawn())
+	{
+		SetViewTargetWithBlend(MyPawn, 0.25f);   // no teammates left: back to own body
+	}
 }
 
 void APaintForgePlayerController::ServerSpectateNext_Implementation(bool bForward)

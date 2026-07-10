@@ -104,7 +104,7 @@ void UPFCombatHUDWidget::BuildTree()
 	UVerticalBox* TopBox = WidgetTree->ConstructWidget<UVerticalBox>();
 
 	UHorizontalBox* PipsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
-	auto AddPip = [this, PipsRow](TArray<TObjectPtr<UImage>>& OutPips)
+	auto AddPip = [this, PipsRow](TArray<TObjectPtr<UImage>>& OutPips, TArray<TObjectPtr<USizeBox>>& OutSizers)
 	{
 		UImage* Pip = MakeSolidImage(WidgetTree, FLinearColor(1.f, 1.f, 1.f, 0.12f));
 		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
@@ -117,10 +117,11 @@ void UPFCombatHUDWidget::BuildTree()
 			HSlot->SetVerticalAlignment(VAlign_Center);
 		}
 		OutPips.Add(Pip);
+		OutSizers.Add(Sizer);
 	};
 	for (int32 i = 0; i < MaxPips; ++i)
 	{
-		AddPip(PipsA);
+		AddPip(PipsA, PipSizersA);
 	}
 	RoundNumberText = WidgetTree->ConstructWidget<UTextBlock>();
 	RoundNumberText->SetFont(PFCombatFont(14, true));
@@ -132,7 +133,7 @@ void UPFCombatHUDWidget::BuildTree()
 	}
 	for (int32 i = 0; i < MaxPips; ++i)
 	{
-		AddPip(PipsB);
+		AddPip(PipsB, PipSizersB);
 	}
 	if (UVerticalBoxSlot* VSlot = TopBox->AddChildToVerticalBox(PipsRow))
 	{
@@ -332,6 +333,15 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 	{
 		return;
 	}
+
+	// Effective wins-to-take: <=2v2 formats play first-to-3 (T15). The GameMode config
+	// isn't replicated, so infer from the roster size; never show fewer pips than a team
+	// already has wins (guards a mid-match leaver dropping the roster to <=4).
+	int32 EffectivePips = (GS->PlayerArray.Num() <= SmallFormatMaxPlayers) ? SmallFormatPips : MaxPips;
+	EffectivePips = FMath::Max3(EffectivePips,
+		static_cast<int32>(GS->TeamRoundWins[0]), static_cast<int32>(GS->TeamRoundWins[1]));
+	UpdatePipVisibility(FMath::Min(EffectivePips, MaxPips));
+
 	for (int32 i = 0; i < MaxPips; ++i)
 	{
 		if (PipsA.IsValidIndex(i) && PipsA[i])
@@ -350,6 +360,27 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 	if (RoundNumberText)
 	{
 		RoundNumberText->SetText(FText::FromString(FString::Printf(TEXT("R%d"), GS->RoundNumber)));
+	}
+}
+
+void UPFCombatHUDWidget::UpdatePipVisibility(int32 EffectiveCount)
+{
+	// Both rows collapse their center-nearest pips, keeping the layout symmetric.
+	// Team A fills outer->center from index 0, so its extras are the HIGH indices;
+	// team B fills outer->center from index MaxPips-1, so its extras are the LOW
+	// indices — collapsing them leaves both fill formulas untouched.
+	for (int32 i = 0; i < MaxPips; ++i)
+	{
+		if (PipSizersA.IsValidIndex(i) && PipSizersA[i])
+		{
+			PipSizersA[i]->SetVisibility(i < EffectiveCount
+				? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+		}
+		if (PipSizersB.IsValidIndex(i) && PipSizersB[i])
+		{
+			PipSizersB[i]->SetVisibility(i >= MaxPips - EffectiveCount
+				? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+		}
 	}
 }
 
@@ -483,10 +514,10 @@ void UPFCombatHUDWidget::UpdateCrosshair()
 		ViewX = 1920;
 	}
 
-	// CONTRACT-GAP: 04 §4 writes the gap as 40·tan(spread)/tan(FOV/2)·(ViewportW/2),
-	// but the leading 40 puts a 1.5° hip cone at ~770 px on a 1080p screen (off-HUD).
-	// Implemented as the true screen projection of the spread half-angle plus a fixed
-	// base gap — the crosshair still "truthfully displays the live spread cone".
+	// Contract §3.6 (ERRATUM 2026-07-10): gap px = 6 + tan(spreadHalfAngle)/tan(FOV/2)
+	// · (ViewportW/2). The original formula's stray leading 40· factor was struck by the
+	// erratum; the ratified form is the true screen projection of the spread half-angle
+	// plus the 6 px base gap (CrosshairBaseGapPx).
 	const float Projected = FMath::Tan(FMath::DegreesToRadians(SpreadDeg))
 		/ FMath::Tan(FMath::DegreesToRadians(FOV * 0.5f))
 		* (static_cast<float>(ViewX) * 0.5f);

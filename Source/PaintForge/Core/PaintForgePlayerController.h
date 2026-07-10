@@ -41,6 +41,9 @@ public:
 	// ---- pkg-core intra API (GameMode → PC, server side) ----
 	void StartDeathCamera();                  // T5: 0.5 s locked death cam, then nearest-teammate spectate
 	void ApplyServerMoveLock(bool bLocked);   // server-copy move-input freeze (Freeze/Intermission/Vote/Results)
+	void SetEliminatedMoveLock(bool bLocked); // server: victim move freeze for the rest of the round
+	                                          // (mirrored to the owning client via ClientSetEliminatedMoveLock)
+	void RetargetSpectatorFrom(APawn* EliminatedPawn); // server: spectated pawn was eliminated → move on
 
 	// CONTRACT-GAP: no §3 API exists for the PC to drive scoreboard visibility inside
 	// UPFRootHUDWidget; exposing the held state here is the smallest seam (pkg-ui may poll it).
@@ -60,7 +63,11 @@ protected:
 	void HandlePhaseChanged(EPFMatchPhase NewPhase);
 	void HandleRoundStateChanged(EPFRoundState NewState);
 	void ApplyInputForPhase();                // IMCs + input mode + local move ignore per §4.5
-	void ApplyLocalMoveLock(bool bLocked);
+	void ApplyLocalMoveLock(bool bLocked);    // phase-driven lock; combined with the elim lock
+	void RefreshMoveLock();                   // re-applies phase lock OR elim lock idempotently
+
+	// Owning-client mirror of the elimination move freeze (move-input ignore does not replicate).
+	UFUNCTION(Client, Reliable) void ClientSetEliminatedMoveLock(bool bLocked);
 	void CreateHUDIfNeeded();
 	void TrySendGuidHash();
 
@@ -90,5 +97,7 @@ private:
 	bool bGameStateBound = false;
 	bool bGuidHashSent = false;
 	bool bScoreboardHeld = false;
+	bool bPhaseMoveLock = false;        // §4.5 phase/round-state move freeze
+	bool bEliminatedMoveLock = false;   // dead-for-the-round move freeze (each side keeps its copy)
 	int32 SpectateIndex = 0;            // server-side cycle cursor into living-teammate list
 };

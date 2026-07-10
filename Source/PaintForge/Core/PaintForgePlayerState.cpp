@@ -3,6 +3,7 @@
 #include "Core/PaintForgePlayerState.h"
 
 #include "PaintForge.h"
+#include "Player/PaintForgeCharacter.h"
 #include "Net/UnrealNetwork.h"
 
 namespace
@@ -145,7 +146,35 @@ void APaintForgePlayerState::ServerAddScore(int32 Delta)
 	ForceNetUpdate();
 }
 
+void APaintForgePlayerState::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+	// Fires on both server (possession) and clients (OnRep_PawnPrivate), covering the case
+	// where the pawn pointer arrives after the team flag.
+	OnPawnSet.AddUniqueDynamic(this, &APaintForgePlayerState::HandlePawnSet);
+}
+
+void APaintForgePlayerState::HandlePawnSet(APlayerState* /*Player*/, APawn* NewPawn, APawn* /*OldPawn*/)
+{
+	ApplyTeamColorToPawn(NewPawn);
+}
+
+void APaintForgePlayerState::ApplyTeamColorToPawn(APawn* InPawn) const
+{
+	if (TeamId > 1)
+	{
+		return;   // unassigned — leave the default tint until a team lands
+	}
+	if (APaintForgeCharacter* Character = Cast<APaintForgeCharacter>(InPawn))
+	{
+		Character->SetTeamColor(TeamId);
+	}
+}
+
 void APaintForgePlayerState::OnRep_Flags()
 {
+	// Mirror the replicated team onto the pawn's MID tint (covers flag-after-pawn ordering and
+	// host team-cycles recoloring an already-spawned pawn) before notifying UI listeners.
+	ApplyTeamColorToPawn(GetPawn());
 	OnFlagsChangedEvent.Broadcast();
 }

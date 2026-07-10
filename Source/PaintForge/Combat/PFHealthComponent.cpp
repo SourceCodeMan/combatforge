@@ -92,18 +92,28 @@ void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate)
 			ShooterLoc = ShooterPawn->GetActorLocation();
 		}
 	}
-	ClientPaintHitTaken(ShooterLoc, Hit.ShooterTeam, HP);
+	// Route victim feedback only where it can land: a locally-controlled pawn (listen host —
+	// the client RPC runs in-place) or a pawn with an owning client connection. Server-owned
+	// victims (APFTargetDummy) have neither; sending would only log a
+	// "no owning connection" net warning per warm-up hit.
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (OwnerPawn != nullptr &&
+		(OwnerPawn->IsLocallyControlled() || OwnerPawn->GetNetConnection() != nullptr))
+	{
+		ClientPaintHitTaken(ShooterLoc, Hit.ShooterTeam, HP);
+	}
 
 	if (HP == 0)
 	{
 		bEliminated = true;
 		ApplyEliminatedAppearance(true);   // server/host visual; clients via OnRep_Eliminated
 
-		// Corpse blocks paintballs 0.5 s, then the paintball response turns off (04 §2.4).
+		// Corpse blocks paintballs 0.5 s, then collision turns off — paintball response and
+		// pawn blocking both (04 §2.4). Clients mirror this via OnRep_Eliminated.
 		if (UWorld* World = GetWorld())
 		{
 			World->GetTimerManager().SetTimer(CorpseCollisionTimer, this,
-				&UPFHealthComponent::DisablePaintballBlocking, CorpseBlockSeconds, false);
+				&UPFHealthComponent::DisableCorpseCollision, CorpseBlockSeconds, false);
 		}
 
 		// GameMode (player pawns) / APFTargetDummy (itself) subscribe here — this component
@@ -126,7 +136,7 @@ void UPFHealthComponent::ResetForRound(uint8 RoundHP)
 
 	HP = RoundHP;
 	bEliminated = false;
-	RestorePaintballBlocking();
+	RestoreCorpseCollision();
 	ApplyEliminatedAppearance(false);
 	OnHPChangedEvent.Broadcast(HP);   // manual host broadcast (§5.9)
 }
@@ -179,9 +189,26 @@ void UPFHealthComponent::OnRep_Eliminated()
 {
 	// Single-shot tolerant (§5.10): applying the final value directly is always correct.
 	ApplyEliminatedAppearance(bEliminated);
+
+	// Mirror the server's corpse collision-off locally: client-predicted movement must agree
+	// with authority that a corpse stops blocking pawns, or living players rubber-band on an
+	// invisible capsule that no longer exists server-side.
+	if (UWorld* World = GetWorld())
+	{
+		if (bEliminated)
+		{
+			World->GetTimerManager().SetTimer(CorpseCollisionTimer, this,
+				&UPFHealthComponent::DisableCorpseCollision, CorpseBlockSeconds, false);
+		}
+		else
+		{
+			World->GetTimerManager().ClearTimer(CorpseCollisionTimer);
+			RestoreCorpseCollision();
+		}
+	}
 }
 
-void UPFHealthComponent::DisablePaintballBlocking()
+void UPFHealthComponent::DisableCorpseCollision()
 {
 	AActor* Owner = GetOwner();
 	if (Owner == nullptr)
@@ -190,20 +217,32 @@ void UPFHealthComponent::DisablePaintballBlocking()
 	}
 
 	PaintballBlockersDisabled.Reset();
+	PawnBlockersDisabled.Reset();
 
 	TInlineComponentArray<UPrimitiveComponent*> Prims(Owner);
 	for (UPrimitiveComponent* Prim : Prims)
 	{
-		if (Prim != nullptr &&
-			Prim->GetCollisionResponseToChannel(PF_ECC_Paintball) == ECR_Block)
+		if (Prim == nullptr)
+		{
+			continue;
+		}
+		if (Prim->GetCollisionResponseToChannel(PF_ECC_Paintball) == ECR_Block)
 		{
 			Prim->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Ignore);
 			PaintballBlockersDisabled.Add(Prim);
 		}
+		// "Then collision off" (04 §2.4): a hidden corpse must not remain a pawn-blocking
+		// invisible collider (doorway body-blocking). Only the pawn response is dropped —
+		// world responses stay so the hidden pawn does not fall out of the level.
+		if (Prim->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block)
+		{
+			Prim->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+			PawnBlockersDisabled.Add(Prim);
+		}
 	}
 }
 
-void UPFHealthComponent::RestorePaintballBlocking()
+void UPFHealthComponent::RestoreCorpseCollision()
 {
 	for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : PaintballBlockersDisabled)
 	{
@@ -213,6 +252,15 @@ void UPFHealthComponent::RestorePaintballBlocking()
 		}
 	}
 	PaintballBlockersDisabled.Reset();
+
+	for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : PawnBlockersDisabled)
+	{
+		if (UPrimitiveComponent* Prim = WeakPrim.Get())
+		{
+			Prim->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		}
+	}
+	PawnBlockersDisabled.Reset();
 }
 
 void UPFHealthComponent::ApplyEliminatedAppearance(bool bNewEliminated)

@@ -158,6 +158,11 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 		FallStartPeakZ = FMath::Max(FallStartPeakZ, GetActorLocation().Z);
 	}
 
+	// ADS transition alpha advances on every role: the server reads
+	// GetADSAlpha() for the authoritative spread cone (04 §2.3), so it must
+	// track the move-stream ADS intent even for remotely controlled pawns.
+	UpdateADSAlpha(DeltaSeconds);
+
 	if (IsLocallyControlled())
 	{
 		// Slide/sprint state can change without new key events; keep the CMC
@@ -299,8 +304,9 @@ void APaintForgeCharacter::OnFirePressed()
 
 	if (bNeedsRaise)
 	{
+		const float SprintOutDelay = (WeaponComponent != nullptr) ? WeaponComponent->SprintOutTime : 0.18f;
 		GetWorldTimerManager().SetTimer(SprintOutTimerHandle, this,
-			&APaintForgeCharacter::OnSprintOutFinished, SprintOutTime, false);
+			&APaintForgeCharacter::OnSprintOutFinished, SprintOutDelay, false);
 	}
 	else if (!GetWorldTimerManager().IsTimerActive(SprintOutTimerHandle))
 	{
@@ -359,7 +365,17 @@ void APaintForgeCharacter::SetADS(bool bWantsADS)
 
 bool APaintForgeCharacter::IsADS() const
 {
-	return bADSHeld && (PFMovement == nullptr || !PFMovement->IsSliding());
+	if (PFMovement == nullptr)
+	{
+		return bADSHeld;
+	}
+	// Owning client: the raw held key drives the state (and feeds the
+	// compressed flag via UpdateMovementIntents). Server / proxies: bADSHeld
+	// never leaves the owning client, so read the intent back out of the move
+	// stream (FLAG_Custom_1) — this keeps the server's spread cone identical
+	// to the one the client predicted with.
+	const bool bHeld = IsLocallyControlled() ? (bADSHeld != 0) : PFMovement->WantsToADS();
+	return bHeld && !PFMovement->IsSliding();
 }
 
 float APaintForgeCharacter::GetADSAlpha() const
@@ -395,20 +411,22 @@ void APaintForgeCharacter::HandleSlideStateChanged(bool /*bSliding*/)
 // FOV arbiter (04 §1.3) — the single compose point; effects never fight
 // ---------------------------------------------------------------------------
 
+void APaintForgeCharacter::UpdateADSAlpha(float DeltaSeconds)
+{
+	// Linear 0.18 s in / 0.14 s out; the ease-out cubic is applied at compose
+	// time (FOV) and by the spread lerp consumer. Runs on every role — see Tick.
+	const float Target = IsADS() ? 1.f : 0.f;
+	const float Rate = (Target > ADSAlpha)
+		? (ADSInTime > 0.f ? 1.f / ADSInTime : BIG_NUMBER)
+		: (ADSOutTime > 0.f ? 1.f / ADSOutTime : BIG_NUMBER);
+	ADSAlpha = FMath::FInterpConstantTo(ADSAlpha, Target, DeltaSeconds, Rate);
+}
+
 void APaintForgeCharacter::UpdateTargetFOV(float DeltaSeconds)
 {
 	if (FirstPersonCamera == nullptr)
 	{
 		return;
-	}
-
-	// ADS alpha: linear 0.18 s in / 0.14 s out; curve applied at compose time.
-	{
-		const float Target = IsADS() ? 1.f : 0.f;
-		const float Rate = (Target > ADSAlpha)
-			? (ADSInTime > 0.f ? 1.f / ADSInTime : BIG_NUMBER)
-			: (ADSOutTime > 0.f ? 1.f / ADSOutTime : BIG_NUMBER);
-		ADSAlpha = FMath::FInterpConstantTo(ADSAlpha, Target, DeltaSeconds, Rate);
 	}
 
 	// Sprint kick: +6 over 0.15 s.

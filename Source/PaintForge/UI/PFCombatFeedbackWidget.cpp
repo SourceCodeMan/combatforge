@@ -342,13 +342,9 @@ void UPFCombatFeedbackWidget::HandleHitTaken(FVector ShooterLoc, uint8 ShooterTe
 		ArcRemaining[ArcIdx] = ArcDuration;
 	}
 
-	if (APaintForgeCharacter* Pawn = BoundPawn.Get())
-	{
-		if (UPFCombatAudio* Audio = Pawn->GetCombatAudio())
-		{
-			Audio->PlaySplatIncoming();
-		}
-	}
+	// No PlaySplatIncoming() here: the contracted call site (§3.4 call-site map) is
+	// UPFHealthComponent::ClientPaintHitTaken, which fires the audio before broadcasting
+	// OnLocalPaintHitTakenEvent — playing it here too doubled the sound per hit taken.
 
 	// ---- Mask splats: wiped fully on elimination (04 §4), else 2-3 new blobs ----
 	if (NewHP == 0)

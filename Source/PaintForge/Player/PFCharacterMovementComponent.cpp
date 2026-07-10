@@ -90,6 +90,11 @@ bool UPFCharacterMovementComponent::IsSlideGlidePhase() const
 	return IsSliding() && bSlideGlideActive;
 }
 
+bool UPFCharacterMovementComponent::WantsToADS() const
+{
+	return bWantsToADSPF;
+}
+
 // ---------------------------------------------------------------------------
 // Speed — the single source of truth (02 R6)
 // ---------------------------------------------------------------------------

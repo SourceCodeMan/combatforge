@@ -86,6 +86,10 @@ protected:
 	void BeginLobbyStartCountdown(bool bForced);
 	void CancelLobbyStartCountdown();
 	void FinalizeVotePhase();
+	// Leaver-aware cores: a leaver's PlayerState can linger in PlayerArray during Logout, so the
+	// all-ready / all-voted scans must be able to exclude it explicitly.
+	void NotifyReadyChangedInternal(const APaintForgePlayerState* IgnorePS);
+	void CheckAllVotesIn(const APaintForgePlayerState* IgnorePS);
 
 	// ---- (intra) world + players ----
 	// Health contract (§3.4): the component never calls the GameMode; the GameMode subscribes
@@ -104,7 +108,7 @@ protected:
 	UPFRatingSubsystem* GetRatingSubsystem() const;
 	void GetTeamCounts(int32& OutTeamA, int32& OutTeamB) const;
 	int32 GetTeamSlotIndex(const APaintForgePlayerState* PS) const;
-	bool AreAllPlayersReady() const;
+	bool AreAllPlayersReady(const APaintForgePlayerState* IgnorePS = nullptr) const;
 	uint8 FindFreeRosterIndex() const;
 	void ComputeEffectiveScaling();
 	FPFMatchResult MakeMatchResult(uint8 MatchWinner) const;

@@ -471,7 +471,10 @@ void UPFVoteWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	}
 
 	// Timeout auto-submits whatever is selected; no thumb = Abstained (01 §4.2).
-	if (Remaining <= 0.f && !bSubmitted)
+	// Fires a short lead BEFORE the deadline: at exactly 0 the server's FinalizeVotePhase
+	// timer is already flipping the phase and marking non-voters Abstained, so an RPC sent
+	// at 0 always loses the race and the selections would be dropped.
+	if (Remaining <= AutoSubmitLeadSeconds && !bSubmitted)
 	{
 		SubmitVote();
 	}

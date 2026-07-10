@@ -233,7 +233,13 @@ void UPFWeaponComponent::FireOneShot(double Now)
 		OnHopperChangedEvent.Broadcast(HopperCount);
 	}
 
-	RegisterShotBloom(Now);
+	if (!Char->HasAuthority())
+	{
+		// Client-side bloom for the next predicted shot. A listen host skips this:
+		// ServerFire_Implementation (invoked synchronously below) is its single accumulation —
+		// registering here too would double the host's bloom (+0.24°/shot vs +0.12°).
+		RegisterShotBloom(Now);
+	}
 
 	// Muzzle feel (04 §4): fire shake doubles as recoil (feel-only; bloom is the spray cost).
 	if (APlayerController* PC = Cast<APlayerController>(Char->GetController()))
@@ -588,6 +594,9 @@ float UPFWeaponComponent::GetCurrentSpreadHalfAngleDeg() const
 		return SpreadHip;
 	}
 	const UPFCharacterMovementComponent* CMC = Char->GetPFMovement();
+	// B3 requires client and server to compute the SAME half-angle. That holds only if
+	// pkg-character advances GetADSAlpha() on ALL roles (server-side from the CMC's
+	// replicated ADS compressed flag), not just on the locally-controlled instance.
 	const float ADSAlpha = FMath::Clamp(Char->GetADSAlpha(), 0.f, 1.f);
 
 	// Base: hip 1.5 / hip-moving (>50% walk) 2.0, lerped to ADS 0.25 by the transition

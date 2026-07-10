@@ -43,7 +43,14 @@ public:
 	void ServerAddScore(int32 Delta);
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PostInitializeComponents() override;
 
 protected:
 	UFUNCTION() void OnRep_Flags();
+
+	// Team tint is visual state derived from replicated TeamId — MIDs never replicate, so every
+	// machine (server, listen host, pure clients) applies it locally whenever the pawn pointer or
+	// the team flag lands, in either order. Also recolors live pawns on a host team-cycle (T22).
+	UFUNCTION() void HandlePawnSet(APlayerState* Player, APawn* NewPawn, APawn* OldPawn);
+	void ApplyTeamColorToPawn(APawn* InPawn) const;
 };

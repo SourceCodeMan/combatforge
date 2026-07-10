@@ -1140,8 +1140,10 @@ public:
 UCLASS() class PAINTFORGE_API UPFCombatHUDWidget : public UUserWidget
 {
     GENERATED_BODY()
-    // Crosshair: 4 lines + dot; gap px = 40·tan(spreadHalfAngle)/tan(FOV/2)·(ViewportW/2), polls
+    // Crosshair: 4 lines + dot; gap px = 6 + tan(spreadHalfAngle)/tan(FOV/2)·(ViewportW/2), polls
     //   Weapon->GetCurrentSpreadHalfAngleDeg() per tick; hidden in ADS → 2 px dot (04 §4).
+    //   [ERRATUM 2026-07-10: original formula had a stray 40· factor (placed a 1.5° hip cone at
+    //   ~770 px on 1080p — self-evidently wrong); ratified as true screen projection + 6 px base gap.]
     // Hopper "100/∞" (OnHopperChangedEvent), reload bar (OnReloadStateChangedEvent).
     // Round pips (first-to-4), round timer, alive counts per team, own HP as 3 paint dots
     //   (OnHPChangedEvent), elim feed last 4 lines (OnElimFeedChangedEvent),

@@ -18,7 +18,9 @@ class UPrimitiveComponent;
  * player pawns; APFTargetDummy subscribes to its own component (T29 decoupling).
  *
  * Corpse rule (04 §2.4): an eliminated body stops generating hit events immediately
- * but keeps blocking paintballs for 0.5 s, then its paintball response turns off.
+ * but keeps blocking paintballs for 0.5 s, then its collision turns off — both the
+ * paintball response and pawn blocking (a hidden corpse must not body-block doorways);
+ * world collision stays so the hidden pawn keeps standing on the floor.
  */
 UCLASS()
 class PAINTFORGE_API UPFHealthComponent : public UActorComponent
@@ -61,13 +63,17 @@ protected:
 	UFUNCTION() void OnRep_Eliminated();  // hides pawn locally, no ragdoll (02 §1.3)
 
 private:
-	// 04 §2.4: 0.5 s after elimination the corpse stops blocking paintballs.
-	void DisablePaintballBlocking();
-	void RestorePaintballBlocking();
+	// 04 §2.4: 0.5 s after elimination the corpse's collision turns off — paintball response
+	// AND pawn blocking (never an invisible body-blocker); world responses untouched. Runs on
+	// every machine (server via ApplyPaintHit's timer, clients via OnRep_Eliminated) so
+	// client-predicted movement agrees with authority about walking through corpses.
+	void DisableCorpseCollision();
+	void RestoreCorpseCollision();
 	// Applies/clears the eliminated look on a character owner (no-op for dummies).
 	void ApplyEliminatedAppearance(bool bNewEliminated);
 
 	FTimerHandle CorpseCollisionTimer;
-	// Components whose PF_ECC_Paintball response we flipped to Ignore, for exact restore.
+	// Components whose PF_ECC_Paintball / ECC_Pawn response we flipped to Ignore, for exact restore.
 	TArray<TWeakObjectPtr<UPrimitiveComponent>> PaintballBlockersDisabled;
+	TArray<TWeakObjectPtr<UPrimitiveComponent>> PawnBlockersDisabled;
 };

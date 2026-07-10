@@ -13,6 +13,7 @@ class UImage;
 class UPFHealthComponent;
 class UPFWeaponComponent;
 class UProgressBar;
+class USizeBox;
 class UTextBlock;
 
 /**
@@ -20,7 +21,7 @@ class UTextBlock;
  *  - live-spread crosshair (polls UPFWeaponComponent::GetCurrentSpreadHalfAngleDeg
  *    per tick, projected through the live camera FOV); hidden in ADS -> 2 px dot
  *  - hopper "100/∞" + reload bar
- *  - round pips (first-to-4), round timer, alive counts per team
+ *  - round pips (first-to-4; first-to-3 at <=2v2 per T15), round timer, alive counts per team
  *  - own HP as 3 paint dots
  *  - elim feed (last 4 lines), freeze/intermission/sudden-death banners
  */
@@ -58,6 +59,9 @@ private:
 	void UpdateCrosshair();
 	void UpdateBanner(float InDeltaTime);
 
+	/** Collapses the center-nearest pips so only the effective wins-to-take show (T15). */
+	void UpdatePipVisibility(int32 EffectiveCount);
+
 	UPROPERTY() TObjectPtr<UImage> CrossLineTop;
 	UPROPERTY() TObjectPtr<UImage> CrossLineBottom;
 	UPROPERTY() TObjectPtr<UImage> CrossLineLeft;
@@ -73,6 +77,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> BannerText;
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsA;
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsB;
+	UPROPERTY() TArray<TObjectPtr<USizeBox>> PipSizersA;
+	UPROPERTY() TArray<TObjectPtr<USizeBox>> PipSizersB;
 	UPROPERTY() TArray<TObjectPtr<UImage>> HPDots;
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> FeedLines;
 
@@ -87,7 +93,11 @@ private:
 	float BannerHoldRemaining = 0.f;
 	EPFRoundState LastRoundState = EPFRoundState::None;
 
+	/** Pips are built at the first-to-4 max; small formats (T15) collapse the extras. */
 	static constexpr int32 MaxPips = 4;
+	/** <=2v2 (<=4 players) plays first-to-3 (T15) — GameMode config isn't replicated, so infer. */
+	static constexpr int32 SmallFormatPips = 3;
+	static constexpr int32 SmallFormatMaxPlayers = 4;
 	static constexpr int32 MaxHP = 3;
 	static constexpr int32 FeedLineCount = 4;
 	static constexpr float CrosshairBaseGapPx = 6.f;

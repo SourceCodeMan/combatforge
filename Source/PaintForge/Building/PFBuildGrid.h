@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "Core/PaintForgeTypes.h"
 #include "Net/Serialization/FastArraySerializer.h"
+#include "UObject/WeakObjectPtrTemplates.h"
 #include "PFBuildGrid.generated.h"
 
 class APaintForgePlayerState;
@@ -146,4 +147,9 @@ private:
 	TMap<uint16, int32> PieceToInstance;     // PieceId → instance index within its ISMC
 
 	TMap<uint8, FPFRateWindow> RateWindows;  // roster index → placements this second (server)
+
+	// Server-only: match-stable builder identity per piece. FPFBuildPieceRec::OwnerIdx is a raw
+	// roster index the GameMode may recycle to a later joiner; a refund must never leak to that
+	// newcomer, so the refund is gated on the ORIGINAL builder's PlayerState still matching.
+	TMap<uint16, TWeakObjectPtr<APaintForgePlayerState>> BuilderByPieceId;
 };

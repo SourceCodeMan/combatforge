@@ -86,7 +86,14 @@ protected:
 	/** Slide state delegate from the CMC (both sides; we only use it locally). */
 	void HandleSlideStateChanged(bool bSliding);
 
-	/** Single compose point for every FOV effect (04 §1.3). */
+	/**
+	 * Advances ADSAlpha toward IsADS() every Tick on EVERY role — the server
+	 * feeds GetADSAlpha() into the authoritative spread cone, so the alpha can
+	 * never live behind an IsLocallyControlled() gate.
+	 */
+	void UpdateADSAlpha(float DeltaSeconds);
+
+	/** Single compose point for every FOV effect (04 §1.3). Local camera only. */
 	void UpdateTargetFOV(float DeltaSeconds);
 
 private:
@@ -114,8 +121,8 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float CameraEyeOffsetFromCapsuleTop = 10.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float CrouchCameraInterpSpeed = 150.f; // 30 uu over 0.2 s
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float LandingDipMinFallUU = 300.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Movement") float SprintOutTime = 0.18f; // sprint -> first shot (04 §1.1)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Movement") float JumpBufferTime = 0.1f; // no coyote time
+	// Sprint-out delay (sprint -> first shot, 04 §1.1) is owned by UPFWeaponComponent::SprintOutTime (§3.4).
 
 	// ---- Input state ----
 	uint8 bSprintKeyHeld : 1;
