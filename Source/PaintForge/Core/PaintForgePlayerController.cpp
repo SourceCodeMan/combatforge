@@ -638,9 +638,9 @@ void APaintForgePlayerController::GatherLivingTeammatePawns(TArray<APaintForgeCh
 	});
 	for (APaintForgePlayerState* PS : Sorted)
 	{
-		if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PS->GetPawn()))
+		if (APaintForgeCharacter* RosterPawn = Cast<APaintForgeCharacter>(PS->GetPawn()))
 		{
-			OutPawns.Add(Pawn);
+			OutPawns.Add(RosterPawn);
 		}
 	}
 }

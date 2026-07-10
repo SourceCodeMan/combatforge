@@ -55,7 +55,7 @@ void UPFResultsWidget::BuildTree()
 	UVerticalBox* Body = WidgetTree->ConstructWidget<UVerticalBox>();
 
 	auto AddCentered = [this, Body](TObjectPtr<UTextBlock>& OutText, int32 FontSize, bool bBold,
-	                                const FLinearColor& Color, const FMargin& Padding)
+	                                const FLinearColor& Color, const FMargin& SlotPadding)
 	{
 		OutText = WidgetTree->ConstructWidget<UTextBlock>();
 		OutText->SetFont(PFResultsFont(FontSize, bBold));
@@ -64,7 +64,7 @@ void UPFResultsWidget::BuildTree()
 		if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(OutText))
 		{
 			VSlot->SetHorizontalAlignment(HAlign_Center);
-			VSlot->SetPadding(Padding);
+			VSlot->SetPadding(SlotPadding);
 		}
 	};
 

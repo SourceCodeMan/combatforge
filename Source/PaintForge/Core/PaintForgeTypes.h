@@ -154,6 +154,7 @@ namespace PFGrid
 	constexpr int32 NeutralMinX = 7;   constexpr int32 NeutralMaxX = 8;
 	constexpr int32 PlotBMinX = 9;     constexpr int32 PlotBMaxX = 14; constexpr int32 SpawnColB = 15;
 	constexpr int32 SpawnPointsPerTeam = 6;
+	constexpr int32 MaxRosterSlots = 12;   // full match roster / warmup pen slots (RosterIndex 0..11, 03 §3.2)
 	constexpr float FieldOriginX = 0.f, FieldOriginY = 0.f;  // field corner at world origin (03 §1)
 	constexpr float BuildReachUU = 1200.f;                    // ghost trace length
 }

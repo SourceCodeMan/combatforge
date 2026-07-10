@@ -20,7 +20,6 @@ namespace
 	constexpr float FieldY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);   // 4000
 	constexpr float PerimeterH = static_cast<float>(PFGrid::HeightCapUU);           // 1200
 	constexpr float SpawnZ = 100.f;            // capsule half-height + clearance over the Z=0 floor
-	constexpr int32 MaxRosterSlots = 12;       // RosterIndex 0..11 (§3.2)
 
 	// Warm-up pen: 2000×2000 uu, centered south of the field at Y = -3000 (T29).
 	constexpr float PenCenterX = FieldX * 0.5f;   // 3200
@@ -30,7 +29,7 @@ namespace
 
 	constexpr float TeamSpawnSpacingY = FieldY / PFGrid::SpawnPointsPerTeam;   // 666.67
 	constexpr float PenSlotSpacingX = 160.f;
-	constexpr float PenSlotStartX = PenCenterX - PenSlotSpacingX * (MaxRosterSlots - 1) * 0.5f;
+	constexpr float PenSlotStartX = PenCenterX - PenSlotSpacingX * (PFGrid::MaxRosterSlots - 1) * 0.5f;
 }
 
 APFArenaShell::APFArenaShell()
@@ -283,7 +282,7 @@ FTransform APFArenaShell::GetBuildStartTransform(uint8 Team, int32 SlotIdx) cons
 
 FTransform APFArenaShell::GetWarmupSpawnTransform(int32 SlotIdx) const
 {
-	const int32 Slot = FMath::Clamp(SlotIdx, 0, MaxRosterSlots - 1);
+	const int32 Slot = FMath::Clamp(SlotIdx, 0, PFGrid::MaxRosterSlots - 1);
 	const float X = PenSlotStartX + Slot * PenSlotSpacingX;
 	const float Y = PenCenterY - PenHalf + 300.f;   // south line, facing the dummies to the north
 	return FTransform(FRotator(0.f, 90.f, 0.f), FVector(X, Y, SpawnZ));
@@ -291,7 +290,7 @@ FTransform APFArenaShell::GetWarmupSpawnTransform(int32 SlotIdx) const
 
 FTransform APFArenaShell::GetWarmupDummyTransform(int32 SlotIdx) const
 {
-	const int32 Slot = FMath::Clamp(SlotIdx, 0, MaxRosterSlots - 1);
+	const int32 Slot = FMath::Clamp(SlotIdx, 0, PFGrid::MaxRosterSlots - 1);
 	const float X = PenSlotStartX + Slot * PenSlotSpacingX;
 	const float Y = PenCenterY + PenHalf - 300.f;   // north line, facing the players
 	return FTransform(FRotator(0.f, -90.f, 0.f), FVector(X, Y, 90.f));   // dummy body r≈40 h≈180

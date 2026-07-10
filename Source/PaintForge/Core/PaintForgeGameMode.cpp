@@ -42,7 +42,6 @@ namespace
 	constexpr float SmallRoundDuration   = 60.f;
 
 	constexpr uint8 TeamNone = 255;
-	constexpr uint8 MaxRosterSlots = 12;
 }
 
 APaintForgeGameMode::APaintForgeGameMode()
@@ -235,7 +234,7 @@ void APaintForgeGameMode::SpawnWarmupDummyFor(APaintForgePlayerState* PS)
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	const FTransform Slot = ArenaShell->GetWarmupDummyTransform(
-		FMath::Min<int32>(PS->RosterIndex, MaxRosterSlots - 1));
+		FMath::Min<int32>(PS->RosterIndex, PFGrid::MaxRosterSlots - 1));
 
 	if (APFTargetDummy* Dummy = World->SpawnActor<APFTargetDummy>(APFTargetDummy::StaticClass(), Slot, Params))
 	{
@@ -262,7 +261,7 @@ FTransform APaintForgeGameMode::GetSpawnTransform(const APaintForgePlayerState* 
 	switch (Phase)
 	{
 	case EPFMatchPhase::Lobby:
-		return ArenaShell->GetWarmupSpawnTransform(FMath::Min<int32>(PS->RosterIndex, MaxRosterSlots - 1));
+		return ArenaShell->GetWarmupSpawnTransform(FMath::Min<int32>(PS->RosterIndex, PFGrid::MaxRosterSlots - 1));
 
 	case EPFMatchPhase::Build:
 		return ArenaShell->GetBuildStartTransform(Team, TeamSlot);
@@ -1298,7 +1297,7 @@ bool APaintForgeGameMode::AreAllPlayersReady(const APaintForgePlayerState* Ignor
 uint8 APaintForgeGameMode::FindFreeRosterIndex() const
 {
 	const APaintForgeGameState* GS = GetPFGameState();
-	for (uint8 Candidate = 0; Candidate < MaxRosterSlots; ++Candidate)
+	for (uint8 Candidate = 0; Candidate < PFGrid::MaxRosterSlots; ++Candidate)
 	{
 		bool bTaken = false;
 		if (GS)
@@ -1319,7 +1318,7 @@ uint8 APaintForgeGameMode::FindFreeRosterIndex() const
 		}
 	}
 	UE_LOG(PaintForgeLog, Error, TEXT("GameMode: roster full (12) - reusing slot 11"));
-	return MaxRosterSlots - 1;
+	return PFGrid::MaxRosterSlots - 1;
 }
 
 void APaintForgeGameMode::ComputeEffectiveScaling()

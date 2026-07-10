@@ -2,6 +2,7 @@
 
 #include "Input/PFInputConfig.h"
 
+#include "Core/PaintForgePlayerController.h"   // complete type for the UObject* outer conversion
 #include "PaintForge.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
