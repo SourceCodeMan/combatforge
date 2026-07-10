@@ -501,17 +501,15 @@ int32 UPFVoteWidget::NativePaint(const FPaintArgs& Args, const FGeometry& Allott
 	const int32 MaxSegments = 48;
 	const int32 Segments = FMath::Max(2, FMath::CeilToInt(Fraction * MaxSegments));
 
-	TArray<FVector2D> Points;
+	// FVector2f points: Slate's single-precision overload of MakeLines is the canonical one
+	// in UE 5.x (§5.17 keeps warnings-as-errors on — avoid the legacy FVector2D path).
+	TArray<FVector2f> Points;
 	Points.Reserve(Segments + 1);
 	for (int32 i = 0; i <= Segments; ++i)
 	{
 		// Clockwise from 12 o'clock, sweeping the remaining fraction.
 		const float Angle = (static_cast<float>(i) / MaxSegments) * 2.f * PI;
-		Points.Add(Center + FVector2D(FMath::Sin(Angle), -FMath::Cos(Angle)) * RingRadiusPx);
-		if (i >= Segments)
-		{
-			break;
-		}
+		Points.Add(FVector2f(Center + FVector2D(FMath::Sin(Angle), -FMath::Cos(Angle)) * RingRadiusPx));
 	}
 
 	const FLinearColor RingColor = Fraction < 0.25f
