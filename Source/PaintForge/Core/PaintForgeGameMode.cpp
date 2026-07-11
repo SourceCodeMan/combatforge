@@ -15,10 +15,15 @@
 
 #include "Components/LightComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
+#include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
+#include "Engine/PostProcessVolume.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
@@ -83,27 +88,54 @@ void APaintForgeGameMode::SpawnArenaActors()
 	ArenaShell = World->SpawnActor<APFArenaShell>(APFArenaShell::StaticClass(), FTransform::Identity, Params);
 	BuildGrid  = World->SpawnActor<APFBuildGrid>(APFBuildGrid::StaticClass(), FTransform::Identity, Params);
 
-	// Lighting rig (02 §3.5): all natively spawnable, zero assets.
+	// Lighting rig (02 §3.5): all natively spawnable, zero assets — the level itself stays empty (T17).
+	// Modern kit: sun (atmosphere sun) + SkyAtmosphere + real-time-capture SkyLight + height fog +
+	// volumetric clouds + an unbound graded PostProcess volume. Turns the empty stage into a lit game world.
 	if (ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(
 			ADirectionalLight::StaticClass(),
-			FTransform(FRotator(-55.f, 30.f, 0.f), FVector::ZeroVector), Params))
+			FTransform(FRotator(-46.f, -35.f, 0.f), FVector::ZeroVector), Params))
 	{
-		if (ULightComponent* LightComp = Sun->GetLightComponent())
+		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
 		{
-			LightComp->SetMobility(EComponentMobility::Movable);
-			LightComp->SetIntensity(6.f);
+			SunComp->SetMobility(EComponentMobility::Movable);
+			SunComp->SetIntensity(6.f);
+			SunComp->SetLightColor(FLinearColor(1.0f, 0.96f, 0.88f));
+			SunComp->SetAtmosphereSunLight(true);   // drives the SkyAtmosphere sun disc + sky colour
+			SunComp->SetDynamicShadowDistanceMovableLight(20000.f);
 		}
 	}
+	World->SpawnActor<ASkyAtmosphere>(ASkyAtmosphere::StaticClass(), FTransform::Identity, Params);   // sky + horizon
 	if (ASkyLight* Sky = World->SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FTransform::Identity, Params))
 	{
 		if (USkyLightComponent* SkyComp = Sky->GetLightComponent())
 		{
 			SkyComp->SetMobility(EComponentMobility::Movable);
+			SkyComp->SetRealTimeCapture(true);      // ambient bounce captured from the atmosphere (no cubemap)
 			SkyComp->SetIntensity(1.f);
-			SkyComp->RecaptureSky();
 		}
 	}
-	World->SpawnActor<AExponentialHeightFog>(AExponentialHeightFog::StaticClass(), FTransform::Identity, Params);
+	if (AExponentialHeightFog* Fog = World->SpawnActor<AExponentialHeightFog>(
+			AExponentialHeightFog::StaticClass(), FTransform::Identity, Params))
+	{
+		if (UExponentialHeightFogComponent* FogComp = Fog->GetComponent())
+		{
+			FogComp->SetFogDensity(0.015f);
+		}
+	}
+	World->SpawnActor<AVolumetricCloud>(AVolumetricCloud::StaticClass(), FTransform::Identity, Params);   // sky detail
+	if (APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>(
+			APostProcessVolume::StaticClass(), FTransform::Identity, Params))
+	{
+		PPV->bUnbound = true;
+		PPV->Priority = 1.f;
+		FPostProcessSettings& PP = PPV->Settings;
+		PP.bOverride_AutoExposureMinBrightness = true; PP.AutoExposureMinBrightness = 1.f;   // lock exposure
+		PP.bOverride_AutoExposureMaxBrightness = true; PP.AutoExposureMaxBrightness = 1.f;
+		PP.bOverride_BloomIntensity = true;            PP.BloomIntensity = 0.6f;
+		PP.bOverride_VignetteIntensity = true;         PP.VignetteIntensity = 0.35f;
+		PP.bOverride_ColorSaturation = true;           PP.ColorSaturation = FVector4(1.06, 1.06, 1.06, 1.0);
+		PP.bOverride_ColorContrast = true;             PP.ColorContrast = FVector4(1.04, 1.04, 1.04, 1.0);
+	}
 
 	if (AWorldSettings* WorldSettings = World->GetWorldSettings())
 	{
