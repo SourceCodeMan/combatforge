@@ -35,6 +35,7 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_ElimFeed)   TArray<FPFElimEntry> ElimFeed;     // capped at 50, oldest trimmed
 	UPROPERTY(ReplicatedUsing=OnRep_VoteTally)  FPFVoteTally VoteTally;
 	UPROPERTY(Replicated)                       FString MatchId;                   // GUID string, set at Lobby→Build
+	UPROPERTY(Replicated)                       uint8  TargetTeamSize = 4;         // match format: 4 (4v4) or 6 (6v6); bots fill to this
 
 	// ---- Client-safe helpers ----
 	float GetPhaseTimeRemaining() const;   // PhaseEndServerTime - GetServerWorldTimeSeconds(), clamped ≥ 0
@@ -56,6 +57,7 @@ public:
 	void ServerSetVoteTally(const FPFVoteTally& NewTally);
 	void ServerSetSuddenDeath(bool bNewSuddenDeath);
 	void ServerSetMatchId(const FString& NewMatchId);
+	void ServerSetTargetTeamSize(uint8 NewSize);             // 4 or 6; clamped [1,6]
 	void ServerResetMatchState();                            // Lobby→Build: wins/feed/tally/round wiped
 
 	// ---- UI subscription points (broadcast from OnReps AND from server setters on host) ----

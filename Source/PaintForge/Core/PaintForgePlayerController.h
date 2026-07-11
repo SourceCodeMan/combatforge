@@ -33,6 +33,10 @@ public:
 	UFUNCTION(Server, Reliable) void ServerHostForceStart();      // ignored if not host
 	UFUNCTION(Server, Reliable) void ServerHostCycleTeam(APaintForgePlayerState* Target);
 	UFUNCTION(Server, Reliable) void ServerHostReturnToLobby();
+	UFUNCTION(Server, Reliable) void ServerHostSetFormat(uint8 TeamSize);   // Lobby only: 4v4 / 6v6
+
+	// Console convenience for the host to pick the format in the lobby, e.g. "PFFormat 6".
+	UFUNCTION(Exec) void PFFormat(int32 TeamSize);
 	UFUNCTION(Server, Reliable) void ServerSpectateNext(bool bForward); // dead-only; server retargets ViewTarget
 
 	// ---- Cross-package accessors ----

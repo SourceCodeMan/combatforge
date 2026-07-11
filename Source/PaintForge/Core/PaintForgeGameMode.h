@@ -13,6 +13,7 @@ class APaintForgePlayerController;
 class APaintForgePlayerState;
 class APFArenaShell;
 class APFBuildGrid;
+class APFBotController;
 class APFTargetDummy;
 class UPFRatingSubsystem;
 
@@ -45,6 +46,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") uint8 RoundWinsToTakeMatch = 4;       // 3 at ≤2v2
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") uint8 MaxRounds            = 7;       // 5 at ≤2v2
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float RespawnDelay         = 5.f;     // Respawn mode only (04 Variant B)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") uint8 DefaultTeamSize      = 4;       // 4 (4v4) or 6 (6v6); bots fill to it
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") bool  bFillWithBots        = true;    // top each team up to the format size
 
 	// ---- The only phase mutator in the codebase ----
 	void SetPhase(EPFMatchPhase NewPhase);            // server; updates GameState, stamps timers, side effects
@@ -61,6 +64,7 @@ public:
 	void HostForceStart();                             // Lobby only
 	void HostCycleTeam(APaintForgePlayerState* Target); // Lobby only (T22)
 	void HostReturnToLobby();                          // Results only
+	void HostSetFormat(uint8 NewTeamSize);             // Lobby only: 4v4 / 6v6 (bots fill to it)
 
 	// Spawn transform for a player in the current round (side swap: even rounds swapped — B1):
 	FTransform GetSpawnTransform(const APaintForgePlayerState* PS) const;
@@ -99,7 +103,16 @@ protected:
 	void SpawnWarmupDummyFor(APaintForgePlayerState* PS);
 	void ResetPawnForRound(APaintForgeCharacter* Pawn, APaintForgePlayerState* PS, uint8 RoundHP);
 	void TeleportPawnTo(APaintForgeCharacter* Pawn, const FTransform& Transform);
+	// Controller-agnostic per-round respawn (players AND bots): resets HP + teleports, or restarts if no pawn.
+	void RespawnCombatant(APaintForgePlayerState* PS, uint8 RoundHP);
 	void RecountAlive();
+
+	// ---- (intra) bots (fill teams to the selected format — server only) ----
+	void FillBotsToFormat();                           // top each team up to TargetTeamSize with bots
+	void RemoveAllBots();                              // despawn every bot (controller + pawn + PlayerState)
+	APaintForgePlayerState* AddBot(uint8 Team);        // spawn a bot controller + PlayerState on Team
+	void TrimOneBotFromTeam(uint8 Team);               // free a slot for a joining human
+	int32 GetTeamCountByKind(uint8 Team, bool bBotsOnly) const;
 	void ApplyServerMoveLocks();
 	void ResetPlayerMatchStats();
 

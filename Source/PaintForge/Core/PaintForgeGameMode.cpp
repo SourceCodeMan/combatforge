@@ -7,6 +7,7 @@
 #include "Core/PaintForgePlayerController.h"
 #include "Core/PaintForgePlayerState.h"
 #include "Player/PaintForgeCharacter.h"
+#include "AI/PFBotController.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFTargetDummy.h"
 #include "Building/PFArenaShell.h"
@@ -70,6 +71,11 @@ void APaintForgeGameMode::BeginPlay()
 	EffectiveRoundWinsToTake = RoundWinsToTakeMatch;
 	EffectiveMaxRounds = MaxRounds;
 	EffectiveRoundDuration = RoundDuration;
+
+	if (APaintForgeGameState* GS = GetPFGameState())
+	{
+		GS->ServerSetTargetTeamSize(DefaultTeamSize);   // 4v4 default; host can switch to 6v6 in Lobby
+	}
 }
 
 void APaintForgeGameMode::SpawnArenaActors()
@@ -171,12 +177,19 @@ void APaintForgeGameMode::PostLogin(APlayerController* NewPlayer)
 		// Joiners during Combat enter the current round alive at their team spawn.
 		// CONTRACT-GAP: contract is silent on mid-round joiners; alive-at-spawn is the smallest
 		// implementation that keeps alive counts and elim-victory checks self-consistent.
+		// If bots have already filled this player's team to the format size, free a slot by dropping a bot.
+		if (bFillWithBots && GetPFGameState() && PS->TeamId <= 1 &&
+			GetTeamCountByKind(PS->TeamId, /*bBotsOnly=*/false) > GetPFGameState()->TargetTeamSize)
+		{
+			TrimOneBotFromTeam(PS->TeamId);
+		}
+
 		if (GetPFGameState() && GetPFGameState()->Phase == EPFMatchPhase::Combat)
 		{
 			PS->bAliveInRound = (GetPFGameState()->RoundState == EPFRoundState::Freeze ||
 			                     GetPFGameState()->RoundState == EPFRoundState::Live);
-			RecountAlive();
 		}
+		RecountAlive();
 
 		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s joined (team %d, roster %d)"),
 			*PS->GetPlayerName(), PS->TeamId, PS->RosterIndex);
@@ -373,8 +386,9 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 	{
 	case EPFMatchPhase::Lobby:
 	{
-		// Results→Lobby: same roster kept; scores/budgets reset on the NEXT Build.
+		// Results→Lobby: same human roster kept; bots are dropped so the next match re-fills fresh.
 		GS->ServerSetRoundState(EPFRoundState::None, 0.f);
+		RemoveAllBots();
 		for (APlayerState* PSBase : GS->PlayerArray)
 		{
 			APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
@@ -387,16 +401,8 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(PS->GetPlayerController()))
 			{
 				PC->SetEliminatedMoveLock(false);
-				if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PC->GetPawn()))
-				{
-					Pawn->GetHealth()->ResetForRound(3);
-					TeleportPawnTo(Pawn, GetSpawnTransform(PS));
-				}
-				else
-				{
-					RestartPlayer(PC);
-				}
 			}
+			RespawnCombatant(PS, 3);   // players and bots alike
 		}
 		RecountAlive();
 		break;
@@ -428,6 +434,10 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		}
 		// Splat-pool reset happens client-side from the phase delegate (T20).
 
+		// Fill both teams up to the selected format with bots BEFORE the reset loop, so the bots are in
+		// PlayerArray and get spawned/positioned by the same loop as the humans.
+		FillBotsToFormat();
+
 		for (APlayerState* PSBase : GS->PlayerArray)
 		{
 			APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
@@ -441,16 +451,8 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(PS->GetPlayerController()))
 			{
 				PC->SetEliminatedMoveLock(false);
-				if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PC->GetPawn()))
-				{
-					Pawn->GetHealth()->ResetForRound(3);
-					TeleportPawnTo(Pawn, GetSpawnTransform(PS));   // own plot
-				}
-				else
-				{
-					RestartPlayer(PC);
-				}
 			}
+			RespawnCombatant(PS, 3);   // own plot; players and bots alike
 		}
 		RecountAlive();
 
@@ -638,6 +640,18 @@ void APaintForgeGameMode::HostReturnToLobby()
 	SetPhase(EPFMatchPhase::Lobby);
 }
 
+void APaintForgeGameMode::HostSetFormat(uint8 NewTeamSize)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Lobby)
+	{
+		return;   // format locks once the match starts (bots + scaling resolve at Lobby→Build)
+	}
+	GS->ServerSetTargetTeamSize(NewTeamSize);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set format to %dv%d"),
+		GS->TargetTeamSize, GS->TargetTeamSize);
+}
+
 // ---------------------------------------------------------------------------
 // Round loop
 // ---------------------------------------------------------------------------
@@ -678,18 +692,10 @@ void APaintForgeGameMode::StartNextRound()
 		if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(PS->GetPlayerController()))
 		{
 			PC->SetEliminatedMoveLock(false);   // back alive; freeze-state lock reapplies below
-			if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PC->GetPawn()))
-			{
-				ResetPawnForRound(Pawn, PS, RoundHP);
-			}
-			else
-			{
-				RestartPlayer(PC);
-				if (APaintForgeCharacter* NewPawn = Cast<APaintForgeCharacter>(PC->GetPawn()))
-				{
-					NewPawn->GetHealth()->ResetForRound(RoundHP);
-				}
-			}
+		}
+		RespawnCombatant(PS, RoundHP);          // players and bots alike
+		if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(PS->GetPlayerController()))
+		{
 			PC->SetViewTargetWithBlend(PC->GetPawn(), 0.f);
 		}
 	}
@@ -729,6 +735,177 @@ void APaintForgeGameMode::TeleportPawnTo(APaintForgeCharacter* Pawn, const FTran
 	if (AController* Controller = Pawn->GetController())
 	{
 		Controller->SetControlRotation(Transform.GetRotation().Rotator());
+	}
+}
+
+void APaintForgeGameMode::RespawnCombatant(APaintForgePlayerState* PS, uint8 RoundHP)
+{
+	// Controller-agnostic: works for a human PlayerController AND a bot AIController. The pawn is found
+	// via the PlayerState (PS->GetPawn), and a missing pawn is restarted via PS->GetOwningController so
+	// bots go through the same RestartPlayer path humans do (which also binds their elimination event).
+	if (!PS)
+	{
+		return;
+	}
+	if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PS->GetPawn()))
+	{
+		if (UPFHealthComponent* Health = Pawn->GetHealth())
+		{
+			Health->ResetForRound(RoundHP);   // restores HP, collision, appearance
+		}
+		TeleportPawnTo(Pawn, GetSpawnTransform(PS));
+	}
+	else if (AController* Ctrl = PS->GetOwningController())
+	{
+		RestartPlayer(Ctrl);
+		if (APaintForgeCharacter* NewPawn = Cast<APaintForgeCharacter>(Ctrl->GetPawn()))
+		{
+			if (UPFHealthComponent* Health = NewPawn->GetHealth())
+			{
+				Health->ResetForRound(RoundHP);
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bots (fill teams to the selected format — server only)
+// ---------------------------------------------------------------------------
+
+int32 APaintForgeGameMode::GetTeamCountByKind(uint8 Team, bool bBotsOnly) const
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return 0;
+	}
+	int32 Count = 0;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (PS && PS->TeamId == Team && (!bBotsOnly || PS->IsABot()))
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+APaintForgePlayerState* APaintForgeGameMode::AddBot(uint8 Team)
+{
+	UWorld* World = GetWorld();
+	if (!World || Team > 1)
+	{
+		return nullptr;
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	// bWantsPlayerState=true (ctor) => the controller's PostInitializeComponents already created and
+	// registered an APaintForgePlayerState in GameState->PlayerArray during SpawnActor.
+	APFBotController* Bot = World->SpawnActor<APFBotController>(APFBotController::StaticClass(),
+		FTransform::Identity, Params);
+	APaintForgePlayerState* PS = Bot ? Bot->GetPlayerState<APaintForgePlayerState>() : nullptr;
+	if (!PS)
+	{
+		if (Bot) { Bot->Destroy(); }
+		UE_LOG(PaintForgeLog, Warning, TEXT("GameMode: AddBot failed (no PlayerState)"));
+		return nullptr;
+	}
+
+	PS->SetIsABot(true);
+	PS->ServerSetTeam(Team, FindFreeRosterIndex());   // same team/roster path as PostLogin
+	PS->SetPlayerName(FString::Printf(TEXT("Bot %d"), PS->RosterIndex + 1));
+	PS->bAliveInRound = true;
+	// The pawn itself is spawned by the caller's reset loop (RespawnCombatant → RestartPlayer), exactly
+	// like a human — that path also binds Health->OnEliminatedEvent so bot deaths reach the match logic.
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: added bot '%s' (team %d, roster %d)"),
+		*PS->GetPlayerName(), Team, PS->RosterIndex);
+	return PS;
+}
+
+void APaintForgeGameMode::FillBotsToFormat()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!bFillWithBots || !GS)
+	{
+		return;
+	}
+	const int32 Target = FMath::Clamp<int32>(GS->TargetTeamSize, 1, PFGrid::SpawnPointsPerTeam);
+	for (uint8 Team = 0; Team <= 1; ++Team)
+	{
+		int32 Have = GetTeamCountByKind(Team, /*bBotsOnly=*/false);
+		int32 Guard = 0;
+		while (Have < Target && Guard < PFGrid::MaxRosterSlots)
+		{
+			if (!AddBot(Team))
+			{
+				break;   // roster full or spawn failure
+			}
+			++Have;
+			++Guard;
+		}
+	}
+}
+
+void APaintForgeGameMode::TrimOneBotFromTeam(uint8 Team)
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return;
+	}
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (PS && PS->IsABot() && PS->TeamId == Team)
+		{
+			if (APFBotController* Bot = Cast<APFBotController>(PS->GetOwningController()))
+			{
+				if (APawn* Pawn = Bot->GetPawn())
+				{
+					Bot->UnPossess();
+					Pawn->Destroy();
+				}
+				Bot->Destroy();   // AController::Destroyed unregisters the PlayerState
+			}
+			return;   // one is enough
+		}
+	}
+}
+
+void APaintForgeGameMode::RemoveAllBots()
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return;
+	}
+	// Collect first — destroying a controller mutates PlayerArray under the iterator.
+	TArray<APFBotController*> Bots;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (PS && PS->IsABot())
+		{
+			if (APFBotController* Bot = Cast<APFBotController>(PS->GetOwningController()))
+			{
+				Bots.Add(Bot);
+			}
+		}
+	}
+	for (APFBotController* Bot : Bots)
+	{
+		if (!Bot)
+		{
+			continue;
+		}
+		if (APawn* Pawn = Bot->GetPawn())
+		{
+			Bot->UnPossess();
+			Pawn->Destroy();
+		}
+		Bot->Destroy();
 	}
 }
 
@@ -1140,9 +1317,9 @@ void APaintForgeGameMode::CheckAllVotesIn(const APaintForgePlayerState* IgnorePS
 	for (APlayerState* OtherBase : GS->PlayerArray)
 	{
 		const APaintForgePlayerState* Other = Cast<APaintForgePlayerState>(OtherBase);
-		if (Other && Other != IgnorePS && !Other->bHasVoted)
+		if (Other && Other != IgnorePS && !Other->IsABot() && !Other->bHasVoted)
 		{
-			return;
+			return;   // bots don't vote — they don't hold the vote phase open
 		}
 	}
 	SetPhase(EPFMatchPhase::Results);
@@ -1313,9 +1490,9 @@ bool APaintForgeGameMode::AreAllPlayersReady(const APaintForgePlayerState* Ignor
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
-		if (!PS || PS == IgnorePS)
+		if (!PS || PS == IgnorePS || PS->IsABot())
 		{
-			continue;
+			continue;   // bots never ready up — they don't gate the human ready check
 		}
 		if (!PS->bReady)
 		{
@@ -1355,11 +1532,18 @@ uint8 APaintForgeGameMode::FindFreeRosterIndex() const
 
 void APaintForgeGameMode::ComputeEffectiveScaling()
 {
-	int32 TeamA = 0, TeamB = 0;
-	GetTeamCounts(TeamA, TeamB);
-	const int32 LargestTeam = FMath::Max(TeamA, TeamB);
+	// Format = the SELECTED team size (bots fill to it), not the live human count — so a 2-human 4v4
+	// still plays first-to-4, not the ≤2v2 small format. With bots off, fall back to live team counts.
+	const APaintForgeGameState* GS = GetPFGameState();
+	int32 FormatTeamSize = GS ? static_cast<int32>(GS->TargetTeamSize) : static_cast<int32>(DefaultTeamSize);
+	if (!bFillWithBots)
+	{
+		int32 TeamA = 0, TeamB = 0;
+		GetTeamCounts(TeamA, TeamB);
+		FormatTeamSize = FMath::Max(TeamA, TeamB);
+	}
 
-	if (LargestTeam <= 2)   // 1v1–2v2 (T15)
+	if (FormatTeamSize <= 2)   // 1v1–2v2 (T15)
 	{
 		EffectiveRoundWinsToTake = SmallRoundWinsToTake;
 		EffectiveMaxRounds = SmallMaxRounds;

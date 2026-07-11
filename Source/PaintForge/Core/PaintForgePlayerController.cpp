@@ -520,6 +520,24 @@ void APaintForgePlayerController::ServerHostReturnToLobby_Implementation()
 	}
 }
 
+void APaintForgePlayerController::ServerHostSetFormat_Implementation(uint8 TeamSize)
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
+	{
+		GM->HostSetFormat(TeamSize);
+	}
+}
+
+void APaintForgePlayerController::PFFormat(int32 TeamSize)
+{
+	// Console exec on the host's controller → server RPC. e.g. "PFFormat 6" for 6v6 in the lobby.
+	ServerHostSetFormat(static_cast<uint8>(FMath::Clamp(TeamSize, 1, 6)));
+}
+
 // ---------------------------------------------------------------------------
 // Death cam + spectate (T5)
 // ---------------------------------------------------------------------------

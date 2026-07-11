@@ -32,6 +32,7 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APaintForgeGameState, ElimFeed);
 	DOREPLIFETIME(APaintForgeGameState, VoteTally);
 	DOREPLIFETIME(APaintForgeGameState, MatchId);
+	DOREPLIFETIME(APaintForgeGameState, TargetTeamSize);
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +202,16 @@ void APaintForgeGameState::ServerSetMatchId(const FString& NewMatchId)
 		return;
 	}
 	MatchId = NewMatchId;
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetTargetTeamSize(uint8 NewSize)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	TargetTeamSize = static_cast<uint8>(FMath::Clamp<int32>(NewSize, 1, PFGrid::SpawnPointsPerTeam));
 	ForceNetUpdate();
 }
 
