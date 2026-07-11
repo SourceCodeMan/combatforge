@@ -41,9 +41,18 @@ UPFSplatSubsystem::UPFSplatSubsystem()
 	{
 		SplatMesh = SphereFinder.Object;
 	}
+	// Prefer the matte-emissive paint material; keep BasicShapeMaterial as the guaranteed fallback.
+	// Both expose a vector param named exactly "Color" (the cross-project MID contract), so the four
+	// team MIDs and every SetVectorParameterValue("Color", ...) call site work unchanged either way.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PaintFinder(
+		TEXT("/Game/Materials/M_PF_PaintSplat.M_PF_PaintSplat"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (MaterialFinder.Succeeded())
+	if (PaintFinder.Succeeded())
+	{
+		BaseMaterial = PaintFinder.Object;
+	}
+	else if (MaterialFinder.Succeeded())
 	{
 		BaseMaterial = MaterialFinder.Object;
 	}
