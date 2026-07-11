@@ -20,6 +20,8 @@ class USkeletalMesh;
 class USkeletalMeshComponent;
 class UAnimInstance;
 class UMaterialInterface;
+class USceneComponent;
+class UPointLightComponent;
 struct FInputActionValue;
 
 /**
@@ -54,6 +56,10 @@ public:
 	void  SetTeamColor(uint8 TeamId);      // MID tint on the graybox mesh
 	void  SetEliminatedAppearance(bool bEliminated); // hide mesh; collision handled by health component
 	FVector GetMuzzleLocation(bool bCosmetic) const; // 04 §2.2: server = capsule offset; cosmetic = camera+20fwd
+
+	// ---- Weapon-fire cosmetics (pkg-weapons calls these per shot) ----
+	void  OnFireCosmetic();        // owning client: viewmodel recoil kick + first-person muzzle flash + light
+	void  OnRemoteFireCosmetic();  // remote viewers: third-person muzzle flash + light at the shooter's marker
 
 	// ---- AActor / ACharacter ----
 	virtual void Tick(float DeltaSeconds) override;
@@ -108,6 +114,17 @@ protected:
 	 */
 	void ApplyArtLoadout();
 
+	/** Timer callback: end the current muzzle flash (hide the blobs, drop the light). */
+	void ClearMuzzleFlash();
+
+	/** Builds the primitive marker viewmodel (receiver/guard/barrel/stock/mag/grip) under Parent. */
+	void BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube, UStaticMesh* Cylinder,
+		TArray<TObjectPtr<UStaticMeshComponent>>& OutParts, FVector& OutMuzzleLocal);
+	UStaticMeshComponent* MakeGunPart(USceneComponent* Parent, const FString& CompName, UStaticMesh* PartMesh,
+		UMaterialInterface* Mat, const FVector& RelLoc, const FVector& RelScale, const FRotator& RelRot);
+	/** Runtime MIDs for the marker (dark gunmetal) + the flash blobs (emissive). Called from BeginPlay. */
+	void SetupWeaponMaterials();
+
 private:
 	// ---- Components ----
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UCameraComponent> FirstPersonCamera;
@@ -133,6 +150,30 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_rSocket");           // socket on the TP body
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // per-team body mat ("Color" param)
 	bool bUsingArtBody = false;   // true once ThirdPersonBodyMesh mounted; gates the SetTeamColor/eliminate branches
+
+	// ---- Weapon cosmetics (M1 art pass): first-person marker viewmodel + muzzle flash (all primitives) ----
+	// The player finally sees a marker in hand; a real gun mesh drops in later by swapping the parts' meshes.
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<USceneComponent> ViewModelRoot;   // FP marker anchor (on camera)
+	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> MarkerPartsFP;                            // owner-only-see marker parts
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleFlashFP; // owner FP flash blob
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleFlashTP; // viewers' flash blob (world-placed)
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UPointLightComponent> MuzzleLight;    // brief world light per shot
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> MarkerMID;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> FlashMIDFP;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> FlashMIDTP;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> FlashMaterial;   // base emissive (M_PF_Flash or fallback)
+
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilKickUU = 3.5f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilKickPitchDeg = 1.6f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilRecoverSpeed = 11.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleFlashTime = 0.045f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleLightIntensity = 5000.f;
+
+	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
+	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
+	FVector RecoilOffset = FVector::ZeroVector;       // decays to zero each tick (owner)
+	float   RecoilPitch = 0.f;                        // deg, decays to zero
+	FTimerHandle MuzzleFlashTimerHandle;
 
 	// ---- Config (04 §1) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;

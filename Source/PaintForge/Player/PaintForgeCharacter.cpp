@@ -17,6 +17,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimInstance.h"
@@ -113,6 +114,67 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	WeaponMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	WeaponMeshComp->SetVisibility(false);
 
+	// ---- First-person marker viewmodel: a rifle silhouette from engine primitives, owner-only-see.
+	// This is what the player stares at every second — the single biggest "it's an FPS" signal. A real
+	// weapon mesh drops in later by re-pointing the parts (or via the WeaponMesh art-loadout seam).
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FlashMatFinder(
+		TEXT("/Game/Materials/M_PF_Flash.M_PF_Flash"));
+	FlashMaterial = FlashMatFinder.Succeeded() ? FlashMatFinder.Object
+		: (MatFinder.Succeeded() ? MatFinder.Object : nullptr);
+	UStaticMesh* CubeMesh = CubeFinder.Succeeded() ? CubeFinder.Object : nullptr;
+	UStaticMesh* CylMesh = CylFinder.Succeeded() ? CylFinder.Object.Get() : CubeMesh;
+	UMaterialInterface* GunBaseMat = MatFinder.Succeeded() ? MatFinder.Object : nullptr;
+
+	ViewModelRoot = CreateDefaultSubobject<USceneComponent>(TEXT("ViewModelRoot"));
+	ViewModelRoot->SetupAttachment(FirstPersonCamera);
+	ViewModelHomeLoc = FVector(28.f, 10.f, -13.f);   // forward-right-down of the eye, classic viewmodel pose
+	ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc);
+
+	BuildMarker(ViewModelRoot, TEXT("VM_"), CubeMesh, CylMesh, MarkerPartsFP, MuzzleLocalFP);
+	for (TObjectPtr<UStaticMeshComponent>& Part : MarkerPartsFP)
+	{
+		if (Part != nullptr)
+		{
+			if (GunBaseMat != nullptr) { Part->SetMaterial(0, GunBaseMat); }
+			Part->SetOnlyOwnerSee(true);   // the marker is the owner's first-person viewmodel
+		}
+	}
+
+	// FP muzzle flash blob (owner) — a small emissive sphere pulsed at the barrel tip.
+	MuzzleFlashFP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleFlashFP"));
+	MuzzleFlashFP->SetupAttachment(ViewModelRoot);
+	if (SphereFinder.Succeeded()) { MuzzleFlashFP->SetStaticMesh(SphereFinder.Object); }
+	if (FlashMaterial != nullptr) { MuzzleFlashFP->SetMaterial(0, FlashMaterial); }
+	MuzzleFlashFP->SetRelativeLocation(MuzzleLocalFP);
+	MuzzleFlashFP->SetRelativeScale3D(FVector(0.12f));
+	MuzzleFlashFP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleFlashFP->SetCastShadow(false);
+	MuzzleFlashFP->SetOnlyOwnerSee(true);
+	MuzzleFlashFP->SetVisibility(false);
+
+	// TP muzzle flash blob (viewers) — world-placed at the shooter's marker each shot.
+	MuzzleFlashTP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleFlashTP"));
+	MuzzleFlashTP->SetupAttachment(Capsule);
+	MuzzleFlashTP->SetUsingAbsoluteLocation(true);   // positioned in world space per shot
+	if (SphereFinder.Succeeded()) { MuzzleFlashTP->SetStaticMesh(SphereFinder.Object); }
+	if (FlashMaterial != nullptr) { MuzzleFlashTP->SetMaterial(0, FlashMaterial); }
+	MuzzleFlashTP->SetRelativeScale3D(FVector(0.2f));
+	MuzzleFlashTP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleFlashTP->SetCastShadow(false);
+	MuzzleFlashTP->SetOwnerNoSee(true);
+	MuzzleFlashTP->SetVisibility(false);
+
+	// Shared muzzle light — off except during a flash; world-placed at the active marker.
+	MuzzleLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("MuzzleLight"));
+	MuzzleLight->SetupAttachment(Capsule);
+	MuzzleLight->SetUsingAbsoluteLocation(true);
+	MuzzleLight->SetIntensity(0.f);
+	MuzzleLight->SetAttenuationRadius(700.f);
+	MuzzleLight->SetLightColor(FLinearColor(1.0f, 0.72f, 0.38f));
+	MuzzleLight->SetCastShadows(false);
+
 	// M1: default the art body to the imported UE Mannequin (Third Person content pack) so the
 	// graybox cubes become a real animated humanoid. .Succeeded() guards keep the graybox fallback
 	// if the pack isn't present. SKM_Manny_Simple is the non-Nanite variant (renders on SM5).
@@ -178,7 +240,8 @@ void APaintForgeCharacter::BeginPlay()
 
 	FallStartPeakZ = GetActorLocation().Z;
 
-	ApplyArtLoadout();   // swaps in real body/arms/weapon if assigned; no-op (graybox) otherwise
+	ApplyArtLoadout();       // swaps in real body/arms/weapon if assigned; no-op (graybox) otherwise
+	SetupWeaponMaterials();  // dark gunmetal marker + emissive flash blobs
 }
 
 void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -189,6 +252,7 @@ void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	GetWorldTimerManager().ClearTimer(SprintOutTimerHandle);
 	GetWorldTimerManager().ClearTimer(BufferedJumpClearHandle);
+	GetWorldTimerManager().ClearTimer(MuzzleFlashTimerHandle);
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -222,6 +286,15 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 			FVector Rel = FirstPersonCamera->GetRelativeLocation();
 			Rel.Z = FMath::FInterpConstantTo(Rel.Z, TargetZ, DeltaSeconds, CrouchCameraInterpSpeed);
 			FirstPersonCamera->SetRelativeLocation(Rel);
+		}
+
+		// Viewmodel recoil recovery: the per-shot kick springs back toward the resting pose.
+		if (ViewModelRoot != nullptr)
+		{
+			RecoilOffset = FMath::VInterpTo(RecoilOffset, FVector::ZeroVector, DeltaSeconds, RecoilRecoverSpeed);
+			RecoilPitch = FMath::FInterpTo(RecoilPitch, 0.f, DeltaSeconds, RecoilRecoverSpeed);
+			ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc + RecoilOffset);
+			ViewModelRoot->SetRelativeRotation(FRotator(RecoilPitch, 0.f, 0.f));
 		}
 	}
 }
@@ -664,6 +737,10 @@ void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	{
 		WeaponMeshComp->SetHiddenInGame(bEliminated);
 	}
+	if (ViewModelRoot != nullptr)
+	{
+		ViewModelRoot->SetVisibility(!bEliminated, /*bPropagateToChildren=*/true);
+	}
 }
 
 FVector APaintForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
@@ -681,4 +758,138 @@ FVector APaintForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 		+ AimBasis.GetUnitAxis(EAxis::X) * 30.f
 		+ AimBasis.GetUnitAxis(EAxis::Y) * 20.f
 		- AimBasis.GetUnitAxis(EAxis::Z) * 10.f;
+}
+
+// ---------------------------------------------------------------------------
+// Weapon viewmodel + muzzle-flash cosmetics (M1 art pass)
+// ---------------------------------------------------------------------------
+
+UStaticMeshComponent* APaintForgeCharacter::MakeGunPart(USceneComponent* Parent, const FString& CompName,
+	UStaticMesh* PartMesh, UMaterialInterface* Mat, const FVector& RelLoc, const FVector& RelScale,
+	const FRotator& RelRot)
+{
+	UStaticMeshComponent* Part = CreateDefaultSubobject<UStaticMeshComponent>(FName(*CompName));
+	if (Part != nullptr)
+	{
+		Part->SetupAttachment(Parent);
+		if (PartMesh != nullptr) { Part->SetStaticMesh(PartMesh); }
+		if (Mat != nullptr) { Part->SetMaterial(0, Mat); }
+		Part->SetRelativeLocation(RelLoc);
+		Part->SetRelativeScale3D(RelScale);
+		Part->SetRelativeRotation(RelRot);
+		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Part->SetCastShadow(false);
+	}
+	return Part;
+}
+
+void APaintForgeCharacter::BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube,
+	UStaticMesh* Cylinder, TArray<TObjectPtr<UStaticMeshComponent>>& OutParts, FVector& OutMuzzleLocal)
+{
+	// Silhouette in uu (barrel points +X). Engine Cube/Cylinder are 100 uu, so scale = size/100.
+	// Base material is assigned by the caller (owner-only-see for the FP viewmodel).
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Recv"), Cube, nullptr,      // receiver / upper
+		FVector(0.f, 0.f, 0.f), FVector(0.34f, 0.06f, 0.10f), FRotator::ZeroRotator));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Guard"), Cube, nullptr,     // handguard
+		FVector(24.f, 0.f, -1.f), FVector(0.22f, 0.05f, 0.055f), FRotator::ZeroRotator));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Barrel"), Cylinder, nullptr, // barrel (cyl +Z -> +X)
+		FVector(40.f, 0.f, 1.5f), FVector(0.024f, 0.024f, 0.28f), FRotator(90.f, 0.f, 0.f)));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Stock"), Cube, nullptr,     // stock
+		FVector(-20.f, 0.f, -1.5f), FVector(0.20f, 0.05f, 0.075f), FRotator::ZeroRotator));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Mag"), Cube, nullptr,       // magazine (angled)
+		FVector(6.f, 0.f, -11.f), FVector(0.05f, 0.035f, 0.16f), FRotator(0.f, 0.f, 18.f)));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Grip"), Cube, nullptr,      // pistol grip
+		FVector(-6.f, 0.f, -9.f), FVector(0.045f, 0.045f, 0.12f), FRotator(0.f, 0.f, -12.f)));
+	OutMuzzleLocal = FVector(54.f, 0.f, 1.5f);   // barrel tip
+}
+
+void APaintForgeCharacter::SetupWeaponMaterials()
+{
+	// Dark gunmetal on the marker: one MID shared across all parts (they all wrap BasicShapeMaterial).
+	if (MarkerPartsFP.Num() > 0 && MarkerPartsFP[0] != nullptr)
+	{
+		MarkerMID = MarkerPartsFP[0]->CreateAndSetMaterialInstanceDynamic(0);
+		if (MarkerMID != nullptr)
+		{
+			MarkerMID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.035f, 0.038f, 0.045f));
+			for (int32 Index = 1; Index < MarkerPartsFP.Num(); ++Index)
+			{
+				if (MarkerPartsFP[Index] != nullptr)
+				{
+					MarkerPartsFP[Index]->SetMaterial(0, MarkerMID);
+				}
+			}
+		}
+	}
+
+	// Emissive flash blobs. Param names cover both the dedicated M_PF_Flash (EmissiveColor/Strength)
+	// and the BasicShapeMaterial fallback (Color); the absent one is a harmless no-op.
+	const FLinearColor FlashColor(6.f, 3.4f, 1.1f);
+	if (MuzzleFlashFP != nullptr)
+	{
+		FlashMIDFP = MuzzleFlashFP->CreateAndSetMaterialInstanceDynamic(0);
+		if (FlashMIDFP != nullptr)
+		{
+			FlashMIDFP->SetVectorParameterValue(TEXT("EmissiveColor"), FlashColor);
+			FlashMIDFP->SetScalarParameterValue(TEXT("EmissiveStrength"), 1.f);
+			FlashMIDFP->SetVectorParameterValue(TEXT("Color"), FlashColor);
+		}
+	}
+	if (MuzzleFlashTP != nullptr)
+	{
+		FlashMIDTP = MuzzleFlashTP->CreateAndSetMaterialInstanceDynamic(0);
+		if (FlashMIDTP != nullptr)
+		{
+			FlashMIDTP->SetVectorParameterValue(TEXT("EmissiveColor"), FlashColor);
+			FlashMIDTP->SetScalarParameterValue(TEXT("EmissiveStrength"), 1.f);
+			FlashMIDTP->SetVectorParameterValue(TEXT("Color"), FlashColor);
+		}
+	}
+}
+
+void APaintForgeCharacter::OnFireCosmetic()
+{
+	// Owning client: viewmodel recoil kick (recovered in Tick) + first-person flash + world light.
+	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f);
+	RecoilPitch += RecoilKickPitchDeg;
+
+	if (MuzzleFlashFP != nullptr)
+	{
+		MuzzleFlashFP->SetRelativeScale3D(FVector(FMath::FRandRange(0.10f, 0.16f)));
+		MuzzleFlashFP->SetRelativeRotation(FRotator(0.f, 0.f, FMath::FRandRange(0.f, 360.f)));
+		MuzzleFlashFP->SetVisibility(true);
+	}
+	if (MuzzleLight != nullptr)
+	{
+		MuzzleLight->SetWorldLocation(GetMuzzleLocation(/*bCosmetic=*/true));
+		MuzzleLight->SetIntensity(MuzzleLightIntensity);
+	}
+	GetWorldTimerManager().SetTimer(MuzzleFlashTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleFlash, MuzzleFlashTime, false);
+}
+
+void APaintForgeCharacter::OnRemoteFireCosmetic()
+{
+	// Remote viewers: a flash blob + light at the shooter's server-marker position.
+	const FVector Muzzle = GetMuzzleLocation(/*bCosmetic=*/false);
+	if (MuzzleFlashTP != nullptr)
+	{
+		MuzzleFlashTP->SetWorldLocation(Muzzle);
+		MuzzleFlashTP->SetRelativeScale3D(FVector(FMath::FRandRange(0.15f, 0.24f)));
+		MuzzleFlashTP->SetVisibility(true);
+	}
+	if (MuzzleLight != nullptr)
+	{
+		MuzzleLight->SetWorldLocation(Muzzle);
+		MuzzleLight->SetIntensity(MuzzleLightIntensity);
+	}
+	GetWorldTimerManager().SetTimer(MuzzleFlashTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleFlash, MuzzleFlashTime, false);
+}
+
+void APaintForgeCharacter::ClearMuzzleFlash()
+{
+	if (MuzzleFlashFP != nullptr) { MuzzleFlashFP->SetVisibility(false); }
+	if (MuzzleFlashTP != nullptr) { MuzzleFlashTP->SetVisibility(false); }
+	if (MuzzleLight != nullptr) { MuzzleLight->SetIntensity(0.f); }
 }
