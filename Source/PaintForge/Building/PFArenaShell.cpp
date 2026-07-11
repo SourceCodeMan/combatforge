@@ -47,9 +47,13 @@ APFArenaShell::APFArenaShell()
 	ShellRoot->SetMobility(EComponentMobility::Static);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UMaterial>   MaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	// Art pass (M1): prefer the concrete master (team accent on "Color"); fall back to
+	// BasicShapeMaterial (full-surface tint) until M_PF_BuildPiece is authored. ApplyTint's
+	// SetVectorParameterValue("Color") works with either.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	CubeMesh = CubeFinder.Object;
-	ShapeMaterial = MaterialFinder.Object;
+	ShapeMaterial = ArtMatFinder.Succeeded() ? ArtMatFinder.Object : BasicMatFinder.Object;
 
 	// --- Field floor slab: 6400×4000×30, top at Z = 0 (T25: level-0 floors sit flush inside it) ---
 	FieldFloor = MakeShapePart(TEXT("FieldFloor"),

@@ -94,8 +94,13 @@ APFBuildGrid::APFBuildGrid()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
-	static ConstructorHelpers::FObjectFinder<UMaterial>   MaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	ShapeMaterial = MaterialFinder.Object;
+	// Art pass (M1): prefer the concrete build-piece master — team color lives on its "Color"
+	// vector param as an EMISSIVE trim (keeps team readability on a realistic surface). Fall back
+	// to the engine BasicShapeMaterial (full-surface "Color" tint) until M_PF_BuildPiece is
+	// authored, so pieces always render. Same "Color" call site works for both (BeginPlay).
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	ShapeMaterial = ArtMatFinder.Succeeded() ? ArtMatFinder.Object : BasicMatFinder.Object;
 
 	UStaticMesh* MeshPerType[7] =
 	{
