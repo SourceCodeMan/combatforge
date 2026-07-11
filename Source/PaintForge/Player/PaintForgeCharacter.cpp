@@ -180,15 +180,27 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	// if the pack isn't present. SKM_Manny_Simple is the non-Nanite variant (renders on SM5).
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinBodyFinder(
 		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> QuinnBodyFinder(
+		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple"));
 	if (MannequinBodyFinder.Succeeded())
 	{
-		ThirdPersonBodyMesh = MannequinBodyFinder.Object;
+		ThirdPersonBodyMesh = MannequinBodyFinder.Object;   // fallback body (also team 0)
+		Team0BodyMesh = MannequinBodyFinder.Object;         // team 0 = Manny
 	}
+	// Team 1 = Quinn if present, else fall back to Manny (still tinted distinctly).
+	Team1BodyMesh = QuinnBodyFinder.Succeeded() ? QuinnBodyFinder.Object.Get() : ThirdPersonBodyMesh.Get();
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannequinAnimFinder(
 		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
 	if (MannequinAnimFinder.Succeeded())
 	{
-		ThirdPersonAnimClass = MannequinAnimFinder.Class;
+		ThirdPersonAnimClass = MannequinAnimFinder.Class;   // same skeleton -> one anim BP for both teams
+	}
+	// Per-team body tint material (muted team color + subtle team-rim). Fallback: no tint (native mannequin mat).
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamBodyMatFinder(
+		TEXT("/Game/Materials/M_PF_TeamBody.M_PF_TeamBody"));
+	if (TeamBodyMatFinder.Succeeded())
+	{
+		TeamBodyMaterial = TeamBodyMatFinder.Object;
 	}
 
 	// Set the mesh's relative transform HERE (ctor), not just in BeginPlay: the Character Movement
@@ -633,36 +645,60 @@ void APaintForgeCharacter::ClearBufferedJump()
 // Team + elimination cosmetics
 // ---------------------------------------------------------------------------
 
+void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
+{
+	// Mounts the per-team skeletal body. Gated so the frequent SetTeamColor calls (ready/budget/roster
+	// flag replications all route here) don't re-mount the mesh every time.
+	if (GetMesh() == nullptr)
+	{
+		return;
+	}
+	USkeletalMesh* Chosen = (Team == 1)
+		? (Team1BodyMesh ? Team1BodyMesh : ThirdPersonBodyMesh)
+		: (Team0BodyMesh ? Team0BodyMesh : ThirdPersonBodyMesh);
+	if (Chosen == nullptr)
+	{
+		return;   // graybox fallback: keep the cubes (unconfigured character stays the validated graybox)
+	}
+	if (bUsingArtBody && CachedBodyTeamId == Team)
+	{
+		return;   // already the right body
+	}
+
+	GetMesh()->SetSkeletalMeshAsset(Chosen);
+	if (ThirdPersonAnimClass != nullptr)
+	{
+		GetMesh()->SetAnimInstanceClass(ThirdPersonAnimClass);
+	}
+	// Align: face +X (standard ACharacter -90 yaw), and snap the mesh's LOWEST point (feet) to the
+	// capsule bottom — robust to import origin (MeshMinZ = feet Z in mesh-local space). Manny and Quinn
+	// share bounds, but computing per-chosen-mesh keeps it correct if a future team body differs.
+	GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	if (const UCapsuleComponent* Cap = GetCapsuleComponent())
+	{
+		const float MeshMinZ = Chosen->GetBounds().GetBox().Min.Z;
+		GetMesh()->SetRelativeLocation(
+			FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight() - MeshMinZ));
+	}
+	GetMesh()->SetVisibility(true);
+	GetMesh()->SetOwnerNoSee(true);           // first-person: owner doesn't see own TP body
+	if (BodyMesh != nullptr) { BodyMesh->SetVisibility(false); }
+	if (HeadMesh != nullptr) { HeadMesh->SetVisibility(false); }
+
+	CachedBodyTeamId = Team;
+	bUsingArtBody = true;
+}
+
 void APaintForgeCharacter::ApplyArtLoadout()
 {
 	// Optional M1 art. Every branch is a no-op when its property is unset, so an
 	// unconfigured character stays byte-identical to the validated graybox.
 	bUsingArtBody = false;
+	CachedBodyTeamId = 255;
 
-	if (ThirdPersonBodyMesh != nullptr && GetMesh() != nullptr)
-	{
-		GetMesh()->SetSkeletalMeshAsset(ThirdPersonBodyMesh);
-		if (ThirdPersonAnimClass != nullptr)
-		{
-			GetMesh()->SetAnimInstanceClass(ThirdPersonAnimClass);
-		}
-		// Align: face +X (standard ACharacter -90 yaw), and snap the mesh's LOWEST point (feet)
-		// to the capsule bottom — robust to the mesh's import origin (a fixed -halfHeight offset
-		// floats SKM_Manny_Simple because its origin sits below the feet). MeshMinZ = feet Z in
-		// mesh-local space; offset so feet land exactly at the capsule bottom.
-		GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-		if (const UCapsuleComponent* Cap = GetCapsuleComponent())
-		{
-			const float MeshMinZ = ThirdPersonBodyMesh->GetBounds().GetBox().Min.Z;
-			GetMesh()->SetRelativeLocation(
-				FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight() - MeshMinZ));
-		}
-		GetMesh()->SetVisibility(true);
-		GetMesh()->SetOwnerNoSee(true);           // first-person: owner doesn't see own TP body
-		if (BodyMesh != nullptr) { BodyMesh->SetVisibility(false); }
-		if (HeadMesh != nullptr) { HeadMesh->SetVisibility(false); }
-		bUsingArtBody = true;
-	}
+	// Provisional body from the (possibly not-yet-replicated) team; SetTeamColor re-drives it
+	// authoritatively when the real TeamId lands.
+	ApplyTeamBody(CachedTeamId);
 
 	if (FirstPersonArmsMesh != nullptr && FirstPersonArms != nullptr)
 	{
@@ -686,8 +722,27 @@ void APaintForgeCharacter::ApplyArtLoadout()
 
 void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 {
+	// SetTeamColor is the one convergence point that runs on server, host, and pure clients once the real
+	// TeamId is known (in either replication order) and again on host team-cycle — so the per-team BODY
+	// swap lives here, not in BeginPlay (where a client often doesn't know its team yet).
+	const bool bTeamChanged = (TeamId != CachedTeamId) || !bTeamAppearanceApplied;
 	CachedTeamId = TeamId;
+
+	if (TeamId <= 1)
+	{
+		ApplyTeamBody(TeamId);   // gated: re-mounts Manny/Quinn only on an actual team change
+	}
+
+	if (!bTeamChanged)
+	{
+		return;   // appearance already applied for this team; don't rebuild MIDs on every flag replication
+	}
+	bTeamAppearanceApplied = true;
+
 	const FLinearColor TeamColor = PFColors::ForTeam(TeamId);
+	// Muted team tint for the soldier body — clearly team-colored but not neon speedball (splats/tracers
+	// keep the full vivid ForTeam color). Tune the 0.45 lerp toward gray to taste.
+	const FLinearColor BodyTint = FMath::Lerp(TeamColor, FLinearColor(0.22f, 0.22f, 0.24f, 1.f), 0.45f);
 
 	if (BodyMesh != nullptr && BodyMID == nullptr)
 	{
@@ -706,13 +761,17 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 		HeadMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
 	}
 
-	// Art body: tint the skeletal mesh via a per-team material's "Color" param, if provided.
+	// Art body: apply the team-tint material to EVERY material slot (the mannequin can have more than one).
 	if (bUsingArtBody && GetMesh() != nullptr && TeamBodyMaterial != nullptr)
 	{
-		if (UMaterialInstanceDynamic* BodyArtMID =
-				GetMesh()->CreateAndSetMaterialInstanceDynamicFromMaterial(0, TeamBodyMaterial))
+		const int32 NumMats = GetMesh()->GetNumMaterials();
+		for (int32 Slot = 0; Slot < NumMats; ++Slot)
 		{
-			BodyArtMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
+			if (UMaterialInstanceDynamic* BodyArtMID =
+					GetMesh()->CreateAndSetMaterialInstanceDynamicFromMaterial(Slot, TeamBodyMaterial))
+			{
+				BodyArtMID->SetVectorParameterValue(TEXT("Color"), BodyTint);
+			}
 		}
 	}
 }
