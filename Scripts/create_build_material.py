@@ -19,14 +19,14 @@ import unreal
 #  Paste UE asset paths (NOT disk paths), e.g.
 #      "/Game/Megascans/Surfaces/Concrete_xyz/T_xyz_BaseColor"
 # --------------------------------------------------------------------------- #
-BASECOLOR_TEXTURE  = ""      # sRGB color map            -> BaseColor
-NORMAL_TEXTURE     = ""      # tangent-space normal map  -> Normal
-ORD_TEXTURE        = ""      # packed map, R=AO G=Rough  -> Roughness / AO
+BASECOLOR_TEXTURE  = "/Game/Textures/Concrete/T_Concrete034_Color"    # CC0 ambientCG Concrete034
+NORMAL_TEXTURE     = "/Game/Textures/Concrete/T_Concrete034_Normal"   # DirectX normal (UE convention)
+ORD_TEXTURE        = "/Game/Textures/Concrete/T_Concrete034_Rough"    # grayscale rough (G read as roughness)
                              #   (adjust channel masks below if your packing differs)
 
 WORLD_TILE_SIZE    = 256.0   # world units per texture tile (scalar param "WorldTileSize")
-ACCENT_BOOST       = 2.5     # emissive multiplier          (scalar param "AccentBoost")
-FRESNEL_EXPONENT   = 4.0     # rim tightness
+ACCENT_BOOST       = 1.5     # emissive multiplier          (scalar param "AccentBoost")
+FRESNEL_EXPONENT   = 6.0     # rim tightness (higher = thinner rim, less blue on flat faces)
 TOP_EDGE_THICKNESS = 12.0    # world-units-thick top trim band (scalar param "TopEdgeThickness")
 
 CONCRETE_GRAY      = (0.34, 0.34, 0.35)   # neutral fallback albedo

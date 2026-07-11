@@ -17,6 +17,9 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimInstance.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -97,6 +100,46 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		GetMesh()->SetVisibility(false);
 	}
 
+	// ---- Art loadout components (M1): created empty; ApplyArtLoadout assigns meshes if set ----
+	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
+	FirstPersonArms->SetupAttachment(FirstPersonCamera);
+	FirstPersonArms->SetOnlyOwnerSee(true);          // FP arms: only the owning client sees them
+	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonArms->SetVisibility(false);
+
+	WeaponMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMeshComp"));
+	WeaponMeshComp->SetupAttachment(GetMesh());      // re-attached to the hand socket in ApplyArtLoadout
+	WeaponMeshComp->SetOwnerNoSee(true);             // slice: weapon rides the TP body only
+	WeaponMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMeshComp->SetVisibility(false);
+
+	// M1: default the art body to the imported UE Mannequin (Third Person content pack) so the
+	// graybox cubes become a real animated humanoid. .Succeeded() guards keep the graybox fallback
+	// if the pack isn't present. SKM_Manny_Simple is the non-Nanite variant (renders on SM5).
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinBodyFinder(
+		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	if (MannequinBodyFinder.Succeeded())
+	{
+		ThirdPersonBodyMesh = MannequinBodyFinder.Object;
+	}
+	static ConstructorHelpers::FClassFinder<UAnimInstance> MannequinAnimFinder(
+		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
+	if (MannequinAnimFinder.Succeeded())
+	{
+		ThirdPersonAnimClass = MannequinAnimFinder.Class;
+	}
+
+	// Set the mesh's relative transform HERE (ctor), not just in BeginPlay: the Character Movement
+	// Component captures this as its network-smoothing baseline for SIMULATED PROXIES. If it's only
+	// set in BeginPlay, proxies smooth around a 0 baseline and the mannequin floats on other
+	// players' screens. Mannequin origin is at its feet (measured minZ = 0), so offset = -halfHeight.
+	if (ThirdPersonBodyMesh != nullptr && GetMesh() != nullptr)
+	{
+		GetMesh()->SetRelativeLocationAndRotation(
+			FVector(0.f, 0.f, -Capsule->GetUnscaledCapsuleHalfHeight()),
+			FRotator(0.f, -90.f, 0.f));
+	}
+
 	// ---- Cross-package components (own their replication flags in their ctors) ----
 	WeaponComponent      = CreateDefaultSubobject<UPFWeaponComponent>(TEXT("WeaponComponent"));
 	BuildComponent       = CreateDefaultSubobject<UPFBuildComponent>(TEXT("BuildComponent"));
@@ -134,6 +177,8 @@ void APaintForgeCharacter::BeginPlay()
 	}
 
 	FallStartPeakZ = GetActorLocation().Z;
+
+	ApplyArtLoadout();   // swaps in real body/arms/weapon if assigned; no-op (graybox) otherwise
 }
 
 void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -515,6 +560,57 @@ void APaintForgeCharacter::ClearBufferedJump()
 // Team + elimination cosmetics
 // ---------------------------------------------------------------------------
 
+void APaintForgeCharacter::ApplyArtLoadout()
+{
+	// Optional M1 art. Every branch is a no-op when its property is unset, so an
+	// unconfigured character stays byte-identical to the validated graybox.
+	bUsingArtBody = false;
+
+	if (ThirdPersonBodyMesh != nullptr && GetMesh() != nullptr)
+	{
+		GetMesh()->SetSkeletalMeshAsset(ThirdPersonBodyMesh);
+		if (ThirdPersonAnimClass != nullptr)
+		{
+			GetMesh()->SetAnimInstanceClass(ThirdPersonAnimClass);
+		}
+		// Align: face +X (standard ACharacter -90 yaw), and snap the mesh's LOWEST point (feet)
+		// to the capsule bottom — robust to the mesh's import origin (a fixed -halfHeight offset
+		// floats SKM_Manny_Simple because its origin sits below the feet). MeshMinZ = feet Z in
+		// mesh-local space; offset so feet land exactly at the capsule bottom.
+		GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+		if (const UCapsuleComponent* Cap = GetCapsuleComponent())
+		{
+			const float MeshMinZ = ThirdPersonBodyMesh->GetBounds().GetBox().Min.Z;
+			GetMesh()->SetRelativeLocation(
+				FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight() - MeshMinZ));
+		}
+		GetMesh()->SetVisibility(true);
+		GetMesh()->SetOwnerNoSee(true);           // first-person: owner doesn't see own TP body
+		if (BodyMesh != nullptr) { BodyMesh->SetVisibility(false); }
+		if (HeadMesh != nullptr) { HeadMesh->SetVisibility(false); }
+		bUsingArtBody = true;
+	}
+
+	if (FirstPersonArmsMesh != nullptr && FirstPersonArms != nullptr)
+	{
+		FirstPersonArms->SetSkeletalMeshAsset(FirstPersonArmsMesh);
+		FirstPersonArms->SetVisibility(true);
+	}
+
+	if (WeaponMesh != nullptr && WeaponMeshComp != nullptr)
+	{
+		WeaponMeshComp->SetStaticMesh(WeaponMesh);
+		WeaponMeshComp->SetVisibility(true);
+		if (bUsingArtBody && GetMesh() != nullptr && GetMesh()->DoesSocketExist(WeaponAttachSocket))
+		{
+			WeaponMeshComp->AttachToComponent(GetMesh(),
+				FAttachmentTransformRules::SnapToTargetIncludingScale, WeaponAttachSocket);
+		}
+	}
+
+	SetTeamColor(CachedTeamId);   // re-tint whatever body is now active (skeletal or cubes)
+}
+
 void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 {
 	CachedTeamId = TeamId;
@@ -536,6 +632,16 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 	{
 		HeadMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
 	}
+
+	// Art body: tint the skeletal mesh via a per-team material's "Color" param, if provided.
+	if (bUsingArtBody && GetMesh() != nullptr && TeamBodyMaterial != nullptr)
+	{
+		if (UMaterialInstanceDynamic* BodyArtMID =
+				GetMesh()->CreateAndSetMaterialInstanceDynamicFromMaterial(0, TeamBodyMaterial))
+		{
+			BodyArtMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
+		}
+	}
 }
 
 void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
@@ -549,6 +655,14 @@ void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	if (HeadMesh != nullptr)
 	{
 		HeadMesh->SetHiddenInGame(bEliminated);
+	}
+	if (bUsingArtBody && GetMesh() != nullptr)
+	{
+		GetMesh()->SetHiddenInGame(bEliminated);
+	}
+	if (WeaponMeshComp != nullptr)
+	{
+		WeaponMeshComp->SetHiddenInGame(bEliminated);
 	}
 }
 

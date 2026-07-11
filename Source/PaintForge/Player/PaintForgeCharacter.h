@@ -15,6 +15,11 @@ class UPFCharacterMovementComponent;
 class UPFCombatAudio;
 class UPFHealthComponent;
 class UPFWeaponComponent;
+class UStaticMesh;
+class USkeletalMesh;
+class USkeletalMeshComponent;
+class UAnimInstance;
+class UMaterialInterface;
 struct FInputActionValue;
 
 /**
@@ -96,6 +101,13 @@ protected:
 	/** Single compose point for every FOV effect (04 §1.3). Local camera only. */
 	void UpdateTargetFOV(float DeltaSeconds);
 
+	/**
+	 * M1 art pass: if the optional art meshes below are assigned, swap the graybox
+	 * cubes for a real skeletal body / FP arms / weapon. Every branch is a no-op when
+	 * its property is unset, so an unconfigured character is byte-identical to the graybox.
+	 */
+	void ApplyArtLoadout();
+
 private:
 	// ---- Components ----
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UCameraComponent> FirstPersonCamera;
@@ -109,6 +121,18 @@ private:
 
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> BodyMID;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> HeadMID;
+
+	// ---- Art loadout (M1 art pass; ALL optional — unset = the graybox cubes, unchanged) ----
+	// Set these on a BP subclass, or via ctor FObjectFinder once the assets are imported.
+	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
+	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UStaticMeshComponent>  WeaponMeshComp;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> ThirdPersonBodyMesh = nullptr;   // real TP body -> GetMesh()
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TSubclassOf<UAnimInstance> ThirdPersonAnimClass;           // anim BP for the body
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_rSocket");           // socket on the TP body
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // per-team body mat ("Color" param)
+	bool bUsingArtBody = false;   // true once ThirdPersonBodyMesh mounted; gates the SetTeamColor/eliminate branches
 
 	// ---- Config (04 §1) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;
