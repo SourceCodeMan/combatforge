@@ -299,7 +299,11 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 	// track the move-stream ADS intent even for remotely controlled pawns.
 	UpdateADSAlpha(DeltaSeconds);
 
-	// TP rifle follows aim at shoulder height on every machine (bots + remotes).
+	// TP rifle: rest in hand_r; raise to aim line only while ADS / firing.
+	if (WeaponRaiseHoldSec > 0.f)
+	{
+		WeaponRaiseHoldSec = FMath::Max(0.f, WeaponRaiseHoldSec - DeltaSeconds);
+	}
 	UpdateWeaponHoldPose();
 
 	if (IsLocallyControlled())
@@ -739,38 +743,77 @@ void APaintForgeCharacter::AttachWeaponToHand()
 		}
 	}
 
-	// Seat on capsule root; UpdateWeaponHoldPose drives world aim each tick.
-	// (hand_r on unarmed ABP is a hip-fire pose — not usable for "looking down sights".)
-	if (USceneComponent* Root = GetRootComponent())
-	{
-		if (WeaponMeshComp->GetAttachParent() != Root)
-		{
-			WeaponMeshComp->AttachToComponent(Root,
-				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		}
-	}
-	UpdateWeaponHoldPose();
+	bWeaponInRaisedPose = false;
+	ApplyHandWeaponPose();
 }
 
-void APaintForgeCharacter::UpdateWeaponHoldPose()
+bool APaintForgeCharacter::ShouldRaiseWeapon() const
 {
-	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr || !bUsingArtBody)
+	if (WeaponRaiseHoldSec > 0.f)
 	{
-		return;
+		return true;
 	}
-	if (WeaponMeshComp->bHiddenInGame)
+	if (IsADS())
+	{
+		return true;
+	}
+	if (bFireHeld)
+	{
+		return true;
+	}
+	if (WeaponComponent != nullptr && WeaponComponent->WantsFire())
+	{
+		return true;
+	}
+	return false;
+}
+
+void APaintForgeCharacter::ApplyHandWeaponPose()
+{
+	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
 	{
 		return;
 	}
 
-	// Shoulder / ADS line along control aim. Unarmed ABP can't pose a rifle; this is the
-	// playable stand-in so bots and remotes read as aiming, not hip-firing.
+	USkeletalMeshComponent* Body = GetMesh();
+	if (!bUsingArtBody || Body == nullptr)
+	{
+		return;
+	}
+
+	const bool bHasSocket = Body->DoesSocketExist(WeaponAttachSocket);
+	const bool bHasBone = Body->GetBoneIndex(WeaponAttachSocket) != INDEX_NONE;
+	if (!bHasSocket && !bHasBone)
+	{
+		UE_LOG(PaintForgeLog, Warning,
+			TEXT("ApplyHandWeaponPose: no socket/bone '%s' — TP gun stays on mesh root."),
+			*WeaponAttachSocket.ToString());
+		return;
+	}
+
+	WeaponMeshComp->AttachToComponent(Body,
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponAttachSocket);
+	WeaponMeshComp->SetRelativeLocation(WeaponRelativeLocation);
+	WeaponMeshComp->SetRelativeRotation(WeaponRelativeRotation);
+	WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
+	bWeaponInRaisedPose = false;
+}
+
+void APaintForgeCharacter::ApplyRaisedWeaponPose()
+{
+	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
+	{
+		return;
+	}
+
+	// Aim-line hold while shooting / ADS only — stock near right shoulder, barrel along control aim.
+	// Not permanent: idle returns to hand_r so the gun isn't glued out the back/chest.
 	const FRotator Aim = GetBaseAimRotation();
 	const FRotationMatrix AimM(Aim);
 	const FVector WorldLoc = GetActorLocation()
-		+ AimM.GetUnitAxis(EAxis::X) * 30.f
-		+ AimM.GetUnitAxis(EAxis::Y) * 18.f
-		+ FVector(0.f, 0.f, 52.f);
+		+ AimM.GetUnitAxis(EAxis::X) * WeaponRaisedForward.X
+		+ AimM.GetUnitAxis(EAxis::Y) * WeaponRaisedForward.Y
+		+ FVector(0.f, 0.f, WeaponRaisedForward.Z);
 
 	if (USceneComponent* Root = GetRootComponent())
 	{
@@ -785,6 +828,32 @@ void APaintForgeCharacter::UpdateWeaponHoldPose()
 	// SM_Rifle barrel is local +Y; aim is world +X of the aim basis → yaw -90.
 	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
 	WeaponMeshComp->SetWorldScale3D(WeaponRelativeScale);
+	bWeaponInRaisedPose = true;
+}
+
+void APaintForgeCharacter::UpdateWeaponHoldPose()
+{
+	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr || !bUsingArtBody)
+	{
+		return;
+	}
+	if (WeaponMeshComp->bHiddenInGame)
+	{
+		return;
+	}
+
+	const bool bRaise = ShouldRaiseWeapon();
+	if (bRaise)
+	{
+		// Every tick while raised so the barrel tracks look pitch/yaw.
+		ApplyRaisedWeaponPose();
+	}
+	else if (bWeaponInRaisedPose)
+	{
+		// Transition raised → hand only on the edge (don't thrash attach every frame).
+		ApplyHandWeaponPose();
+	}
+	// else: already in hand — leave relative offsets alone so the bone anim carries the gun
 }
 
 void APaintForgeCharacter::ApplyArtLoadout()
@@ -1008,9 +1077,12 @@ void APaintForgeCharacter::OnFireCosmetic()
 	// Airsoft marker: viewmodel recoil only — no muzzle flash, smoke, or gunfire light.
 	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f);
 	RecoilPitch += RecoilKickPitchDeg;
+	// Local/authority (incl. bots): keep the TP marker raised briefly through the shot cadence.
+	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
 }
 
 void APaintForgeCharacter::OnRemoteFireCosmetic()
 {
-	// Airsoft: remotes get audio from MulticastShotFX; no flash/smoke/light.
+	// Airsoft: no flash. Brief TP raise so remote viewers see the marker come up with the shot.
+	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
 }

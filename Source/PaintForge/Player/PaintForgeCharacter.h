@@ -117,17 +117,24 @@ protected:
 	void ApplyTeamBody(uint8 Team);
 
 	/**
-	 * Sets TP rifle mesh + materials and seats it for third-person (shoulder aim pose).
-	 * Safe to call when mesh/weapon is missing (no-op). Re-run after team body swaps.
+	 * Sets TP rifle mesh + materials. Safe no-op if missing. Re-run after team body swaps.
 	 */
 	void AttachWeaponToHand();
 
 	/**
-	 * Every-frame TP rifle placement: shoulder / ADS line along GetBaseAimRotation.
-	 * Unarmed ABP has no rifle pose — hand_r attach reads as hip-fire; this keeps the
-	 * marker up on the aim line for bots and remote viewers.
+	 * TP rifle: resting = snap to hand_r (in hands); raised = aim line while ADS / firing.
+	 * Unarmed ABP has no rifle grip pose — hand attach is the idle stand-in until a rifle ABP lands.
 	 */
 	void UpdateWeaponHoldPose();
+
+	/** True when the TP marker should leave the hand and raise to the aim line. */
+	bool ShouldRaiseWeapon() const;
+
+	/** Snap to hand_r with resting grip offsets (idle / not shooting). */
+	void ApplyHandWeaponPose();
+
+	/** World aim-line hold at the shoulder (only while ShouldRaiseWeapon). */
+	void ApplyRaisedWeaponPose();
 
 	/** Builds the primitive marker viewmodel (receiver/guard/barrel/stock/mag/grip) under Parent. */
 	void BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube, UStaticMesh* Cylinder,
@@ -162,17 +169,20 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // hand bone on the TP body (Manny)
-	// Held-rifle grip in hand_r bone space (SM_Rifle: local +Y is barrel-forward).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(-3.f, 8.f, -2.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(0.f, 90.f, -5.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(1.f);
+	// Resting grip in hand_r bone space (SM_Rifle: local +Y is barrel-forward).
+	// Tuned so the stock sits in the palm — not through the torso / out the back.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(3.f, -1.5f, 1.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(-5.f, 95.f, 8.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(0.9f);
+	// Raised aim-line offsets from capsule center (only while firing / ADS).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedForward = FVector(28.f, 16.f, 48.f); // along aim X/Y + world Z
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
 	// Native mannequin MIs (keep textured Manny/Quinn look; avoid full-body team wash).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> Team0BodyMaterial = nullptr; // MI_Manny_01
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> Team1BodyMaterial = nullptr; // MI_Quinn_01
 	bool bUsingArtBody = false;   // true once ThirdPersonBodyMesh mounted; gates the SetTeamColor/eliminate branches
 
-	// ---- Weapon cosmetics: FP viewmodel + TP shoulder pose (airsoft — no muzzle flash) ----
+	// ---- Weapon cosmetics: FP viewmodel + TP hand/raise (airsoft — no muzzle flash) ----
 	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<USceneComponent> ViewModelRoot;   // FP marker anchor (on camera)
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> MarkerPartsFP;                            // owner-only-see marker parts
 	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> RifleFPMesh; // real FP rifle (replaces the marker gun)
@@ -184,11 +194,15 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilRecoverSpeed = 11.f;
 	// Local tip of SM_Rifle when barrel-forward is +Y (after TP world yaw -90).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector RifleMuzzleLocalTP = FVector(0.f, 58.f, 4.f);
+	/** Brief raise after remote shot FX so viewers see the marker come up even without ADS rep. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.35f;
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
 	FVector RecoilOffset = FVector::ZeroVector;       // decays to zero each tick (owner)
 	float   RecoilPitch = 0.f;                        // deg, decays to zero
+	float   WeaponRaiseHoldSec = 0.f;                 // countdown; keeps raised pose after a shot
+	bool    bWeaponInRaisedPose = false;              // last applied pose (hand vs raised)
 
 	// ---- Config (04 §1) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;
