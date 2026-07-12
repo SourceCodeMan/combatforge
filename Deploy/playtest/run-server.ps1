@@ -1,12 +1,11 @@
 # Headless-style playtest SERVER (no local player on this process).
+# ASCII-only so Windows PowerShell 5.1 parses cleanly.
 #
 # Priority:
-#   1) PaintForgeServer.exe          (source-engine only; rare on Launcher UE)
-#   2) Packaged/staged PaintForge.exe  -server -nullrhi
-#   3) Development PaintForge.exe      -server -nullrhi -project=...
-#   4) UnrealEditor.exe                -server -nullrhi  (works BEFORE a full package)
-#
-# You do NOT need a shipping build of the whole app for this — editor host is fine for LAN/VPN.
+#   1) PaintForgeServer.exe
+#   2) Packaged/staged PaintForge.exe -server -nullrhi
+#   3) Development PaintForge.exe -server -nullrhi
+#   4) UnrealEditor.exe -server -nullrhi
 param(
 	[string]$ProjectRoot = "",
 	[int]$Port = 7777,
@@ -42,12 +41,10 @@ if (-not $PreferEditor -and $ServerExe) {
 	$Args = @($Map, "-log", "-port=$Port", "-NOHOMEDIR")
 }
 elseif (-not $PreferEditor -and $GameExe) {
-	# Packaged/staged game binaries don't need -project; Dev game may.
 	$Mode = "game-server"
 	$Exe = $GameExe
 	$WorkDir = Split-Path $Exe -Parent
 	$Args = @($Map, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR")
-	# Development non-packaged game exe needs project path to find Content
 	if ($Exe -match "[\\/]Binaries[\\/]Win64[\\/]") {
 		$Args += "-project=$UProject"
 	}
@@ -56,7 +53,6 @@ elseif ($Editor) {
 	$Mode = "editor-server"
 	$Exe = $Editor
 	$WorkDir = $ProjectRoot
-	# Editor dedicated-style host: works with uncooked Content in the project tree.
 	$Args = @(
 		$UProject,
 		$Map,

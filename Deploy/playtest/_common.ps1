@@ -1,4 +1,4 @@
-# Shared helpers for playtest host scripts.
+# Shared helpers for playtest host scripts. ASCII-only (PowerShell encoding safe).
 
 function Get-ProjectRoot {
 	param([string]$ScriptRoot)
@@ -53,7 +53,7 @@ function Ensure-PlaytestFirewall {
 			"New-NetFirewallRule -DisplayName '$RuleTcp' -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue"
 		)
 	} catch {
-		Write-Host "Firewall rule skipped — open port $Port manually if friends cannot join."
+		Write-Host "Firewall rule skipped - open port $Port manually if friends cannot join."
 	}
 }
 
@@ -61,14 +61,14 @@ function Write-JoinBanner {
 	param([int]$Port = 7777)
 	Write-Host ""
 	Write-Host "Friends join with console (~):"
-	Write-Host "  open <host-ip>:$Port"
-	Write-Host "Or:  .\Deploy\playtest\connect.ps1 -Server <host-ip>"
+	Write-Host ("  open YOUR_LAN_IP:{0}" -f $Port)
+	Write-Host "Or:  .\Deploy\playtest\connect.ps1 -Server YOUR_LAN_IP"
 	Write-Host "Host IPs:"
 	Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
 		Where-Object { $_.IPAddress -notlike "127.*" } |
 		ForEach-Object {
 			$Tag = if ($_.InterfaceAlias -match "Tailscale|ZeroTier|WireGuard|VPN|Hamachi") { "VPN" } else { "LAN" }
-			Write-Host ("  [{0}] {1}:$Port  ({2})" -f $Tag, $_.IPAddress, $_.InterfaceAlias)
+			Write-Host ("  [{0}] {1}:{2}  ({3})" -f $Tag, $_.IPAddress, $Port, $_.InterfaceAlias)
 		}
 	Write-Host ""
 }
