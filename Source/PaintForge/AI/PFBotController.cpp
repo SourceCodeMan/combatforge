@@ -10,6 +10,14 @@
 #include "Combat/PFWeaponComponent.h"
 
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
+
+// Live playtest knob: override skill for newly spawned bots (takes effect next build/round). -1 = default.
+static TAutoConsoleVariable<int32> CVarBotSkill(
+	TEXT("pf.BotSkill"),
+	-1,
+	TEXT("Bot difficulty for newly spawned bots: -1=default, 0=Rookie(easy), 1=Regular, 2=Sharpshooter."),
+	ECVF_Default);
 
 APFBotController::APFBotController()
 {
@@ -40,18 +48,24 @@ void APFBotController::OnUnPossess()
 
 void APFBotController::ApplySkill()
 {
-	// One knob for the whole bot difficulty. Rookie is deliberately soft for the kids' session: wide
-	// aim error, a long "notice" delay before it opens up, and a shorter engage range so it doesn't
-	// snipe them across the field. Regular is the original brain; Sharpshooter tightens it for scrims.
-	switch (Skill)
+	// One knob for the whole bot difficulty. Rookie is deliberately soft for the kids' session: LAGGY aim
+	// (low turn rate → misses strafing players), wide error, a long "notice" delay, and a short engage
+	// range. Regular is the middle brain; Sharpshooter tightens it for scrims. pf.BotSkill overrides live.
+	EPFBotSkill Effective = Skill;
+	const int32 Override = CVarBotSkill.GetValueOnAnyThread();
+	if (Override >= 0 && Override <= static_cast<int32>(EPFBotSkill::Sharpshooter))
+	{
+		Effective = static_cast<EPFBotSkill>(Override);
+	}
+	switch (Effective)
 	{
 	case EPFBotSkill::Rookie:
-		AimErrorDeg = 8.0f;  ReactionDelay = 0.60f;  EngageRangeUU = 3200.f;  break;
+		AimErrorDeg = 14.f;  AimTurnRate = 2.5f;  ReactionDelay = 0.60f;  EngageRangeUU = 3200.f;  break;
 	case EPFBotSkill::Sharpshooter:
-		AimErrorDeg = 1.5f;  ReactionDelay = 0.12f;  EngageRangeUU = 5500.f;  break;
+		AimErrorDeg = 1.5f;  AimTurnRate = 11.f;  ReactionDelay = 0.12f;  EngageRangeUU = 5500.f;  break;
 	case EPFBotSkill::Regular:
 	default:
-		AimErrorDeg = 3.5f;  ReactionDelay = 0.30f;  EngageRangeUU = 4500.f;  break;
+		AimErrorDeg = 4.5f;  AimTurnRate = 6.5f;  ReactionDelay = 0.30f;  EngageRangeUU = 4500.f;  break;
 	}
 }
 
@@ -89,14 +103,9 @@ void APFBotController::Tick(float DeltaSeconds)
 		TargetRefreshTimer = TargetRefreshInterval;
 		APaintForgeCharacter* PrevTarget = CurrentTarget.Get();
 		APaintForgeCharacter* NewTarget = AcquireNearestEnemy();   // nearest VISIBLE enemy (else nearest)
-		if (NewTarget != PrevTarget)
+		if (NewTarget != PrevTarget && NewTarget != nullptr)
 		{
-			AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
-			AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
-			if (NewTarget != nullptr)
-			{
-				FireHoldTimer = ReactionDelay;   // notice gap only when we actually switch to a new target
-			}
+			FireHoldTimer = ReactionDelay;   // notice gap only when we actually switch to a new target
 		}
 		CurrentTarget = NewTarget;
 	}
@@ -113,12 +122,20 @@ void APFBotController::Tick(float DeltaSeconds)
 	const FVector ToTarget = TargetChest - BotEye;
 	const float Dist = ToTarget.Size();
 
-	// Aim: control rotation toward the target chest + a small per-acquisition error. The weapon and the
-	// server dir-gate both read control rotation, so this IS the shot direction.
-	FRotator LookAt = ToTarget.Rotation();
-	LookAt.Yaw += AimJitterYaw;
-	LookAt.Pitch = FMath::Clamp(LookAt.Pitch + AimJitterPitch, -80.f, 80.f);
-	SetControlRotation(LookAt);
+	// Aim: re-roll a random error every AimJitterInterval, then EASE control rotation toward the target at a
+	// capped turn rate (AimTurnRate). A low turn rate + wide error means bots lag strafing players and miss
+	// — beatable by juking. The weapon and the server dir-gate read control rotation, so this IS the shot dir.
+	AimJitterTimer -= DeltaSeconds;
+	if (AimJitterTimer <= 0.f)
+	{
+		AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
+		AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
+		AimJitterTimer = AimJitterInterval;
+	}
+	FRotator DesiredAim = ToTarget.Rotation();
+	DesiredAim.Yaw += AimJitterYaw;
+	DesiredAim.Pitch = FMath::Clamp(DesiredAim.Pitch + AimJitterPitch, -80.f, 80.f);
+	SetControlRotation(FMath::RInterpTo(GetControlRotation(), DesiredAim, DeltaSeconds, AimTurnRate));
 
 	// Movement: hold a stand-off band — close if too far, back up if too close, strafe in-band — then
 	// steer that desired direction around cover/walls (reactive whiskers) and break out if we get pinned.

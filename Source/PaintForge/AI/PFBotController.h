@@ -58,6 +58,8 @@ protected:
 	// before a freshly-acquired target may be fired on. Default Rookie = easy bots for the kids' session.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") EPFBotSkill Skill = EPFBotSkill::Rookie;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ReactionDelay = 0.6f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimTurnRate = 2.5f;      // control-rotation ease speed (low = laggy aim, misses strafers)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimJitterInterval = 0.6f;// how often the random aim error is re-rolled
 
 	// Reactive navigation (open arena, sparse player-built cover): whisker length + unstick threshold.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeUU = 320.f;    // forward look-ahead for cover avoidance
@@ -80,6 +82,7 @@ private:
 	float StrafeSign = 1.f;
 	float AimJitterYaw = 0.f;
 	float AimJitterPitch = 0.f;
+	float AimJitterTimer = 0.f;
 	// Reactive-avoidance / unstick state.
 	FVector StuckSamplePos = FVector::ZeroVector;
 	float StuckSampleTimer = 0.f;
