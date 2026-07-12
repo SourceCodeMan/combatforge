@@ -22,9 +22,10 @@ class UStaticMeshComponent;
  * stripe + an invisible full-height blocking volume active during BuildPhase only), and the
  * south warm-up pen (20×20 m at Y=-3000) with 12 dummy slots.
  *
- * Art pass: materials are per-role (floor / wall / metal / mark) — cosmetics only. Collision,
- * scales, and spawn transforms are unchanged. Lights/fog live in UPFLightingSubsystem.
- * Replicated for existence only.
+ * Art pass: per-role materials + Cosmetic warehouse dressing (ceiling, trusses, dock bays,
+ * wall ribs) — all NoCollision and above HeightCap so they never block build/trace/play.
+ * Collision, scales, and spawn transforms for functional parts are unchanged.
+ * Lights/fog live in UPFLightingSubsystem. Replicated for existence only.
  */
 UCLASS()
 class PAINTFORGE_API APFArenaShell : public AActor
@@ -55,12 +56,18 @@ private:
 	{
 		Solid,            // block Pawn / Visibility / Paintball
 		SolidBuildable,   // Solid + block BuildTrace (field floor: ghost snap target — §4.6)
-		Cosmetic          // NoCollision (spawn strips, midline stripe)
+		Cosmetic          // NoCollision (strips, dressing, hazard paint)
 	};
 
 	UStaticMeshComponent* MakeShapePart(const FString& Name, const FVector& Center,
 	                                    const FVector& Scale, EPFShellCollision Mode,
-	                                    UMaterialInterface* Material);
+	                                    UMaterialInterface* Material,
+	                                    const FRotator& RelRot = FRotator::ZeroRotator,
+	                                    bool bCastShadow = false);
+
+	/** Ceiling, trusses, dock bays, wall ribs — all Cosmetic, Z ≥ 1400, off play volume. */
+	void BuildWarehouseDressing();
+
 	void ApplyTint(UStaticMeshComponent* Comp, const FLinearColor& Color);
 	void BindToGameState(APaintForgeGameState* GS);
 	void OnGameStateSet(AGameStateBase* NewGameState);
@@ -75,6 +82,9 @@ private:
 	UPROPERTY() TObjectPtr<UBoxComponent> MidlineBarrier;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> PenFloor;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> PenWalls;
+
+	// Cosmetic warehouse dressing (existence-only; never solid).
+	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> DressingParts;
 
 	UPROPERTY() TObjectPtr<UStaticMesh> CubeMesh;
 	// Per-role arena art materials (soft CDO load; BasicShapeMaterial fallback).

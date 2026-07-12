@@ -30,6 +30,11 @@ namespace
 	constexpr float TeamSpawnSpacingY = FieldY / PFGrid::SpawnPointsPerTeam;   // 666.67
 	constexpr float PenSlotSpacingX = 160.f;
 	constexpr float PenSlotStartX = PenCenterX - PenSlotSpacingX * (PFGrid::MaxRosterSlots - 1) * 0.5f;
+
+	// Warehouse dressing — well above HeightCap so build volume stays clean (playbook Z ≥ 1400–1600).
+	constexpr float CeilingZ = 1500.f;
+	constexpr float TrussZ = 1420.f;
+	constexpr float PurlinZ = 1460.f;
 }
 
 APFArenaShell::APFArenaShell()
@@ -133,11 +138,130 @@ APFArenaShell::APFArenaShell()
 	PenWalls.Add(MakeShapePart(TEXT("PenWallE"),
 		FVector(PenCenterX + PenHalf - 10.f, PenCenterY, PenWallH * 0.5f), FVector(0.2f, 20.f, 3.f),
 		EPFShellCollision::Solid, WallMaterial));
+
+	// --- Cosmetic CQB warehouse shell (no collision, above height cap) ---
+	BuildWarehouseDressing();
+}
+
+void APFArenaShell::BuildWarehouseDressing()
+{
+	// All Cosmetic / NoCollision. Nothing enters the buildable volume (Z < 1200) as solid.
+	// Cube mesh is 100 uu; scale = world size / 100.
+
+	// Ceiling deck over the whole field (slightly oversized for clean perimeter join).
+	DressingParts.Add(MakeShapePart(TEXT("CeilingDeck"),
+		FVector(FieldX * 0.5f, FieldY * 0.5f, CeilingZ),
+		FVector(65.f, 41.f, 0.25f),
+		EPFShellCollision::Cosmetic, WallMaterial, FRotator::ZeroRotator, /*bCastShadow=*/true));
+
+	// Primary roof trusses — span N–S (along Y) every 800 uu along X. Metal I-beam look.
+	const float TrussSpanY = FieldY + 80.f;
+	int32 TrussIdx = 0;
+	for (float X = 400.f; X < FieldX; X += 800.f)
+	{
+		const int32 Idx = TrussIdx++;
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussMain%d"), Idx),
+			FVector(X, FieldY * 0.5f, TrussZ),
+			FVector(0.35f, TrussSpanY * 0.01f, 0.55f),
+			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+		// Vertical hangers from truss up to ceiling (reads as warehouse structure).
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussHangerN%d"), Idx),
+			FVector(X, 200.f, (TrussZ + CeilingZ) * 0.5f),
+			FVector(0.15f, 0.15f, (CeilingZ - TrussZ) * 0.01f),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussHangerS%d"), Idx),
+			FVector(X, FieldY - 200.f, (TrussZ + CeilingZ) * 0.5f),
+			FVector(0.15f, 0.15f, (CeilingZ - TrussZ) * 0.01f),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+	}
+
+	// Cross purlins — span E–W (along X) every 800 uu along Y.
+	const float PurlinSpanX = FieldX + 80.f;
+	int32 PurlinIdx = 0;
+	for (float Y = 400.f; Y < FieldY; Y += 800.f)
+	{
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("Purlin%d"), PurlinIdx++),
+			FVector(FieldX * 0.5f, Y, PurlinZ),
+			FVector(PurlinSpanX * 0.01f, 0.22f, 0.22f),
+			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+	}
+
+	// Exterior wall ribs / pilasters on the long N/S walls (outside play volume).
+	int32 RibIdx = 0;
+	for (float X = 200.f; X < FieldX; X += 400.f)
+	{
+		// North exterior face (Y = FieldY + 30)
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("RibN%d"), RibIdx),
+			FVector(X, FieldY + 30.f, PerimeterH * 0.5f),
+			FVector(0.35f, 0.25f, 12.2f),
+			EPFShellCollision::Cosmetic, WallMaterial));
+		// South exterior face
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("RibS%d"), RibIdx),
+			FVector(X, -30.f, PerimeterH * 0.5f),
+			FVector(0.35f, 0.25f, 12.2f),
+			EPFShellCollision::Cosmetic, WallMaterial));
+		++RibIdx;
+	}
+
+	// Dock-bay doors on spawn walls (west = Team A, east = Team B) — exterior only.
+	// Three roll-up bays per side, reading as loading docks over the spawn strips.
+	const float DoorH = 7.f;     // 700 uu tall
+	const float DoorW = 5.f;     // 500 uu wide
+	const float DoorZ = DoorH * 50.f;   // center at half height of door (scale z * 100 / 2)
+	const float BayYs[3] = { FieldY * 0.25f, FieldY * 0.5f, FieldY * 0.75f };
+	for (int32 i = 0; i < 3; ++i)
+	{
+		// West exterior (x ≈ -40)
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockDoorW%d"), i),
+			FVector(-40.f, BayYs[i], DoorZ),
+			FVector(0.15f, DoorW, DoorH),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+		// Header bar above door
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockHdrW%d"), i),
+			FVector(-40.f, BayYs[i], DoorH * 100.f + 40.f),
+			FVector(0.25f, DoorW + 0.4f, 0.35f),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+
+		// East exterior (x ≈ FieldX + 40)
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockDoorE%d"), i),
+			FVector(FieldX + 40.f, BayYs[i], DoorZ),
+			FVector(0.15f, DoorW, DoorH),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockHdrE%d"), i),
+			FVector(FieldX + 40.f, BayYs[i], DoorH * 100.f + 40.f),
+			FVector(0.25f, DoorW + 0.4f, 0.35f),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+	}
+
+	// Corner columns (exterior, visual weight at field corners).
+	const FVector Corners[4] = {
+		FVector(-50.f, -50.f, PerimeterH * 0.5f),
+		FVector(FieldX + 50.f, -50.f, PerimeterH * 0.5f),
+		FVector(-50.f, FieldY + 50.f, PerimeterH * 0.5f),
+		FVector(FieldX + 50.f, FieldY + 50.f, PerimeterH * 0.5f),
+	};
+	for (int32 i = 0; i < 4; ++i)
+	{
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("CornerCol%d"), i),
+			Corners[i], FVector(0.7f, 0.7f, 12.5f),
+			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+	}
+
+	// High catwalk rail hints along long walls just under the trusses (outside play).
+	DressingParts.Add(MakeShapePart(TEXT("CatwalkRailN"),
+		FVector(FieldX * 0.5f, FieldY + 55.f, 1100.f),
+		FVector(64.f, 0.12f, 0.12f),
+		EPFShellCollision::Cosmetic, MetalMaterial));
+	DressingParts.Add(MakeShapePart(TEXT("CatwalkRailS"),
+		FVector(FieldX * 0.5f, -55.f, 1100.f),
+		FVector(64.f, 0.12f, 0.12f),
+		EPFShellCollision::Cosmetic, MetalMaterial));
 }
 
 UStaticMeshComponent* APFArenaShell::MakeShapePart(const FString& Name, const FVector& Center,
                                                    const FVector& Scale, EPFShellCollision Mode,
-                                                   UMaterialInterface* Material)
+                                                   UMaterialInterface* Material, const FRotator& RelRot,
+                                                   bool bCastShadow)
 {
 	UStaticMeshComponent* Comp = CreateDefaultSubobject<UStaticMeshComponent>(*Name);
 	Comp->SetupAttachment(ShellRoot);
@@ -148,11 +272,12 @@ UStaticMeshComponent* APFArenaShell::MakeShapePart(const FString& Name, const FV
 		Comp->SetMaterial(0, Material);
 	}
 	Comp->SetRelativeLocation(Center);
+	Comp->SetRelativeRotation(RelRot);
 	Comp->SetRelativeScale3D(Scale);
-	// Perimeter-scale pieces cast soft shadows for depth; thin cosmetics stay off (perf).
-	const bool bBigStructure =
-		Mode == EPFShellCollision::Solid || Mode == EPFShellCollision::SolidBuildable;
-	Comp->SetCastShadow(bBigStructure);
+	// Solid structure always shadows; cosmetics only when explicitly requested (ceiling/trusses).
+	const bool bShadow =
+		bCastShadow || Mode == EPFShellCollision::Solid || Mode == EPFShellCollision::SolidBuildable;
+	Comp->SetCastShadow(bShadow);
 	Comp->SetCanEverAffectNavigation(false);
 
 	if (Mode == EPFShellCollision::Cosmetic)
