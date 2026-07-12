@@ -3,6 +3,7 @@
 #include "UI/PFLoadingMenuWidget.h"
 
 #include "PaintForge.h"
+#include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerController.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -10,12 +11,16 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/CheckBox.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/WidgetSwitcher.h"
 #include "Engine/Texture2D.h"
 #include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInterface.h"
@@ -32,6 +37,82 @@ namespace
 	{
 		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
 	}
+
+	FString BuildModeLabel(EPFBuildMode Mode)
+	{
+		switch (Mode)
+		{
+		case EPFBuildMode::Creative:    return TEXT("Creative");
+		case EPFBuildMode::Improvement: return TEXT("Improvement");
+		case EPFBuildMode::PlayOnly:    return TEXT("Play-Only");
+		default:                        return TEXT("Creative");
+		}
+	}
+
+	FString BuildModeBlurb(EPFBuildMode Mode)
+	{
+		switch (Mode)
+		{
+		case EPFBuildMode::Creative:
+			return TEXT("Empty plots · build your fort from scratch");
+		case EPFBuildMode::Improvement:
+			return TEXT("Load a saved arena · both teams improve it");
+		case EPFBuildMode::PlayOnly:
+			return TEXT("Skip build · straight into combat");
+		default:
+			return TEXT("");
+		}
+	}
+
+	FString MatchTypeLabel(EPFMatchType Type)
+	{
+		switch (Type)
+		{
+		case EPFMatchType::Elimination: return TEXT("Elimination");
+		case EPFMatchType::FreeForAll:  return TEXT("Free-for-All");
+		case EPFMatchType::Skirmish:    return TEXT("Skirmish");
+		case EPFMatchType::CaptureFlag: return TEXT("Capture the Flag");
+		case EPFMatchType::Domination:  return TEXT("Domination");
+		case EPFMatchType::Hardpoint:   return TEXT("Hardpoint");
+		default:                        return TEXT("Elimination");
+		}
+	}
+
+	FString MatchTypeBlurb(EPFMatchType Type)
+	{
+		switch (Type)
+		{
+		case EPFMatchType::Elimination:
+			return TEXT("Last team standing · first to N round wins");
+		case EPFMatchType::FreeForAll:
+			return TEXT("Solo · most tags · no teams · play-only");
+		case EPFMatchType::Skirmish:
+			return TEXT("Teams · most tags · everyone respawns");
+		case EPFMatchType::CaptureFlag:
+			return TEXT("Grab their flag · score at your base · first to 3");
+		case EPFMatchType::Domination:
+			return TEXT("Hold points A / MID / B · score over time");
+		case EPFMatchType::Hardpoint:
+			return TEXT("One rotating point · hold it · score over time");
+		default:
+			return TEXT("");
+		}
+	}
+
+	FString FormatLabel(uint8 TeamSize)
+	{
+		return FString::Printf(TEXT("%dv%d"), TeamSize, TeamSize);
+	}
+
+	FString FormatBlurb(uint8 TeamSize, bool bBots)
+	{
+		if (bBots)
+		{
+			return FString::Printf(TEXT("%dv%d · empty slots filled with bots at match start"),
+				TeamSize, TeamSize);
+		}
+		return FString::Printf(TEXT("%dv%d · humans only · no bot fill"), TeamSize, TeamSize);
+	}
 }
 
 TSharedRef<SWidget> UPFLoadingMenuWidget::RebuildWidget()
@@ -42,6 +123,119 @@ TSharedRef<SWidget> UPFLoadingMenuWidget::RebuildWidget()
 	}
 	return Super::RebuildWidget();
 }
+
+UButton* UPFLoadingMenuWidget::MakeMenuTab(const FString& Label, FName Name)
+{
+	UButton* Btn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+	Btn->SetBackgroundColor(FLinearColor(0.14f, 0.15f, 0.18f, 0.95f));
+	UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>();
+	T->SetText(FText::FromString(Label));
+	T->SetFont(PFLoadFont(14, true));
+	T->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.12f, 0.14f)));
+	T->SetJustification(ETextJustify::Center);
+	Btn->AddChild(T);
+	return Btn;
+}
+
+UButton* UPFLoadingMenuWidget::MakeSetupButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText, FName Name)
+{
+	UButton* Btn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+	Btn->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 0.95f));
+
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+
+	UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>();
+	LabelText->SetText(FText::FromString(Label));
+	LabelText->SetFont(PFLoadFont(13, true));
+	LabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+	USizeBox* LabelSizer = WidgetTree->ConstructWidget<USizeBox>();
+	LabelSizer->SetWidthOverride(90.f);
+	LabelSizer->SetContent(LabelText);
+	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(LabelSizer))
+	{
+		HS->SetVerticalAlignment(VAlign_Center);
+		HS->SetPadding(FMargin(12.f, 10.f, 8.f, 10.f));
+	}
+
+	OutValueText = WidgetTree->ConstructWidget<UTextBlock>();
+	OutValueText->SetFont(PFLoadFont(16, true));
+	OutValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(OutValueText))
+	{
+		HS->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		HS->SetVerticalAlignment(VAlign_Center);
+		HS->SetPadding(FMargin(0.f, 10.f, 12.f, 10.f));
+	}
+
+	Btn->SetContent(Row);
+	return Btn;
+}
+
+void UPFLoadingMenuWidget::AddHowToLine(UVerticalBox* Box, const FString& Text, int32 Size, bool bBold,
+	const FLinearColor& Color)
+{
+	UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>();
+	T->SetText(FText::FromString(Text));
+	T->SetFont(PFLoadFont(Size, bBold));
+	T->SetColorAndOpacity(FSlateColor(Color));
+	T->SetAutoWrapText(true);
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(T))
+	{
+		V->SetPadding(FMargin(0.f, bBold ? 8.f : 2.f, 0.f, 0.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+}
+
+void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
+{
+	const FLinearColor Head(1.f, 0.92f, 0.35f);
+	const FLinearColor Body(0.88f, 0.89f, 0.92f);
+	const FLinearColor Key(0.65f, 0.82f, 1.f);
+	const FLinearColor Dim(0.55f, 0.57f, 0.62f);
+
+	AddHowToLine(Box, TEXT("THE MATCH"), 14, true, Head);
+	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Pick mode, type, format, and bots here, then Enter Lobby."), 12, false, Body);
+
+	AddHowToLine(Box, TEXT("MOVE & LOOK"), 14, true, Head);
+	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump · Shift sprint · Ctrl/C crouch"), 12, false, Key);
+
+	AddHowToLine(Box, TEXT("COMBAT"), 14, true, Head);
+	AddHowToLine(Box, TEXT("LMB fire · RMB aim · R reload · Tag opponents with paintballs"), 12, false, Key);
+
+	AddHowToLine(Box, TEXT("BUILD"), 14, true, Head);
+	AddHowToLine(Box, TEXT("F1–F4 structure · barrel/crate/boxes cover · LMB place · R rotate · X delete · Hold Q wheel"), 12, false, Key);
+
+	AddHowToLine(Box, TEXT("LOBBY"), 14, true, Head);
+	AddHowToLine(Box, TEXT("F ready · Enter host start · Tab scoreboard · Esc options (How to Play anytime)"), 12, false, Key);
+
+	AddHowToLine(Box, TEXT("MODE vs TYPE"), 14, true, Head);
+	AddHowToLine(Box, TEXT("Mode = build style (Creative / Improvement / Play-Only). Type = win condition (Elim, Skirmish, CTF…)."), 12, false, Dim);
+}
+
+void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
+{
+	ActiveMenuTab = FMath::Clamp(Index, 0, 1);
+	if (MenuSwitcher)
+	{
+		MenuSwitcher->SetActiveWidgetIndex(ActiveMenuTab);
+	}
+	// Highlight active tab with a brighter plate.
+	if (TabSetup)
+	{
+		TabSetup->SetBackgroundColor(ActiveMenuTab == 0
+			? FLinearColor(1.f, 0.92f, 0.35f, 0.95f)
+			: FLinearColor(0.14f, 0.15f, 0.18f, 0.95f));
+	}
+	if (TabHowTo)
+	{
+		TabHowTo->SetBackgroundColor(ActiveMenuTab == 1
+			? FLinearColor(1.f, 0.92f, 0.35f, 0.95f)
+			: FLinearColor(0.14f, 0.15f, 0.18f, 0.95f));
+	}
+}
+
+void UPFLoadingMenuWidget::OnTabSetup() { SelectMenuTab(0); }
+void UPFLoadingMenuWidget::OnTabHowTo() { SelectMenuTab(1); }
 
 void UPFLoadingMenuWidget::BuildTree()
 {
@@ -80,9 +274,134 @@ void UPFLoadingMenuWidget::BuildTree()
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SubtitleText))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 36.f));
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 28.f));
 	}
 
+	// ---- Menu tabs: Match Setup | How to Play ----
+	UHorizontalBox* MenuTabs = WidgetTree->ConstructWidget<UHorizontalBox>();
+	TabSetup = MakeMenuTab(TEXT("  MATCH SETUP  "), TEXT("TabSetup"));
+	TabHowTo = MakeMenuTab(TEXT("  HOW TO PLAY  "), TEXT("TabHowTo"));
+	TabSetup->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabSetup);
+	TabHowTo->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabHowTo);
+	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabSetup))
+	{
+		H->SetPadding(FMargin(4.f, 0.f));
+	}
+	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabHowTo))
+	{
+		H->SetPadding(FMargin(4.f, 0.f));
+	}
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MenuTabs))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 14.f));
+	}
+
+	USizeBox* MenuSizer = WidgetTree->ConstructWidget<USizeBox>();
+	MenuSizer->SetWidthOverride(480.f);
+	MenuSwitcher = WidgetTree->ConstructWidget<UWidgetSwitcher>();
+	MenuSizer->SetContent(MenuSwitcher);
+
+	// Page 0 — match setup
+	UVerticalBox* SetupCol = WidgetTree->ConstructWidget<UVerticalBox>();
+
+	ModeButton = MakeSetupButton(TEXT("MODE"), ModeValueText, TEXT("ModeBtn"));
+	ModeButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnModeClicked);
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(ModeButton))
+	{
+		V->SetPadding(FMargin(0.f, 2.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+	ModeBlurbText = WidgetTree->ConstructWidget<UTextBlock>();
+	ModeBlurbText->SetFont(PFLoadFont(12, false));
+	ModeBlurbText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
+	ModeBlurbText->SetJustification(ETextJustify::Left);
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(ModeBlurbText))
+	{
+		V->SetPadding(FMargin(4.f, 2.f, 4.f, 10.f));
+	}
+
+	TypeButton = MakeSetupButton(TEXT("TYPE"), TypeValueText, TEXT("TypeBtn"));
+	TypeButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTypeClicked);
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(TypeButton))
+	{
+		V->SetPadding(FMargin(0.f, 2.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+	TypeBlurbText = WidgetTree->ConstructWidget<UTextBlock>();
+	TypeBlurbText->SetFont(PFLoadFont(12, false));
+	TypeBlurbText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
+	TypeBlurbText->SetJustification(ETextJustify::Left);
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(TypeBlurbText))
+	{
+		V->SetPadding(FMargin(4.f, 2.f, 4.f, 10.f));
+	}
+
+	FormatButton = MakeSetupButton(TEXT("FORMAT"), FormatValueText, TEXT("FormatBtn"));
+	FormatButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnFormatClicked);
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(FormatButton))
+	{
+		V->SetPadding(FMargin(0.f, 2.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+	FormatBlurbText = WidgetTree->ConstructWidget<UTextBlock>();
+	FormatBlurbText->SetFont(PFLoadFont(12, false));
+	FormatBlurbText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
+	FormatBlurbText->SetJustification(ETextJustify::Left);
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(FormatBlurbText))
+	{
+		V->SetPadding(FMargin(4.f, 2.f, 4.f, 10.f));
+	}
+
+	// Bots checkbox row
+	UHorizontalBox* BotsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	BotsCheck = WidgetTree->ConstructWidget<UCheckBox>();
+	BotsCheck->SetIsChecked(true);
+	BotsCheck->OnCheckStateChanged.AddDynamic(this, &UPFLoadingMenuWidget::OnBotsChanged);
+	if (UHorizontalBoxSlot* H = BotsRow->AddChildToHorizontalBox(BotsCheck))
+	{
+		H->SetVerticalAlignment(VAlign_Center);
+		H->SetPadding(FMargin(8.f, 6.f, 10.f, 6.f));
+	}
+	BotsLabelText = WidgetTree->ConstructWidget<UTextBlock>();
+	BotsLabelText->SetText(FText::FromString(TEXT("Fill empty slots with bots")));
+	BotsLabelText->SetFont(PFLoadFont(15, false));
+	BotsLabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.91f, 0.94f)));
+	if (UHorizontalBoxSlot* H = BotsRow->AddChildToHorizontalBox(BotsLabelText))
+	{
+		H->SetVerticalAlignment(VAlign_Center);
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(BotsRow))
+	{
+		V->SetPadding(FMargin(0.f, 4.f, 0.f, 2.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+
+	SetupHintText = WidgetTree->ConstructWidget<UTextBlock>();
+	SetupHintText->SetFont(PFLoadFont(12, false));
+	SetupHintText->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
+	SetupHintText->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(SetupHintText))
+	{
+		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+		V->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	// Page 1 — how to play
+	UVerticalBox* HowToCol = WidgetTree->ConstructWidget<UVerticalBox>();
+	BuildHowToPlayPage(HowToCol);
+
+	MenuSwitcher->AddChild(SetupCol);
+	MenuSwitcher->AddChild(HowToCol);
+
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MenuSizer))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 28.f));
+	}
+
+	// ---- Warmup status ----
 	StatusText = WidgetTree->ConstructWidget<UTextBlock>();
 	StatusText->SetText(FText::FromString(TEXT("Starting…")));
 	StatusText->SetFont(PFLoadFont(15, false));
@@ -149,6 +468,10 @@ void UPFLoadingMenuWidget::NativeConstruct()
 		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed.ABP_Unarmed_C"),
 		TEXT("/Game/Materials/M_PF_Flash.M_PF_Flash"),
 		TEXT("/Game/Materials/M_PF_ImpactMark.M_PF_ImpactMark"),
+		// Build props (warehouse) — soft, so first place doesn't hitch on mesh load.
+		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Aba_Storage_Barrel_Metal_Blue_01/SM_Ind_Aba_Storage_Barrel_Metal_Blue_01.SM_Ind_Aba_Storage_Barrel_Metal_Blue_01"),
+		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Crate_Plastic_Blue_01/SM_Ind_War_Storage_Crate_Plastic_Blue_01.SM_Ind_War_Storage_Crate_Plastic_Blue_01"),
+		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Box_Cardboard_Set_01/SM_Ind_War_Storage_Box_Cardboard_Set_01_A.SM_Ind_War_Storage_Box_Cardboard_Set_01_A"),
 	};
 	PreloadIndex = 0;
 	WarmupStep = 0;
@@ -166,6 +489,9 @@ void UPFLoadingMenuWidget::NativeConstruct()
 		PC->bShowMouseCursor = true;
 	}
 
+	SeedFromGameState();
+	RefreshSetupLabels();
+	SelectMenuTab(0);
 	SetStatus(TEXT("Preparing…"));
 	UE_LOG(PaintForgeLog, Log, TEXT("LoadingMenu: boot menu up — warmup starting"));
 }
@@ -173,11 +499,22 @@ void UPFLoadingMenuWidget::NativeConstruct()
 void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	if (bDismissed || bWarmupComplete)
+	if (bDismissed)
 	{
 		return;
 	}
-	RunWarmupStep();
+
+	// Keep labels honest if GS replicates in late (client join).
+	if (!bWarmupComplete)
+	{
+		RunWarmupStep();
+	}
+	// Host can still change while waiting on Enter; clients just mirror GS.
+	if (!IsLocalHost())
+	{
+		SeedFromGameState();
+		RefreshSetupLabels();
+	}
 }
 
 void UPFLoadingMenuWidget::SetStatus(const FString& Line)
@@ -185,6 +522,151 @@ void UPFLoadingMenuWidget::SetStatus(const FString& Line)
 	if (StatusText)
 	{
 		StatusText->SetText(FText::FromString(Line));
+	}
+}
+
+bool UPFLoadingMenuWidget::IsLocalHost() const
+{
+	const APlayerController* PC = GetOwningPlayer();
+	return PC && PC->HasAuthority() && PC->IsLocalPlayerController();
+}
+
+void UPFLoadingMenuWidget::SeedFromGameState()
+{
+	const UWorld* World = GetWorld();
+	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
+	if (GS)
+	{
+		SelectedBuildMode = GS->BuildMode;
+		SelectedMatchType = GS->MatchType;
+		SelectedTeamSize = (GS->TargetTeamSize >= 6) ? 6 : 4;
+		bSelectedFillBots = GS->bFillWithBots;
+	}
+}
+
+void UPFLoadingMenuWidget::RefreshSetupLabels()
+{
+	if (ModeValueText)
+	{
+		ModeValueText->SetText(FText::FromString(BuildModeLabel(SelectedBuildMode)));
+	}
+	if (ModeBlurbText)
+	{
+		ModeBlurbText->SetText(FText::FromString(BuildModeBlurb(SelectedBuildMode)));
+	}
+	if (TypeValueText)
+	{
+		TypeValueText->SetText(FText::FromString(MatchTypeLabel(SelectedMatchType)));
+	}
+	if (TypeBlurbText)
+	{
+		TypeBlurbText->SetText(FText::FromString(MatchTypeBlurb(SelectedMatchType)));
+	}
+	if (FormatValueText)
+	{
+		FormatValueText->SetText(FText::FromString(FormatLabel(SelectedTeamSize)));
+	}
+	if (FormatBlurbText)
+	{
+		FormatBlurbText->SetText(FText::FromString(FormatBlurb(SelectedTeamSize, bSelectedFillBots)));
+	}
+	if (BotsCheck)
+	{
+		BotsCheck->SetIsChecked(bSelectedFillBots);
+		BotsCheck->SetIsEnabled(IsLocalHost());
+	}
+	if (BotsLabelText)
+	{
+		BotsLabelText->SetText(FText::FromString(
+			bSelectedFillBots ? TEXT("Fill empty slots with bots") : TEXT("No bots — humans only")));
+		BotsLabelText->SetColorAndOpacity(FSlateColor(
+			IsLocalHost() ? FLinearColor(0.9f, 0.91f, 0.94f) : FLinearColor(0.55f, 0.55f, 0.6f)));
+	}
+	if (SetupHintText)
+	{
+		SetupHintText->SetText(FText::FromString(
+			IsLocalHost()
+				? TEXT("Click MODE / TYPE / FORMAT to cycle · bots checkbox · applied live")
+				: TEXT("Host chooses match setup · waiting for Enter")));
+	}
+	// Non-host: still clickable visually but handlers no-op; dim slightly via background.
+	const FLinearColor ActiveBg(0.12f, 0.13f, 0.16f, 0.95f);
+	const FLinearColor DimBg(0.08f, 0.08f, 0.10f, 0.7f);
+	const FLinearColor BtnBg = IsLocalHost() ? ActiveBg : DimBg;
+	if (ModeButton)   { ModeButton->SetBackgroundColor(BtnBg); }
+	if (TypeButton)   { TypeButton->SetBackgroundColor(BtnBg); }
+	if (FormatButton) { FormatButton->SetBackgroundColor(BtnBg); }
+}
+
+void UPFLoadingMenuWidget::OnModeClicked()
+{
+	if (!IsLocalHost() || bDismissed)
+	{
+		return;
+	}
+	SelectedBuildMode = static_cast<EPFBuildMode>(
+		(static_cast<uint8>(SelectedBuildMode) + 1) % static_cast<uint8>(EPFBuildMode::MAX_Count));
+	// FFA is play-only by nature — nudge build mode if needed is still host's call.
+	RefreshSetupLabels();
+	ApplySelectionsToHost();
+}
+
+void UPFLoadingMenuWidget::OnTypeClicked()
+{
+	if (!IsLocalHost() || bDismissed)
+	{
+		return;
+	}
+	SelectedMatchType = static_cast<EPFMatchType>(
+		(static_cast<uint8>(SelectedMatchType) + 1) % static_cast<uint8>(EPFMatchType::MAX_Count));
+	// FreeForAll is play-only by design (GameMode enforces the same).
+	if (SelectedMatchType == EPFMatchType::FreeForAll)
+	{
+		SelectedBuildMode = EPFBuildMode::PlayOnly;
+	}
+	RefreshSetupLabels();
+	ApplySelectionsToHost();
+}
+
+void UPFLoadingMenuWidget::OnFormatClicked()
+{
+	if (!IsLocalHost() || bDismissed)
+	{
+		return;
+	}
+	SelectedTeamSize = (SelectedTeamSize >= 6) ? 4 : 6;
+	RefreshSetupLabels();
+	ApplySelectionsToHost();
+}
+
+void UPFLoadingMenuWidget::OnBotsChanged(bool bIsChecked)
+{
+	if (!IsLocalHost() || bDismissed)
+	{
+		// Revert UI if a non-host somehow toggled.
+		if (BotsCheck)
+		{
+			BotsCheck->SetIsChecked(bSelectedFillBots);
+		}
+		return;
+	}
+	bSelectedFillBots = bIsChecked;
+	RefreshSetupLabels();
+	ApplySelectionsToHost();
+}
+
+void UPFLoadingMenuWidget::ApplySelectionsToHost()
+{
+	if (!IsLocalHost())
+	{
+		return;
+	}
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->ServerHostSetBuildMode(static_cast<uint8>(SelectedBuildMode));
+		PC->ServerHostSetMatchType(static_cast<uint8>(SelectedMatchType));
+		PC->ServerHostSetFormat(SelectedTeamSize);
+		PC->ServerHostSetFillWithBots(bSelectedFillBots);
 	}
 }
 
@@ -302,7 +784,12 @@ void UPFLoadingMenuWidget::FinishWarmup()
 	{
 		EnterLabel->SetText(FText::FromString(TEXT("ENTER LOBBY")));
 	}
-	UE_LOG(PaintForgeLog, Log, TEXT("LoadingMenu: warmup complete — waiting for Enter"));
+	// Ensure host selection is on the server before anyone enters.
+	ApplySelectionsToHost();
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("LoadingMenu: warmup complete — waiting for Enter (Mode=%d Type=%d Format=%dv%d Bots=%d)"),
+		static_cast<int32>(SelectedBuildMode), static_cast<int32>(SelectedMatchType),
+		SelectedTeamSize, SelectedTeamSize, bSelectedFillBots ? 1 : 0);
 }
 
 void UPFLoadingMenuWidget::OnEnterClicked()
@@ -311,6 +798,9 @@ void UPFLoadingMenuWidget::OnEnterClicked()
 	{
 		return;
 	}
+	// Final push so late cycles stick.
+	ApplySelectionsToHost();
+
 	bDismissed = true;
 	RemoveFromParent();
 
@@ -320,5 +810,8 @@ void UPFLoadingMenuWidget::OnEnterClicked()
 		PC->NotifyLoadingMenuFinished();
 	}
 
-	UE_LOG(PaintForgeLog, Log, TEXT("LoadingMenu: dismissed — entering lobby view"));
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("LoadingMenu: dismissed — entering lobby (Mode=%s Type=%s Format=%s Bots=%s)"),
+		*BuildModeLabel(SelectedBuildMode), *MatchTypeLabel(SelectedMatchType),
+		*FormatLabel(SelectedTeamSize), bSelectedFillBots ? TEXT("on") : TEXT("off"));
 }

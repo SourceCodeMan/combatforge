@@ -58,18 +58,17 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
-	// Host match-setup controls (server re-validates host-ness; these are UX gating only).
-	UFUNCTION() void OnModeClicked();
-	UFUNCTION() void OnTypeClicked();
-	UFUNCTION() void OnFormatClicked();
+	// Loadout / options only in lobby — mode/type/format/bots chosen on the boot menu.
 	UFUNCTION() void OnLoadoutClicked();
 	UFUNCTION() void OnLoadoutClose();
+	UFUNCTION() void OnOptionsClicked();
 
 private:
 	void BuildTree();
 	void BuildConfigPanel(UCanvasPanel* RootCanvas);
 	void BuildLoadoutOverlay(UCanvasPanel* RootCanvas);
 	UButton* MakeConfigButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText);
+	void AddReadOnlyRow(UVerticalBox* Box, const FString& Label, TObjectPtr<UTextBlock>& OutValueText);
 	void RefreshRoster();
 	void RefreshConfig();
 	bool IsLocalHost() const;
@@ -79,10 +78,11 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> FooterText;
 	UPROPERTY() TObjectPtr<UVerticalBox> RosterBox;
 
-	// Match-setup panel (host-editable, replicated on GameState so everyone sees the selection).
+	// Match-setup panel: all match config is read-only (set on boot menu).
 	UPROPERTY() TObjectPtr<UTextBlock> ModeValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> TypeValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> FormatValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> BotsValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> ConfigHintText;
 	UPROPERTY() TObjectPtr<UBorder> LoadoutOverlay;   // stub screen (nothing to equip yet)
 

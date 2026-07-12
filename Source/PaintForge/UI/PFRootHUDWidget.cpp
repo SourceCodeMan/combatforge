@@ -11,6 +11,7 @@
 #include "UI/PFCombatFeedbackWidget.h"
 #include "UI/PFCombatHUDWidget.h"
 #include "UI/PFLobbyWidget.h"
+#include "UI/PFOptionsWidget.h"
 #include "UI/PFResultsWidget.h"
 #include "UI/PFScoreboardWidget.h"
 #include "UI/PFVoteWidget.h"
@@ -66,13 +67,57 @@ void UPFRootHUDWidget::BuildTree()
 	if (ResultsPanel) { PhaseSwitcher->AddChild(ResultsPanel); }
 	PhaseSwitcher->SetActiveWidgetIndex(static_cast<int32>(EPFMatchPhase::Lobby));
 
-	// Persistent overlays, bottom-up: feedback under the wheel, scoreboard on top of everything.
+	// Persistent overlays, bottom-up: feedback under the wheel, scoreboard, then options on top.
 	FeedbackWidget = CreateWidget<UPFCombatFeedbackWidget>(this);
 	AddFill(FeedbackWidget);
 	WheelWidget = CreateWidget<UPFBuildWheelWidget>(this);
 	AddFill(WheelWidget);
 	ScoreboardWidget = CreateWidget<UPFScoreboardWidget>(this);
 	AddFill(ScoreboardWidget);
+	OptionsWidget = CreateWidget<UPFOptionsWidget>(this);
+	AddFill(OptionsWidget);
+}
+
+void UPFRootHUDWidget::OpenOptions()
+{
+	if (OptionsWidget)
+	{
+		OptionsWidget->Open();
+	}
+}
+
+void UPFRootHUDWidget::CloseOptions()
+{
+	if (OptionsWidget && OptionsWidget->IsOpen())
+	{
+		OptionsWidget->Close();
+	}
+}
+
+void UPFRootHUDWidget::ToggleOptions()
+{
+	if (!OptionsWidget)
+	{
+		return;
+	}
+	if (OptionsWidget->IsOpen())
+	{
+		OptionsWidget->Close();
+	}
+	else
+	{
+		// Close build wheel capture if open so Escape doesn't leave look-input ignored.
+		if (WheelWidget)
+		{
+			WheelWidget->CloseCancel();
+		}
+		OptionsWidget->Open();
+	}
+}
+
+bool UPFRootHUDWidget::IsOptionsOpen() const
+{
+	return OptionsWidget && OptionsWidget->IsOpen();
 }
 
 void UPFRootHUDWidget::NativeConstruct()

@@ -39,6 +39,8 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_VoteTally)  FPFVoteTally VoteTally;
 	UPROPERTY(Replicated)                       FString MatchId;                   // GUID string, set at Lobby→Build
 	UPROPERTY(Replicated)                       uint8  TargetTeamSize = 4;         // match format: 4 (4v4) or 6 (6v6); bots fill to this
+	/** When true, GameMode tops each team up to TargetTeamSize with bots at Lobby→Build. */
+	UPROPERTY(Replicated)                       bool   bFillWithBots = true;
 	UPROPERTY(Replicated)                       uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count reads this
 	UPROPERTY(Replicated)                       EPFBuildMode BuildMode = EPFBuildMode::Creative;  // build style
 	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Elimination; // objective
@@ -67,6 +69,7 @@ public:
 	void ServerSetSuddenDeath(bool bNewSuddenDeath);
 	void ServerSetMatchId(const FString& NewMatchId);
 	void ServerSetTargetTeamSize(uint8 NewSize);             // 4 or 6; clamped [1,6]
+	void ServerSetFillWithBots(bool bFill);                  // Lobby only (GameMode gates)
 	void ServerSetRoundWinsToTake(uint8 NewWins);            // resolved at Lobby→Build from the format
 	void ServerSetBuildMode(EPFBuildMode NewMode);           // Lobby only (GameMode gates)
 	void ServerSetMatchType(EPFMatchType NewType);           // Lobby only (GameMode gates)

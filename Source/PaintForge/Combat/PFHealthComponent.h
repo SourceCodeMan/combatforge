@@ -40,6 +40,8 @@ public:
 		// fills Damage from region (Body 1 / Mask 2 — T1), decrements HP, fires
 		// ClientPaintHitTaken; at 0 → bEliminated, OnEliminatedEvent broadcast, corpse blocks
 		// paintballs 0.5 s then collision off (04 §2.4), owner SetEliminatedAppearance(true).
+	/** Instant lethal elim (fall from height, etc.). ShooterTeam=255, no shooter credit. */
+	void ApplyFallDeath();
 	void ResetForRound(uint8 RoundHP);   // server: restore HP (3, or 1 in sudden death), un-eliminate,
 	                                     // restore collision/appearance
 	EPFBodyRegion ComputeRegion(const FVector& ImpactPoint) const;  // Mask iff Z ≥ capsule-top − 35 uu (T1)

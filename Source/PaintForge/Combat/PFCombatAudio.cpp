@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Sound/SoundAttenuation.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundConcurrency.h"
@@ -247,6 +248,19 @@ void UPFCombatAudio::EnsureSounds()
 		CueSplatIncoming ? TEXT("yes") : TEXT("proc"));
 }
 
+namespace
+{
+	float ReadSfxVolumeScale()
+	{
+		float Sfx = 1.f;
+		if (GConfig)
+		{
+			GConfig->GetFloat(TEXT("PaintForge"), TEXT("SfxVolume"), Sfx, GGameUserSettingsIni);
+		}
+		return FMath::Clamp(Sfx, 0.f, 1.f);
+	}
+}
+
 void UPFCombatAudio::PlayUI(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/,
 	const TArray<uint8>& Pcm, float Volume, float Pitch)
 {
@@ -254,9 +268,10 @@ void UPFCombatAudio::PlayUI(USoundBase* Preferred, USoundWaveProcedural* /*Wave*
 	{
 		return;
 	}
+	const float Vol = Volume * ReadSfxVolumeScale();
 	if (Preferred != nullptr)
 	{
-		UGameplayStatics::PlaySound2D(this, Preferred, Volume, Pitch);
+		UGameplayStatics::PlaySound2D(this, Preferred, Vol, Pitch);
 		return;
 	}
 	if (Pcm.Num() == 0)
@@ -267,7 +282,7 @@ void UPFCombatAudio::PlayUI(USoundBase* Preferred, USoundWaveProcedural* /*Wave*
 	const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
 	USoundWaveProcedural* Live = MakeWaveShell(this, Dur);
 	QueuePcm(Live, Pcm);
-	UGameplayStatics::PlaySound2D(this, Live, Volume, Pitch);
+	UGameplayStatics::PlaySound2D(this, Live, Vol, Pitch);
 }
 
 void UPFCombatAudio::PlayWorld(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/,
@@ -301,14 +316,15 @@ void UPFCombatAudio::PlayWorld(USoundBase* Preferred, USoundWaveProcedural* /*Wa
 		ToPlay = Wave;
 	}
 
+	const float Vol = Volume * ReadSfxVolumeScale();
 	if (CombatAttenuation)
 	{
 		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
-			Volume, Pitch, 0.f, CombatAttenuation, Concurrency);
+			Vol, Pitch, 0.f, CombatAttenuation, Concurrency);
 	}
 	else
 	{
-		UGameplayStatics::PlaySound2D(this, ToPlay, Volume, Pitch);
+		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
 	}
 }
 

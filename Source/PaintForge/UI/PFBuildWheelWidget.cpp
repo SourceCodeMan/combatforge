@@ -2,6 +2,8 @@
 
 #include "UI/PFBuildWheelWidget.h"
 
+#include "Building/PFBuildPieceVisuals.h"
+
 #include "Core/PaintForgePlayerState.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -32,18 +34,7 @@ namespace
 
 const TCHAR* UPFBuildWheelWidget::ToolDisplayName(EPFBuildTool Tool)
 {
-	switch (Tool)
-	{
-	case EPFBuildTool::Wall:       return TEXT("Wall");
-	case EPFBuildTool::Floor:      return TEXT("Floor");
-	case EPFBuildTool::Ramp:       return TEXT("Ramp");
-	case EPFBuildTool::Roof:       return TEXT("Roof");
-	case EPFBuildTool::PropCan:    return TEXT("Can");
-	case EPFBuildTool::PropDorito: return TEXT("Dorito");
-	case EPFBuildTool::PropSnake:  return TEXT("Snake");
-	case EPFBuildTool::Delete:     return TEXT("Delete");
-	default:                       return TEXT("?");
-	}
+	return PFBuildPieceVisuals::DisplayName(Tool);
 }
 
 TSharedRef<SWidget> UPFBuildWheelWidget::RebuildWidget()

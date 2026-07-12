@@ -704,6 +704,29 @@ void APaintForgeCharacter::Landed(const FHitResult& Hit)
 			}
 		}
 	}
+
+	// Lethal fall from 3+ build levels (900 uu): authority only → elim + instant respawn path.
+	if (HasAuthority() && FallDistance >= FallLethalHeightUU)
+	{
+		if (UPFHealthComponent* HPComp = GetHealth())
+		{
+			if (!HPComp->bEliminated && HPComp->HP > 0)
+			{
+				// Only during live combat so lobby/build falls are free.
+				if (const UWorld* World = GetWorld())
+				{
+					if (const APaintForgeGameState* GS = World->GetGameState<APaintForgeGameState>())
+					{
+						if (GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live)
+						{
+							HPComp->ApplyFallDeath();
+						}
+					}
+				}
+			}
+		}
+	}
+
 	FallStartPeakZ = GetActorLocation().Z;
 
 	// 0.1 s pre-landing jump buffer, no coyote time (04 §1.1).

@@ -25,6 +25,16 @@ namespace
 	}
 }
 
+void UPFInputConfig::SetLookSensitivity(float Sens)
+{
+	if (LookSensitivityScalar == nullptr)
+	{
+		return;
+	}
+	const float Scale = BaseDegreesPerMouseUnit * FMath::Clamp(Sens, 0.2f, 3.f);
+	LookSensitivityScalar->Scalar = FVector(Scale, Scale, 1.0);
+}
+
 void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 {
 	if (IMC_Common != nullptr)
@@ -103,9 +113,9 @@ void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 
 		FEnhancedActionKeyMapping& Look = IMC_Common->MapKey(IA_Look, EKeys::Mouse2D);
 
-		UInputModifierScalar* Scalar = NewObject<UInputModifierScalar>(IMC_Common);
-		Scalar->Scalar = FVector(Scale, Scale, 1.0);
-		Look.Modifiers.Add(Scalar);
+		LookSensitivityScalar = NewObject<UInputModifierScalar>(IMC_Common);
+		LookSensitivityScalar->Scalar = FVector(Scale, Scale, 1.0);
+		Look.Modifiers.Add(LookSensitivityScalar);
 
 		UInputModifierNegate* NegY = NewObject<UInputModifierNegate>(IMC_Common);
 		NegY->bX = false;

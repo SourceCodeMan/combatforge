@@ -4,6 +4,7 @@
 
 #include "PaintForge.h"
 #include "Building/PFBuildGrid.h"
+#include "Building/PFBuildPieceVisuals.h"
 #include "Building/PFGridMath.h"
 #include "Combat/PFCombatAudio.h"
 #include "Core/PaintForgeGameState.h"
@@ -323,7 +324,7 @@ void UPFBuildComponent::UpdatePlacementGhostAndTurbo(const FVector& CamLoc, cons
 	SetGhostMeshForType(Type);
 	if (GhostMesh)
 	{
-		GhostMesh->SetWorldTransform(FPFGridMath::PieceLocalTransform(Type, X, Y, Z, Rot));
+		GhostMesh->SetWorldTransform(PFBuildPieceVisuals::PieceWorldTransform(Type, X, Y, Z, Rot));
 	}
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	const bool bDenyFlash = Now < DenyFlashUntil;
@@ -377,7 +378,7 @@ void UPFBuildComponent::UpdateDeleteToolAndTurbo(bool bTraceHit, const FHitResul
 	SetGhostMeshForType(Rec.Type);
 	if (GhostMesh)
 	{
-		FTransform T = FPFGridMath::PieceLocalTransform(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
+		FTransform T = PFBuildPieceVisuals::PieceWorldTransform(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
 		T.SetScale3D(T.GetScale3D() * 1.03f);
 		GhostMesh->SetWorldTransform(T);
 	}
@@ -537,22 +538,31 @@ void UPFBuildComponent::SetGhostMeshForType(EPFPieceType Type)
 	GhostMesh->SetStaticMesh(MeshForType(Type));
 	if (GhostMID)
 	{
-		GhostMesh->SetMaterial(0, GhostMID);   // re-apply: SetStaticMesh resets material overrides
+		// Warehouse props can have many material slots — tint every one for validity color.
+		const int32 NumMats = FMath::Max(1, GhostMesh->GetNumMaterials());
+		for (int32 i = 0; i < NumMats; ++i)
+		{
+			GhostMesh->SetMaterial(i, GhostMID);
+		}
 	}
 	CurrentGhostMeshType = static_cast<int32>(Type);
 }
 
 UStaticMesh* UPFBuildComponent::MeshForType(EPFPieceType Type) const
 {
+	// Shared catalog: warehouse barrel/crate/boxes for props; basic shapes for structural.
+	if (UStaticMesh* Shared = PFBuildPieceVisuals::MeshForType(Type))
+	{
+		return Shared;
+	}
 	switch (Type)
 	{
 	case EPFPieceType::Roof:
-	case EPFPieceType::PropDorito:
 		return ConeMesh;
 	case EPFPieceType::PropCan:
 		return CylinderMesh;
 	default:
-		return CubeMesh;   // Wall / Floor / Ramp / Snake
+		return CubeMesh;
 	}
 }
 

@@ -74,6 +74,7 @@ public:
 	void HostCycleTeam(APaintForgePlayerState* Target); // Lobby only (T22)
 	void HostReturnToLobby();                          // Results only
 	void HostSetFormat(uint8 NewTeamSize);             // Lobby only: 4v4 / 6v6 (bots fill to it)
+	void HostSetFillWithBots(bool bFill);              // Lobby only: top teams with bots at Lobby→Build
 	void HostSetBuildMode(EPFBuildMode NewMode);       // Lobby only: Creative / Improvement / Play-only
 	void HostSetMatchType(EPFMatchType NewType);       // Lobby only: Elimination / FFA / Skirmish / …
 
@@ -151,7 +152,8 @@ protected:
 	// Controller-agnostic per-round respawn (players AND bots): resets HP + teleports, or restarts if no pawn.
 	void RespawnCombatant(APaintForgePlayerState* PS, uint8 RoundHP);
 	// Skirmish/Respawn: timed reset-in-place of an eliminated victim at its team spawn (no round-out).
-	void RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim);
+	// DelaySec < 0 uses RespawnDelay default; fall deaths pass a short value for near-instant respawn.
+	void RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim, float DelaySec = -1.f);
 	void RecountAlive();
 
 	// ---- (intra) bots (fill teams to the selected format — server only) ----

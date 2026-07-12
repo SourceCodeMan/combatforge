@@ -604,7 +604,7 @@ float UPFWeaponComponent::GetCurrentSpreadHalfAngleDeg() const
 	// replicated ADS compressed flag), not just on the locally-controlled instance.
 	const float ADSAlpha = FMath::Clamp(Char->GetADSAlpha(), 0.f, 1.f);
 
-	// Base: hip 1.5 / hip-moving (>50% walk) 2.0, lerped to ADS 0.25 by the transition
+	// Base: hip 1.5 / hip-moving (>50% walk) 2.0, lerped to tight ADS by the transition
 	// alpha (04 §2.3 — fire is allowed at any point of the ADS transition).
 	float HipBase = SpreadHip;
 	if (CMC != nullptr && Char->GetVelocity().Size2D() > CMC->WalkSpeed * 0.5f)
@@ -617,16 +617,18 @@ float UPFWeaponComponent::GetCurrentSpreadHalfAngleDeg() const
 	{
 		Spread *= SpreadCrouchMult;
 	}
+	// Air / slide penalties fade out as you ADS so aimed shots stay precise.
+	const float HipOnly = 1.f - ADSAlpha;
 	if (CMC != nullptr && CMC->IsFalling())
 	{
-		Spread += SpreadAirAdd;
+		Spread += SpreadAirAdd * HipOnly;
 	}
 	if (CMC != nullptr && CMC->IsSliding())
 	{
-		Spread += SpreadSlideAdd;   // slide fire is hipfire-only (04 §1.2); additive penalty
+		Spread += SpreadSlideAdd * HipOnly;   // slide fire is mostly hipfire (04 §1.2)
 	}
 
-	// Bloom, halved while ADS'd (lerped by the same alpha to avoid a snap).
+	// Bloom nearly vanishes while fully ADS (BloomADSMult ~0.12).
 	const float Bloom = GetEffectiveBloomDeg(World->GetTimeSeconds());
 	Spread += Bloom * FMath::Lerp(1.f, BloomADSMult, ADSAlpha);
 

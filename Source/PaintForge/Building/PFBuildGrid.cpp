@@ -3,6 +3,7 @@
 #include "Building/PFBuildGrid.h"
 
 #include "PaintForge.h"
+#include "Building/PFBuildPieceVisuals.h"
 #include "Building/PFGridMath.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerState.h"
@@ -15,24 +16,6 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
-
-namespace
-{
-	const TCHAR* PFPieceTypeName(EPFPieceType Type)
-	{
-		switch (Type)
-		{
-		case EPFPieceType::Wall:       return TEXT("Wall");
-		case EPFPieceType::Floor:      return TEXT("Floor");
-		case EPFPieceType::Ramp:       return TEXT("Ramp");
-		case EPFPieceType::Roof:       return TEXT("Roof");
-		case EPFPieceType::PropCan:    return TEXT("Can");
-		case EPFPieceType::PropDorito: return TEXT("Dorito");
-		case EPFPieceType::PropSnake:  return TEXT("Snake");
-		default:                       return TEXT("Invalid");
-		}
-	}
-}
 
 // ---------------------------------------------------------------------------
 // FPFBuildPieceArray — client mirror hooks (§5.11: visuals ONLY from these)
@@ -102,15 +85,16 @@ APFBuildGrid::APFBuildGrid()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	ShapeMaterial = ArtMatFinder.Succeeded() ? ArtMatFinder.Object : BasicMatFinder.Object;
 
+	// Structural + temporary prop placeholders (props swap to warehouse meshes in BeginPlay).
 	UStaticMesh* MeshPerType[7] =
 	{
 		CubeFinder.Object,       // Wall
 		CubeFinder.Object,       // Floor
 		CubeFinder.Object,       // Ramp (plank)
 		ConeFinder.Object,       // Roof (cone proxy)
-		CylinderFinder.Object,   // Can
-		ConeFinder.Object,       // Dorito
-		CubeFinder.Object        // Snake
+		CylinderFinder.Object,   // Barrel fallback
+		ConeFinder.Object,       // Crate fallback
+		CubeFinder.Object        // Boxes fallback
 	};
 
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
@@ -119,7 +103,7 @@ APFBuildGrid::APFBuildGrid()
 		{
 			const int32 K = ISMCIndexFor(static_cast<EPFPieceType>(TypeIdx), Team);
 			const FName CompName(*FString::Printf(TEXT("ISM_%s_Team%d"),
-				PFPieceTypeName(static_cast<EPFPieceType>(TypeIdx)), Team));
+				PFBuildPieceVisuals::DisplayName(static_cast<EPFPieceType>(TypeIdx)), Team));
 
 			UInstancedStaticMeshComponent* ISMC = CreateDefaultSubobject<UInstancedStaticMeshComponent>(CompName);
 			ISMC->SetupAttachment(GridRoot);
@@ -156,12 +140,45 @@ void APFBuildGrid::BeginPlay()
 
 	Pieces.OwnerGrid = this;   // belt+braces: ctor set it, keep it correct post-init on both sides
 
-	// Team-tinted MIDs (T8): BasicShapeMaterial's "Color" vector param is the one tint knob.
+	// Soft-load warehouse prop meshes (barrel / crate / boxes) after CDO so first compile doesn't freeze PIE.
+	PFBuildPieceVisuals::EnsureLoaded();
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
 	{
+		const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
+		if (!PFIsProp(Type))
+		{
+			continue;
+		}
+		if (UStaticMesh* PropMesh = PFBuildPieceVisuals::MeshForType(Type))
+		{
+			for (uint8 Team = 0; Team < 2; ++Team)
+			{
+				const int32 K = ISMCIndexFor(Type, Team);
+				if (PieceISMCs[K])
+				{
+					PieceISMCs[K]->SetStaticMesh(PropMesh);
+					// Warehouse assets keep their own materials (looks like real cover, not neon cubes).
+					if (PFBuildPieceVisuals::UsesNativeMaterials(Type))
+					{
+						PieceISMCs[K]->EmptyOverrideMaterials();
+					}
+				}
+			}
+		}
+	}
+
+	// Team-tinted MIDs (T8) for structural / fallback shapes only.
+	// Warehouse props keep native Megascans materials.
+	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
+	{
+		const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
+		if (PFBuildPieceVisuals::UsesNativeMaterials(Type))
+		{
+			continue;
+		}
 		for (uint8 Team = 0; Team < 2; ++Team)
 		{
-			const int32 K = ISMCIndexFor(static_cast<EPFPieceType>(TypeIdx), Team);
+			const int32 K = ISMCIndexFor(Type, Team);
 			if (PieceISMCs[K] && ShapeMaterial)
 			{
 				UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(ShapeMaterial, this);
@@ -410,7 +427,7 @@ EPFDenyReason APFBuildGrid::TryPlacePiece(APaintForgePlayerState* Placer, const 
 	if (Reason != EPFDenyReason::None)
 	{
 		UE_LOG(PaintForgeLog, Warning, TEXT("BuildGrid: place %s rejected (%d) for %s"),
-			PFPieceTypeName(ServerQ.Type), static_cast<int32>(Reason), *Placer->GetPlayerName());
+			PFBuildPieceVisuals::DisplayName(ServerQ.Type), static_cast<int32>(Reason), *Placer->GetPlayerName());
 		return Reason;
 	}
 
@@ -451,7 +468,7 @@ EPFDenyReason APFBuildGrid::TryPlacePiece(APaintForgePlayerState* Placer, const 
 
 	OutPieceId = Rec.PieceId;
 	UE_LOG(PaintForgeLog, Verbose, TEXT("BuildGrid: %s placed %s #%u at (%d,%d,%d) rot %u"),
-		*Placer->GetPlayerName(), PFPieceTypeName(Rec.Type), Rec.PieceId, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
+		*Placer->GetPlayerName(), PFBuildPieceVisuals::DisplayName(Rec.Type), Rec.PieceId, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
 	return EPFDenyReason::None;
 }
 
@@ -521,7 +538,7 @@ EPFDenyReason APFBuildGrid::TryDeletePiece(APaintForgePlayerState* Requester, ui
 	UE_LOG(PaintForgeLog, Log, TEXT("BuildGrid: %s removed %s's %s #%u"),
 		*Requester->GetPlayerName(),
 		Builder ? *Builder->GetPlayerName() : TEXT("<gone>"),
-		PFPieceTypeName(Rec.Type), Rec.PieceId);
+		PFBuildPieceVisuals::DisplayName(Rec.Type), Rec.PieceId);
 	return EPFDenyReason::None;
 }
 
@@ -596,7 +613,7 @@ void APFBuildGrid::AddPieceLocal(const FPFBuildPieceRec& Rec)
 	const int32 K = ISMCIndexFor(Rec.Type, Rec.Team);
 	if (PieceISMCs[K])
 	{
-		const FTransform T = FPFGridMath::PieceLocalTransform(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
+		const FTransform T = PFBuildPieceVisuals::PieceWorldTransform(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
 		const int32 InstanceIdx = PieceISMCs[K]->AddInstance(T, /*bWorldSpace=*/true);
 		InstanceToPiece[K].Add(InstanceIdx, Rec.PieceId);
 		PieceToInstance.Add(Rec.PieceId, InstanceIdx);

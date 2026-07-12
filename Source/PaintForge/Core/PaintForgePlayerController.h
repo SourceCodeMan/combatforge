@@ -36,6 +36,7 @@ public:
 	UFUNCTION(Server, Reliable) void ServerHostCycleTeam(APaintForgePlayerState* Target);
 	UFUNCTION(Server, Reliable) void ServerHostReturnToLobby();
 	UFUNCTION(Server, Reliable) void ServerHostSetFormat(uint8 TeamSize);   // Lobby only: 4v4 / 6v6
+	UFUNCTION(Server, Reliable) void ServerHostSetFillWithBots(bool bFill); // Lobby only: fill roster with bots
 	UFUNCTION(Server, Reliable) void ServerHostSetBuildMode(uint8 Mode);    // Lobby only: 0=Creative 1=Improvement 2=PlayOnly
 	UFUNCTION(Server, Reliable) void ServerHostSetMatchType(uint8 Type);    // Lobby only: 0=Elim 1=FFA 2=Skirmish 3=CTF 4=Dom 5=Hardpoint
 	/** Remote client → host: append a log chunk under Saved/ClientLogs/ (LAN crash triage). */
@@ -65,6 +66,13 @@ public:
 
 	/** Boot loading menu dismissed — re-apply phase IMCs / lobby GameAndUI. */
 	void NotifyLoadingMenuFinished();
+
+	/** Options overlay closed (Back / Esc) — restore phase input mode + cursor. */
+	void NotifyOptionsMenuClosed();
+
+	/** Open / close / toggle video-audio-controls options (local only). */
+	void ToggleOptionsMenu();
+	bool IsOptionsMenuOpen() const;
 
 protected:
 	// ---- Engine overrides ----

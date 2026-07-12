@@ -16,6 +16,7 @@ class UPFBuildWheelWidget;
 class UPFCombatFeedbackWidget;
 class UPFCombatHUDWidget;
 class UPFLobbyWidget;
+class UPFOptionsWidget;
 class UPFResultsWidget;
 class UPFScoreboardWidget;
 class UPFVoteWidget;
@@ -25,7 +26,7 @@ class UWidgetSwitcher;
  * Viewport root (contract §3.6): created exactly once by the PC in BeginPlayingState (local
  * controllers only). Owns a UWidgetSwitcher of phase panels — child index == (int32)EPFMatchPhase
  * (Lobby..Results = 0..4) — plus the persistent overlays (combat feedback, build wheel, hold-Tab
- * scoreboard). Panels switch on GameState OnPhaseChangedEvent.
+ * scoreboard, options menu). Panels switch on GameState OnPhaseChangedEvent.
  *
  * CROSS-PACKAGE WIRING DUTY (binding, §3.6):
  *  - BuildComponent->OnBuildWheelRequestedEvent -> Wheel->Open() / Wheel->CloseAndCommit()
@@ -34,11 +35,19 @@ class UWidgetSwitcher;
  *    pointers across possession (the pawn is pushed down through BindToPawn)
  *  - scoreboard visibility from APaintForgePlayerController::IsScoreboardHeld() /
  *    OnScoreboardHeldChanged (pkg-core's contract-gap seam)
+ *  - Escape / lobby OPTIONS -> ToggleOptions()
  */
 UCLASS()
 class PAINTFORGE_API UPFRootHUDWidget : public UUserWidget
 {
 	GENERATED_BODY()
+
+public:
+	/** Open / close / toggle the full-screen options overlay (video, audio, controls). */
+	void OpenOptions();
+	void CloseOptions();
+	void ToggleOptions();
+	bool IsOptionsOpen() const;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -76,6 +85,7 @@ private:
 	UPROPERTY() TObjectPtr<UPFBuildWheelWidget> WheelWidget;
 	UPROPERTY() TObjectPtr<UPFCombatFeedbackWidget> FeedbackWidget;
 	UPROPERTY() TObjectPtr<UPFScoreboardWidget> ScoreboardWidget;
+	UPROPERTY() TObjectPtr<UPFOptionsWidget> OptionsWidget;
 
 	TWeakObjectPtr<APaintForgeGameState> BoundGameState;
 	TWeakObjectPtr<UPFBuildComponent> BoundBuild;

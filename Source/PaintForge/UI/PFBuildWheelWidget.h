@@ -15,7 +15,7 @@ class UTextBlock;
 
 /**
  * THE build wheel (03 §3): 8 x 45-degree sectors clockwise from top —
- * Wall, Floor, Ramp, Roof, Can, Dorito, Snake, Delete.
+ * Wall, Floor, Ramp, Roof, Barrel, Crate, Boxes, Delete.
  * Opened on Q-hold (>= 0.18 s) via UPFRootHUDWidget from
  * UPFBuildComponent::OnBuildWheelRequestedEvent; release commits the hovered
  * sector through OnToolSelectedEvent. Client-only, zero replication.

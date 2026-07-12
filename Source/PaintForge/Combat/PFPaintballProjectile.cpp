@@ -22,10 +22,12 @@
 
 namespace
 {
-	// Elongated tracer along velocity (+X with bRotationFollowsVelocity) — more readable BB trail.
-	constexpr float TracerLenScale = 0.30f;    // ~30 uu long
-	constexpr float TracerRadScale = 0.11f;    // ~11 uu diameter
+	// Elongated tracer along velocity (+X with bRotationFollowsVelocity).
+	// Sized for ~1/3 original BB (radius ~2.33 uu → mesh scale ~1/3 of the old trail).
+	constexpr float TracerLenScale = 0.10f;    // ~10 uu long
+	constexpr float TracerRadScale = 0.037f;   // ~3.7 uu diameter
 	constexpr float EmissiveBoost = 5.5f;      // hot team tracer read (04 §2.2)
+	constexpr float DefaultRadiusUU = 2.33f;
 }
 
 APFPaintballProjectile::APFPaintballProjectile()
@@ -37,7 +39,7 @@ APFPaintballProjectile::APFPaintballProjectile()
 	SetCanBeDamaged(false);
 
 	CollisionComp = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
-	CollisionComp->InitSphereRadius(7.f);   // inflated hit-reg sphere (04 §2.2)
+	CollisionComp->InitSphereRadius(DefaultRadiusUU);
 	CollisionComp->SetCollisionObjectType(PF_ECC_Paintball);
 	CollisionComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);   // InitProjectile arms per mode
 	CollisionComp->SetCollisionResponseToAllChannels(ECR_Block);
@@ -95,7 +97,7 @@ void APFPaintballProjectile::InitProjectile(const FVector& Origin, const FVector
 	float Speed = 10000.f;
 	float GravScale = 0.35f;
 	LifetimeSec = 2.f;
-	RadiusUU = 7.f;
+	RadiusUU = DefaultRadiusUU;
 	if (SourceWeapon != nullptr)
 	{
 		Speed = SourceWeapon->MuzzleSpeedUU;

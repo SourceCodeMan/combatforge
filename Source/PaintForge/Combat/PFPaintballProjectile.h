@@ -25,9 +25,9 @@ class UPFWeaponComponent;
  *    impact; owning client registers a PENDING splat (UPFSplatSubsystem::SpawnPendingSplat),
  *    then parks back in the per-client pool of 64 (lives on UPFSplatSubsystem — intra).
  *
- * Ballistics: 10,000 uu/s, gravity ×0.35, life 2.0 s, r=7 uu sphere, no bounce/penetration,
- * no inherited shooter velocity (04 §2.2). Visual: elongated engine sphere tracer, emissive-boosted
- * team MID (Color ×~5.5) for airsoft BB trail readability.
+ * Ballistics: 10,000 uu/s, gravity ×0.35, life 2.0 s, r≈2.33 uu sphere (~1/3 original BB),
+ * no bounce/penetration, no inherited shooter velocity (04 §2.2). Visual: elongated engine
+ * sphere tracer, emissive-boosted team MID for airsoft BB trail readability.
  */
 UCLASS()
 class PAINTFORGE_API APFPaintballProjectile : public AActor
@@ -35,9 +35,9 @@ class PAINTFORGE_API APFPaintballProjectile : public AActor
 	GENERATED_BODY()
 
 public:
-	APFPaintballProjectile();  // bReplicates=false; sphere r=7 on PF_ECC_Paintball;
+	APFPaintballProjectile();  // bReplicates=false; sphere on PF_ECC_Paintball;
 	                           // UProjectileMovementComponent (10000, grav 0.35, no bounce);
-	                           // engine-sphere visual scaled 0.14, emissive team MID
+	                           // engine-sphere visual, emissive team MID
 
 	// Single init point; caller applies spread to Dir BEFORE calling (shared stream — B3).
 	void InitProjectile(const FVector& Origin, const FVector& SpreadedDir, uint8 Team,
@@ -72,6 +72,6 @@ private:
 	bool    bInFlight = false;
 	float   LifeElapsed = 0.f;
 	float   LifetimeSec = 2.f;
-	float   RadiusUU = 7.f;
+	float   RadiusUU = 2.33f;
 	FVector PrevLocation = FVector::ZeroVector;
 };

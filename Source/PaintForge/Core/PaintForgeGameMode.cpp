@@ -106,8 +106,9 @@ void APaintForgeGameMode::BeginPlay()
 
 	if (APaintForgeGameState* GS = GetPFGameState())
 	{
-		GS->ServerSetTargetTeamSize(DefaultTeamSize);   // 4v4 default; host can switch to 6v6 in Lobby
-		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks in Lobby / menu
+		GS->ServerSetTargetTeamSize(DefaultTeamSize);   // 4v4 default; host can switch to 6v6 on boot menu
+		GS->ServerSetFillWithBots(bFillWithBots);       // bots on by default; host can disable on boot menu
+		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks on boot menu
 		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
 	}
 
@@ -962,9 +963,28 @@ void APaintForgeGameMode::HostSetFormat(uint8 NewTeamSize)
 	{
 		return;   // format locks once the match starts (bots + scaling resolve at Lobby→Build)
 	}
-	GS->ServerSetTargetTeamSize(NewTeamSize);
+	// Only 4v4 or 6v6 from the host UI (internal smoke can still use smaller sizes via other paths).
+	const uint8 Clamped = (NewTeamSize >= 6) ? 6 : 4;
+	GS->ServerSetTargetTeamSize(Clamped);
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set format to %dv%d"),
 		GS->TargetTeamSize, GS->TargetTeamSize);
+}
+
+void APaintForgeGameMode::HostSetFillWithBots(bool bFill)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Lobby)
+	{
+		return;
+	}
+	bFillWithBots = bFill;
+	GS->ServerSetFillWithBots(bFill);
+	// If bots were already in the roster (e.g. host toggled off after a previous fill attempt), clear them.
+	if (!bFill)
+	{
+		RemoveAllBots();
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set fill-with-bots = %s"), bFill ? TEXT("true") : TEXT("false"));
 }
 
 void APaintForgeGameMode::HostSetBuildMode(EPFBuildMode NewMode)
@@ -1121,22 +1141,23 @@ void APaintForgeGameMode::RespawnCombatant(APaintForgePlayerState* PS, uint8 Rou
 	}
 }
 
-void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim)
+void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim, float DelaySec)
 {
 	if (!Victim)
 	{
 		return;
 	}
+	const float Delay = (DelaySec >= 0.f) ? DelaySec : RespawnDelay;
 	// Timed reset-in-place (Skirmish + the Respawn variant): the victim is NOT marked dead, move-locked,
-	// or death-cammed — after RespawnDelay it heals to full and teleports to its team spawn. PS is
+	// or death-cammed — after Delay it heals to full and teleports to its team spawn. PS is
 	// re-fetched inside the timer via the weak victim (safe if it despawned). Works for players and bots.
 	// Stamp OutKind + RespawnAtServerTime so the victim's HUD can show "YOU'RE OUT" + countdown.
 	if (APaintForgePlayerState* VictimPS = Victim->GetPlayerState<APaintForgePlayerState>())
 	{
-		float At = RespawnDelay;
+		float At = Delay;
 		if (const APaintForgeGameState* GS = GetPFGameState())
 		{
-			At = GS->GetServerWorldTimeSeconds() + RespawnDelay;
+			At = GS->GetServerWorldTimeSeconds() + Delay;
 		}
 		VictimPS->ServerSetOutWaitingRespawn(At);
 	}
@@ -1160,7 +1181,7 @@ void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim)
 				}
 			}
 		}),
-		RespawnDelay, false);
+		FMath::Max(0.05f, Delay), false);
 }
 
 // ---------------------------------------------------------------------------
@@ -2345,6 +2366,34 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 	{
 		UE_LOG(PaintForgeLog, Warning, TEXT("GameMode: elimination outside a live round ignored (%s)"),
 			*VictimPS->GetPlayerName());
+		return;
+	}
+
+	// Fall death (ShooterTeam 255): no elim credit, near-instant respawn in every mode.
+	const bool bFallDeath = (ShooterPS == nullptr && FinalHit.ShooterTeam == 255);
+	if (bFallDeath)
+	{
+		VictimPS->TimesEliminated = VictimPS->TimesEliminated + 1;
+		FPFElimEntry Entry;
+		Entry.ShooterName = TEXT("Fall");
+		Entry.ShooterTeam = 255;
+		Entry.VictimName = VictimPS->GetPlayerName();
+		Entry.VictimTeam = VictimPS->TeamId;
+		Entry.ServerTime = GS->GetServerWorldTimeSeconds();
+		GS->ServerAddElimEntry(Entry);
+		// Drop flag if carrying.
+		if (VictimPS->bCarryingFlag)
+		{
+			if (APFFlagActor* Carried = GetFlagForTeam(VictimPS->CarriedFlagTeam))
+			{
+				Carried->ServerDropAt(Victim->GetActorLocation());
+			}
+			VictimPS->ServerSetFlagCarry(false, 255);
+		}
+		VictimPS->ServerSetStandingOnPoint(255);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: fall death → instant respawn (%s, fall≥3 levels)"),
+			*VictimPS->GetPlayerName());
+		RespawnVictimAtTeamSpawn(Victim, 0.35f);   // near-instant (short "you're out" flash)
 		return;
 	}
 

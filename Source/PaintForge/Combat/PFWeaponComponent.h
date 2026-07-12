@@ -75,8 +75,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float MuzzleSpeedUU = 10000.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjGravityScale = 0.35f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjLifetime = 2.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjRadiusUU = 7.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadADS = 0.25f;
+	/** Hit sphere radius (uu). Default ~1/3 of the original 7 uu BB for tighter airsoft feel. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjRadiusUU = 2.33f;
+	/** ADS half-angle (deg) — near laser when fully aimed; hipfire stays loose. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadADS = 0.06f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadHip = 1.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadHipMoving = 2.0f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadAirAdd = 1.5f;
@@ -86,7 +88,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomCap = 1.8f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomDecayPerSec = 6.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomDecayDelay = 0.15f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomADSMult = 0.5f;
+	/** Bloom retained while ADS (0 = none). Low value = ADS feels much more accurate. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomADSMult = 0.12f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SprintOutTime = 0.18f;
 
 protected:

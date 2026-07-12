@@ -122,6 +122,47 @@ void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate)
 	}
 }
 
+void UPFHealthComponent::ApplyFallDeath()
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+	if (bEliminated || HP == 0)
+	{
+		return;
+	}
+
+	HP = 0;
+	OnHPChangedEvent.Broadcast(HP);
+
+	bEliminated = true;
+	ApplyEliminatedAppearance(true);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(CorpseCollisionTimer, this,
+			&UPFHealthComponent::DisableCorpseCollision, CorpseBlockSeconds, false);
+	}
+
+	FPFPaintHitInfo Hit;
+	Hit.ShooterPS = nullptr;
+	Hit.ShooterTeam = 255;   // sentinel: fall / environment (GameMode treats as instant respawn)
+	if (const AActor* Owner = GetOwner())
+	{
+		Hit.ImpactPoint = Owner->GetActorLocation();
+	}
+	Hit.ImpactNormal = FVector::UpVector;
+	Hit.Region = EPFBodyRegion::Body;
+	Hit.Damage = 3;
+	if (const UWorld* World = GetWorld())
+	{
+		Hit.ServerTime = World->GetTimeSeconds();
+	}
+
+	UE_LOG(PaintForgeLog, Log, TEXT("FallDeath on %s"), *GetNameSafe(GetOwner()));
+	OnEliminatedEvent.Broadcast(this, Hit);
+}
+
 void UPFHealthComponent::ResetForRound(uint8 RoundHP)
 {
 	if (GetOwnerRole() != ROLE_Authority)

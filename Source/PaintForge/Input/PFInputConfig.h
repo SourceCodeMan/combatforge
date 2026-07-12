@@ -9,6 +9,7 @@
 class APaintForgePlayerController;
 class UInputAction;
 class UInputMappingContext;
+class UInputModifierScalar;
 
 /**
  * Owns every native-constructed Enhanced Input object (22 UInputActions + 3
@@ -28,6 +29,9 @@ class PAINTFORGE_API UPFInputConfig : public UObject
 public:
 	/** Constructs ALL actions, contexts, modifiers and triggers. Idempotent. */
 	void Build(APaintForgePlayerController* OuterPC);
+
+	/** Update mouse look scale (1.0 = default). Safe anytime after Build(). */
+	void SetLookSensitivity(float Sens);
 
 	// ---- Common (IMC_Common, priority 0) ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Move;        // Axis2D, WASD swizzle
@@ -61,4 +65,7 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputMappingContext> IMC_Common;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputMappingContext> IMC_Combat;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputMappingContext> IMC_Build;
+
+	/** Live look-sensitivity scalar; Options menu updates this. */
+	UPROPERTY() TObjectPtr<UInputModifierScalar> LookSensitivityScalar;
 };

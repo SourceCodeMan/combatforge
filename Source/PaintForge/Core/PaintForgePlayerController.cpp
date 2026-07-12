@@ -225,6 +225,12 @@ void APaintForgePlayerController::ApplyInputForPhase()
 		return;
 	}
 
+	// Options overlay owns GameAndUI + cursor while open.
+	if (RootHUD && RootHUD->IsOptionsOpen())
+	{
+		return;
+	}
+
 	if (!IsLocalController())
 	{
 		return;
@@ -410,6 +416,38 @@ void APaintForgePlayerController::NotifyLoadingMenuFinished()
 	ApplyInputForPhase();
 }
 
+void APaintForgePlayerController::NotifyOptionsMenuClosed()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+	ApplyInputForPhase();
+}
+
+void APaintForgePlayerController::ToggleOptionsMenu()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+	// Don't cover the boot loading menu — finish warmup first.
+	if (LoadingMenu && !LoadingMenu->IsFinished())
+	{
+		return;
+	}
+	CreateHUDIfNeeded();
+	if (RootHUD)
+	{
+		RootHUD->ToggleOptions();
+	}
+}
+
+bool APaintForgePlayerController::IsOptionsMenuOpen() const
+{
+	return RootHUD && RootHUD->IsOptionsOpen();
+}
+
 void APaintForgePlayerController::CreateHUDIfNeeded()
 {
 	if (RootHUD || !IsLocalController())
@@ -487,8 +525,8 @@ void APaintForgePlayerController::OnScoreboardCompleted()
 
 void APaintForgePlayerController::OnMenuBack()
 {
-	// v1: no pause menu; Escape is reserved. UI panels handle their own back/cancel.
-	UE_LOG(PaintForgeLog, Verbose, TEXT("PC: menu back pressed"));
+	// Escape toggles the options / pause settings overlay (video, audio, controls).
+	ToggleOptionsMenu();
 }
 
 void APaintForgePlayerController::OnFireWhileDead()
@@ -616,6 +654,18 @@ void APaintForgePlayerController::ServerHostSetFormat_Implementation(uint8 TeamS
 	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
 	{
 		GM->HostSetFormat(TeamSize);
+	}
+}
+
+void APaintForgePlayerController::ServerHostSetFillWithBots_Implementation(bool bFill)
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
+	{
+		GM->HostSetFillWithBots(bFill);
 	}
 }
 

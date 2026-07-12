@@ -223,6 +223,40 @@ UButton* UPFLobbyWidget::MakeConfigButton(const FString& Label, TObjectPtr<UText
 	return Btn;
 }
 
+void UPFLobbyWidget::AddReadOnlyRow(UVerticalBox* Box, const FString& Label, TObjectPtr<UTextBlock>& OutValueText)
+{
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+
+	UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>();
+	LabelText->SetText(FText::FromString(Label));
+	LabelText->SetFont(PFLobbyFont(12, true));
+	LabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.55f, 0.7f)));
+	USizeBox* LabelSizer = WidgetTree->ConstructWidget<USizeBox>();
+	LabelSizer->SetWidthOverride(74.f);
+	LabelSizer->SetContent(LabelText);
+	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(LabelSizer))
+	{
+		HS->SetVerticalAlignment(VAlign_Center);
+		HS->SetPadding(FMargin(6.f, 4.f, 8.f, 4.f));
+	}
+
+	OutValueText = WidgetTree->ConstructWidget<UTextBlock>();
+	OutValueText->SetFont(PFLobbyFont(14, false));
+	OutValueText->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.87f, 0.9f)));
+	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(OutValueText))
+	{
+		HS->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		HS->SetVerticalAlignment(VAlign_Center);
+		HS->SetPadding(FMargin(0.f, 4.f, 6.f, 4.f));
+	}
+
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Row))
+	{
+		VS->SetPadding(FMargin(0.f, 2.f));
+		VS->SetHorizontalAlignment(HAlign_Fill);
+	}
+}
+
 void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 {
 	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>();
@@ -238,17 +272,11 @@ void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 	Header->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Header)) { VS->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f)); }
 
-	UButton* ModeBtn = MakeConfigButton(TEXT("MODE"), ModeValueText);
-	ModeBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnModeClicked);
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(ModeBtn)) { VS->SetPadding(FMargin(0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
-
-	UButton* TypeBtn = MakeConfigButton(TEXT("TYPE"), TypeValueText);
-	TypeBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnTypeClicked);
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(TypeBtn)) { VS->SetPadding(FMargin(0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
-
-	UButton* FormatBtn = MakeConfigButton(TEXT("FORMAT"), FormatValueText);
-	FormatBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnFormatClicked);
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(FormatBtn)) { VS->SetPadding(FMargin(0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+	// Mode / type / format / bots are chosen on the pre-game loading menu; lobby only displays them.
+	AddReadOnlyRow(Box, TEXT("MODE"), ModeValueText);
+	AddReadOnlyRow(Box, TEXT("TYPE"), TypeValueText);
+	AddReadOnlyRow(Box, TEXT("FORMAT"), FormatValueText);
+	AddReadOnlyRow(Box, TEXT("BOTS"), BotsValueText);
 
 	UButton* LoadoutBtn = WidgetTree->ConstructWidget<UButton>();
 	LoadoutBtn->SetBackgroundColor(FLinearColor(0.14f, 0.12f, 0.05f, 0.9f));
@@ -260,6 +288,17 @@ void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 	LoadoutLabel->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.9f, 0.5f)));
 	LoadoutBtn->SetContent(LoadoutLabel);
 	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(LoadoutBtn)) { VS->SetPadding(FMargin(0.f, 10.f, 0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+
+	UButton* OptionsBtn = WidgetTree->ConstructWidget<UButton>();
+	OptionsBtn->SetBackgroundColor(FLinearColor(0.08f, 0.12f, 0.16f, 0.9f));
+	OptionsBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnOptionsClicked);
+	UTextBlock* OptionsLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	OptionsLabel->SetText(FText::FromString(TEXT("OPTIONS")));
+	OptionsLabel->SetFont(PFLobbyFont(14, true));
+	OptionsLabel->SetJustification(ETextJustify::Center);
+	OptionsLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.88f, 1.f)));
+	OptionsBtn->SetContent(OptionsLabel);
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(OptionsBtn)) { VS->SetPadding(FMargin(0.f, 6.f, 0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
 
 	ConfigHintText = WidgetTree->ConstructWidget<UTextBlock>();
 	ConfigHintText->SetFont(PFLobbyFont(11, false));
@@ -325,45 +364,6 @@ void UPFLobbyWidget::BuildLoadoutOverlay(UCanvasPanel* RootCanvas)
 	}
 }
 
-void UPFLobbyWidget::OnModeClicked()
-{
-	if (!IsLocalHost()) { return; }
-	const UWorld* World = GetWorld();
-	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
-	if (!GS) { return; }
-	const uint8 Next = static_cast<uint8>((static_cast<uint8>(GS->BuildMode) + 1) % static_cast<uint8>(EPFBuildMode::MAX_Count));
-	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
-	{
-		PC->ServerHostSetBuildMode(Next);
-	}
-}
-
-void UPFLobbyWidget::OnTypeClicked()
-{
-	if (!IsLocalHost()) { return; }
-	const UWorld* World = GetWorld();
-	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
-	if (!GS) { return; }
-	const uint8 Next = static_cast<uint8>((static_cast<uint8>(GS->MatchType) + 1) % static_cast<uint8>(EPFMatchType::MAX_Count));
-	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
-	{
-		PC->ServerHostSetMatchType(Next);
-	}
-}
-
-void UPFLobbyWidget::OnFormatClicked()
-{
-	if (!IsLocalHost()) { return; }
-	const UWorld* World = GetWorld();
-	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
-	if (!GS) { return; }
-	const uint8 Next = (GS->TargetTeamSize >= 6) ? 4 : 6;   // toggle 4v4 <-> 6v6
-	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
-	{
-		PC->ServerHostSetFormat(Next);
-	}
-}
-
 void UPFLobbyWidget::OnLoadoutClicked()
 {
 	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Visible); }
@@ -374,6 +374,14 @@ void UPFLobbyWidget::OnLoadoutClose()
 	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed); }
 }
 
+void UPFLobbyWidget::OnOptionsClicked()
+{
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->ToggleOptionsMenu();
+	}
+}
+
 void UPFLobbyWidget::RefreshConfig()
 {
 	const UWorld* World = GetWorld();
@@ -381,15 +389,19 @@ void UPFLobbyWidget::RefreshConfig()
 	if (!GS) { return; }
 	if (ModeValueText)   { ModeValueText->SetText(FText::FromString(BuildModeLabel(GS->BuildMode))); }
 	if (TypeValueText)   { TypeValueText->SetText(FText::FromString(MatchTypeLabel(GS->MatchType))); }
-	if (FormatValueText) { FormatValueText->SetText(FText::FromString(FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize))); }
+	if (FormatValueText)
+	{
+		FormatValueText->SetText(FText::FromString(
+			FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize)));
+	}
+	if (BotsValueText)
+	{
+		BotsValueText->SetText(FText::FromString(GS->bFillWithBots ? TEXT("On") : TEXT("Off")));
+	}
 	if (ConfigHintText)
 	{
-		const FString HostLine = IsLocalHost()
-			? TEXT("Host: click a row to change")
-			: TEXT("Host controls the match setup");
 		const FString ModeBlurb = BuildModeBlurb(GS->BuildMode);
 		const FString TypeBlurb = MatchTypeBlurb(GS->MatchType);
-		// MODE blurb first (build style), then TYPE (win condition), then host gate line.
 		FString Hint;
 		if (!ModeBlurb.IsEmpty()) { Hint += ModeBlurb; }
 		if (!TypeBlurb.IsEmpty())
@@ -398,7 +410,7 @@ void UPFLobbyWidget::RefreshConfig()
 			Hint += TypeBlurb;
 		}
 		if (!Hint.IsEmpty()) { Hint += TEXT("\n"); }
-		Hint += HostLine;
+		Hint += TEXT("Match setup was chosen on the pre-game menu");
 		ConfigHintText->SetText(FText::FromString(Hint));
 	}
 }
@@ -409,7 +421,7 @@ void UPFLobbyWidget::NativeConstruct()
 
 	if (FooterText)
 	{
-		FString Hints = TEXT("F — Ready    ·    Hold Tab — Cursor");
+		FString Hints = TEXT("F — Ready    ·    Esc — Options / How to Play    ·    Hold Tab — Cursor");
 		if (IsLocalHost())
 		{
 			Hints += TEXT("    ·    Enter — Start Match    ·    Click a player to swap team");

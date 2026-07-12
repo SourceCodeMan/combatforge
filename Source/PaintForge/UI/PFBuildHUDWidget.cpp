@@ -33,9 +33,9 @@ const TCHAR* UPFBuildHUDWidget::ToolDisplayName(EPFBuildTool Tool)
 	case EPFBuildTool::Floor:      return TEXT("Floor");
 	case EPFBuildTool::Ramp:       return TEXT("Ramp");
 	case EPFBuildTool::Roof:       return TEXT("Roof");
-	case EPFBuildTool::PropCan:    return TEXT("Can");
-	case EPFBuildTool::PropDorito: return TEXT("Dorito");
-	case EPFBuildTool::PropSnake:  return TEXT("Snake");
+	case EPFBuildTool::PropCan:    return TEXT("Barrel");
+	case EPFBuildTool::PropDorito: return TEXT("Crate");
+	case EPFBuildTool::PropSnake:  return TEXT("Boxes");
 	case EPFBuildTool::Delete:     return TEXT("Delete");
 	default:                       return TEXT("?");
 	}
