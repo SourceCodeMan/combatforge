@@ -137,6 +137,15 @@ protected:
 	/** World aim-line hold at the shoulder (only while ShouldRaiseWeapon). */
 	void ApplyRaisedWeaponPose();
 
+	/**
+	 * When no AnimBP matches the mesh (Quantum pack), drive idle/walk/run via PlayAnimation
+	 * using that skeleton's sequences. No-op when an AnimInstance is already active.
+	 */
+	void UpdateSequenceLocomotion();
+
+	/** Find a usable weapon attach bone/socket name on the live body (hand_r and common aliases). */
+	FName ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const;
+
 	/** Builds the primitive marker viewmodel (receiver/guard/barrel/stock/mag/grip) under Parent. */
 	void BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube, UStaticMesh* Cylinder,
 		TArray<TObjectPtr<UStaticMeshComponent>>& OutParts, FVector& OutMuzzleLocal);
@@ -169,17 +178,24 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TSubclassOf<UAnimInstance> ThirdPersonAnimClass;           // mannequin ABP fallback only
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TSubclassOf<UAnimInstance> Team0AnimClass;                 // optional per-team AnimBP
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TSubclassOf<UAnimInstance> Team1AnimClass;
-	/** Looping idle when no matching AnimBP (skeleton-gated PlayAnimation). */
+	/** Locomotion sequences when no matching AnimBP (skeleton-gated PlayAnimation). */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team0IdleAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team0WalkAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team0RunAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team1IdleAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team1WalkAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team1RunAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // hand bone on the TP body
-	// Resting grip in hand_r bone space (SM_Rifle: local +Y is barrel-forward).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
+	// Resting grip in hand bone space (SM_Rifle: local +Y is barrel-forward).
 	// Tuned so the stock sits in the palm — not through the torso / out the back.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(3.f, -1.5f, 1.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(-5.f, 95.f, 8.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(0.9f);
+	// Fallback when the mesh has no hand bone: mesh-local "in hands" pose (not mesh origin / shoulder).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(15.f, 25.f, 110.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(0.f, 90.f, -10.f);
 	// Raised aim-line offsets from capsule center (only while firing / ADS).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedForward = FVector(28.f, 16.f, 48.f); // along aim X/Y + world Z
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
@@ -211,6 +227,9 @@ private:
 	float   RecoilPitch = 0.f;                        // deg, decays to zero
 	float   WeaponRaiseHoldSec = 0.f;                 // countdown; keeps raised pose after a shot
 	bool    bWeaponInRaisedPose = false;              // last applied pose (hand vs raised)
+	/** Sequence-driven locomotion (0=none/ABP, 1=idle, 2=walk, 3=run). */
+	uint8   SeqLocoState = 0;
+	bool    bSequenceLocoActive = false;              // true when AnimBP was rejected / idle path uses sequences
 
 	// ---- Config (04 §1) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;

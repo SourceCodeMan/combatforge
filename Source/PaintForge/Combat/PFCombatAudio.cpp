@@ -188,11 +188,11 @@ void UPFCombatAudio::EnsureSounds()
 	};
 	CueHitmarker = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_1-1_Cue.Interface_1-1_Cue"));
 	CueElim = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Special_Collectible_26-1_Cue.Special_Collectible_26-1_Cue"));
-	// Softer airsoft-ish "pop" than a full rifle crack; Sci-Fi gun reads less lethal.
-	CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Sci-Fi_Gun_1-1_Cue.Sci-Fi_Gun_1-1_Cue"));
+	// Real gun report for the marker (not the Sci-Fi laser). Prefer short gunshot variants.
+	CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_7-1_Cue.Gunshot_7-1_Cue"));
 	if (CueMuzzle == nullptr)
 	{
-		CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_7-1_Cue.Gunshot_7-1_Cue"));
+		CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_1-1_Cue.Gunshot_1-1_Cue"));
 	}
 	CueSplatIncoming = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Hit_Generic_5-1_Cue.Hit_Generic_5-1_Cue"));
 	CueBreakout = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Whoosh_4-1_Cue.Whoosh_4-1_Cue"));
@@ -329,7 +329,8 @@ void UPFCombatAudio::PlayElim()
 void UPFCombatAudio::PlayMuzzle()
 {
 	EnsureSounds();
-	PlayWorld(CueMuzzle, SndMuzzle, PcmMuzzle, 0.85f, FMath::FRandRange(0.92f, 1.08f), MuzzleConcurrency);
+	// Slightly quieter + varied pitch so 12 bps auto-fire doesn't blast kids' speakers.
+	PlayWorld(CueMuzzle, SndMuzzle, PcmMuzzle, 0.70f, FMath::FRandRange(0.94f, 1.06f), MuzzleConcurrency);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Muzzle (%s)"), *GetNameSafe(GetOwner()));
 }
 

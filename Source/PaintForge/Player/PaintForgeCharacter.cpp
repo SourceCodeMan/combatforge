@@ -187,14 +187,16 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> QuinnBodyFinder(
 		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple"));
+	// Quantum pack sequences (SK_Military skeleton) — used for sequence locomotion (no Quantum AnimBP).
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> QuantumIdleFinder(
 		TEXT("/Game/QuantumCharacter/Demo/Animations/A_MM_Idle.A_MM_Idle"));
-	// AnimStarterPack (UE4 Hero skeleton) — only used if a mesh shares that skeleton later.
-	static ConstructorHelpers::FClassFinder<UAnimInstance> AspAnimFinder(
-		TEXT("/Game/AnimStarterPack/Character/ASP_HeroTPP_AnimBlueprint"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> QuantumWalkFinder(
+		TEXT("/Game/QuantumCharacter/Demo/Animations/A_MM_Walk_Fwd.A_MM_Walk_Fwd"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> QuantumRunFinder(
+		TEXT("/Game/QuantumCharacter/Demo/Animations/A_MM_Run_Fwd.A_MM_Run_Fwd"));
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannequinAnimFinder(
 		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
-	// Survival's own locomotion AnimBP + idle (its pack skeleton) — guaranteed match for team 1.
+	// Survival shares the mannequin skeleton with ABP_Manny (playtest-verified walk/run).
 	static ConstructorHelpers::FClassFinder<UAnimInstance> SurvivalAnimFinder(
 		TEXT("/Game/Survival_Character/Demo/Characters/Mannequins/Animations/ABP_Manny"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> SurvivalIdleFinder(
@@ -232,26 +234,21 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		Team1BodyMesh = Team0BodyMesh;
 	}
 
-	if (QuantumIdleFinder.Succeeded())
-	{
-		Team0IdleAnim = QuantumIdleFinder.Object;
-	}
-	// Mannequin ABP only valid on mannequin skeleton (fallback path).
+	// Quantum: NEVER force mannequin ABP — skeletons don't match (playtest: frozen/broken anims).
+	// Sequence locomotion (idle/walk/run) is driven in UpdateSequenceLocomotion.
+	if (QuantumIdleFinder.Succeeded()) { Team0IdleAnim = QuantumIdleFinder.Object; }
+	if (QuantumWalkFinder.Succeeded()) { Team0WalkAnim = QuantumWalkFinder.Object; }
+	if (QuantumRunFinder.Succeeded())  { Team0RunAnim  = QuantumRunFinder.Object; }
+	Team0AnimClass = nullptr;
+
+	// Mannequin ABP only for actual mannequin meshes (fallback path).
 	if (MannequinAnimFinder.Succeeded())
 	{
 		ThirdPersonAnimClass = MannequinAnimFinder.Class;
-		// Quantum (team 0): the mannequin locomotion ABP (tested skeleton-compatible; ApplyTeamBody's guard
-		// drops to its own idle if it ever isn't). Full walk/run.
-		Team0AnimClass = MannequinAnimFinder.Class;
 	}
-	// Survival (team 1): its own pack AnimBP (walk/run) + idle as the safety fallback.
+	// Survival (team 1): mannequin-compatible ABP_Manny (playtest-verified).
 	if (SurvivalAnimFinder.Succeeded()) { Team1AnimClass = SurvivalAnimFinder.Class; }
 	if (SurvivalIdleFinder.Succeeded()) { Team1IdleAnim = SurvivalIdleFinder.Object; }
-	if (AspAnimFinder.Succeeded())
-	{
-		// Available for HeroTPP-compatible meshes; not forced onto Quantum/Survival.
-		(void)AspAnimFinder.Class;
-	}
 
 	// Soft team-tint fallback (mannequin / graybox only).
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamBodyMatFinder(
@@ -361,7 +358,10 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 	// track the move-stream ADS intent even for remotely controlled pawns.
 	UpdateADSAlpha(DeltaSeconds);
 
-	// TP rifle: rest in hand_r; raise to aim line only while ADS / firing.
+	// Quantum (and any sequence-driven body): idle ↔ walk ↔ run without an AnimBP.
+	UpdateSequenceLocomotion();
+
+	// TP rifle: rest in hand bone; raise to aim line only while ADS / firing.
 	if (WeaponRaiseHoldSec > 0.f)
 	{
 		WeaponRaiseHoldSec = FMath::Max(0.f, WeaponRaiseHoldSec - DeltaSeconds);
@@ -751,8 +751,8 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 
 	GetMesh()->SetSkeletalMeshAsset(Chosen);
 
-	// Anim: prefer per-team AnimBP, else skeleton-matched idle loop, else mannequin ABP only
-	// when the mesh is the mannequin pack (wrong ABP on Quantum/Survival = broken pose).
+	// Anim: prefer per-team AnimBP (skeleton-guarded). Quantum has no matching ABP — use sequence
+	// locomotion (idle/walk/run) instead of forcing mannequin ABP (playtest: broken pose).
 	UAnimSequence* IdleAnim = (Team == 1) ? Team1IdleAnim.Get() : Team0IdleAnim.Get();
 	TSubclassOf<UAnimInstance> AnimClass = (Team == 1) ? Team1AnimClass : Team0AnimClass;
 	const bool bLooksLikeMannequin = Chosen->GetName().Contains(TEXT("Manny"))
@@ -763,33 +763,38 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 		AnimClass = ThirdPersonAnimClass;
 	}
 
-	// Safety: only drive with an AnimBP whose target skeleton matches this mesh. A wrong ABP leaves a broken
-	// ref pose, so if it doesn't match we drop to the skeleton-checked idle below — never a T-pose regression.
+	// Safety: only drive with an AnimBP whose target skeleton matches this mesh.
 	if (AnimClass != nullptr)
 	{
 		const UAnimBlueprintGeneratedClass* GenClass = Cast<UAnimBlueprintGeneratedClass>(AnimClass.Get());
 		const USkeleton* AnimSkel = GenClass ? GenClass->GetTargetSkeleton() : nullptr;
 		if (AnimSkel != nullptr && AnimSkel != Chosen->GetSkeleton())
 		{
+			UE_LOG(PaintForgeLog, Log,
+				TEXT("ApplyTeamBody: AnimBP skeleton mismatch for %s — using sequence locomotion."),
+				*Chosen->GetName());
 			AnimClass = nullptr;
 		}
 	}
 
 	GetMesh()->Stop();
+	SeqLocoState = 0;
+	bSequenceLocoActive = false;
 	if (AnimClass != nullptr)
 	{
 		GetMesh()->SetAnimInstanceClass(AnimClass);
 	}
-	else if (IdleAnim != nullptr && IdleAnim->GetSkeleton() != nullptr
-		&& Chosen->GetSkeleton() == IdleAnim->GetSkeleton())
-	{
-		GetMesh()->SetAnimInstanceClass(nullptr);
-		GetMesh()->PlayAnimation(IdleAnim, /*bLooping=*/true);
-	}
 	else
 	{
-		// No matching AnimBP/idle yet (e.g. Survival until retarget). Leave default pose.
+		// Sequence path (Quantum): start idle; UpdateSequenceLocomotion swaps walk/run by speed.
 		GetMesh()->SetAnimInstanceClass(nullptr);
+		bSequenceLocoActive = true;
+		if (IdleAnim != nullptr && IdleAnim->GetSkeleton() != nullptr
+			&& Chosen->GetSkeleton() == IdleAnim->GetSkeleton())
+		{
+			GetMesh()->PlayAnimation(IdleAnim, /*bLooping=*/true);
+			SeqLocoState = 1;
+		}
 	}
 
 	// Align: face +X (standard ACharacter -90 yaw). Feet at capsule bottom:
@@ -862,6 +867,42 @@ bool APaintForgeCharacter::ShouldRaiseWeapon() const
 	return false;
 }
 
+FName APaintForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const
+{
+	if (Body == nullptr)
+	{
+		return NAME_None;
+	}
+	// Quantum military skeleton often uses different hand names than UE mannequin hand_r.
+	static const FName Candidates[] = {
+		TEXT("hand_r"),
+		TEXT("Hand_R"),
+		TEXT("hand_r_socket"),
+		TEXT("RightHand"),
+		TEXT("weapon_r"),
+		TEXT("ik_hand_gun"),
+		TEXT("ik_hand_r"),
+		TEXT("HandR"),
+		TEXT("mixamorig:RightHand"),
+	};
+	auto Exists = [Body](FName N) -> bool
+	{
+		return Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE;
+	};
+	if (!WeaponAttachSocket.IsNone() && Exists(WeaponAttachSocket))
+	{
+		return WeaponAttachSocket;
+	}
+	for (const FName& N : Candidates)
+	{
+		if (Exists(N))
+		{
+			return N;
+		}
+	}
+	return NAME_None;
+}
+
 void APaintForgeCharacter::ApplyHandWeaponPose()
 {
 	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
@@ -875,22 +916,93 @@ void APaintForgeCharacter::ApplyHandWeaponPose()
 		return;
 	}
 
-	const bool bHasSocket = Body->DoesSocketExist(WeaponAttachSocket);
-	const bool bHasBone = Body->GetBoneIndex(WeaponAttachSocket) != INDEX_NONE;
-	if (!bHasSocket && !bHasBone)
+	const FName AttachBone = ResolveWeaponAttachBone(Body);
+	if (!AttachBone.IsNone())
 	{
-		UE_LOG(PaintForgeLog, Warning,
-			TEXT("ApplyHandWeaponPose: no socket/bone '%s' — TP gun stays on mesh root."),
-			*WeaponAttachSocket.ToString());
+		WeaponMeshComp->AttachToComponent(Body,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachBone);
+		WeaponMeshComp->SetRelativeLocation(WeaponRelativeLocation);
+		WeaponMeshComp->SetRelativeRotation(WeaponRelativeRotation);
+		WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
+		bWeaponInRaisedPose = false;
 		return;
 	}
 
+	// No hand bone (or unknown naming): mesh-local "held at side" — NOT mesh origin (that reads
+	// as stuck in the shoulder/chest on Quantum).
+	static bool bLoggedMissingBone = false;
+	if (!bLoggedMissingBone)
+	{
+		bLoggedMissingBone = true;
+		UE_LOG(PaintForgeLog, Warning,
+			TEXT("ApplyHandWeaponPose: no hand bone on %s — using mesh-local hand fallback. Bones sample:"),
+			Body->GetSkeletalMeshAsset() ? *Body->GetSkeletalMeshAsset()->GetName() : TEXT("(none)"));
+		const int32 NumBones = Body->GetNumBones();
+		for (int32 i = 0; i < NumBones && i < 40; ++i)
+		{
+			UE_LOG(PaintForgeLog, Warning, TEXT("  bone[%d]=%s"), i, *Body->GetBoneName(i).ToString());
+		}
+	}
 	WeaponMeshComp->AttachToComponent(Body,
-		FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponAttachSocket);
-	WeaponMeshComp->SetRelativeLocation(WeaponRelativeLocation);
-	WeaponMeshComp->SetRelativeRotation(WeaponRelativeRotation);
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	WeaponMeshComp->SetRelativeLocation(WeaponMeshFallbackLocation);
+	WeaponMeshComp->SetRelativeRotation(WeaponMeshFallbackRotation);
 	WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
 	bWeaponInRaisedPose = false;
+}
+
+void APaintForgeCharacter::UpdateSequenceLocomotion()
+{
+	if (!bSequenceLocoActive || !bUsingArtBody || GetMesh() == nullptr)
+	{
+		return;
+	}
+	// If something installed an AnimInstance later, step aside.
+	if (GetMesh()->GetAnimInstance() != nullptr)
+	{
+		bSequenceLocoActive = false;
+		return;
+	}
+
+	const bool bTeam1 = (CachedBodyTeamId == 1);
+	UAnimSequence* Idle = bTeam1 ? Team1IdleAnim.Get() : Team0IdleAnim.Get();
+	UAnimSequence* Walk = bTeam1 ? Team1WalkAnim.Get() : Team0WalkAnim.Get();
+	UAnimSequence* Run  = bTeam1 ? Team1RunAnim.Get()  : Team0RunAnim.Get();
+	if (Idle == nullptr && Walk == nullptr && Run == nullptr)
+	{
+		return;
+	}
+
+	const float Speed = GetVelocity().Size2D();
+	// Thresholds: crawl of noise < walk < run (sprint ~830, walk ~600 on our CMC).
+	uint8 Want = 1;   // idle
+	if (Speed > 450.f && Run != nullptr)       { Want = 3; }
+	else if (Speed > 40.f && Walk != nullptr)  { Want = 2; }
+	else if (Speed > 40.f && Run != nullptr)   { Want = 3; }   // walk missing → run
+	else                                       { Want = 1; }
+
+	if (Want == SeqLocoState)
+	{
+		return;
+	}
+	SeqLocoState = Want;
+
+	UAnimSequence* Seq = Idle;
+	if (Want == 2) { Seq = Walk ? Walk : (Run ? Run : Idle); }
+	else if (Want == 3) { Seq = Run ? Run : (Walk ? Walk : Idle); }
+	if (Seq == nullptr)
+	{
+		return;
+	}
+	// Only play if skeleton matches (guards against loading the wrong sequence on a body swap).
+	if (USkeletalMesh* Skm = GetMesh()->GetSkeletalMeshAsset())
+	{
+		if (Seq->GetSkeleton() != nullptr && Seq->GetSkeleton() != Skm->GetSkeleton())
+		{
+			return;
+		}
+	}
+	GetMesh()->PlayAnimation(Seq, /*bLooping=*/true);
 }
 
 void APaintForgeCharacter::ApplyRaisedWeaponPose()
