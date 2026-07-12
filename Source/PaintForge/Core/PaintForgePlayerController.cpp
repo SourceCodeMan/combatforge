@@ -11,6 +11,7 @@
 #include "Player/PaintForgeCharacter.h"
 #include "Input/PFInputConfig.h"
 #include "UI/PFRootHUDWidget.h"
+#include "UI/PFLoadingMenuWidget.h"
 #include "Combat/PFCombatAudio.h"
 
 #include "Blueprint/UserWidget.h"
@@ -103,8 +104,14 @@ void APaintForgePlayerController::BeginPlayingState()
 	Super::BeginPlayingState();
 	if (IsLocalController())
 	{
+		// Boot menu first (opaque) so the player never stares at a half-loaded pen + HUD.
+		CreateLoadingMenuIfNeeded();
 		CreateHUDIfNeeded();
-		ApplyInputForPhase();   // internally retries until the EI subsystem is alive (02 R1)
+		// While the loading menu is up it owns input mode; otherwise apply lobby/combat IMCs.
+		if (LoadingMenu == nullptr || LoadingMenu->IsFinished())
+		{
+			ApplyInputForPhase();
+		}
 		TrySendGuidHash();
 		StartClientLogShip();   // remote clients only — tee GLog → host Saved/ClientLogs
 	}
@@ -212,6 +219,12 @@ void APaintForgePlayerController::HandleRoundStateChanged(EPFRoundState NewState
 
 void APaintForgePlayerController::ApplyInputForPhase()
 {
+	// Boot menu owns input until dismissed — don't let phase IMCs fight the UI-only mode.
+	if (LoadingMenu && !LoadingMenu->IsFinished())
+	{
+		return;
+	}
+
 	if (!IsLocalController())
 	{
 		return;
@@ -373,6 +386,30 @@ void APaintForgePlayerController::ClientSetEliminatedMoveLock_Implementation(boo
 	RefreshMoveLock();
 }
 
+void APaintForgePlayerController::CreateLoadingMenuIfNeeded()
+{
+	if (LoadingMenu || !IsLocalController())
+	{
+		return;
+	}
+	LoadingMenu = CreateWidget<UPFLoadingMenuWidget>(this, UPFLoadingMenuWidget::StaticClass());
+	if (LoadingMenu)
+	{
+		// Z-order above RootHUD so the opaque menu fully covers the live world + lobby UI.
+		LoadingMenu->AddToViewport(100);
+		UE_LOG(PaintForgeLog, Log, TEXT("PC: loading menu shown (shader/asset warmup)"));
+	}
+	else
+	{
+		UE_LOG(PaintForgeLog, Error, TEXT("PC: failed to create UPFLoadingMenuWidget"));
+	}
+}
+
+void APaintForgePlayerController::NotifyLoadingMenuFinished()
+{
+	ApplyInputForPhase();
+}
+
 void APaintForgePlayerController::CreateHUDIfNeeded()
 {
 	if (RootHUD || !IsLocalController())
@@ -382,7 +419,8 @@ void APaintForgePlayerController::CreateHUDIfNeeded()
 	RootHUD = CreateWidget<UPFRootHUDWidget>(this, UPFRootHUDWidget::StaticClass());
 	if (RootHUD)
 	{
-		RootHUD->AddToViewport();
+		// Under the loading menu (Z=100) until Enter Lobby is pressed.
+		RootHUD->AddToViewport(0);
 	}
 	else
 	{

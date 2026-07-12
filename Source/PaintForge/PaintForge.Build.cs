@@ -21,7 +21,9 @@ public class PaintForge : ModuleRules
 			"NetCore",                       // push-model / net serialization helpers
 			"EngineCameras",                 // UWaveOscillatorCameraShakePattern (PFCameraShakes)
 			"AIModule",                      // AAIController base for roster-filling bots (PFBotController)
-			"Json", "JsonUtilities"          // arena rating records
+			"Json", "JsonUtilities",         // arena rating records
+			"RenderCore",                    // GShaderCompilingManager / loading-screen shader drain
+			"RHI"                            // shader pipeline cache helpers
 		});
 		// No private-only deps in v1. NOT needed: OnlineSubsystem (02 D12),
 		// Niagara (post-v1 art), GameplayAbilities (overkill).

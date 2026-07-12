@@ -13,6 +13,7 @@ class APaintForgeGameState;
 class APaintForgePlayerState;
 class UPFInputConfig;
 class UPFRootHUDWidget;
+class UPFLoadingMenuWidget;
 
 /**
  * Player controller (contract §3.2): builds the native input objects (UPFInputConfig), applies
@@ -62,6 +63,9 @@ public:
 	bool IsScoreboardHeld() const { return bScoreboardHeld; }
 	TMulticastDelegate<void(bool /*bHeld*/)> OnScoreboardHeldChanged;
 
+	/** Boot loading menu dismissed — re-apply phase IMCs / lobby GameAndUI. */
+	void NotifyLoadingMenuFinished();
+
 protected:
 	// ---- Engine overrides ----
 	virtual void SetupInputComponent() override;
@@ -81,6 +85,8 @@ protected:
 	// Owning-client mirror of the elimination move freeze (move-input ignore does not replicate).
 	UFUNCTION(Client, Reliable) void ClientSetEliminatedMoveLock(bool bLocked);
 	void CreateHUDIfNeeded();
+	/** Full-screen boot menu + shader warmup (covers live world until Enter). */
+	void CreateLoadingMenuIfNeeded();
 	void TrySendGuidHash();
 
 	// ---- (intra) client → host log ship (LAN crash triage) ----
@@ -107,6 +113,7 @@ protected:
 private:
 	UPROPERTY() TObjectPtr<UPFInputConfig>    InputConfig;   // GC root for all input objects (02 R1)
 	UPROPERTY() TObjectPtr<UPFRootHUDWidget>  RootHUD;
+	UPROPERTY() TObjectPtr<UPFLoadingMenuWidget> LoadingMenu;
 
 	FTimerHandle InputRetryHandle;      // Enhanced Input subsystem may not exist at first call (02 R1)
 	FTimerHandle GameStateRetryHandle;
