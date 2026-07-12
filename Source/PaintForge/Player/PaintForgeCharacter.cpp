@@ -22,6 +22,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimSingleNodeInstance.h"
 #include "Animation/AnimBlueprintGeneratedClass.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
@@ -365,11 +366,7 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 	// Build phase: no marker in hands (placement HUD has its own aim dot).
 	UpdateBuildPhaseWeaponVisibility();
 
-	// TP rifle: rest in hand bone; raise to aim line only while ADS / firing.
-	if (WeaponRaiseHoldSec > 0.f)
-	{
-		WeaponRaiseHoldSec = FMath::Max(0.f, WeaponRaiseHoldSec - DeltaSeconds);
-	}
+	// TP rifle always in hands (no world-space shoulder pose).
 	UpdateWeaponHoldPose();
 
 	if (IsLocallyControlled())
@@ -784,20 +781,29 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 	GetMesh()->Stop();
 	SeqLocoState = 0;
 	bSequenceLocoActive = false;
+	CachedWeaponAttachBone = NAME_None;
 	if (AnimClass != nullptr)
 	{
+		GetMesh()->SetAnimationMode(EAnimationMode::AnimationBlueprint);
 		GetMesh()->SetAnimInstanceClass(AnimClass);
 	}
 	else
 	{
-		// Sequence path (Quantum): start idle; UpdateSequenceLocomotion swaps walk/run by speed.
+		// Sequence path (Quantum): SingleNode instance + UpdateSequenceLocomotion each tick.
 		GetMesh()->SetAnimInstanceClass(nullptr);
+		GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 		bSequenceLocoActive = true;
-		if (IdleAnim != nullptr && IdleAnim->GetSkeleton() != nullptr
-			&& Chosen->GetSkeleton() == IdleAnim->GetSkeleton())
+		if (IdleAnim != nullptr)
 		{
 			GetMesh()->PlayAnimation(IdleAnim, /*bLooping=*/true);
 			SeqLocoState = 1;
+			UE_LOG(PaintForgeLog, Log, TEXT("ApplyTeamBody: Quantum sequence loco ready (idle=%s)"),
+				*IdleAnim->GetName());
+		}
+		else
+		{
+			UE_LOG(PaintForgeLog, Warning,
+				TEXT("ApplyTeamBody: sequence loco active but no idle for %s"), *Chosen->GetName());
 		}
 	}
 
@@ -846,29 +852,7 @@ void APaintForgeCharacter::AttachWeaponToHand()
 		}
 	}
 
-	bWeaponInRaisedPose = false;
 	ApplyHandWeaponPose();
-}
-
-bool APaintForgeCharacter::ShouldRaiseWeapon() const
-{
-	if (WeaponRaiseHoldSec > 0.f)
-	{
-		return true;
-	}
-	if (IsADS())
-	{
-		return true;
-	}
-	if (bFireHeld)
-	{
-		return true;
-	}
-	if (WeaponComponent != nullptr && WeaponComponent->WantsFire())
-	{
-		return true;
-	}
-	return false;
 }
 
 FName APaintForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const
@@ -877,17 +861,18 @@ FName APaintForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponent
 	{
 		return NAME_None;
 	}
-	// Quantum military skeleton often uses different hand names than UE mannequin hand_r.
+	// Prefer sockets first (weapon sockets), then common hand bone names (Manny + military packs).
 	static const FName Candidates[] = {
+		TEXT("hand_rSocket"),
+		TEXT("weapon_r"),
+		TEXT("WeaponPoint"),
 		TEXT("hand_r"),
 		TEXT("Hand_R"),
-		TEXT("hand_r_socket"),
 		TEXT("RightHand"),
-		TEXT("weapon_r"),
 		TEXT("ik_hand_gun"),
 		TEXT("ik_hand_r"),
 		TEXT("HandR"),
-		TEXT("mixamorig:RightHand"),
+		TEXT("LowerArm_R"),   // last-resort closer to hand than pelvis
 	};
 	auto Exists = [Body](FName N) -> bool
 	{
@@ -902,6 +887,24 @@ FName APaintForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponent
 		if (Exists(N))
 		{
 			return N;
+		}
+	}
+	// Scan for any bone with "hand" + "r" in the name (Quantum / Mixamo variants).
+	const int32 NumBones = Body->GetNumBones();
+	for (int32 i = 0; i < NumBones; ++i)
+	{
+		const FString Bone = Body->GetBoneName(i).ToString();
+		const FString Lower = Bone.ToLower();
+		if ((Lower.Contains(TEXT("hand")) && (Lower.Contains(TEXT("_r")) || Lower.EndsWith(TEXT("r"))
+				|| Lower.Contains(TEXT("right"))))
+			|| Lower.Contains(TEXT("weapon")))
+		{
+			// Skip left hand.
+			if (Lower.Contains(TEXT("_l")) || Lower.Contains(TEXT("left")))
+			{
+				continue;
+			}
+			return Body->GetBoneName(i);
 		}
 	}
 	return NAME_None;
@@ -920,39 +923,53 @@ void APaintForgeCharacter::ApplyHandWeaponPose()
 		return;
 	}
 
-	const FName AttachBone = ResolveWeaponAttachBone(Body);
-	if (!AttachBone.IsNone())
+	if (CachedWeaponAttachBone.IsNone())
 	{
-		WeaponMeshComp->AttachToComponent(Body,
-			FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachBone);
+		CachedWeaponAttachBone = ResolveWeaponAttachBone(Body);
+		if (!CachedWeaponAttachBone.IsNone())
+		{
+			UE_LOG(PaintForgeLog, Log, TEXT("Weapon attach bone: %s on %s"),
+				*CachedWeaponAttachBone.ToString(),
+				Body->GetSkeletalMeshAsset() ? *Body->GetSkeletalMeshAsset()->GetName() : TEXT("?"));
+		}
+		else
+		{
+			static bool bLogged = false;
+			if (!bLogged)
+			{
+				bLogged = true;
+				UE_LOG(PaintForgeLog, Warning,
+					TEXT("ApplyHandWeaponPose: no hand bone on %s — hip-carry fallback. Bone dump:"),
+					Body->GetSkeletalMeshAsset() ? *Body->GetSkeletalMeshAsset()->GetName() : TEXT("?"));
+				const int32 NumBones = Body->GetNumBones();
+				for (int32 i = 0; i < NumBones && i < 60; ++i)
+				{
+					UE_LOG(PaintForgeLog, Warning, TEXT("  bone[%d]=%s"), i, *Body->GetBoneName(i).ToString());
+				}
+			}
+		}
+	}
+
+	if (!CachedWeaponAttachBone.IsNone())
+	{
+		if (WeaponMeshComp->GetAttachParent() != Body
+			|| WeaponMeshComp->GetAttachSocketName() != CachedWeaponAttachBone)
+		{
+			WeaponMeshComp->AttachToComponent(Body,
+				FAttachmentTransformRules::SnapToTargetNotIncludingScale, CachedWeaponAttachBone);
+		}
 		WeaponMeshComp->SetRelativeLocation(WeaponRelativeLocation);
 		WeaponMeshComp->SetRelativeRotation(WeaponRelativeRotation);
 		WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
-		bWeaponInRaisedPose = false;
 		return;
 	}
 
-	// No hand bone (or unknown naming): mesh-local "held at side" — NOT mesh origin (that reads
-	// as stuck in the shoulder/chest on Quantum).
-	static bool bLoggedMissingBone = false;
-	if (!bLoggedMissingBone)
-	{
-		bLoggedMissingBone = true;
-		UE_LOG(PaintForgeLog, Warning,
-			TEXT("ApplyHandWeaponPose: no hand bone on %s — using mesh-local hand fallback. Bones sample:"),
-			Body->GetSkeletalMeshAsset() ? *Body->GetSkeletalMeshAsset()->GetName() : TEXT("(none)"));
-		const int32 NumBones = Body->GetNumBones();
-		for (int32 i = 0; i < NumBones && i < 40; ++i)
-		{
-			UE_LOG(PaintForgeLog, Warning, TEXT("  bone[%d]=%s"), i, *Body->GetBoneName(i).ToString());
-		}
-	}
+	// No hand bone: hip-carry in mesh space (never origin = shoulder/chest).
 	WeaponMeshComp->AttachToComponent(Body,
 		FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	WeaponMeshComp->SetRelativeLocation(WeaponMeshFallbackLocation);
 	WeaponMeshComp->SetRelativeRotation(WeaponMeshFallbackRotation);
 	WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
-	bWeaponInRaisedPose = false;
 }
 
 void APaintForgeCharacter::UpdateSequenceLocomotion()
@@ -961,11 +978,19 @@ void APaintForgeCharacter::UpdateSequenceLocomotion()
 	{
 		return;
 	}
-	// If something installed an AnimInstance later, step aside.
-	if (GetMesh()->GetAnimInstance() != nullptr)
+
+	// Stay on SingleNode — if a full AnimBP was installed, leave it alone.
+	if (GetMesh()->GetAnimationMode() == EAnimationMode::AnimationBlueprint
+		&& GetMesh()->GetAnimInstance() != nullptr
+		&& !GetMesh()->GetAnimInstance()->IsA<UAnimSingleNodeInstance>())
 	{
 		bSequenceLocoActive = false;
 		return;
+	}
+
+	if (GetMesh()->GetAnimationMode() != EAnimationMode::AnimationSingleNode)
+	{
+		GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	}
 
 	const bool bTeam1 = (CachedBodyTeamId == 1);
@@ -977,12 +1002,22 @@ void APaintForgeCharacter::UpdateSequenceLocomotion()
 		return;
 	}
 
-	const float Speed = GetVelocity().Size2D();
-	// Thresholds: crawl of noise < walk < run (sprint ~830, walk ~600 on our CMC).
-	uint8 Want = 1;   // idle
-	if (Speed > 450.f && Run != nullptr)       { Want = 3; }
-	else if (Speed > 40.f && Walk != nullptr)  { Want = 2; }
-	else if (Speed > 40.f && Run != nullptr)   { Want = 3; }   // walk missing → run
+	// Prefer CMC velocity (replicates on proxies); actor velocity can lag for bots.
+	float Speed = 0.f;
+	if (const UCharacterMovementComponent* Move = GetCharacterMovement())
+	{
+		Speed = Move->Velocity.Size2D();
+	}
+	else
+	{
+		Speed = GetVelocity().Size2D();
+	}
+
+	// walk ~600, sprint ~830 on our CMC — pick idle / walk / run.
+	uint8 Want = 1;
+	if (Speed > 500.f && Run != nullptr)       { Want = 3; }
+	else if (Speed > 30.f && Walk != nullptr)  { Want = 2; }
+	else if (Speed > 30.f && Run != nullptr)   { Want = 3; }
 	else                                       { Want = 1; }
 
 	if (Want == SeqLocoState)
@@ -998,47 +1033,15 @@ void APaintForgeCharacter::UpdateSequenceLocomotion()
 	{
 		return;
 	}
-	// Only play if skeleton matches (guards against loading the wrong sequence on a body swap).
-	if (USkeletalMesh* Skm = GetMesh()->GetSkeletalMeshAsset())
-	{
-		if (Seq->GetSkeleton() != nullptr && Seq->GetSkeleton() != Skm->GetSkeleton())
-		{
-			return;
-		}
-	}
+
+	// Use SingleNode API — more reliable than PlayAnimation when mode was already set.
 	GetMesh()->PlayAnimation(Seq, /*bLooping=*/true);
-}
-
-void APaintForgeCharacter::ApplyRaisedWeaponPose()
-{
-	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
+	if (UAnimSingleNodeInstance* Node = GetMesh()->GetSingleNodeInstance())
 	{
-		return;
+		Node->SetLooping(true);
+		Node->SetPlaying(true);
+		Node->SetPlayRate(1.f);
 	}
-
-	// Aim-line hold while shooting / ADS only — stock near right shoulder, barrel along control aim.
-	// Not permanent: idle returns to hand_r so the gun isn't glued out the back/chest.
-	const FRotator Aim = GetBaseAimRotation();
-	const FRotationMatrix AimM(Aim);
-	const FVector WorldLoc = GetActorLocation()
-		+ AimM.GetUnitAxis(EAxis::X) * WeaponRaisedForward.X
-		+ AimM.GetUnitAxis(EAxis::Y) * WeaponRaisedForward.Y
-		+ FVector(0.f, 0.f, WeaponRaisedForward.Z);
-
-	if (USceneComponent* Root = GetRootComponent())
-	{
-		if (WeaponMeshComp->GetAttachParent() != Root)
-		{
-			WeaponMeshComp->AttachToComponent(Root,
-				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		}
-	}
-
-	WeaponMeshComp->SetWorldLocation(WorldLoc);
-	// SM_Rifle barrel is local +Y; aim is world +X of the aim basis → yaw -90.
-	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
-	WeaponMeshComp->SetWorldScale3D(WeaponRelativeScale);
-	bWeaponInRaisedPose = true;
 }
 
 void APaintForgeCharacter::UpdateBuildPhaseWeaponVisibility()
@@ -1087,19 +1090,8 @@ void APaintForgeCharacter::UpdateWeaponHoldPose()
 	{
 		return;
 	}
-
-	const bool bRaise = ShouldRaiseWeapon();
-	if (bRaise)
-	{
-		// Every tick while raised so the barrel tracks look pitch/yaw.
-		ApplyRaisedWeaponPose();
-	}
-	else if (bWeaponInRaisedPose)
-	{
-		// Transition raised → hand only on the edge (don't thrash attach every frame).
-		ApplyHandWeaponPose();
-	}
-	// else: already in hand — leave relative offsets alone so the bone anim carries the gun
+	// Always re-seat on the hand bone so ADS/fire never leaves a world-space shoulder pose.
+	ApplyHandWeaponPose();
 }
 
 void APaintForgeCharacter::ApplyArtLoadout()
@@ -1320,15 +1312,12 @@ void APaintForgeCharacter::SetupWeaponMaterials()
 
 void APaintForgeCharacter::OnFireCosmetic()
 {
-	// Airsoft marker: viewmodel recoil only — no muzzle flash, smoke, or gunfire light.
+	// Airsoft marker: viewmodel recoil only — no muzzle flash; TP gun stays in hands.
 	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f);
 	RecoilPitch += RecoilKickPitchDeg;
-	// Local/authority (incl. bots): keep the TP marker raised briefly through the shot cadence.
-	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
 }
 
 void APaintForgeCharacter::OnRemoteFireCosmetic()
 {
-	// Airsoft: no flash. Brief TP raise so remote viewers see the marker come up with the shot.
-	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
+	// Airsoft: no flash; TP gun stays hand-attached.
 }

@@ -126,27 +126,21 @@ protected:
 	void AttachWeaponToHand();
 
 	/**
-	 * TP rifle: resting = snap to hand_r (in hands); raised = aim line while ADS / firing.
-	 * Unarmed ABP has no rifle grip pose — hand attach is the idle stand-in until a rifle ABP lands.
+	 * TP rifle always stays parented to the hand bone (no world-space "shoulder raise" —
+	 * that was reading as stuck on both Quantum and Survival).
 	 */
 	void UpdateWeaponHoldPose();
 
-	/** True when the TP marker should leave the hand and raise to the aim line. */
-	bool ShouldRaiseWeapon() const;
-
-	/** Snap to hand_r with resting grip offsets (idle / not shooting). */
+	/** Snap to resolved hand bone with grip offsets. */
 	void ApplyHandWeaponPose();
 
-	/** World aim-line hold at the shoulder (only while ShouldRaiseWeapon). */
-	void ApplyRaisedWeaponPose();
-
 	/**
-	 * When no AnimBP matches the mesh (Quantum pack), drive idle/walk/run via PlayAnimation
-	 * using that skeleton's sequences. No-op when an AnimInstance is already active.
+	 * Quantum (no matching AnimBP): drive idle/walk/run via AnimSingleNodeInstance.
+	 * Survival keeps ABP_Manny and skips this path.
 	 */
 	void UpdateSequenceLocomotion();
 
-	/** Find a usable weapon attach bone/socket name on the live body (hand_r and common aliases). */
+	/** Find a usable weapon attach bone/socket name on the live body. */
 	FName ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const;
 
 	/** Builds the primitive marker viewmodel (receiver/guard/barrel/stock/mag/grip) under Parent. */
@@ -191,16 +185,13 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
-	// Resting grip in hand bone space (SM_Rifle: local +Y is barrel-forward).
-	// Tuned so the stock sits in the palm — not through the torso / out the back.
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(3.f, -1.5f, 1.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(-5.f, 95.f, 8.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(0.9f);
-	// Fallback when the mesh has no hand bone: mesh-local "in hands" pose (not mesh origin / shoulder).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(15.f, 25.f, 110.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(0.f, 90.f, -10.f);
-	// Raised aim-line offsets from capsule center (only while firing / ADS).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedForward = FVector(28.f, 16.f, 48.f); // along aim X/Y + world Z
+	// Grip in hand bone space (SM_Rifle / olive: local +Y barrel-forward). Mannequin hand_r defaults.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(-2.f, 4.f, 0.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(0.f, 90.f, 0.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(0.85f);
+	// Fallback when the mesh has no hand bone: low "hip-carry" in mesh space (never mesh origin).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(12.f, 28.f, 55.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(10.f, 90.f, -15.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
 	// Optional single-slot overrides (mannequin only). Human models keep authored multi-slot mats.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> Team0BodyMaterial = nullptr;
@@ -221,18 +212,15 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilRecoverSpeed = 11.f;
 	// Local tip of SM_Rifle when barrel-forward is +Y (after TP world yaw -90).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector RifleMuzzleLocalTP = FVector(0.f, 58.f, 4.f);
-	/** Brief raise after remote shot FX so viewers see the marker come up even without ADS rep. */
-	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.35f;
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
 	FVector RecoilOffset = FVector::ZeroVector;       // decays to zero each tick (owner)
 	float   RecoilPitch = 0.f;                        // deg, decays to zero
-	float   WeaponRaiseHoldSec = 0.f;                 // countdown; keeps raised pose after a shot
-	bool    bWeaponInRaisedPose = false;              // last applied pose (hand vs raised)
-	/** Sequence-driven locomotion (0=none/ABP, 1=idle, 2=walk, 3=run). */
+	/** Sequence-driven locomotion (0=none, 1=idle, 2=walk, 3=run). */
 	uint8   SeqLocoState = 0;
-	bool    bSequenceLocoActive = false;              // true when AnimBP was rejected / idle path uses sequences
+	bool    bSequenceLocoActive = false;              // Quantum single-node path
+	FName   CachedWeaponAttachBone = NAME_None;       // resolved once per body
 
 	// ---- Config (04 §1) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;
