@@ -21,10 +21,13 @@
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "TimerManager.h"
 
 namespace
@@ -90,6 +93,48 @@ void APaintForgeGameMode::BeginPlay()
 }
 
 #if !UE_BUILD_SHIPPING
+namespace
+{
+	/** Write a tiny both-team fort into ProjectSavedDir/Arenas so packaged smokes don't depend on host paths. */
+	bool SmokeWriteCommunityArenaSeed()
+	{
+		const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
+		IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+		const FString Path = Dir / TEXT("arena_99999999_smokeseed.json");
+		// Newest-wins loader sorts by name — high timestamp prefix stays on top of empty match dumps.
+		const TCHAR* Json =
+			TEXT("{\n")
+			TEXT("  \"schema\": 1,\n")
+			TEXT("  \"game\": \"PaintForge\",\n")
+			TEXT("  \"matchId\": \"smoke-seed\",\n")
+			TEXT("  \"createdUtc\": \"2026-07-12T00:00:00Z\",\n")
+			TEXT("  \"teamSize\": 2,\n")
+			TEXT("  \"grid\": { \"cellUU\": 400, \"subUU\": 100, \"wallH\": 300, \"cellsX\": 16, \"cellsY\": 10, \"levels\": 4 },\n")
+			TEXT("  \"arenaId\": \"smoke\",\n")
+			TEXT("  \"halfHashA\": \"smoke\",\n")
+			TEXT("  \"halfHashB\": \"smoke\",\n")
+			TEXT("  \"pieces\": [\n")
+			TEXT("    { \"id\": 1, \"t\": 1, \"x\": 8,  \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 2, \"t\": 1, \"x\": 12, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 3, \"t\": 0, \"x\": 8,  \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 4, \"t\": 1, \"x\": 40, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 },\n")
+			TEXT("    { \"id\": 5, \"t\": 1, \"x\": 44, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 },\n")
+			TEXT("    { \"id\": 6, \"t\": 0, \"x\": 40, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 },\n")
+			TEXT("    { \"id\": 7, \"t\": 4, \"x\": 10, \"y\": 18, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 8, \"t\": 4, \"x\": 42, \"y\": 18, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 }\n")
+			TEXT("  ]\n")
+			TEXT("}\n");
+		if (!FFileHelper::SaveStringToFile(Json, *Path))
+		{
+			UE_LOG(PaintForgeLog, Error, TEXT("SMOKE: failed to write arena seed %s"), *Path);
+			return false;
+		}
+		UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: wrote community seed %s (ProjectSavedDir=%s)"),
+			*Path, *FPaths::ProjectSavedDir());
+		return true;
+	}
+}
+
 void APaintForgeGameMode::TickSmokeImprovement()
 {
 	APaintForgeGameState* GS = GetPFGameState();
@@ -134,6 +179,8 @@ void APaintForgeGameMode::TickSmokeImprovement()
 				return;
 			}
 		}
+		// Always re-seed under the runtime ProjectSavedDir (editor vs packaged differ).
+		SmokeWriteCommunityArenaSeed();
 		HostSetMatchType(EPFMatchType::Skirmish);       // team mode so bots fill
 		HostSetBuildMode(EPFBuildMode::Improvement);
 		HostSetFormat(2);                               // small format → faster fill
