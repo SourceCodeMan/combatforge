@@ -17,6 +17,8 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "Framework/Application/SlateApplication.h"
+#include "GameFramework/InputSettings.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "TimerManager.h"
@@ -33,6 +35,19 @@ namespace
 
 void APaintForgePlayerController::SetupInputComponent()
 {
+	// Packaged / -game launches sometimes create a plain UInputComponent despite the plugin
+	// being enabled. Force Enhanced Input before Super so Character bindings can Cast<> it.
+	if (InputComponent && !InputComponent->IsA<UEnhancedInputComponent>())
+	{
+		InputComponent->DestroyComponent();
+		InputComponent = nullptr;
+	}
+	if (InputComponent == nullptr)
+	{
+		InputComponent = NewObject<UEnhancedInputComponent>(this, TEXT("PC_EnhancedInputComponent"));
+		InputComponent->RegisterComponent();
+	}
+
 	Super::SetupInputComponent();
 
 	// All input objects are native NewObjects rooted in UPFInputConfig (02 R1). Built exactly
@@ -46,7 +61,8 @@ void APaintForgePlayerController::SetupInputComponent()
 	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent);
 	if (!EIC || !InputConfig)
 	{
-		UE_LOG(PaintForgeLog, Error, TEXT("PC: EnhancedInputComponent missing - PC-level actions unbound"));
+		UE_LOG(PaintForgeLog, Error, TEXT("PC: EnhancedInputComponent missing - PC-level actions unbound (InputComponent=%s)"),
+			InputComponent ? *InputComponent->GetClass()->GetName() : TEXT("null"));
 		return;
 	}
 
@@ -213,6 +229,8 @@ void APaintForgePlayerController::ApplyInputForPhase()
 	case EPFMatchPhase::Lobby:
 		bWantCommon = true;
 		bWantCombat = true;   // warm-up pen fire live (T21)
+		// Always show a cursor in lobby so match-setup UI is clickable without Tab.
+		// (Tab still toggles the full scoreboard overlay.)
 		break;
 	case EPFMatchPhase::Build:
 		bWantCommon = true;
@@ -260,23 +278,34 @@ void APaintForgePlayerController::ApplyInputForPhase()
 	SyncContext(InputConfig->IMC_Combat, bWantCombat, 1);
 	SyncContext(InputConfig->IMC_Build,  bWantBuild,  1);
 
-	// Input mode + cursor (§4.5). Lobby Tab-hold shows the roster with a cursor (T22).
+	// Input mode + cursor (§4.5). Lobby always GameAndUI so first-time hosts can click
+	// MODE/TYPE/FORMAT without knowing Tab; combat stays GameOnly for look capture.
 	if (bUIOnly)
 	{
 		SetInputMode(FInputModeUIOnly());
 		SetShowMouseCursor(true);
 	}
-	else if (GS->Phase == EPFMatchPhase::Lobby && bScoreboardHeld)
+	else if (GS->Phase == EPFMatchPhase::Lobby)
 	{
 		FInputModeGameAndUI Mode;
 		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		SetInputMode(Mode);
 		SetShowMouseCursor(true);
 	}
 	else
 	{
-		SetInputMode(FInputModeGameOnly());
+		FInputModeGameOnly Mode;
+		Mode.SetConsumeCaptureMouseDown(true);
+		SetInputMode(Mode);
 		SetShowMouseCursor(false);
+	}
+
+	// Standalone -game launches from PowerShell often leave keyboard/mouse focus on the console
+	// window — without this the game looks "frozen" (no look, no keys).
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport(EFocusCause::SetDirectly);
 	}
 
 	ApplyLocalMoveLock(bLocalMoveLock);

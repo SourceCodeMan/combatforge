@@ -65,7 +65,12 @@ Write-Host "==> PaintForge LISTEN host ($Mode) - you play on this machine"
 Write-Host "    Exe:  $Exe"
 Write-Host "    URL:  $ListenUrl"
 Write-Host "    Port: $Port"
+if ($Mode -eq "game-listen") {
+	Write-Host "    Tip: if mouse/keyboard feel frozen, re-run with -PreferEditor"
+}
 Write-JoinBanner -Port $Port
+Write-Host "Click the game window once if keys do nothing (focus)."
+Write-Host ""
 
 Set-Location $WorkDir
 & $Exe @Args
