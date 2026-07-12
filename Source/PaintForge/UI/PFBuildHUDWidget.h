@@ -53,6 +53,8 @@ private:
 	static const TCHAR* DenyReasonText(EPFDenyReason Reason);
 
 	UPROPERTY() TObjectPtr<UTextBlock> TimerText;
+	/** Build-mode callout under the timer (Creative / Improvement / …). */
+	UPROPERTY() TObjectPtr<UTextBlock> ModeBannerText;
 	UPROPERTY() TObjectPtr<UTextBlock> ReadyText;
 	UPROPERTY() TObjectPtr<UTextBlock> BudgetText;
 	UPROPERTY() TObjectPtr<UTextBlock> EquippedText;

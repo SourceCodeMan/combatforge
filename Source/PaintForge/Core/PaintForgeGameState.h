@@ -26,6 +26,8 @@ public:
 	// ---- Replicated state (all registered in GetLifetimeReplicatedProps) ----
 	UPROPERTY(ReplicatedUsing=OnRep_Phase)      EPFMatchPhase Phase = EPFMatchPhase::Lobby;
 	UPROPERTY(Replicated)                       float  PhaseEndServerTime = 0.f;   // 0 = untimed (Lobby)
+	/** Full length of the current phase when it was stamped (server seconds). Vote ring uses this. */
+	UPROPERTY(Replicated)                       float  PhaseDuration = 0.f;
 	UPROPERTY(ReplicatedUsing=OnRep_RoundState) EPFRoundState RoundState = EPFRoundState::None;
 	UPROPERTY(Replicated)                       float  RoundStateEndServerTime = 0.f;
 	UPROPERTY(Replicated)                       uint8  RoundNumber = 0;            // 1-based during Combat
@@ -40,6 +42,8 @@ public:
 	UPROPERTY(Replicated)                       uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count reads this
 	UPROPERTY(Replicated)                       EPFBuildMode BuildMode = EPFBuildMode::Creative;  // build style
 	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Elimination; // objective
+	/** Pieces injected at Lobby→Build (Improvement whole map, or Creative all-bot half). HUD reads this. */
+	UPROPERTY(Replicated)                       uint16 CommunityBasePieces = 0;
 
 	// ---- Client-safe helpers ----
 	float GetPhaseTimeRemaining() const;   // PhaseEndServerTime - GetServerWorldTimeSeconds(), clamped ≥ 0
@@ -66,6 +70,7 @@ public:
 	void ServerSetRoundWinsToTake(uint8 NewWins);            // resolved at Lobby→Build from the format
 	void ServerSetBuildMode(EPFBuildMode NewMode);           // Lobby only (GameMode gates)
 	void ServerSetMatchType(EPFMatchType NewType);           // Lobby only (GameMode gates)
+	void ServerSetCommunityBasePieces(uint16 Count);         // Lobby→Build inject result
 	void ServerResetMatchState();                            // Lobby→Build: wins/feed/tally/round wiped
 
 	// ---- UI subscription points (broadcast from OnReps AND from server setters on host) ----

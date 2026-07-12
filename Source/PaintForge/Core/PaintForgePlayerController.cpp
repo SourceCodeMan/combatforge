@@ -140,6 +140,9 @@ void APaintForgePlayerController::TryBindGameState()
 	bGameStateBound = true;
 
 	// Catch up: join-in-progress must react to the state that already replicated (02 R4).
+	// Seed LastSeenRoundState BEFORE HandleRoundStateChanged so join-into-Live does not
+	// fire a false breakout horn (pre-playtest finding #4).
+	LastSeenRoundState = GS->RoundState;
 	HandlePhaseChanged(GS->Phase);
 	HandleRoundStateChanged(GS->RoundState);
 }
@@ -161,8 +164,12 @@ void APaintForgePlayerController::HandleRoundStateChanged(EPFRoundState NewState
 	}
 	ApplyInputForPhase();
 
-	// Breakout horn stub at freeze → live (T6); local pawn only.
-	if (NewState == EPFRoundState::Live)
+	// Breakout horn only on a real Freeze → Live transition (T6), never on join catch-up
+	// or Live re-broadcasts. Local pawn only.
+	const bool bBreakout = (NewState == EPFRoundState::Live
+		&& LastSeenRoundState == EPFRoundState::Freeze);
+	LastSeenRoundState = NewState;
+	if (bBreakout)
 	{
 		if (APaintForgeCharacter* PFPawn = Cast<APaintForgeCharacter>(GetPawn()))
 		{
@@ -572,6 +579,12 @@ void APaintForgePlayerController::PFType(int32 Type)
 {
 	// "PFType 0=Elimination, 1=FFA, 2=Skirmish, 3=CTF, 4=Domination, 5=Hardpoint" — host, in the lobby.
 	ServerHostSetMatchType(static_cast<uint8>(FMath::Clamp(Type, 0, 5)));
+}
+
+void APaintForgePlayerController::PFForceStart()
+{
+	// Host convenience / smoke: same as Enter force-start in the lobby.
+	ServerHostForceStart();
 }
 
 // ---------------------------------------------------------------------------

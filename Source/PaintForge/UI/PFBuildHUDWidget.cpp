@@ -85,7 +85,21 @@ void UPFBuildHUDWidget::BuildTree()
 		CSlot->SetAutoSize(true);
 	}
 
-	// Per-team ready counts — under the timer.
+	// Build-mode banner — under the timer (Improvement callout is the main one).
+	ModeBannerText = WidgetTree->ConstructWidget<UTextBlock>();
+	ModeBannerText->SetFont(PFBuildFont(14, true));
+	ModeBannerText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.35f)));
+	ModeBannerText->SetJustification(ETextJustify::Center);
+	ModeBannerText->SetText(FText::GetEmpty());
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(ModeBannerText))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
+		CSlot->SetAlignment(FVector2D(0.5f, 0.f));
+		CSlot->SetPosition(FVector2D(0.f, 70.f));
+		CSlot->SetAutoSize(true);
+	}
+
+	// Per-team ready counts — under the mode banner.
 	ReadyText = WidgetTree->ConstructWidget<UTextBlock>();
 	ReadyText->SetFont(PFBuildFont(15, false));
 	ReadyText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.8f)));
@@ -94,7 +108,7 @@ void UPFBuildHUDWidget::BuildTree()
 	{
 		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
 		CSlot->SetAlignment(FVector2D(0.5f, 0.f));
-		CSlot->SetPosition(FVector2D(0.f, 74.f));
+		CSlot->SetPosition(FVector2D(0.f, 94.f));
 		CSlot->SetAutoSize(true);
 	}
 
@@ -137,7 +151,7 @@ void UPFBuildHUDWidget::BuildTree()
 		CSlot->SetAutoSize(true);
 	}
 
-	// Controls hint — bottom left.
+	// Controls hint — bottom left. (Improvement: delete works on team base pieces too.)
 	HintText = WidgetTree->ConstructWidget<UTextBlock>();
 	HintText->SetText(FText::FromString(
 		TEXT("F1-F4 pieces  ·  Q wheel  ·  LMB place  ·  R rotate  ·  X delete  ·  F ready")));
@@ -267,13 +281,45 @@ void UPFBuildHUDWidget::UpdateBudgetText()
 
 void UPFBuildHUDWidget::UpdateReadyCounts()
 {
-	if (!ReadyText)
-	{
-		return;
-	}
 	const UWorld* World = GetWorld();
 	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
 	if (!GS)
+	{
+		return;
+	}
+
+	// Build-mode callout (Improvement is the mode that needs a clear "improve this fort" read).
+	if (ModeBannerText)
+	{
+		FString Banner;
+		if (GS->BuildMode == EPFBuildMode::Improvement)
+		{
+			if (GS->CommunityBasePieces > 0)
+			{
+				Banner = FString::Printf(TEXT("IMPROVEMENT — %d base pieces · add / delete / rebuild"),
+					GS->CommunityBasePieces);
+			}
+			else
+			{
+				Banner = TEXT("IMPROVEMENT — no saved arena yet · empty field (play a match to seed)");
+			}
+		}
+		else if (GS->BuildMode == EPFBuildMode::Creative && GS->CommunityBasePieces > 0)
+		{
+			Banner = FString::Printf(TEXT("CREATIVE — bot half pre-built (%d pieces)"),
+				GS->CommunityBasePieces);
+		}
+		else if (GS->BuildMode == EPFBuildMode::Creative)
+		{
+			Banner = TEXT("CREATIVE — build your fort");
+		}
+		ModeBannerText->SetText(FText::FromString(Banner));
+		ModeBannerText->SetVisibility(Banner.IsEmpty()
+			? ESlateVisibility::Collapsed
+			: ESlateVisibility::HitTestInvisible);
+	}
+
+	if (!ReadyText)
 	{
 		return;
 	}

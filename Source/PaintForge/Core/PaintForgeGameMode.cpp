@@ -21,7 +21,13 @@
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
+#include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "TimerManager.h"
 
 namespace
@@ -71,7 +77,169 @@ void APaintForgeGameMode::BeginPlay()
 		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks in Lobby / menu
 		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
 	}
+
+#if !UE_BUILD_SHIPPING
+	// Deploy/playtest/smoke-improvement.ps1: editor -game -nullrhi -SmokeImprovement
+	if (FParse::Param(FCommandLine::Get(), TEXT("SmokeImprovement")))
+	{
+		bFillWithBots = true;   // need two sides for a normal lobby→build
+		SmokeImprovementStep = 0;
+		SmokeImprovementElapsed = 0.f;
+		GetWorldTimerManager().SetTimer(SmokeImprovementTimer, this,
+			&APaintForgeGameMode::TickSmokeImprovement, 0.5f, true);
+		UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: Improvement path armed (-SmokeImprovement)"));
+	}
+#endif
 }
+
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/** Write a tiny both-team fort into ProjectSavedDir/Arenas so packaged smokes don't depend on host paths. */
+	bool SmokeWriteCommunityArenaSeed()
+	{
+		const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
+		IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+		const FString Path = Dir / TEXT("arena_99999999_smokeseed.json");
+		// Newest-wins loader sorts by name — high timestamp prefix stays on top of empty match dumps.
+		const TCHAR* Json =
+			TEXT("{\n")
+			TEXT("  \"schema\": 1,\n")
+			TEXT("  \"game\": \"PaintForge\",\n")
+			TEXT("  \"matchId\": \"smoke-seed\",\n")
+			TEXT("  \"createdUtc\": \"2026-07-12T00:00:00Z\",\n")
+			TEXT("  \"teamSize\": 2,\n")
+			TEXT("  \"grid\": { \"cellUU\": 400, \"subUU\": 100, \"wallH\": 300, \"cellsX\": 16, \"cellsY\": 10, \"levels\": 4 },\n")
+			TEXT("  \"arenaId\": \"smoke\",\n")
+			TEXT("  \"halfHashA\": \"smoke\",\n")
+			TEXT("  \"halfHashB\": \"smoke\",\n")
+			TEXT("  \"pieces\": [\n")
+			TEXT("    { \"id\": 1, \"t\": 1, \"x\": 8,  \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 2, \"t\": 1, \"x\": 12, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 3, \"t\": 0, \"x\": 8,  \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 4, \"t\": 1, \"x\": 40, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 },\n")
+			TEXT("    { \"id\": 5, \"t\": 1, \"x\": 44, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 },\n")
+			TEXT("    { \"id\": 6, \"t\": 0, \"x\": 40, \"y\": 16, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 },\n")
+			TEXT("    { \"id\": 7, \"t\": 4, \"x\": 10, \"y\": 18, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 0 },\n")
+			TEXT("    { \"id\": 8, \"t\": 4, \"x\": 42, \"y\": 18, \"z\": 0, \"r\": 0, \"own\": 0, \"team\": 1 }\n")
+			TEXT("  ]\n")
+			TEXT("}\n");
+		if (!FFileHelper::SaveStringToFile(Json, *Path))
+		{
+			UE_LOG(PaintForgeLog, Error, TEXT("SMOKE: failed to write arena seed %s"), *Path);
+			return false;
+		}
+		UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: wrote community seed %s (ProjectSavedDir=%s)"),
+			*Path, *FPaths::ProjectSavedDir());
+		return true;
+	}
+}
+
+void APaintForgeGameMode::TickSmokeImprovement()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return;
+	}
+	SmokeImprovementElapsed += 0.5f;
+
+	// Hard timeout — never hang a CI/playtest host.
+	if (SmokeImprovementElapsed > 90.f)
+	{
+		UE_LOG(PaintForgeLog, Error, TEXT("SMOKE: Improvement FAIL (timeout %.0fs, phase=%d, basePieces=%d)"),
+			SmokeImprovementElapsed, static_cast<int32>(GS->Phase), GS->CommunityBasePieces);
+		GetWorldTimerManager().ClearTimer(SmokeImprovementTimer);
+		FGenericPlatformMisc::RequestExit(false);
+		return;
+	}
+
+	switch (SmokeImprovementStep)
+	{
+	case 0:   // Wait for a human host to exist in Lobby, then configure Improvement.
+		if (GS->Phase != EPFMatchPhase::Lobby)
+		{
+			return;
+		}
+		{
+			bool bHaveHost = false;
+			for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(It->Get()))
+				{
+					if (PC->IsLocalController())
+					{
+						bHaveHost = true;
+						break;
+					}
+				}
+			}
+			if (!bHaveHost)
+			{
+				return;
+			}
+		}
+		// Always re-seed under the runtime ProjectSavedDir (editor vs packaged differ).
+		SmokeWriteCommunityArenaSeed();
+		HostSetMatchType(EPFMatchType::Skirmish);       // team mode so bots fill
+		HostSetBuildMode(EPFBuildMode::Improvement);
+		HostSetFormat(2);                               // small format → faster fill
+		UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: configured Improvement + Skirmish 2v2"));
+		SmokeImprovementStep = 1;
+		break;
+
+	case 1:   // Force the lobby countdown once (host path).
+		if (GS->Phase != EPFMatchPhase::Lobby)
+		{
+			SmokeImprovementStep = 2;
+			return;
+		}
+		if (!bLobbyCountdownActive)
+		{
+			HostForceStart();
+			UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: HostForceStart (lobby countdown)"));
+		}
+		if (GS->Phase == EPFMatchPhase::Build || GS->Phase == EPFMatchPhase::Combat)
+		{
+			SmokeImprovementStep = 2;
+		}
+		break;
+
+	case 2:   // Build inject is synchronous at Lobby→Build — assert CommunityBasePieces.
+		if (GS->Phase == EPFMatchPhase::Lobby)
+		{
+			return;   // still counting down
+		}
+		if (GS->Phase == EPFMatchPhase::Build || GS->Phase == EPFMatchPhase::Combat)
+		{
+			const uint16 N = GS->CommunityBasePieces;
+			if (N > 0)
+			{
+				UE_LOG(PaintForgeLog, Warning,
+					TEXT("SMOKE: Improvement PASS (CommunityBasePieces=%d, phase=%d)"),
+					N, static_cast<int32>(GS->Phase));
+			}
+			else
+			{
+				UE_LOG(PaintForgeLog, Error,
+					TEXT("SMOKE: Improvement FAIL (CommunityBasePieces=0 — seed Saved/Arenas or inject broke)"));
+			}
+			SmokeImprovementStep = 3;
+			GetWorldTimerManager().ClearTimer(SmokeImprovementTimer);
+			// Short grace so the log flushes, then exit.
+			FTimerHandle ExitHandle;
+			GetWorldTimerManager().SetTimer(ExitHandle, FTimerDelegate::CreateLambda([]()
+			{
+				FGenericPlatformMisc::RequestExit(false);
+			}), 1.5f, false);
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+#endif
 
 void APaintForgeGameMode::SpawnArenaActors()
 {
@@ -483,21 +651,28 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		}
 		RecountAlive();
 
-		// All-bot team → auto-fill THAT team's half from a community-favorite arena (nobody is there to
-		// build it). Injected here (after bots exist, grid cleared, before FreezeBuild) so it replicates
-		// through the build window and is captured by BeginMatchRecord at Combat. Skipped in Play-only
-		// (which flashes past the build phase).
+		// Community inject (after bots exist, grid cleared, before FreezeBuild) so it replicates
+		// through the build window and is captured by BeginMatchRecord at Combat. Skipped in Play-only.
+		//   Improvement → whole saved arena; both teams improve their half.
+		//   Creative    → only an all-bot team's half is filled (nobody is there to build it).
 		if (BuildGrid && GS->BuildMode != EPFBuildMode::PlayOnly)
 		{
 			if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
 			{
 				if (GS->BuildMode == EPFBuildMode::Improvement)
 				{
-					// Improvement: load the WHOLE community map; everyone builds on top of it.
 					TArray<FPFBuildPieceRec> Whole;
 					if (Rating->PickCommunityArena(Whole))
 					{
 						BuildGrid->ServerInjectPieces(Whole);
+						UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Improvement loaded %d community pieces"),
+							Whole.Num());
+					}
+					else
+					{
+						// No Saved/Arenas/*.json with geometry yet — fall back to empty field (Creative-like).
+						UE_LOG(PaintForgeLog, Warning,
+							TEXT("GameMode: Improvement — no community arena on disk; starting empty"));
 					}
 				}
 				else   // Creative: only an all-bot team's half needs filling
@@ -516,6 +691,13 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 					}
 				}
 			}
+			// Actual injected count after validation skips (invalid team/type filtered in inject).
+			const int32 N = BuildGrid->GetPieces().Num();
+			GS->ServerSetCommunityBasePieces(static_cast<uint16>(FMath::Clamp(N, 0, 65535)));
+		}
+		else
+		{
+			GS->ServerSetCommunityBasePieces(0);
 		}
 
 		// Play-only mode runs all the Build-phase SETUP above (match reset, bots, spawns) but skips the
@@ -744,6 +926,12 @@ void APaintForgeGameMode::HostSetBuildMode(EPFBuildMode NewMode)
 	{
 		return;
 	}
+	// FreeForAll is play-only by design — Creative/Improvement would flash past or confuse the lobby.
+	if (GS->MatchType == EPFMatchType::FreeForAll && NewMode != EPFBuildMode::PlayOnly)
+	{
+		NewMode = EPFBuildMode::PlayOnly;
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: FreeForAll forces PlayOnly build mode"));
+	}
 	GS->ServerSetBuildMode(NewMode);
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set build mode %d"), static_cast<int32>(NewMode));
 }
@@ -819,7 +1007,7 @@ void APaintForgeGameMode::StartNextRound()
 		&APaintForgeGameMode::BeginLiveRound, FreezeDuration, false);
 
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: round %d freeze (%s)"),
-		GS->RoundNumber, bSuddenDeathRoundActive ? TEXT("SUDDEN DEATH") : TEXT("normal"));
+		GS->RoundNumber, bSuddenDeathRoundActive ? TEXT("SHOWDOWN") : TEXT("normal"));
 }
 
 void APaintForgeGameMode::ResetPawnForRound(APaintForgeCharacter* Pawn, APaintForgePlayerState* PS, uint8 RoundHP)

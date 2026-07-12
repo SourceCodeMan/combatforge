@@ -68,15 +68,25 @@ void UPFScoreboardWidget::BuildTree()
 		VSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 
-	// Round context line ("Round 3", sudden death flag).
+	// Mode + unit line ("CAPTURE THE FLAG · first to 3 · CAPTURES").
 	RoundText = WidgetTree->ConstructWidget<UTextBlock>();
-	RoundText->SetFont(PFBoardFont(13, false));
-	RoundText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.6f)));
+	RoundText->SetFont(PFBoardFont(13, true));
+	RoundText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.75f)));
 	RoundText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(RoundText))
 	{
 		VSlot->SetHorizontalAlignment(HAlign_Center);
-		VSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 12.f));
+		VSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 2.f));
+	}
+
+	ScoreUnitText = WidgetTree->ConstructWidget<UTextBlock>();
+	ScoreUnitText->SetFont(PFBoardFont(11, false));
+	ScoreUnitText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
+	ScoreUnitText->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(ScoreUnitText))
+	{
+		VSlot->SetHorizontalAlignment(HAlign_Center);
+		VSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
 	}
 
 	// Roster rows (header + one per PlayerState), rebuilt on poll.
@@ -137,68 +147,110 @@ void UPFScoreboardWidget::RefreshRows()
 		return;
 	}
 
-	// TeamScores modes: Skirmish tags + CTF/Dom/HP objective points. FreeForAll: solo header. Else: round wins.
+	// TeamScores modes: Skirmish tags + CTF/Dom/HP objective points. FreeForAll: YOU / LEAD. Else: round wins.
 	const bool bTeamScores = (GS->MatchType == EPFMatchType::Skirmish
 		|| GS->MatchType == EPFMatchType::CaptureFlag
 		|| GS->MatchType == EPFMatchType::Domination
 		|| GS->MatchType == EPFMatchType::Hardpoint);
 	const bool bFFA = (GS->MatchType == EPFMatchType::FreeForAll);
+
+	uint16 MyTags = 0;
+	uint16 LeadTags = 0;
+	if (bFFA)
+	{
+		if (const APlayerController* PC = GetOwningPlayer())
+		{
+			if (const APaintForgePlayerState* LocalPS = PC->GetPlayerState<APaintForgePlayerState>())
+			{
+				MyTags = LocalPS->TagCount;
+			}
+		}
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			if (const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+			{
+				LeadTags = FMath::Max(LeadTags, PS->TagCount);
+			}
+		}
+	}
+
 	if (WinsAText)
 	{
 		if (bFFA)
 		{
-			WinsAText->SetText(FText::FromString(TEXT("—")));
+			WinsAText->SetText(FText::FromString(FString::Printf(TEXT("%d"), MyTags)));
+			WinsAText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.9f, 0.35f))); // YOU
 		}
 		else
 		{
 			WinsAText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
 				bTeamScores ? static_cast<int32>(GS->TeamScores[0]) : static_cast<int32>(GS->TeamRoundWins[0]))));
+			WinsAText->SetColorAndOpacity(FSlateColor(PFColors::ForTeam(0)));
 		}
 	}
 	if (WinsBText)
 	{
 		if (bFFA)
 		{
-			WinsBText->SetText(FText::FromString(TEXT("—")));
+			WinsBText->SetText(FText::FromString(FString::Printf(TEXT("%d"), LeadTags)));
+			WinsBText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.85f))); // LEAD
 		}
 		else
 		{
 			WinsBText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
 				bTeamScores ? static_cast<int32>(GS->TeamScores[1]) : static_cast<int32>(GS->TeamRoundWins[1]))));
+			WinsBText->SetColorAndOpacity(FSlateColor(PFColors::ForTeam(1)));
 		}
+	}
+
+	// Mode title + score-unit subtitle.
+	FString ModeTitle;
+	FString ScoreUnit;
+	switch (GS->MatchType)
+	{
+	case EPFMatchType::FreeForAll:
+		ModeTitle = TEXT("FREE-FOR-ALL");
+		ScoreUnit = TEXT("YOU  —  LEAD   ·   tags");
+		break;
+	case EPFMatchType::Skirmish:
+		ModeTitle = TEXT("SKIRMISH");
+		ScoreUnit = TEXT("TEAM TAGS");
+		break;
+	case EPFMatchType::CaptureFlag:
+		ModeTitle = TEXT("CAPTURE THE FLAG");
+		ScoreUnit = TEXT("CAPTURES");
+		break;
+	case EPFMatchType::Domination:
+		ModeTitle = TEXT("DOMINATION");
+		ScoreUnit = TEXT("CONTROL POINTS");
+		break;
+	case EPFMatchType::Hardpoint:
+		ModeTitle = TEXT("HARDPOINT");
+		ScoreUnit = TEXT("HARDPOINT SCORE");
+		break;
+	default:
+		ModeTitle = (GS->RoundNumber > 0)
+			? FString::Printf(TEXT("ELIMINATION  ·  ROUND %d"), GS->RoundNumber)
+			: TEXT("ELIMINATION");
+		if (GS->bSuddenDeath) { ModeTitle += TEXT("  ·  SHOWDOWN"); }
+		ScoreUnit = TEXT("ROUND WINS");
+		break;
+	}
+	if (!bFFA && GS->MatchType != EPFMatchType::Elimination && GS->RoundWinsToTake > 0)
+	{
+		ModeTitle += FString::Printf(TEXT("  ·  first to %d"), GS->RoundWinsToTake);
+	}
+	else if (bFFA && GS->RoundWinsToTake > 0)
+	{
+		ModeTitle += FString::Printf(TEXT("  ·  first to %d"), GS->RoundWinsToTake);
 	}
 	if (RoundText)
 	{
-		FString Round;
-		if (bFFA)
-		{
-			Round = TEXT("FREE-FOR-ALL");
-		}
-		else if (GS->MatchType == EPFMatchType::Skirmish)
-		{
-			Round = TEXT("SKIRMISH");
-		}
-		else if (GS->MatchType == EPFMatchType::CaptureFlag)
-		{
-			Round = TEXT("CAPTURE THE FLAG");
-		}
-		else if (GS->MatchType == EPFMatchType::Domination)
-		{
-			Round = TEXT("DOMINATION");
-		}
-		else if (GS->MatchType == EPFMatchType::Hardpoint)
-		{
-			Round = TEXT("HARDPOINT");
-		}
-		else if (GS->RoundNumber > 0)
-		{
-			Round = FString::Printf(TEXT("Round %d"), GS->RoundNumber);
-			if (GS->bSuddenDeath)
-			{
-				Round += TEXT("  ·  SUDDEN DEATH");
-			}
-		}
-		RoundText->SetText(FText::FromString(Round));
+		RoundText->SetText(FText::FromString(ModeTitle));
+	}
+	if (ScoreUnitText)
+	{
+		ScoreUnitText->SetText(FText::FromString(ScoreUnit));
 	}
 
 	// Stable display order: FFA = tags desc; else team A/B then score/elims.
@@ -245,8 +297,9 @@ void UPFScoreboardWidget::RefreshRows()
 		});
 	}
 
-	// Only rebuild the row widgets when something visible actually changed.
-	FString Signature;
+	// Rebuild rows when roster, stats, mode, or team scores change (header is mode-sensitive).
+	FString Signature = FString::Printf(TEXT("m%d|s%d|s%d|t%d|"),
+		static_cast<int32>(GS->MatchType), GS->TeamScores[0], GS->TeamScores[1], GS->RoundWinsToTake);
 	for (const APaintForgePlayerState* PS : Roster)
 	{
 		Signature += FString::Printf(TEXT("%s|%d|%d|%d|%d|%d|%d|%d|%d;"), *PS->GetPlayerName(), PS->TeamId,
@@ -360,9 +413,17 @@ void UPFScoreboardWidget::AddRow(const APaintForgePlayerState* PS)
 		HSlot->SetPadding(FMargin(0.f, 3.f, 10.f, 3.f));
 	}
 
-	// Player name (+ FLAG / ON POINT markers for objective modes).
+	// Player name (+ YOU / FLAG / ON POINT markers).
+	const APaintForgePlayerState* LocalPS =
+		GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<APaintForgePlayerState>() : nullptr;
+	const bool bIsLocal = (LocalPS == PS);
+
 	UTextBlock* NameText = WidgetTree->ConstructWidget<UTextBlock>();
 	FString DisplayName = PS->GetPlayerName();
+	if (bIsLocal)
+	{
+		DisplayName += TEXT("  (you)");
+	}
 	if (PS->bCarryingFlag)
 	{
 		DisplayName += TEXT("  ⚑ FLAG");
@@ -374,11 +435,17 @@ void UPFScoreboardWidget::AddRow(const APaintForgePlayerState* PS)
 		DisplayName += FString::Printf(TEXT("  ·  %s"), PointNames[Idx]);
 	}
 	NameText->SetText(FText::FromString(DisplayName));
-	NameText->SetFont(PFBoardFont(15, false));
-	NameText->SetColorAndOpacity(FSlateColor(
-		PS->bCarryingFlag && PS->CarriedFlagTeam <= 1
-			? PFColors::ForTeam(PS->CarriedFlagTeam)
-			: FLinearColor::White));
+	NameText->SetFont(PFBoardFont(15, bIsLocal));
+	FLinearColor NameColor = FLinearColor::White;
+	if (PS->bCarryingFlag && PS->CarriedFlagTeam <= 1)
+	{
+		NameColor = PFColors::ForTeam(PS->CarriedFlagTeam);
+	}
+	else if (bIsLocal)
+	{
+		NameColor = FLinearColor(1.f, 0.92f, 0.45f);
+	}
+	NameText->SetColorAndOpacity(FSlateColor(NameColor));
 	if (UHorizontalBoxSlot* HSlot = Row->AddChildToHorizontalBox(NameText))
 	{
 		HSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));

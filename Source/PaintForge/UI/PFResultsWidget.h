@@ -13,10 +13,10 @@ class UTextBlock;
 
 /**
  * Results panel (contract §3.6; 15 s Results phase):
- *  - winner banner + final score from GameState TeamRoundWins
- *  - MVP = highest PlayerState MatchScore, eliminations tiebreak
+ *  - winner banner + final score (round wins / tags / captures / control points / FFA tags)
+ *  - mode subtitle (Elimination / CTF / Dom / …) + first-to-N when applicable
+ *  - MVP = highest MatchScore (FFA: TagCount), eliminations tiebreak
  *  - thumb tally + top liked / top disliked category from the replicated VoteTally
- *    (OnVoteTallyChangedEvent)
  *  - arena fingerprint line (computed client-side from the replicated grid)
  *  - host-only "Return to Lobby" button -> PC->ServerHostReturnToLobby (server re-validates)
  */
@@ -47,6 +47,8 @@ private:
 	bool IsLocalHost() const;
 
 	UPROPERTY() TObjectPtr<UTextBlock> WinnerText;
+	/** Match type + unit (e.g. "CAPTURE THE FLAG · captures · first to 3"). */
+	UPROPERTY() TObjectPtr<UTextBlock> ModeText;
 	UPROPERTY() TObjectPtr<UTextBlock> ScoreText;
 	UPROPERTY() TObjectPtr<UTextBlock> MVPText;
 	UPROPERTY() TObjectPtr<UTextBlock> TallyText;

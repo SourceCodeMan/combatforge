@@ -41,6 +41,7 @@ public:
 	UFUNCTION(Exec) void PFFormat(int32 TeamSize);   // "PFFormat 6"
 	UFUNCTION(Exec) void PFMode(int32 Mode);         // "PFMode 2" (Play-only)
 	UFUNCTION(Exec) void PFType(int32 Type);         // "PFType 0" (Elimination)
+	UFUNCTION(Exec) void PFForceStart();             // host: force lobby → match (smoke / playtest)
 	UFUNCTION(Server, Reliable) void ServerSpectateNext(bool bForward); // dead-only; server retargets ViewTarget
 
 	// ---- Cross-package accessors ----
@@ -107,5 +108,7 @@ private:
 	bool bScoreboardHeld = false;
 	bool bPhaseMoveLock = false;        // §4.5 phase/round-state move freeze
 	bool bEliminatedMoveLock = false;   // dead-for-the-round move freeze (each side keeps its copy)
+	/** Last RoundState seen by this local PC — breakout only fires Freeze→Live, not join catch-up. */
+	EPFRoundState LastSeenRoundState = EPFRoundState::None;
 	int32 SpectateIndex = 0;            // server-side cycle cursor into living-teammate list
 };

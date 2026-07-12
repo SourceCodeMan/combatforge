@@ -190,7 +190,7 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetAutoSize(true);
 	}
 
-	// ---- Banner (freeze / intermission / sudden death) ----
+	// ---- Banner (freeze / intermission / showdown) ----
 	BannerText = WidgetTree->ConstructWidget<UTextBlock>();
 	BannerText->SetFont(PFCombatFont(34, true));
 	BannerText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
@@ -639,8 +639,9 @@ void UPFCombatHUDWidget::UpdateBanner(float InDeltaTime)
 	case EPFRoundState::Freeze:
 	{
 		const int32 Secs = FMath::Max(0, FMath::CeilToInt(GS->GetRoundTimeRemaining()));
+		// Non-lethal copy: SHOWDOWN (not "sudden death") — kids/airsoft tone (roadmap M2).
 		Banner = GS->bSuddenDeath
-			? FString::Printf(TEXT("SUDDEN DEATH — %d"), Secs)
+			? FString::Printf(TEXT("SHOWDOWN — %d"), Secs)
 			: FString::Printf(TEXT("GET READY — %d"), Secs);
 		break;
 	}
@@ -652,7 +653,7 @@ void UPFCombatHUDWidget::UpdateBanner(float InDeltaTime)
 		}
 		else if (GS->bSuddenDeath)
 		{
-			Banner = TEXT("SUDDEN DEATH");
+			Banner = TEXT("SHOWDOWN");
 		}
 		break;
 	case EPFRoundState::Intermission:
