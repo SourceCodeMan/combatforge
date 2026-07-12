@@ -250,7 +250,7 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	{
 		Audio->PlayMuzzle();
 	}
-	Char->OnFireCosmetic();   // first-person muzzle flash + viewmodel recoil kick
+	Char->OnFireCosmetic();   // viewmodel recoil only (airsoft — no muzzle flash)
 
 	FPFShotPacket Packet;
 	Packet.Origin = Char->GetMuzzleLocation(false);   // server-muzzle convention (04 §2.2)
@@ -447,7 +447,7 @@ void UPFWeaponComponent::MulticastShotFX_Implementation(FVector_NetQuantize100 O
 		{
 			Audio->PlayMuzzle();
 		}
-		Char->OnRemoteFireCosmetic();   // third-person muzzle flash + world light at the shooter's marker
+		Char->OnRemoteFireCosmetic();   // airsoft: no flash (hook reserved)
 	}
 }
 

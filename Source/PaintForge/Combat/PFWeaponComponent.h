@@ -39,6 +39,9 @@ public:
 	void StopFire();
 	void StartReload();     // manual; also auto-fires on empty (04 §3)
 
+	/** True while the fire button / bot trigger is held (not replicated; local/authority only). */
+	bool WantsFire() const { return bWantsFire; }
+
 	// ---- RPC surface (binding) ----
 	UFUNCTION(Server, Reliable)          void ServerFire(const FPFShotPacket& Shot);
 	UFUNCTION(NetMulticast, Unreliable)  void MulticastShotFX(FVector_NetQuantize100 Origin,

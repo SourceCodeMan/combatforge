@@ -454,6 +454,10 @@ void APFBotController::SetFiring(bool bFire)
 	bFiring = bFire;
 	if (APaintForgeCharacter* Bot = GetBotCharacter())
 	{
+		// ADS while shooting: tighter spread + CMC ADS flag (reads as aiming, not hip-fire).
+		// TP rifle pose is driven by GetBaseAimRotation every tick either way.
+		Bot->SetADS(bFire);
+
 		if (UPFWeaponComponent* Weapon = Bot->GetWeapon())
 		{
 			if (bFire)
