@@ -178,6 +178,8 @@ protected:
 	static bool IsActiveRosterMember(const APaintForgePlayerState* PS);
 	/** Destroy orphaned human PlayerStates that no longer own a Controller. */
 	void ScrubGhostPlayerStates(const APaintForgePlayerState* KeepPS = nullptr);
+	/** Periodic host log line for crash triage (who is connected, phase, scores). */
+	void LogCrashBreadcrumb();
 	uint8 FindFreeRosterIndex() const;
 	void ComputeEffectiveScaling();
 	FPFMatchResult MakeMatchResult(uint8 MatchWinner) const;
@@ -198,7 +200,7 @@ protected:
 	FTimerHandle LobbyCountdownHandle;       // all-ready / force-start 5 s countdown
 	FTimerHandle ObjectiveScoreTimerHandle;  // Dom/HP periodic scoring
 	FTimerHandle HardpointRotateTimerHandle; // Hardpoint slot rotation
-
+	FTimerHandle CrashBreadcrumbTimer;       // 30 s host roster dump for crash triage
 
 	// Effective match scaling (T15), computed at Lobby→Build from connected team sizes:
 	uint8 EffectiveRoundWinsToTake = 4;

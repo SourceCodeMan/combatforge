@@ -95,6 +95,11 @@ void APaintForgeGameMode::BeginPlay()
 		}
 	}
 
+	// Crash triage breadcrumb: periodic roster dump during combat so host logs show who was
+	// connected in the minute before a client vanished (kids "crash with no dialog").
+	GetWorldTimerManager().SetTimer(CrashBreadcrumbTimer, this,
+		&APaintForgeGameMode::LogCrashBreadcrumb, 30.f, /*bLoop=*/true);
+
 	EffectiveRoundWinsToTake = RoundWinsToTakeMatch;
 	EffectiveMaxRounds = MaxRounds;
 	EffectiveRoundDuration = RoundDuration;
@@ -2661,6 +2666,44 @@ bool APaintForgeGameMode::IsActiveRosterMember(const APaintForgePlayerState* PS)
 		return PS->GetOwningController() != nullptr;
 	}
 	return PS->GetPlayerController() != nullptr || PS->GetOwningController() != nullptr;
+}
+
+void APaintForgeGameMode::LogCrashBreadcrumb()
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return;
+	}
+	int32 Humans = 0, Bots = 0, Ghosts = 0;
+	FString Names;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (!PS)
+		{
+			continue;
+		}
+		if (!IsActiveRosterMember(PS))
+		{
+			++Ghosts;
+			continue;
+		}
+		if (PS->IsABot()) { ++Bots; }
+		else
+		{
+			++Humans;
+			if (!Names.IsEmpty()) { Names += TEXT(","); }
+			Names += PS->GetPlayerName();
+		}
+	}
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("CRASH_BC phase=%d round=%d type=%d humans=%d bots=%d ghosts=%d scores=%d-%d alive=%d-%d [%s]"),
+		static_cast<int32>(GS->Phase), GS->RoundNumber, static_cast<int32>(GS->MatchType),
+		Humans, Bots, Ghosts,
+		GS->TeamScores[0], GS->TeamScores[1],
+		GS->AliveCounts[0], GS->AliveCounts[1],
+		*Names);
 }
 
 void APaintForgeGameMode::ScrubGhostPlayerStates(const APaintForgePlayerState* KeepPS)

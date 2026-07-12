@@ -370,7 +370,14 @@ void UPFCharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
 
 FNetworkPredictionData_Client* UPFCharacterMovementComponent::GetPredictionData_Client() const
 {
-	check(PawnOwner != nullptr);
+	// During client teardown / disconnect, the engine can still query prediction data with a null
+	// PawnOwner. A hard check() here hard-crashes kids' clients mid-match with no dialog.
+	if (PawnOwner == nullptr)
+	{
+		UE_LOG(PaintForgeLog, Warning,
+			TEXT("PFCMC::GetPredictionData_Client: PawnOwner null (teardown?) — returning cached data"));
+		return ClientPredictionData;
+	}
 
 	if (ClientPredictionData == nullptr)
 	{
