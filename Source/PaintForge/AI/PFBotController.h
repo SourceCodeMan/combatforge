@@ -7,6 +7,8 @@
 #include "PFBotController.generated.h"
 
 class APaintForgeCharacter;
+class APFControlPointActor;
+class APFFlagActor;
 
 /**
  * Server-only roster-filling bot (contract addendum: bots fill teams to the selected format).
@@ -23,6 +25,16 @@ class APaintForgeCharacter;
  * ethos): acquire the nearest visible enemy, face it, hold a stand-off band with simple strafing,
  * and fire on line-of-sight. Deliberately imperfect (per-acquisition aim error) so bots are beatable.
  */
+
+/** Bot skill preset — scales aim error, reaction time and engage range. Rookie is the kid-test default. */
+UENUM()
+enum class EPFBotSkill : uint8
+{
+	Rookie,        // kids: sloppy aim, slow to notice, shorter engage range
+	Regular,       // the original beatable-but-competent brain
+	Sharpshooter   // tighter aim, faster reaction — adult scrims
+};
+
 UCLASS()
 class PAINTFORGE_API APFBotController : public AAIController
 {
@@ -41,20 +53,48 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float PreferredRangeUU = 1400.f;   // stand-off band centre
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float MinRangeUU = 700.f;          // back up if closer
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float TargetRefreshInterval = 0.4f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimErrorDeg = 3.5f;          // beatable, not laser-accurate
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimErrorDeg = 3.5f;          // beatable, not laser-accurate (ApplySkill overrides)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float StrafeSwitchInterval = 1.8f;
+
+	// Kid-test difficulty: Skill picks the numbers in ApplySkill(); ReactionDelay is the "notice" gap
+	// before a freshly-acquired target may be fired on. Default Rookie = easy bots for the kids' session.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") EPFBotSkill Skill = EPFBotSkill::Rookie;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ReactionDelay = 0.6f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimTurnRate = 2.5f;      // control-rotation ease speed (low = laggy aim, misses strafers)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimJitterInterval = 0.6f;// how often the random aim error is re-rolled
+
+	// Reactive navigation (open arena, sparse player-built cover): whisker length + unstick threshold.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeUU = 320.f;    // forward look-ahead for cover avoidance
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeRadius = 30.f; // sweep radius (~pawn width) for the avoidance probe
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float StuckMoveThresh = 45.f;  // min 2D move per 0.5s before we count as stuck
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
 
 private:
 	APaintForgeCharacter* GetBotCharacter() const;
 	APaintForgeCharacter* AcquireNearestEnemy() const;
 	bool HasLineOfSight(const APaintForgeCharacter* Target) const;
 	void SetFiring(bool bFire);
+	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
+	FVector SteerAvoidingObstacles(const FVector& DesiredDir) const;   // whisker-steer a move dir around cover/walls
+	bool IsTargetEngageable(const APaintForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
+	bool ComputeObjectiveGoal(FVector& OutGoal);   // Dom/Hardpoint/CTF: where to push (false in fight modes)
+	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)
 
 	TWeakObjectPtr<APaintForgeCharacter> CurrentTarget;
 	float TargetRefreshTimer = 0.f;
+	float FireHoldTimer = 0.f;   // counts down after acquiring a NEW target; fire is blocked until <= 0 (reaction gap)
 	float StrafeTimer = 0.f;
 	float StrafeSign = 1.f;
 	float AimJitterYaw = 0.f;
 	float AimJitterPitch = 0.f;
+	float AimJitterTimer = 0.f;
+	// Reactive-avoidance / unstick state.
+	FVector StuckSamplePos = FVector::ZeroVector;
+	float StuckSampleTimer = 0.f;
+	float EscapeTimer = 0.f;
+	float EscapeSign = 1.f;
+	// Objective-mode targets (Domination / Hardpoint / CTF), cached once per match.
+	TArray<TWeakObjectPtr<APFControlPointActor>> ControlPointsCache;
+	TArray<TWeakObjectPtr<APFFlagActor>> FlagsCache;
 	bool  bFiring = false;
 };
