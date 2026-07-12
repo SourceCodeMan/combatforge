@@ -6,14 +6,15 @@
 #include "Components/ActorComponent.h"
 #include "PFCombatAudio.generated.h"
 
+class USoundBase;
 class USoundWaveProcedural;
 class USoundAttenuation;
 class USoundConcurrency;
 
 /**
  * Combat audio hooks (04 §4, contract §3.4). Non-replicated — every call site is already
- * client-correct. Bodies synthesize short one-shots at runtime (no marketplace packs);
- * callers stay untouched.
+ * client-correct. Prefers Free_Sounds_Pack cues when present; falls back to procedural
+ * one-shots so a checkout without the pack still has audio.
  *
  * Call-site map:
  *   PlayHitmarker()     — UPFCombatFeedbackWidget on hit confirm
@@ -42,15 +43,23 @@ private:
 	bool CanPlay() const;
 	void EnsureSounds();
 
-	/** Queue cached PCM into a procedural wave and play 2D. */
-	void PlayUI(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm, float Volume, float Pitch);
-
-	/** Queue cached PCM and play 3D at owner muzzle (or actor location). */
-	void PlayWorld(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm, float Volume, float Pitch,
-	               USoundConcurrency* Concurrency);
+	/** Prefer imported cue; else procedural PCM. */
+	void PlayUI(USoundBase* Preferred, USoundWaveProcedural* Wave, const TArray<uint8>& Pcm,
+		float Volume, float Pitch);
+	void PlayWorld(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/, const TArray<uint8>& Pcm,
+		float Volume, float Pitch, USoundConcurrency* Concurrency);
 
 	static void QueuePcm(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm);
 
+	// Imported Free_Sounds_Pack cues (null if pack missing).
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueHitmarker;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueElim;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueMuzzle;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueSplatIncoming;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueBreakout;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueDenied;
+
+	// Procedural fallbacks.
 	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndHitmarker;
 	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndElim;
 	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndMuzzle;
@@ -61,7 +70,6 @@ private:
 	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> CombatAttenuation;
 	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> MuzzleConcurrency;
 
-	// Raw little-endian int16 mono PCM (byte buffers for QueueAudio).
 	TArray<uint8> PcmHitmarker;
 	TArray<uint8> PcmElim;
 	TArray<uint8> PcmMuzzle;

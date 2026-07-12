@@ -9,6 +9,7 @@
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundAttenuation.h"
+#include "Sound/SoundBase.h"
 #include "Sound/SoundConcurrency.h"
 #include "Sound/SoundWaveProcedural.h"
 
@@ -180,6 +181,24 @@ void UPFCombatAudio::EnsureSounds()
 	}
 	bSoundsReady = true;
 
+	// Free_Sounds_Pack cues (optional). Soft load so a checkout without the pack still boots.
+	auto LoadCue = [](const TCHAR* Path) -> USoundBase*
+	{
+		return LoadObject<USoundBase>(nullptr, Path);
+	};
+	CueHitmarker = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_1-1_Cue.Interface_1-1_Cue"));
+	CueElim = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Special_Collectible_26-1_Cue.Special_Collectible_26-1_Cue"));
+	// Softer airsoft-ish "pop" than a full rifle crack; Sci-Fi gun reads less lethal.
+	CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Sci-Fi_Gun_1-1_Cue.Sci-Fi_Gun_1-1_Cue"));
+	if (CueMuzzle == nullptr)
+	{
+		CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_7-1_Cue.Gunshot_7-1_Cue"));
+	}
+	CueSplatIncoming = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Hit_Generic_5-1_Cue.Hit_Generic_5-1_Cue"));
+	CueBreakout = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Whoosh_4-1_Cue.Whoosh_4-1_Cue"));
+	CueDenied = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_3-3_Cue.Interface_3-3_Cue"));
+
+	// Procedural PCM always built as silent-pack fallback.
 	PcmHitmarker = PackPcm(SynthHitmarker());
 	PcmElim = PackPcm(SynthElim());
 	PcmMuzzle = PackPcm(SynthMuzzle());
@@ -220,12 +239,27 @@ void UPFCombatAudio::EnsureSounds()
 		C.ResolutionRule = EMaxConcurrentResolutionRule::StopFarthestThenPreventNew;
 		C.RetriggerTime = 0.f;
 	}
+
+	UE_LOG(PaintForgeLog, Log, TEXT("[Audio] cues loaded: muzzle=%s hit=%s elim=%s splat=%s"),
+		CueMuzzle ? TEXT("yes") : TEXT("proc"),
+		CueHitmarker ? TEXT("yes") : TEXT("proc"),
+		CueElim ? TEXT("yes") : TEXT("proc"),
+		CueSplatIncoming ? TEXT("yes") : TEXT("proc"));
 }
 
-void UPFCombatAudio::PlayUI(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm,
-	float Volume, float Pitch)
+void UPFCombatAudio::PlayUI(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/,
+	const TArray<uint8>& Pcm, float Volume, float Pitch)
 {
-	if (!CanPlay() || Wave == nullptr || Pcm.Num() == 0)
+	if (!CanPlay())
+	{
+		return;
+	}
+	if (Preferred != nullptr)
+	{
+		UGameplayStatics::PlaySound2D(this, Preferred, Volume, Pitch);
+		return;
+	}
+	if (Pcm.Num() == 0)
 	{
 		return;
 	}
@@ -236,18 +270,13 @@ void UPFCombatAudio::PlayUI(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm
 	UGameplayStatics::PlaySound2D(this, Live, Volume, Pitch);
 }
 
-void UPFCombatAudio::PlayWorld(USoundWaveProcedural* /*Wave*/, const TArray<uint8>& Pcm,
-	float Volume, float Pitch, USoundConcurrency* Concurrency)
+void UPFCombatAudio::PlayWorld(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/,
+	const TArray<uint8>& Pcm, float Volume, float Pitch, USoundConcurrency* Concurrency)
 {
-	if (!CanPlay() || Pcm.Num() == 0)
+	if (!CanPlay())
 	{
 		return;
 	}
-	// Fresh wave per shot so auto-fire concurrency doesn't share one drained FIFO.
-	// Outer=this (component) so GC can't collect mid-play (TransientPackage was risky).
-	const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
-	USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
-	QueuePcm(Wave, Pcm);
 
 	FVector Loc = FVector::ZeroVector;
 	if (const APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetOwner()))
@@ -259,56 +288,68 @@ void UPFCombatAudio::PlayWorld(USoundWaveProcedural* /*Wave*/, const TArray<uint
 		Loc = Owner->GetActorLocation();
 	}
 
-	// 3D first; if attenuation is missing, still hear it as 2D so playtest isn't silent.
+	USoundBase* ToPlay = Preferred;
+	if (ToPlay == nullptr)
+	{
+		if (Pcm.Num() == 0)
+		{
+			return;
+		}
+		const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
+		USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
+		QueuePcm(Wave, Pcm);
+		ToPlay = Wave;
+	}
+
 	if (CombatAttenuation)
 	{
-		UGameplayStatics::SpawnSoundAtLocation(this, Wave, Loc, FRotator::ZeroRotator,
+		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
 			Volume, Pitch, 0.f, CombatAttenuation, Concurrency);
 	}
 	else
 	{
-		UGameplayStatics::PlaySound2D(this, Wave, Volume, Pitch);
+		UGameplayStatics::PlaySound2D(this, ToPlay, Volume, Pitch);
 	}
 }
 
 void UPFCombatAudio::PlayHitmarker()
 {
 	EnsureSounds();
-	PlayUI(SndHitmarker, PcmHitmarker, 1.0f, FMath::FRandRange(0.98f, 1.05f));
+	PlayUI(CueHitmarker, SndHitmarker, PcmHitmarker, 1.0f, FMath::FRandRange(0.98f, 1.05f));
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Hitmarker (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayElim()
 {
 	EnsureSounds();
-	PlayUI(SndElim, PcmElim, 1.0f, 1.f);
+	PlayUI(CueElim, SndElim, PcmElim, 1.0f, 1.f);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Elim (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayMuzzle()
 {
 	EnsureSounds();
-	PlayWorld(SndMuzzle, PcmMuzzle, 1.0f, FMath::FRandRange(0.92f, 1.08f), MuzzleConcurrency);
+	PlayWorld(CueMuzzle, SndMuzzle, PcmMuzzle, 0.85f, FMath::FRandRange(0.92f, 1.08f), MuzzleConcurrency);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Muzzle (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlaySplatIncoming()
 {
 	EnsureSounds();
-	PlayUI(SndSplatIncoming, PcmSplatIncoming, 1.0f, FMath::FRandRange(0.95f, 1.05f));
+	PlayUI(CueSplatIncoming, SndSplatIncoming, PcmSplatIncoming, 1.0f, FMath::FRandRange(0.95f, 1.05f));
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] SplatIncoming (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayBreakout()
 {
 	EnsureSounds();
-	PlayUI(SndBreakout, PcmBreakout, 1.0f, 1.f);
+	PlayUI(CueBreakout, SndBreakout, PcmBreakout, 1.0f, 1.f);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Breakout (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayDenied()
 {
 	EnsureSounds();
-	PlayUI(SndDenied, PcmDenied, 0.85f, 1.f);
+	PlayUI(CueDenied, SndDenied, PcmDenied, 0.85f, 1.f);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Denied (%s)"), *GetNameSafe(GetOwner()));
 }

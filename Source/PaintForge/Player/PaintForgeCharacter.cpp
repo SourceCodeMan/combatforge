@@ -20,6 +20,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -173,48 +174,97 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		}
 	}
 
-	// M1: default the art body to the imported UE Mannequin (Third Person content pack) so the
-	// graybox cubes become a real animated humanoid. .Succeeded() guards keep the graybox fallback
-	// if the pack isn't present. SKM_Manny_Simple is the non-Nanite variant (renders on SM5).
+	// Team models: each team is ONE human mesh for readability.
+	//   Team 0 (blue)  = Quantum operator
+	//   Team 1 (orange)= Survival character
+	// Mannequin pack remains the graybox-friendly fallback if a pack is missing.
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> QuantumBodyFinder(
+		TEXT("/Game/QuantumCharacter/Mesh/SKM_QuantumCharacter.SKM_QuantumCharacter"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> SurvivalBodyFinder(
+		TEXT("/Game/Survival_Character/Meshes/SK_Survival_Character.SK_Survival_Character"));
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinBodyFinder(
 		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> QuinnBodyFinder(
 		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple"));
-	if (MannequinBodyFinder.Succeeded())
-	{
-		ThirdPersonBodyMesh = MannequinBodyFinder.Object;   // fallback body (also team 0)
-		Team0BodyMesh = MannequinBodyFinder.Object;         // team 0 = Manny
-	}
-	// Team 1 = Quinn if present, else fall back to Manny (still tinted distinctly).
-	Team1BodyMesh = QuinnBodyFinder.Succeeded() ? QuinnBodyFinder.Object.Get() : ThirdPersonBodyMesh.Get();
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> QuantumIdleFinder(
+		TEXT("/Game/QuantumCharacter/Demo/Animations/A_MM_Idle.A_MM_Idle"));
+	// AnimStarterPack (UE4 Hero skeleton) — only used if a mesh shares that skeleton later.
+	static ConstructorHelpers::FClassFinder<UAnimInstance> AspAnimFinder(
+		TEXT("/Game/AnimStarterPack/Character/ASP_HeroTPP_AnimBlueprint"));
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannequinAnimFinder(
 		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> OliveRifleFinder(
+		TEXT("/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive"));
+
+	if (QuantumBodyFinder.Succeeded())
+	{
+		Team0BodyMesh = QuantumBodyFinder.Object;
+		ThirdPersonBodyMesh = QuantumBodyFinder.Object;
+		bPreserveAuthoredMaterials = true;   // multi-slot military materials — do not wash
+	}
+	else if (MannequinBodyFinder.Succeeded())
+	{
+		Team0BodyMesh = MannequinBodyFinder.Object;
+		ThirdPersonBodyMesh = MannequinBodyFinder.Object;
+	}
+
+	if (SurvivalBodyFinder.Succeeded())
+	{
+		Team1BodyMesh = SurvivalBodyFinder.Object;
+		bPreserveAuthoredMaterials = true;
+		if (ThirdPersonBodyMesh == nullptr)
+		{
+			ThirdPersonBodyMesh = SurvivalBodyFinder.Object;
+		}
+	}
+	else if (QuinnBodyFinder.Succeeded())
+	{
+		Team1BodyMesh = QuinnBodyFinder.Object;
+	}
+	else
+	{
+		Team1BodyMesh = Team0BodyMesh;
+	}
+
+	if (QuantumIdleFinder.Succeeded())
+	{
+		Team0IdleAnim = QuantumIdleFinder.Object;
+	}
+	// Mannequin ABP only valid on mannequin skeleton (fallback path).
 	if (MannequinAnimFinder.Succeeded())
 	{
-		ThirdPersonAnimClass = MannequinAnimFinder.Class;   // same skeleton -> one anim BP for both teams
+		ThirdPersonAnimClass = MannequinAnimFinder.Class;
 	}
-	// Soft team-tint fallback (used only when native mannequin MIs are missing).
+	if (AspAnimFinder.Succeeded())
+	{
+		// Available for HeroTPP-compatible meshes; not forced onto Quantum/Survival.
+		(void)AspAnimFinder.Class;
+	}
+
+	// Soft team-tint fallback (mannequin / graybox only).
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamBodyMatFinder(
 		TEXT("/Game/Materials/M_PF_TeamBody.M_PF_TeamBody"));
 	if (TeamBodyMatFinder.Succeeded())
 	{
 		TeamBodyMaterial = TeamBodyMatFinder.Object;
 	}
-	// Prefer native mannequin materials so kids see textured Manny/Quinn, not a flat team wash.
+	// Mannequin MIs only applied when NOT preserving authored human materials.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MannyMatFinder(
 		TEXT("/Game/Characters/Mannequins/Materials/Manny/MI_Manny_01_New.MI_Manny_01_New"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> QuinnMatFinder(
 		TEXT("/Game/Characters/Mannequins/Materials/Quinn/MI_Quinn_01.MI_Quinn_01"));
-	if (MannyMatFinder.Succeeded())
+	if (!bPreserveAuthoredMaterials)
 	{
-		Team0BodyMaterial = MannyMatFinder.Object;
+		if (MannyMatFinder.Succeeded()) { Team0BodyMaterial = MannyMatFinder.Object; }
+		if (QuinnMatFinder.Succeeded()) { Team1BodyMaterial = QuinnMatFinder.Object; }
 	}
-	if (QuinnMatFinder.Succeeded())
+
+	// TP weapon: Quantum olive rifle if present, else Lyra SM_Rifle.
+	if (OliveRifleFinder.Succeeded())
 	{
-		Team1BodyMaterial = QuinnMatFinder.Object;
+		WeaponMesh = OliveRifleFinder.Object;
 	}
-	// TP weapon: same SM_Rifle as the FP viewmodel so remote players see a held gun (not a cube).
-	if (RifleMeshFinder.Succeeded())
+	else if (RifleMeshFinder.Succeeded())
 	{
 		WeaponMesh = RifleMeshFinder.Object;
 	}
@@ -688,24 +738,44 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 	}
 
 	GetMesh()->SetSkeletalMeshAsset(Chosen);
-	if (ThirdPersonAnimClass != nullptr)
+
+	// Anim: prefer per-team AnimBP, else skeleton-matched idle loop, else mannequin ABP only
+	// when the mesh is the mannequin pack (wrong ABP on Quantum/Survival = broken pose).
+	UAnimSequence* IdleAnim = (Team == 1) ? Team1IdleAnim.Get() : Team0IdleAnim.Get();
+	TSubclassOf<UAnimInstance> AnimClass = (Team == 1) ? Team1AnimClass : Team0AnimClass;
+	const bool bLooksLikeMannequin = Chosen->GetName().Contains(TEXT("Manny"))
+		|| Chosen->GetName().Contains(TEXT("Quinn"))
+		|| Chosen->GetName().Contains(TEXT("Mannequin"));
+	if (AnimClass == nullptr && bLooksLikeMannequin)
 	{
-		GetMesh()->SetAnimInstanceClass(ThirdPersonAnimClass);
+		AnimClass = ThirdPersonAnimClass;
 	}
-	// Align: face +X (standard ACharacter -90 yaw), feet at the capsule bottom. Use the FEET-AT-ORIGIN
-	// convention (-halfHeight, matching the ctor smoothing baseline). Log only — ensureMsgf can
-	// freeze/assert on Development client builds and looks like a mid-match "crash" to kids.
+
+	GetMesh()->Stop();
+	if (AnimClass != nullptr)
+	{
+		GetMesh()->SetAnimInstanceClass(AnimClass);
+	}
+	else if (IdleAnim != nullptr && IdleAnim->GetSkeleton() != nullptr
+		&& Chosen->GetSkeleton() == IdleAnim->GetSkeleton())
+	{
+		GetMesh()->SetAnimInstanceClass(nullptr);
+		GetMesh()->PlayAnimation(IdleAnim, /*bLooping=*/true);
+	}
+	else
+	{
+		// No matching AnimBP/idle yet (e.g. Survival until retarget). Leave default pose.
+		GetMesh()->SetAnimInstanceClass(nullptr);
+	}
+
+	// Align: face +X (standard ACharacter -90 yaw). Feet at capsule bottom:
+	// relative Z = -halfHeight - meshMinZ (handles pelvis-origin human packs).
 	GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
 	if (const UCapsuleComponent* Cap = GetCapsuleComponent())
 	{
 		const float MeshMinZ = Chosen->GetBounds().GetBox().Min.Z;
-		if (!FMath::IsNearlyZero(MeshMinZ, 2.f))
-		{
-			UE_LOG(PaintForgeLog, Warning,
-				TEXT("Team body %s isn't feet-at-origin (minZ=%.1f); may float on remote screens."),
-				*Chosen->GetName(), MeshMinZ);
-		}
-		GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight()));
+		const float FeetZ = -Cap->GetUnscaledCapsuleHalfHeight() - MeshMinZ;
+		GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, FeetZ));
 	}
 	GetMesh()->SetVisibility(true);
 	GetMesh()->SetHiddenInGame(false);
@@ -919,9 +989,9 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 		HeadMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
 	}
 
-	// Art body: prefer native Manny/Quinn materials (textured characters kids can read as "people").
-	// Fall back to M_PF_TeamBody soft tint only when the pack MIs are missing.
-	if (bUsingArtBody && GetMesh() != nullptr)
+	// Human packs (Quantum / Survival) keep their multi-slot authored materials — team identity
+	// is the model itself. Mannequin/graybox may still take a single-slot tint override.
+	if (bUsingArtBody && GetMesh() != nullptr && !bPreserveAuthoredMaterials)
 	{
 		UMaterialInterface* NativeMat = (TeamId == 1)
 			? (Team1BodyMaterial ? Team1BodyMaterial.Get() : Team0BodyMaterial.Get())

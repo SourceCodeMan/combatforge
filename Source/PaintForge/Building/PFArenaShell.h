@@ -65,8 +65,18 @@ private:
 	                                    const FRotator& RelRot = FRotator::ZeroRotator,
 	                                    bool bCastShadow = false);
 
+	/** Same as MakeShapePart but with an arbitrary static mesh (warehouse props). */
+	UStaticMeshComponent* MakeMeshPart(const FString& Name, UStaticMesh* Mesh, const FVector& Center,
+	                                   const FVector& Scale, EPFShellCollision Mode,
+	                                   UMaterialInterface* Material,
+	                                   const FRotator& RelRot = FRotator::ZeroRotator,
+	                                   bool bCastShadow = false);
+
 	/** Ceiling, trusses, dock bays, wall ribs — all Cosmetic, Z ≥ 1400, off play volume. */
 	void BuildWarehouseDressing();
+
+	/** Place Megascans / warehouse prop meshes along exterior (NoCollision). */
+	void BuildWarehouseProps();
 
 	void ApplyTint(UStaticMeshComponent* Comp, const FLinearColor& Color);
 	void BindToGameState(APaintForgeGameState* GS);
@@ -87,6 +97,11 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> DressingParts;
 
 	UPROPERTY() TObjectPtr<UStaticMesh> CubeMesh;
+	// Warehouse prop meshes (optional; null if Scene_Warehouse not imported).
+	UPROPERTY() TObjectPtr<UStaticMesh> PropBarrelMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropBoxMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropCeilingLightMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropLadderMesh;
 	// Per-role arena art materials (soft CDO load; BasicShapeMaterial fallback).
 	UPROPERTY() TObjectPtr<UMaterialInterface> FloorMaterial;
 	UPROPERTY() TObjectPtr<UMaterialInterface> WallMaterial;
