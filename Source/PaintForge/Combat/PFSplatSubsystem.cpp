@@ -7,11 +7,15 @@
 #include "Core/PaintForgeGameState.h"
 #include "Components/DecalComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/CollisionProfile.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
+#include "UObject/ConstructorHelpers.h"
 #include "UObject/SoftObjectPtr.h"
 
 namespace
@@ -27,11 +31,14 @@ namespace
 	constexpr float JitterMax = 1.35f;
 	constexpr float AspectMin = 0.72f;             // slight stretch → ricochet / scrape variety
 	constexpr float AspectMax = 1.28f;
+	constexpr float PuffSizeUU = 0.09f;            // sphere scale (~9 uu) for dust puff
+	constexpr float PuffNormalOffsetUU = 4.f;
 
-	// Soft path — CDO FObjectFinder is only reliable for /Engine content (playbook §2).
-	// Airsoft impact scuff (not paint). Soft-load — CDO FObjectFinder is /Engine-only reliable.
+	// Soft paths — CDO FObjectFinder is only reliable for /Engine content (playbook §2).
 	TSoftObjectPtr<UMaterialInterface> SplatDecalMatRef(
 		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ImpactMark.M_PF_ImpactMark")));
+	TSoftObjectPtr<UMaterialInterface> ImpactDustMatRef(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ImpactDust.M_PF_ImpactDust")));
 
 	int32 TeamIndex(uint8 Team)
 	{
@@ -41,7 +48,13 @@ namespace
 
 UPFSplatSubsystem::UPFSplatSubsystem()
 {
-	// Material loaded lazily in EnsureInfrastructure (rendering worlds only).
+	// Engine sphere for impact puffs (CDO-safe /Engine path). Materials soft-load in EnsureInfrastructure.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
+		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereFinder.Succeeded())
+	{
+		PuffMesh = SphereFinder.Object;
+	}
 }
 
 bool UPFSplatSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
@@ -102,11 +115,17 @@ void UPFSplatSubsystem::SpawnConfirmedSplat(const FVector& Loc, const FVector& N
 			break;
 		}
 	}
+	const bool bReconciledPending = (Slot != INDEX_NONE);
 	if (Slot == INDEX_NONE)
 	{
 		Slot = TakeNextSlot();
 	}
 	PlaceSplat(Slot, Loc, Normal, Team, /*bPending=*/false, /*ShotIndex=*/0);
+	// Dust puff only when this is a new remote/world hit — owning client already puffed on pending.
+	if (!bReconciledPending)
+	{
+		SpawnImpactPuff(Loc, Normal, Team);
+	}
 }
 
 void UPFSplatSubsystem::SpawnPendingSplat(uint32 ShotIndex, const FVector& Loc,
@@ -118,6 +137,7 @@ void UPFSplatSubsystem::SpawnPendingSplat(uint32 ShotIndex, const FVector& Loc,
 	}
 	EnsureInfrastructure();
 	PlaceSplat(TakeNextSlot(), Loc, Normal, Team, /*bPending=*/true, ShotIndex);
+	SpawnImpactPuff(Loc, Normal, Team);   // immediate owning-client hit juice
 }
 
 void UPFSplatSubsystem::ResetPool()
@@ -136,6 +156,20 @@ void UPFSplatSubsystem::ResetPool()
 		M = FSplatMeta();
 	}
 	NextSlot = 0;
+
+	for (int32 i = 0; i < PuffComps.Num(); ++i)
+	{
+		if (UStaticMeshComponent* Comp = PuffComps[i])
+		{
+			Comp->SetVisibility(false);
+		}
+	}
+	for (FPuffMeta& P : PuffMeta)
+	{
+		P = FPuffMeta();
+	}
+	NextPuffSlot = 0;
+
 	UE_LOG(PaintForgeLog, Log, TEXT("Splat pool reset (BuildPhase entry, T20)"));
 }
 
@@ -196,6 +230,11 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 		SplatMeta.SetNum(PoolSize);
 		SplatComps.SetNum(PoolSize);
 	}
+	if (PuffMeta.Num() != PuffPoolSize)
+	{
+		PuffMeta.SetNum(PuffPoolSize);
+		PuffComps.SetNum(PuffPoolSize);
+	}
 
 	if (SplatHolder == nullptr)
 	{
@@ -212,7 +251,7 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 		}
 	}
 
-	// Load /Game decal material on demand (never touch render packages on dedicated servers —
+	// Load /Game materials on demand (never touch render packages on dedicated servers —
 	// EnsureInfrastructure is only called from rendering spawn paths).
 	if (BaseMaterial == nullptr)
 	{
@@ -222,6 +261,10 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 			UE_LOG(PaintForgeLog, Warning,
 				TEXT("Impact decal material missing — run Scripts/gen_splat_decal_material.py"));
 		}
+	}
+	if (DustMaterial == nullptr)
+	{
+		DustMaterial = ImpactDustMatRef.LoadSynchronous();
 	}
 
 	if (ConfirmedMIDs.Num() == 0 && BaseMaterial != nullptr)
@@ -235,6 +278,25 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 			ConfirmedMIDs[T]->SetVectorParameterValue(TEXT("Color"), TeamColor);
 			PendingMIDs[T] = UMaterialInstanceDynamic::Create(BaseMaterial, this);
 			PendingMIDs[T]->SetVectorParameterValue(TEXT("Color"), TeamColor * PendingBrightness);
+		}
+	}
+
+	// Team-tinted dust puffs: warm dust * slight team color (airsoft scuff, not paint).
+	if (PuffMIDs.Num() == 0 && DustMaterial != nullptr)
+	{
+		PuffMIDs.SetNum(2);
+		for (int32 T = 0; T < 2; ++T)
+		{
+			const FLinearColor Team = PFColors::ForTeam(static_cast<uint8>(T));
+			const FLinearColor Dust(
+				0.45f + Team.R * 0.25f,
+				0.40f + Team.G * 0.20f,
+				0.32f + Team.B * 0.15f,
+				1.f);
+			PuffMIDs[T] = UMaterialInstanceDynamic::Create(DustMaterial, this);
+			PuffMIDs[T]->SetVectorParameterValue(TEXT("EmissiveColor"), Dust);
+			PuffMIDs[T]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.85f);
+			PuffMIDs[T]->SetVectorParameterValue(TEXT("Color"), Dust);
 		}
 	}
 }
@@ -315,6 +377,78 @@ void UPFSplatSubsystem::PlaceSplat(int32 Index, const FVector& Loc, const FVecto
 	M.Team = Team;
 }
 
+UStaticMeshComponent* UPFSplatSubsystem::GetOrCreatePuffComp(int32 Index)
+{
+	if (!PuffComps.IsValidIndex(Index) || SplatHolder == nullptr)
+	{
+		return nullptr;
+	}
+	UStaticMeshComponent* Comp = PuffComps[Index];
+	if (!IsValid(Comp))
+	{
+		Comp = NewObject<UStaticMeshComponent>(SplatHolder);
+		if (PuffMesh != nullptr)
+		{
+			Comp->SetStaticMesh(PuffMesh);
+		}
+		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Comp->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+		Comp->SetCastShadow(false);
+		Comp->SetVisibility(false);
+		Comp->SetUsingAbsoluteScale(true);
+		Comp->RegisterComponent();
+		Comp->AttachToComponent(SplatHolder->GetRootComponent(),
+			FAttachmentTransformRules::KeepWorldTransform);
+		PuffComps[Index] = Comp;
+	}
+	return Comp;
+}
+
+void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Normal, uint8 Team)
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || DustMaterial == nullptr)
+	{
+		return;
+	}
+	if (PuffMeta.Num() != PuffPoolSize)
+	{
+		PuffMeta.SetNum(PuffPoolSize);
+		PuffComps.SetNum(PuffPoolSize);
+	}
+
+	const int32 Slot = NextPuffSlot;
+	NextPuffSlot = (NextPuffSlot + 1) % PuffPoolSize;
+
+	UStaticMeshComponent* Comp = GetOrCreatePuffComp(Slot);
+	if (Comp == nullptr)
+	{
+		return;
+	}
+
+	const int32 TIdx = TeamIndex(Team);
+	if (PuffMIDs.IsValidIndex(TIdx) && PuffMIDs[TIdx] != nullptr)
+	{
+		Comp->SetMaterial(0, PuffMIDs[TIdx]);
+	}
+
+	FVector SafeNormal = Normal.GetSafeNormal();
+	if (SafeNormal.IsNearlyZero())
+	{
+		SafeNormal = FVector::UpVector;
+	}
+	const float Size = PuffSizeUU * FMath::FRandRange(0.75f, 1.35f);
+	// Flatten slightly along the surface normal so it reads as a dust burst, not a ball.
+	const FQuat Align = FRotationMatrix::MakeFromZ(SafeNormal).ToQuat();
+	Comp->SetWorldLocationAndRotation(Loc + SafeNormal * PuffNormalOffsetUU, Align.Rotator());
+	Comp->SetWorldScale3D(FVector(Size * 1.4f, Size * 1.4f, Size * 0.55f));
+	Comp->SetVisibility(true);
+
+	FPuffMeta& P = PuffMeta[Slot];
+	P.bActive = true;
+	P.HideAt = World->GetTimeSeconds() + PuffLifetimeSec;
+}
+
 void UPFSplatSubsystem::TickPendingExpiry()
 {
 	const UWorld* World = GetWorld();
@@ -340,6 +474,23 @@ void UPFSplatSubsystem::TickPendingExpiry()
 				}
 			}
 			M = FSplatMeta();
+		}
+	}
+
+	// Hide expired dust puffs (mesh pool, no fade needed — already a short flash).
+	for (int32 i = 0; i < PuffMeta.Num(); ++i)
+	{
+		FPuffMeta& P = PuffMeta[i];
+		if (P.bActive && Now >= P.HideAt)
+		{
+			if (UStaticMeshComponent* Comp = PuffComps.IsValidIndex(i) ? PuffComps[i].Get() : nullptr)
+			{
+				if (IsValid(Comp))
+				{
+					Comp->SetVisibility(false);
+				}
+			}
+			P = FPuffMeta();
 		}
 	}
 }

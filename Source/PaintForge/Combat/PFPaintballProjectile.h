@@ -26,8 +26,8 @@ class UPFWeaponComponent;
  *    then parks back in the per-client pool of 64 (lives on UPFSplatSubsystem — intra).
  *
  * Ballistics: 10,000 uu/s, gravity ×0.35, life 2.0 s, r=7 uu sphere, no bounce/penetration,
- * no inherited shooter velocity (04 §2.2). Visual: engine sphere scaled 0.14, emissive-boosted
- * team MID (Color ×3) so the ball reads as a tracer.
+ * no inherited shooter velocity (04 §2.2). Visual: elongated engine sphere tracer, emissive-boosted
+ * team MID (Color ×~5.5) for airsoft BB trail readability.
  */
 UCLASS()
 class PAINTFORGE_API APFPaintballProjectile : public AActor

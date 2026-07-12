@@ -22,8 +22,10 @@
 
 namespace
 {
-	constexpr float BallVisualScale = 0.14f;   // 14 cm diameter tracer (04 §2.2)
-	constexpr float EmissiveBoost = 3.f;       // over-unity Color = tracer read (04 §2.2)
+	// Elongated tracer along velocity (+X with bRotationFollowsVelocity) — more readable BB trail.
+	constexpr float TracerLenScale = 0.30f;    // ~30 uu long
+	constexpr float TracerRadScale = 0.11f;    // ~11 uu diameter
+	constexpr float EmissiveBoost = 5.5f;      // hot team tracer read (04 §2.2)
 }
 
 APFPaintballProjectile::APFPaintballProjectile()
@@ -52,7 +54,8 @@ APFPaintballProjectile::APFPaintballProjectile()
 	BallMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BallMesh->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
 	BallMesh->SetCastShadow(false);
-	BallMesh->SetRelativeScale3D(FVector(BallVisualScale));
+	// Stretch along +X (flight direction when Movement->bRotationFollowsVelocity).
+	BallMesh->SetRelativeScale3D(FVector(TracerLenScale, TracerRadScale, TracerRadScale));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
 		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
