@@ -12,10 +12,9 @@ class UVerticalBox;
 
 /**
  * Hold-Tab scoreboard overlay (contract §3.6): one row per PlayerState — name, team color chip,
- * eliminations, times eliminated, match score, alive dot — under the team round-win score line.
- * Visibility is driven by UPFRootHUDWidget from the PC's IA_Scoreboard hold state
- * (IsScoreboardHeld / OnScoreboardHeldChanged); while visible the roster is re-polled every
- * 0.5 s (PlayerArray has no delegate). Display-only: the whole overlay is hit-test invisible.
+ * eliminations, times eliminated, match score (or FFA tags), alive dot — under the mode score line.
+ * Headers adapt to Elimination / Skirmish / CTF / Dom / HP / FFA. FLAG / on-point markers for
+ * objectives. Visibility from UPFRootHUDWidget (Tab hold); roster polled every 0.5 s.
  */
 UCLASS()
 class PAINTFORGE_API UPFScoreboardWidget : public UUserWidget
@@ -40,6 +39,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> WinsAText;
 	UPROPERTY() TObjectPtr<UTextBlock> WinsBText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundText;
+	/** "TAGS" / "CAPTURES" / "POINTS" / "ROUND WINS" under the big score numbers. */
+	UPROPERTY() TObjectPtr<UTextBlock> ScoreUnitText;
 	UPROPERTY() TObjectPtr<UVerticalBox> RowsBox;
 
 	float PollAccum = 0.f;
