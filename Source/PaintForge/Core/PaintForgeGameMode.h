@@ -49,9 +49,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") uint8 DefaultTeamSize      = 4;       // 4 (4v4) or 6 (6v6); bots fill to it
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") bool  bFillWithBots        = true;    // top each team up to the format size
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFBuildMode DefaultBuildMode = EPFBuildMode::Creative;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFMatchType DefaultMatchType = EPFMatchType::Elimination;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 SkirmishTagTarget = 50; // first team to N tags wins (≤255 keeps HUD/record fields consistent)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFMatchType DefaultMatchType = EPFMatchType::Skirmish; // kids' default
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 SkirmishTagTarget = 50; // first team/player to N tags wins (≤255; shared by Skirmish + FFA)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period (Skirmish + FFA)
 
 	// ---- The only phase mutator in the codebase ----
 	void SetPhase(EPFMatchPhase NewPhase);            // server; updates GameState, stamps timers, side effects
@@ -96,6 +96,11 @@ protected:
 	void ResolveSkirmishOnTimer();                     // timer expiry: higher tags wins, tie = draw
 	void EndSkirmish(uint8 WinnerTeam);                // 0/1 winner, 255 = draw → Combat→Vote jump
 	void CheckSkirmishAbandon();                       // disconnect: end promptly if a whole team leaves
+
+	// ---- (intra) FreeForAll (solo tags; siblings, never touch Elimination / Skirmish paths) ----
+	void ResolveFreeForAllOnTimer();                   // timer: most TagCount wins, tie = draw
+	void EndFreeForAll(uint8 WinnerRosterOrNone);      // roster index of winner, 255 = draw
+	void CheckFreeForAllAbandon();                     // one combatant left → they win
 
 	// ---- (intra) lobby / build countdowns ----
 	void BeginLobbyStartCountdown(bool bForced);

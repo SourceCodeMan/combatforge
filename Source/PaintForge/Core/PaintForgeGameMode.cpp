@@ -66,7 +66,7 @@ void APaintForgeGameMode::BeginPlay()
 	{
 		GS->ServerSetTargetTeamSize(DefaultTeamSize);   // 4v4 default; host can switch to 6v6 in Lobby
 		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks in Lobby / menu
-		GS->ServerSetMatchType(DefaultMatchType);       // Elimination default
+		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
 	}
 }
 
@@ -108,14 +108,24 @@ void APaintForgeGameMode::PostLogin(APlayerController* NewPlayer)
 	APaintForgePlayerState* PS = NewPlayer ? NewPlayer->GetPlayerState<APaintForgePlayerState>() : nullptr;
 	if (PS && PS->TeamId == TeamNone)
 	{
-		int32 TeamA = 0, TeamB = 0;
-		GetTeamCounts(TeamA, TeamB);
-		// Balance on HUMAN counts, not bot-padded totals — otherwise every mid-match joiner stacks on
-		// team 0 (bots keep the totals equal, so the tie always resolves to 0).
-		const int32 HumansA = TeamA - GetTeamCountByKind(0, /*bBotsOnly=*/true);
-		const int32 HumansB = TeamB - GetTeamCountByKind(1, /*bBotsOnly=*/true);
-		const uint8 NewTeam = (HumansB < HumansA) ? 1 : 0;   // fewer real players; tie → A
-		PS->ServerSetTeam(NewTeam, FindFreeRosterIndex());
+		const APaintForgeGameState* PreGS = GetPFGameState();
+		if (PreGS && PreGS->MatchType == EPFMatchType::FreeForAll)
+		{
+			// Unique combat id (= roster) so B12 never treats two FFA players as teammates.
+			const uint8 Roster = FindFreeRosterIndex();
+			PS->ServerSetTeam(Roster, Roster);
+		}
+		else
+		{
+			int32 TeamA = 0, TeamB = 0;
+			GetTeamCounts(TeamA, TeamB);
+			// Balance on HUMAN counts, not bot-padded totals — otherwise every mid-match joiner stacks on
+			// team 0 (bots keep the totals equal, so the tie always resolves to 0).
+			const int32 HumansA = TeamA - GetTeamCountByKind(0, /*bBotsOnly=*/true);
+			const int32 HumansB = TeamB - GetTeamCountByKind(1, /*bBotsOnly=*/true);
+			const uint8 NewTeam = (HumansB < HumansA) ? 1 : 0;   // fewer real players; tie → A
+			PS->ServerSetTeam(NewTeam, FindFreeRosterIndex());
+		}
 	}
 
 	Super::PostLogin(NewPlayer);
@@ -130,7 +140,9 @@ void APaintForgeGameMode::PostLogin(APlayerController* NewPlayer)
 		// Keep the joined team at/under the format size. Prefer to free a bot slot; if the team is all
 		// humans (no bot to drop), move the joiner to the other side when it has room, so no team
 		// exceeds the format (which would also alias onto the 6 fixed spawn slots).
-		if (bFillWithBots && GetPFGameState() && PS->TeamId <= 1 &&
+		// FreeForAll has no teams — skip the team-size clamp.
+		if (bFillWithBots && GetPFGameState() && GetPFGameState()->MatchType != EPFMatchType::FreeForAll
+			&& PS->TeamId <= 1 &&
 			GetTeamCountByKind(PS->TeamId, /*bBotsOnly=*/false) > GetPFGameState()->TargetTeamSize)
 		{
 			if (GetTeamCountByKind(PS->TeamId, /*bBotsOnly=*/true) > 0)
@@ -187,6 +199,7 @@ void APaintForgeGameMode::Logout(AController* Exiting)
 	RecountAlive();
 	CheckElimVictory();
 	CheckSkirmishAbandon();   // Skirmish: a whole team leaving ends the match (CheckElimVictory no-ops here)
+	CheckFreeForAllAbandon(); // FFA: last combatant standing wins
 	NotifyReadyChangedInternal(ExitingPS);
 	CheckAllVotesIn(ExitingPS);
 }
@@ -207,7 +220,11 @@ void APaintForgeGameMode::RestartPlayer(AController* NewPlayer)
 
 	if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(NewPlayer->GetPawn()))
 	{
-		Pawn->SetTeamColor(PS->TeamId);
+		// Palette is A/B only; FFA unique combat ids map via % 2 (same as PlayerState ApplyTeamColor).
+		if (PS->TeamId != TeamNone)
+		{
+			Pawn->SetTeamColor(static_cast<uint8>(PS->TeamId % 2));
+		}
 
 		// §3.4: GameMode subscribes to the pawn's elimination broadcast (the health component
 		// never calls up into the GameMode). RemoveAll first keeps re-spawns single-bound.
@@ -264,6 +281,21 @@ FTransform APaintForgeGameMode::GetSpawnTransform(const APaintForgePlayerState* 
 
 	const APaintForgeGameState* GS = GetPFGameState();
 	const EPFMatchPhase Phase = GS ? GS->Phase : EPFMatchPhase::Lobby;
+
+	// FreeForAll: free spawns across both team spawn columns (no team half ownership).
+	if (GS && GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		if (Phase == EPFMatchPhase::Lobby)
+		{
+			return ArenaShell->GetWarmupSpawnTransform(
+				FMath::Min<int32>(PS->RosterIndex, PFGrid::MaxRosterSlots - 1));
+		}
+		const int32 FreeIdx = static_cast<int32>(PS->RosterIndex) % (PFGrid::SpawnPointsPerTeam * 2);
+		const uint8 Side = static_cast<uint8>(FreeIdx / PFGrid::SpawnPointsPerTeam);
+		const int32 Slot = FreeIdx % PFGrid::SpawnPointsPerTeam;
+		return ArenaShell->GetTeamSpawnTransform(Side, Slot);
+	}
+
 	const uint8 Team = (PS->TeamId <= 1) ? PS->TeamId : 0;
 	const int32 TeamSlot = GetTeamSlotIndex(PS);
 
@@ -402,6 +434,21 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		// PlayerArray and get spawned/positioned by the same loop as the humans.
 		FillBotsToFormat();
 
+		// FreeForAll: stamp unique combat TeamIds (= roster) on everyone so B12 never blocks tags.
+		if (GS->MatchType == EPFMatchType::FreeForAll)
+		{
+			for (APlayerState* PSBase : GS->PlayerArray)
+			{
+				if (APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+				{
+					if (PS->RosterIndex != 255)
+					{
+						PS->ServerSetTeam(PS->RosterIndex, PS->RosterIndex);
+					}
+				}
+			}
+		}
+
 		for (APlayerState* PSBase : GS->PlayerArray)
 		{
 			APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
@@ -457,7 +504,9 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 
 		// Play-only mode runs all the Build-phase SETUP above (match reset, bots, spawns) but skips the
 		// build TIME — flash straight to Combat. (Creative/Improvement get the full build window.)
-		const bool bPlayOnly = (GS->BuildMode == EPFBuildMode::PlayOnly);
+		// FreeForAll is play-only by nature (solo tags, no build phase).
+		const bool bPlayOnly = (GS->BuildMode == EPFBuildMode::PlayOnly)
+			|| (GS->MatchType == EPFMatchType::FreeForAll);
 		if (bPlayOnly)
 		{
 			GS->ServerSetPhaseEndTime(Now + 0.1f);
@@ -632,6 +681,11 @@ void APaintForgeGameMode::HostCycleTeam(APaintForgePlayerState* Target)
 	{
 		return;
 	}
+	// FreeForAll has no teams (unique combat ids) — team cycle is a no-op.
+	if (GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		return;
+	}
 	const uint8 NewTeam = (Target->TeamId == 0) ? 1 : 0;
 	// Don't overstack a side beyond the format size (also protects the 6 fixed spawn slots per team).
 	if (GetTeamCountByKind(NewTeam, /*bBotsOnly=*/false) >= GS->TargetTeamSize)
@@ -684,6 +738,11 @@ void APaintForgeGameMode::HostSetMatchType(EPFMatchType NewType)
 		return;
 	}
 	GS->ServerSetMatchType(NewType);
+	// FreeForAll is play-only by design — force the build mode so Lobby UI + Lobby→Build agree.
+	if (NewType == EPFMatchType::FreeForAll)
+	{
+		GS->ServerSetBuildMode(EPFBuildMode::PlayOnly);
+	}
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set match type %d"), static_cast<int32>(NewType));
 }
 
@@ -856,7 +915,14 @@ int32 APaintForgeGameMode::GetTeamCountByKind(uint8 Team, bool bBotsOnly) const
 APaintForgePlayerState* APaintForgeGameMode::AddBot(uint8 Team)
 {
 	UWorld* World = GetWorld();
-	if (!World || Team > 1)
+	if (!World)
+	{
+		return nullptr;
+	}
+	// Team modes: Team must be 0/1. FreeForAll ignores Team and assigns a unique combat id.
+	const APaintForgeGameState* GS = GetPFGameState();
+	const bool bFFA = GS && GS->MatchType == EPFMatchType::FreeForAll;
+	if (!bFFA && Team > 1)
 	{
 		return nullptr;
 	}
@@ -876,13 +942,15 @@ APaintForgePlayerState* APaintForgeGameMode::AddBot(uint8 Team)
 	}
 
 	PS->SetIsABot(true);
-	PS->ServerSetTeam(Team, FindFreeRosterIndex());   // same team/roster path as PostLogin
+	const uint8 Roster = FindFreeRosterIndex();
+	// FFA: unique combat TeamId (= roster) so projectile B12 never treats two players as teammates.
+	PS->ServerSetTeam(bFFA ? Roster : Team, Roster);
 	PS->SetPlayerName(FString::Printf(TEXT("Bot %d"), PS->RosterIndex + 1));
 	PS->bAliveInRound = true;
 	// The pawn itself is spawned by the caller's reset loop (RespawnCombatant → RestartPlayer), exactly
 	// like a human — that path also binds Health->OnEliminatedEvent so bot deaths reach the match logic.
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: added bot '%s' (team %d, roster %d)"),
-		*PS->GetPlayerName(), Team, PS->RosterIndex);
+		*PS->GetPlayerName(), PS->TeamId, PS->RosterIndex);
 	return PS;
 }
 
@@ -893,6 +961,33 @@ void APaintForgeGameMode::FillBotsToFormat()
 	{
 		return;
 	}
+
+	// FreeForAll: fill total combatants to 2× format size as individuals (not per-team).
+	if (GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		const int32 TargetTotal = FMath::Clamp<int32>(
+			static_cast<int32>(GS->TargetTeamSize) * 2, 2, PFGrid::MaxRosterSlots);
+		int32 Have = 0;
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			if (Cast<APaintForgePlayerState>(PSBase))
+			{
+				++Have;
+			}
+		}
+		int32 Guard = 0;
+		while (Have < TargetTotal && Guard < PFGrid::MaxRosterSlots)
+		{
+			if (!AddBot(0))   // Team arg ignored for FFA (unique combat id assigned inside)
+			{
+				break;
+			}
+			++Have;
+			++Guard;
+		}
+		return;
+	}
+
 	const int32 Target = FMath::Clamp<int32>(GS->TargetTeamSize, 1, PFGrid::SpawnPointsPerTeam);
 	for (uint8 Team = 0; Team <= 1; ++Team)
 	{
@@ -992,6 +1087,18 @@ void APaintForgeGameMode::BeginLiveRound()
 		return;
 	}
 
+	if (GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		// Solo continuous Live period — same clock as Skirmish, per-player TagCount win.
+		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
+		ApplyServerMoveLocks();
+		GetWorldTimerManager().SetTimer(RoundTimerHandle, this,
+			&APaintForgeGameMode::ResolveFreeForAllOnTimer, SkirmishMatchDuration, false);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: FreeForAll LIVE (%.0f s, first to %d tags)"),
+			SkirmishMatchDuration, SkirmishTagTarget);
+		return;
+	}
+
 	const float Duration = bSuddenDeathRoundActive ? SuddenDeathDuration : EffectiveRoundDuration;
 	GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + Duration);
 	ApplyServerMoveLocks();
@@ -1084,6 +1191,85 @@ void APaintForgeGameMode::CheckSkirmishAbandon()
 	EndSkirmish(Winner);   // clears the round timer + jumps Combat→Vote (double-fire guarded)
 }
 
+void APaintForgeGameMode::ResolveFreeForAllOnTimer()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	// Most tags wins; exact tie → draw.
+	uint16 BestTags = 0;
+	int32 BestCount = 0;
+	uint8 BestRoster = TeamNone;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (!PS || PS->RosterIndex == 255)
+		{
+			continue;
+		}
+		if (PS->TagCount > BestTags)
+		{
+			BestTags = PS->TagCount;
+			BestCount = 1;
+			BestRoster = PS->RosterIndex;
+		}
+		else if (PS->TagCount == BestTags && BestTags > 0)
+		{
+			++BestCount;
+		}
+	}
+	const uint8 Winner = (BestCount == 1 && BestTags > 0) ? BestRoster : TeamNone;
+	EndFreeForAll(Winner);
+}
+
+void APaintForgeGameMode::EndFreeForAll(uint8 WinnerRosterOrNone)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat)
+	{
+		return;   // tag-cap + timer double-fire guard
+	}
+	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
+	PendingMatchWinner = WinnerRosterOrNone;   // roster index, or 255 draw (not a team id)
+	PendingMatchResult = MakeMatchResult(WinnerRosterOrNone);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: FreeForAll over — winner roster %d"),
+		WinnerRosterOrNone);
+	SetPhase(EPFMatchPhase::Vote);
+}
+
+void APaintForgeGameMode::CheckFreeForAllAbandon()
+{
+	// If only one combatant remains connected, they win (others left / never joined).
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::FreeForAll
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	APaintForgePlayerState* Sole = nullptr;
+	int32 Count = 0;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (!PS || PS->RosterIndex == 255)
+		{
+			continue;
+		}
+		++Count;
+		Sole = PS;
+	}
+	if (Count == 1 && Sole)
+	{
+		EndFreeForAll(Sole->RosterIndex);
+	}
+	else if (Count == 0)
+	{
+		EndFreeForAll(TeamNone);
+	}
+}
+
 void APaintForgeGameMode::CheckElimVictory()
 {
 	APaintForgeGameState* GS = GetPFGameState();
@@ -1091,9 +1277,11 @@ void APaintForgeGameMode::CheckElimVictory()
 	{
 		return;
 	}
-	if (RespawnMode == EPFRespawnMode::Respawn || GS->MatchType == EPFMatchType::Skirmish)
+	if (RespawnMode == EPFRespawnMode::Respawn
+		|| GS->MatchType == EPFMatchType::Skirmish
+		|| GS->MatchType == EPFMatchType::FreeForAll)
 	{
-		return;   // respawn variant / Skirmish: resolve on the timer / tag-cap only, never by team-wipe
+		return;   // respawn variant / Skirmish / FFA: resolve on the timer / tag-cap only
 	}
 
 	const uint8 AliveA = GS->AliveCounts[0];
@@ -1239,6 +1427,29 @@ FPFMatchResult APaintForgeGameMode::MakeMatchResult(uint8 MatchWinner) const
 			Result.RoundWinsB = static_cast<uint8>(FMath::Min<int32>(GS->TeamScores[1], 255));
 			Result.RoundsPlayed = 1;
 		}
+		else if (GS->MatchType == EPFMatchType::FreeForAll)
+		{
+			// Pack top-2 TagCounts into RoundWinsA/B for the JSON record; WinnerTeam = roster or 255.
+			uint16 Best = 0, Second = 0;
+			for (APlayerState* PSBase : GS->PlayerArray)
+			{
+				if (const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+				{
+					if (PS->TagCount >= Best)
+					{
+						Second = Best;
+						Best = PS->TagCount;
+					}
+					else if (PS->TagCount > Second)
+					{
+						Second = PS->TagCount;
+					}
+				}
+			}
+			Result.RoundWinsA = static_cast<uint8>(FMath::Min<int32>(Best, 255));
+			Result.RoundWinsB = static_cast<uint8>(FMath::Min<int32>(Second, 255));
+			Result.RoundsPlayed = 1;
+		}
 		else
 		{
 			Result.RoundWinsA = GS->TeamRoundWins[0];
@@ -1248,7 +1459,7 @@ FPFMatchResult APaintForgeGameMode::MakeMatchResult(uint8 MatchWinner) const
 		Result.MatchDurationSec = FMath::RoundToInt32(
 			FMath::Max(0.f, GS->GetServerWorldTimeSeconds() - MatchStartServerTime));
 	}
-	Result.bSuddenDeath = bSuddenDeathPlayed;   // always false in Skirmish
+	Result.bSuddenDeath = bSuddenDeathPlayed;   // always false in Skirmish / FFA
 	return Result;
 }
 
@@ -1331,6 +1542,23 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 			if ((FinalHit.ShooterTeam == 0 ? TagsA : TagsB) >= SkirmishTagTarget)
 			{
 				EndSkirmish(FinalHit.ShooterTeam);
+				return;
+			}
+		}
+		RespawnVictimAtTeamSpawn(Victim);
+		return;
+	}
+
+	// FREE-FOR-ALL: credit the SHOOTER a personal tag (score/elims already booked above), check cap, respawn.
+	// Unique combat TeamIds (= roster) so B12 never treats two players as teammates.
+	if (GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		if (ShooterPS && ShooterPS != VictimPS)
+		{
+			ShooterPS->ServerAddTag();
+			if (ShooterPS->TagCount >= SkirmishTagTarget)
+			{
+				EndFreeForAll(ShooterPS->RosterIndex);
 				return;
 			}
 		}
@@ -1583,6 +1811,7 @@ void APaintForgeGameMode::ResetPlayerMatchStats()
 		{
 			PS->Eliminations = 0;
 			PS->TimesEliminated = 0;
+			PS->TagCount = 0;
 			PS->MatchScore = 0;
 			PS->bHasVoted = false;
 			PS->ForceNetUpdate();
@@ -1681,18 +1910,20 @@ uint8 APaintForgeGameMode::FindFreeRosterIndex() const
 
 void APaintForgeGameMode::ComputeEffectiveScaling()
 {
-	// Skirmish: one continuous timed period, win by tag count — bypass all round scaling. RoundWinsToTake
-	// carries the tag TARGET for the HUD (clamped to its uint8 field; the real win-check uses the uint16).
+	// Skirmish / FreeForAll: one continuous timed period, win by tag count — bypass all round scaling.
+	// RoundWinsToTake carries the tag TARGET for the HUD (clamped to uint8; real win-check uses full value).
 	if (APaintForgeGameState* SkGS = GetPFGameState())
 	{
-		if (SkGS->MatchType == EPFMatchType::Skirmish)
+		if (SkGS->MatchType == EPFMatchType::Skirmish
+			|| SkGS->MatchType == EPFMatchType::FreeForAll)
 		{
 			const uint8 TargetU8 = static_cast<uint8>(FMath::Min<int32>(SkirmishTagTarget, 255));
 			EffectiveRoundWinsToTake = TargetU8;
 			EffectiveMaxRounds = 1;
 			EffectiveRoundDuration = SkirmishMatchDuration;
 			SkGS->ServerSetRoundWinsToTake(TargetU8);
-			UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Skirmish — first to %d tags, %.0f s"),
+			UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s — first to %d tags, %.0f s"),
+				SkGS->MatchType == EPFMatchType::FreeForAll ? TEXT("FreeForAll") : TEXT("Skirmish"),
 				SkirmishTagTarget, SkirmishMatchDuration);
 			return;
 		}

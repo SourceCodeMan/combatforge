@@ -29,6 +29,7 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  PropBudget = 6;
 	UPROPERTY(Replicated)                  uint16 Eliminations = 0;
 	UPROPERTY(Replicated)                  uint16 TimesEliminated = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint16 TagCount = 0;         // FreeForAll per-player tags (also useful HUD)
 	UPROPERTY(Replicated)                  int32  MatchScore = 0;         // T18 scoring
 	UPROPERTY(Replicated)                  FString PlayerGuidHash;        // set via PC on join (T24)
 
@@ -41,6 +42,7 @@ public:
 	bool ServerTrySpendBudget(EPFPieceType Type);      // false if empty; decrements correct pool
 	void ServerRefundBudget(EPFPieceType Type);        // T19: called with the ORIGINAL builder's PS
 	void ServerAddScore(int32 Delta);
+	void ServerAddTag();                               // FreeForAll: ++TagCount + flags refresh
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void PostInitializeComponents() override;

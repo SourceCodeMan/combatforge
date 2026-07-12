@@ -354,6 +354,38 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 		return;
 	}
 
+	if (GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		// Solo leaderboard strip: "YOU N" / "LEAD M" + first-to-N. Pips collapsed.
+		UpdatePipVisibility(0);
+		for (int32 i = 0; i < MaxPips; ++i)
+		{
+			if (PipsA.IsValidIndex(i) && PipsA[i]) { PipsA[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+			if (PipsB.IsValidIndex(i) && PipsB[i]) { PipsB[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+		}
+		if (RoundNumberText)
+		{
+			RoundNumberText->SetText(FText::FromString(FString::Printf(TEXT("FFA · first to %d"), GS->RoundWinsToTake)));
+		}
+		uint16 MyTags = 0;
+		uint16 LeadTags = 0;
+		if (const APaintForgePlayerState* LocalPS =
+			GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<APaintForgePlayerState>() : nullptr)
+		{
+			MyTags = LocalPS->TagCount;
+		}
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			if (const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+			{
+				LeadTags = FMath::Max(LeadTags, PS->TagCount);
+			}
+		}
+		if (AliveTextA) { AliveTextA->SetText(FText::FromString(FString::Printf(TEXT("YOU %d"), MyTags))); }
+		if (AliveTextB) { AliveTextB->SetText(FText::FromString(FString::Printf(TEXT("LEAD %d"), LeadTags))); }
+		return;
+	}
+
 	// Effective wins-to-take is resolved server-side from the format and replicated on GameState
 	// (RoundWinsToTake) — read it directly instead of inferring from the live (bot-padded /
 	// leaver-shrunk) roster size. Never show fewer pips than a team already has wins.
@@ -411,9 +443,9 @@ void UPFCombatHUDWidget::HandleAliveCountsChanged()
 	{
 		return;
 	}
-	if (GS->MatchType == EPFMatchType::Skirmish)
+	if (GS->MatchType == EPFMatchType::Skirmish || GS->MatchType == EPFMatchType::FreeForAll)
 	{
-		return;   // in Skirmish the alive row shows TAG totals (owned by HandleScoreChanged)
+		return;   // tag / FFA leaderboard row is owned by HandleScoreChanged
 	}
 	if (AliveTextA)
 	{
@@ -627,6 +659,12 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 				(GS->RoundState == EPFRoundState::Live && Secs <= 10)
 					? FLinearColor(0.95f, 0.15f, 0.1f)
 					: FLinearColor::White));
+		}
+		// FreeForAll TagCount rides PlayerState OnRep (no GameState score event) — refresh the
+		// YOU/LEAD strip here so clients stay live without a dedicated multicast.
+		if (GS->MatchType == EPFMatchType::FreeForAll)
+		{
+			HandleScoreChanged();
 		}
 	}
 

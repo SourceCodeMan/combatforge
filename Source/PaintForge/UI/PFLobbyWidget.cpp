@@ -44,7 +44,7 @@ namespace
 		switch (Type)
 		{
 		case EPFMatchType::Elimination: return TEXT("Elimination");
-		case EPFMatchType::FreeForAll:  return TEXT("Free-for-All  (soon)");
+		case EPFMatchType::FreeForAll:  return TEXT("Free-for-All");
 		case EPFMatchType::Skirmish:    return TEXT("Skirmish");
 		case EPFMatchType::CaptureFlag: return TEXT("Capture the Flag  (soon)");
 		case EPFMatchType::Domination:  return TEXT("Domination  (soon)");

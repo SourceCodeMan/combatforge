@@ -32,6 +32,7 @@ void APaintForgePlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 	DOREPLIFETIME(APaintForgePlayerState, PropBudget);
 	DOREPLIFETIME(APaintForgePlayerState, Eliminations);
 	DOREPLIFETIME(APaintForgePlayerState, TimesEliminated);
+	DOREPLIFETIME(APaintForgePlayerState, TagCount);
 	DOREPLIFETIME(APaintForgePlayerState, MatchScore);
 	DOREPLIFETIME(APaintForgePlayerState, PlayerGuidHash);
 }
@@ -146,6 +147,17 @@ void APaintForgePlayerState::ServerAddScore(int32 Delta)
 	ForceNetUpdate();
 }
 
+void APaintForgePlayerState::ServerAddTag()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	++TagCount;
+	OnRep_Flags();   // HUD / scoreboard listeners
+	ForceNetUpdate();
+}
+
 void APaintForgePlayerState::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
@@ -161,13 +173,15 @@ void APaintForgePlayerState::HandlePawnSet(APlayerState* /*Player*/, APawn* NewP
 
 void APaintForgePlayerState::ApplyTeamColorToPawn(APawn* InPawn) const
 {
-	if (TeamId > 1)
+	if (TeamId == 255)
 	{
 		return;   // unassigned — leave the default tint until a team lands
 	}
 	if (APaintForgeCharacter* Character = Cast<APaintForgeCharacter>(InPawn))
 	{
-		Character->SetTeamColor(TeamId);
+		// FreeForAll uses unique combat TeamIds (roster slots) so FF-off never blocks tags;
+		// palette still only has A/B — map via % 2 for a mixed look.
+		Character->SetTeamColor(static_cast<uint8>(TeamId % 2));
 	}
 }
 

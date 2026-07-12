@@ -137,22 +137,41 @@ void UPFScoreboardWidget::RefreshRows()
 		return;
 	}
 
-	// Skirmish shows team TAG counts + a SKIRMISH label; Elimination shows round wins + "Round N".
+	// Skirmish: team TAG counts. FreeForAll: solo leaderboard header. Elimination: round wins.
 	const bool bSkirmish = (GS->MatchType == EPFMatchType::Skirmish);
+	const bool bFFA = (GS->MatchType == EPFMatchType::FreeForAll);
 	if (WinsAText)
 	{
-		WinsAText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
-			bSkirmish ? static_cast<int32>(GS->TeamScores[0]) : static_cast<int32>(GS->TeamRoundWins[0]))));
+		if (bFFA)
+		{
+			WinsAText->SetText(FText::FromString(TEXT("—")));
+		}
+		else
+		{
+			WinsAText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
+				bSkirmish ? static_cast<int32>(GS->TeamScores[0]) : static_cast<int32>(GS->TeamRoundWins[0]))));
+		}
 	}
 	if (WinsBText)
 	{
-		WinsBText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
-			bSkirmish ? static_cast<int32>(GS->TeamScores[1]) : static_cast<int32>(GS->TeamRoundWins[1]))));
+		if (bFFA)
+		{
+			WinsBText->SetText(FText::FromString(TEXT("—")));
+		}
+		else
+		{
+			WinsBText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
+				bSkirmish ? static_cast<int32>(GS->TeamScores[1]) : static_cast<int32>(GS->TeamRoundWins[1]))));
+		}
 	}
 	if (RoundText)
 	{
 		FString Round;
-		if (bSkirmish)
+		if (bFFA)
+		{
+			Round = TEXT("FREE-FOR-ALL");
+		}
+		else if (bSkirmish)
 		{
 			Round = TEXT("SKIRMISH");
 		}
@@ -167,7 +186,7 @@ void UPFScoreboardWidget::RefreshRows()
 		RoundText->SetText(FText::FromString(Round));
 	}
 
-	// Stable display order: team A, team B, unassigned; score desc, elims desc, then name.
+	// Stable display order: FFA = tags desc; else team A/B then score/elims.
 	TArray<APaintForgePlayerState*> Roster;
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
@@ -176,29 +195,47 @@ void UPFScoreboardWidget::RefreshRows()
 			Roster.Add(PS);
 		}
 	}
-	Roster.Sort([](const APaintForgePlayerState& A, const APaintForgePlayerState& B)
+	if (bFFA)
 	{
-		if (A.TeamId != B.TeamId)
+		Roster.Sort([](const APaintForgePlayerState& A, const APaintForgePlayerState& B)
 		{
-			return A.TeamId < B.TeamId;
-		}
-		if (A.MatchScore != B.MatchScore)
+			if (A.TagCount != B.TagCount)
+			{
+				return A.TagCount > B.TagCount;
+			}
+			if (A.Eliminations != B.Eliminations)
+			{
+				return A.Eliminations > B.Eliminations;
+			}
+			return A.GetPlayerName() < B.GetPlayerName();
+		});
+	}
+	else
+	{
+		Roster.Sort([](const APaintForgePlayerState& A, const APaintForgePlayerState& B)
 		{
-			return A.MatchScore > B.MatchScore;
-		}
-		if (A.Eliminations != B.Eliminations)
-		{
-			return A.Eliminations > B.Eliminations;
-		}
-		return A.GetPlayerName() < B.GetPlayerName();
-	});
+			if (A.TeamId != B.TeamId)
+			{
+				return A.TeamId < B.TeamId;
+			}
+			if (A.MatchScore != B.MatchScore)
+			{
+				return A.MatchScore > B.MatchScore;
+			}
+			if (A.Eliminations != B.Eliminations)
+			{
+				return A.Eliminations > B.Eliminations;
+			}
+			return A.GetPlayerName() < B.GetPlayerName();
+		});
+	}
 
 	// Only rebuild the row widgets when something visible actually changed.
 	FString Signature;
 	for (const APaintForgePlayerState* PS : Roster)
 	{
-		Signature += FString::Printf(TEXT("%s|%d|%d|%d|%d|%d;"), *PS->GetPlayerName(), PS->TeamId,
-			PS->Eliminations, PS->TimesEliminated, PS->MatchScore, PS->bAliveInRound ? 1 : 0);
+		Signature += FString::Printf(TEXT("%s|%d|%d|%d|%d|%d|%d;"), *PS->GetPlayerName(), PS->TeamId,
+			PS->Eliminations, PS->TimesEliminated, PS->MatchScore, PS->TagCount, PS->bAliveInRound ? 1 : 0);
 	}
 	if (Signature == LastSignature)
 	{
@@ -255,9 +292,13 @@ void UPFScoreboardWidget::AddHeaderRow()
 			HSlot->SetPadding(FMargin(6.f, 0.f));
 		}
 	};
-	AddColLabel(TEXT("ELIM"), NumColWidthPx);
-	AddColLabel(TEXT("OUT"), NumColWidthPx);
-	AddColLabel(TEXT("SCORE"), ScoreColWidthPx);
+	{
+		const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
+		const bool bFFA = GS && GS->MatchType == EPFMatchType::FreeForAll;
+		AddColLabel(bFFA ? TEXT("TAGS") : TEXT("ELIM"), NumColWidthPx);
+		AddColLabel(TEXT("OUT"), NumColWidthPx);
+		AddColLabel(bFFA ? TEXT("ELIM") : TEXT("SCORE"), ScoreColWidthPx);
+	}
 
 	// Alive-dot-column spacer.
 	USizeBox* DotSpacer = WidgetTree->ConstructWidget<USizeBox>();
@@ -283,10 +324,16 @@ void UPFScoreboardWidget::AddRow(const APaintForgePlayerState* PS)
 	}
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 
-	// Team color chip.
+	const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
+	const bool bFFA = GS && GS->MatchType == EPFMatchType::FreeForAll;
+
+	// Team color chip (FFA: palette by combat-id % 2).
 	UImage* Chip = WidgetTree->ConstructWidget<UImage>();
 	Chip->SetBrush(FSlateColorBrush(FLinearColor::White));
-	Chip->SetColorAndOpacity(PS->TeamId <= 1 ? PFColors::ForTeam(PS->TeamId) : FLinearColor(0.4f, 0.4f, 0.4f));
+	{
+		const uint8 TintTeam = (PS->TeamId == 255) ? 255 : static_cast<uint8>(PS->TeamId % 2);
+		Chip->SetColorAndOpacity(TintTeam <= 1 ? PFColors::ForTeam(TintTeam) : FLinearColor(0.4f, 0.4f, 0.4f));
+	}
 	USizeBox* ChipSizer = WidgetTree->ConstructWidget<USizeBox>();
 	ChipSizer->SetWidthOverride(ChipSizePx);
 	ChipSizer->SetHeightOverride(ChipSizePx);
@@ -308,7 +355,7 @@ void UPFScoreboardWidget::AddRow(const APaintForgePlayerState* PS)
 		HSlot->SetVerticalAlignment(VAlign_Center);
 	}
 
-	// Numeric columns: eliminations, times eliminated, match score.
+	// Numeric columns: FFA = tags / out / elims; else elim / out / score.
 	auto AddNumCell = [this, Row](int32 Value, float Width, bool bBold)
 	{
 		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>();
@@ -325,9 +372,18 @@ void UPFScoreboardWidget::AddRow(const APaintForgePlayerState* PS)
 			HSlot->SetPadding(FMargin(6.f, 0.f));
 		}
 	};
-	AddNumCell(PS->Eliminations, NumColWidthPx, false);
-	AddNumCell(PS->TimesEliminated, NumColWidthPx, false);
-	AddNumCell(PS->MatchScore, ScoreColWidthPx, true);
+	if (bFFA)
+	{
+		AddNumCell(PS->TagCount, NumColWidthPx, true);
+		AddNumCell(PS->TimesEliminated, NumColWidthPx, false);
+		AddNumCell(PS->Eliminations, ScoreColWidthPx, false);
+	}
+	else
+	{
+		AddNumCell(PS->Eliminations, NumColWidthPx, false);
+		AddNumCell(PS->TimesEliminated, NumColWidthPx, false);
+		AddNumCell(PS->MatchScore, ScoreColWidthPx, true);
+	}
 
 	// Alive dot (round HP state at PlayerState granularity: in or out this round).
 	UImage* Dot = WidgetTree->ConstructWidget<UImage>();
