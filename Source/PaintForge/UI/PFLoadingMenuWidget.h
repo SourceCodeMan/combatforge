@@ -90,10 +90,16 @@ private:
 	UFUNCTION() void OnMapPagePrev();
 	UFUNCTION() void OnMapPageNext();
 	UFUNCTION() void OnMapAutoClicked();
+	UFUNCTION() void OnQuickStartClicked();
+
+	/** Apply Play-Only + Skirmish + 4v4 + bots + auto map (first-session default). */
+	void ApplyQuickStartPreset();
 
 	UPROPERTY() TObjectPtr<UImage> Backdrop;
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> SubtitleText;
+	UPROPERTY() TObjectPtr<UButton> QuickStartButton;
+	UPROPERTY() TObjectPtr<UTextBlock> QuickStartLabel;
 	UPROPERTY() TObjectPtr<UTextBlock> StatusText;
 	UPROPERTY() TObjectPtr<UProgressBar> ProgressBar;
 	UPROPERTY() TObjectPtr<UButton> EnterButton;

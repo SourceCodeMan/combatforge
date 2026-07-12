@@ -433,6 +433,13 @@ void UPFLobbyWidget::RefreshConfig()
 		}
 		if (!Hint.IsEmpty()) { Hint += TEXT("\n"); }
 		Hint += TEXT("Match setup was chosen on the pre-game menu");
+		if (GS->BuildMode == EPFBuildMode::PlayOnly || GS->BuildMode == EPFBuildMode::Improvement)
+		{
+			if (GS->SelectedCommunityMapLabel.IsEmpty() && GS->SelectedCommunityMapFile.IsEmpty())
+			{
+				Hint += TEXT("\nMap: auto top-ranked (starter seeds if new install)");
+			}
+		}
 		ConfigHintText->SetText(FText::FromString(Hint));
 	}
 }

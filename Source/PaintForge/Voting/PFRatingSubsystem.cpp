@@ -3,6 +3,7 @@
 #include "Voting/PFRatingSubsystem.h"
 
 #include "PaintForge.h"
+#include "Building/PFArenaSeed.h"
 #include "Building/PFArenaSerialization.h"
 
 #include "Dom/JsonValue.h"
@@ -296,6 +297,17 @@ bool UPFRatingSubsystem::ParseArenaFile(const FString& AbsolutePath, const FStri
 	return true;
 }
 
+int32 UPFRatingSubsystem::EnsureSeedArenas() const
+{
+	const UGameInstance* GI = GetGameInstance();
+	const UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (World && World->GetNetMode() == NM_Client)
+	{
+		return 0;
+	}
+	return FPFArenaSeed::EnsureSeedArenas();
+}
+
 void UPFRatingSubsystem::ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMaps, int32 MaxCount) const
 {
 	OutMaps.Reset();
@@ -306,6 +318,9 @@ void UPFRatingSubsystem::ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMa
 	{
 		return;
 	}
+
+	// First-time / empty install: ship playable starter maps.
+	EnsureSeedArenas();
 
 	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
 	TArray<FString> Files;

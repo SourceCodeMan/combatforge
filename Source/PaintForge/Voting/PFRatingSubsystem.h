@@ -94,6 +94,9 @@ public:
 	/** Load a specific Saved/Arenas file by filename (basename only). */
 	bool LoadCommunityArenaByFileName(const FString& FileName, TArray<FPFBuildPieceRec>& OutPieces) const;
 
+	/** Ensure starter community maps exist (first install / empty Arenas folder). */
+	int32 EnsureSeedArenas() const;
+
 private:
 	/** One staged vote (AddVote input, held until CommitMatchRecord). Not a USTRUCT: no GC refs. */
 	struct FPFPendingVote

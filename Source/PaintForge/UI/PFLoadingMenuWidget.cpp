@@ -232,6 +232,7 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	AddHowToLine(Box, TEXT("MODE vs TYPE"), 14, true, Head);
 	AddHowToLine(Box, TEXT("Mode = build style (Creative / Improvement / Play-Only). Type = win condition (Elim, Skirmish, CTF…)."), 12, false, Dim);
 	AddHowToLine(Box, TEXT("Improvement & Play-Only: pick a community map (top 100, 10 per page) on Match Setup."), 12, false, Dim);
+	AddHowToLine(Box, TEXT("QUICK START: Play-Only Skirmish 4v4 with bots on a starter fort — best first session."), 12, false, Dim);
 }
 
 void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
@@ -388,7 +389,33 @@ void UPFLoadingMenuWidget::BuildTree()
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SubtitleText))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 28.f));
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
+	}
+
+	// First-session one-click preset (host): Play-Only Skirmish 4v4 with bots + community map.
+	QuickStartButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("QuickStartBtn"));
+	QuickStartButton->SetBackgroundColor(FLinearColor(1.f, 0.85f, 0.2f, 0.95f));
+	QuickStartButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuickStartClicked);
+	QuickStartLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — first game  ")));
+	QuickStartLabel->SetFont(PFLoadFont(16, true));
+	QuickStartLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.12f, 0.14f)));
+	QuickStartLabel->SetJustification(ETextJustify::Center);
+	QuickStartButton->AddChild(QuickStartLabel);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(QuickStartButton))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+	}
+	UTextBlock* QuickHint = WidgetTree->ConstructWidget<UTextBlock>();
+	QuickHint->SetText(FText::FromString(TEXT("Play-Only · Skirmish · 4v4 · bots · community map")));
+	QuickHint->SetFont(PFLoadFont(12, false));
+	QuickHint->SetColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.62f, 0.68f)));
+	QuickHint->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(QuickHint))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 20.f));
 	}
 
 	// ---- Menu tabs: Match Setup | How to Play ----
@@ -607,10 +634,21 @@ void UPFLoadingMenuWidget::NativeConstruct()
 
 	SeedFromGameState();
 	ReloadMapCatalog();
+	// Host first paint: default UI toward a friendly first session if still Creative default.
+	if (IsLocalHost() && SelectedBuildMode == EPFBuildMode::Creative
+		&& SelectedMatchType == EPFMatchType::Skirmish)
+	{
+		// Soft-default (not force): leave Creative if host already changed via GS.
+		// Only nudge status; Quick Start remains the explicit first-game path.
+	}
 	RefreshSetupLabels();
 	RefreshMapPicker();
 	SelectMenuTab(0);
-	SetStatus(TEXT("Preparing…"));
+	if (QuickStartButton)
+	{
+		QuickStartButton->SetIsEnabled(IsLocalHost());
+	}
+	SetStatus(TEXT("Preparing… · first time? try QUICK START"));
 	UE_LOG(PaintForgeLog, Log, TEXT("LoadingMenu: boot menu up — warmup starting"));
 }
 
@@ -693,6 +731,7 @@ void UPFLoadingMenuWidget::ReloadMapCatalog()
 	{
 		if (UPFRatingSubsystem* Rating = GI->GetSubsystem<UPFRatingSubsystem>())
 		{
+			Rating->EnsureSeedArenas();
 			Rating->ListTopCommunityMaps(MapCatalog, MaxMaps);
 		}
 	}
@@ -890,6 +929,44 @@ void UPFLoadingMenuWidget::ApplyMapSelectionToHost()
 	{
 		PC->ServerHostSetCommunityMap(File, Label);
 	}
+}
+
+void UPFLoadingMenuWidget::ApplyQuickStartPreset()
+{
+	// First-session default: straight into combat with bots on a community fort.
+	SelectedBuildMode = EPFBuildMode::PlayOnly;
+	SelectedMatchType = EPFMatchType::Skirmish;
+	SelectedTeamSize = 4;
+	bSelectedFillBots = true;
+	SelectedMapCatalogIndex = INDEX_NONE;   // auto top-ranked (seeds always available after Ensure)
+	ReloadMapCatalog();
+	// Prefer named starter seed if present so first game is predictable.
+	for (int32 i = 0; i < MapCatalog.Num(); ++i)
+	{
+		if (MapCatalog[i].FileName.Contains(TEXT("seed_starter")))
+		{
+			SelectedMapCatalogIndex = i;
+			break;
+		}
+	}
+	RefreshSetupLabels();
+	ApplySelectionsToHost();
+	ApplyMapSelectionToHost();
+	SetStatus(TEXT("Quick Start ready — press ENTER LOBBY when warm-up finishes."));
+	if (QuickStartLabel)
+	{
+		QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — applied ✓  ")));
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("LoadingMenu: Quick Start preset applied"));
+}
+
+void UPFLoadingMenuWidget::OnQuickStartClicked()
+{
+	if (!IsLocalHost() || bDismissed)
+	{
+		return;
+	}
+	ApplyQuickStartPreset();
 }
 
 void UPFLoadingMenuWidget::OnModeClicked()

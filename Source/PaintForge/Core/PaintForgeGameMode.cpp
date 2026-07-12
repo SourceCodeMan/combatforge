@@ -85,6 +85,12 @@ void APaintForgeGameMode::BeginPlay()
 	Super::BeginPlay();
 	SpawnArenaActors();
 
+	// First install / packaged playtest: ensure starter community maps exist.
+	if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
+	{
+		Rating->EnsureSeedArenas();
+	}
+
 	// NetDriver is often created after InitGame for listen hosts — re-apply timeouts here.
 	if (UWorld* World = GetWorld())
 	{
