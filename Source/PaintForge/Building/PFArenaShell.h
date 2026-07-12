@@ -82,8 +82,33 @@ private:
 	/** Ceiling, trusses, dock bays, wall ribs — all Cosmetic, Z ≥ 1400, off play volume. */
 	void BuildWarehouseDressing();
 
-	/** Place Megascans / warehouse prop meshes along exterior (NoCollision). */
-	void BuildWarehouseProps();
+	/**
+	 * Soft-load Scene_Warehouse Megascans (BeginPlay only — never CDO) and drape real
+	 * structural props outside/above the 64×40 m play rectangle. NoCollision. Falls back
+	 * cleanly when the pack is missing; hides cube stand-ins when real meshes spawn.
+	 */
+	void BuildWarehouseBackdropDrape();
+
+	/** Soft-load warehouse meshes into Prop* slots (idempotent). Returns true if any mesh loaded. */
+	bool SoftLoadWarehouseMeshes();
+
+	/**
+	 * Runtime mesh part (BeginPlay / post-ctor). CreateDefaultSubobject is ctor-only;
+	 * backdrop drapes must use NewObject + RegisterComponent.
+	 */
+	UStaticMeshComponent* MakeRuntimeMeshPart(const FString& Name, UStaticMesh* Mesh,
+	                                          const FVector& Center, const FVector& Scale,
+	                                          EPFShellCollision Mode, UMaterialInterface* Material,
+	                                          const FRotator& RelRot = FRotator::ZeroRotator,
+	                                          bool bCastShadow = false);
+
+	/** Place mesh with bottom on a Z plane (World XY + GroundZ). Scale fitted to TargetSize if non-zero. */
+	UStaticMeshComponent* PlaceBackdropFitted(const FString& Name, UStaticMesh* Mesh,
+	                                          const FVector& WorldXY, float GroundZ,
+	                                          const FVector& TargetSize, const FRotator& YawRot,
+	                                          bool bCastShadow = true);
+
+	void HideCubeDressingByPrefix(const TCHAR* Prefix);
 
 	void ApplyTint(UStaticMeshComponent* Comp, const FLinearColor& Color);
 	void BindToGameState(APaintForgeGameState* GS);
@@ -106,11 +131,16 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> DressingParts;
 
 	UPROPERTY() TObjectPtr<UStaticMesh> CubeMesh;
-	// Warehouse prop meshes (optional; null if Scene_Warehouse not imported).
+	// Soft-loaded warehouse meshes (null if Scene_Warehouse not present). BeginPlay only.
 	UPROPERTY() TObjectPtr<UStaticMesh> PropBarrelMesh;
 	UPROPERTY() TObjectPtr<UStaticMesh> PropBoxMesh;
 	UPROPERTY() TObjectPtr<UStaticMesh> PropCeilingLightMesh;
 	UPROPERTY() TObjectPtr<UStaticMesh> PropLadderMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropBeamMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropBulkheadMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropShelfMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropPalletMesh;
+	UPROPERTY() TObjectPtr<UStaticMesh> PropCabinetMesh;
 	// Per-role arena art materials (soft CDO load; BasicShapeMaterial fallback).
 	UPROPERTY() TObjectPtr<UMaterialInterface> FloorMaterial;
 	UPROPERTY() TObjectPtr<UMaterialInterface> WallMaterial;
@@ -120,4 +150,6 @@ private:
 
 	FDelegateHandle GameStateSetHandle;
 	bool bMapBackdropActive = false;
+	bool bWarehouseMeshesLoaded = false;
+	bool bWarehouseDrapeBuilt = false;
 };

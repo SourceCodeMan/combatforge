@@ -10,9 +10,48 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/SoftObjectPath.h"
+
+namespace
+{
+	// 1 = soft-load Scene_Warehouse meshes and drape exterior (default). 0 = cube dressing only.
+	static TAutoConsoleVariable<int32> CVarWarehouseBackdrop(
+		TEXT("pf.WarehouseBackdrop"),
+		1,
+		TEXT("1 = soft-load warehouse meshes as exterior backdrop drape (NoCollision). 0 = cube dressing only."),
+		ECVF_Default);
+
+	UStaticMesh* SoftLoadStaticMesh(const TCHAR* Path)
+	{
+		if (!Path || !*Path)
+		{
+			return nullptr;
+		}
+		return Cast<UStaticMesh>(FSoftObjectPath(Path).TryLoad());
+	}
+
+	UStaticMesh* SoftLoadFirstMesh(const TCHAR* const* Paths, int32 Count)
+	{
+		for (int32 i = 0; i < Count; ++i)
+		{
+			if (UStaticMesh* M = SoftLoadStaticMesh(Paths[i]))
+			{
+				return M;
+			}
+		}
+		return nullptr;
+	}
+
+	template <int32 N>
+	UStaticMesh* SoftLoadFirstMesh(const TCHAR* const (&Paths)[N])
+	{
+		return SoftLoadFirstMesh(Paths, N);
+	}
+}
 
 namespace
 {
@@ -79,13 +118,18 @@ APFArenaShell::APFArenaShell()
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Tile.M_Tile"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhDemoMetalFinder(
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Metal.M_Metal"));
-	// Heavy Megascans prop meshes are NOT hard-loaded here — first compile freezes PIE for minutes
-	// at ~100% CPU. Shell keeps materials + cube dressing; props can be re-enabled after meshes are built.
+	// Heavy Megascans prop meshes are NOT hard-loaded here — CDO TryLoad freezes PIE for minutes.
+	// Soft-load in BeginPlay via BuildWarehouseBackdropDrape() instead.
 	CubeMesh = CubeFinder.Object;
 	PropBarrelMesh = nullptr;
 	PropBoxMesh = nullptr;
 	PropCeilingLightMesh = nullptr;
 	PropLadderMesh = nullptr;
+	PropBeamMesh = nullptr;
+	PropBulkheadMesh = nullptr;
+	PropShelfMesh = nullptr;
+	PropPalletMesh = nullptr;
+	PropCabinetMesh = nullptr;
 
 	UMaterialInterface* const Basic = BasicMatFinder.Succeeded() ? BasicMatFinder.Object.Get() : nullptr;
 	UMaterialInterface* const GenFloor = FloorFinder.Succeeded() ? FloorFinder.Object.Get() : Basic;
@@ -189,9 +233,8 @@ APFArenaShell::APFArenaShell()
 		FVector(PenCenterX + PenHalf - 10.f, PenCenterY, PenWallH * 0.5f), FVector(0.2f, 20.f, 3.f),
 		EPFShellCollision::Solid, WallMaterial));
 
-	// --- Cosmetic CQB warehouse shell (no collision, above height cap) ---
+	// --- Cosmetic CQB warehouse shell (cube frame; real Megascans drape in BeginPlay) ---
 	BuildWarehouseDressing();
-	BuildWarehouseProps();
 }
 
 void APFArenaShell::BuildWarehouseDressing()
@@ -375,43 +418,245 @@ void APFArenaShell::BuildWarehouseDressing()
 	}
 }
 
-void APFArenaShell::BuildWarehouseProps()
+bool APFArenaShell::SoftLoadWarehouseMeshes()
 {
-	// Real Megascans props — all Cosmetic, placed outside the solid play volume so they never
-	// steal BuildTrace snaps or block movement. No-ops cleanly if the pack is missing.
-
-	// Barrels along the exterior long walls (outside Y bounds).
-	if (PropBarrelMesh)
+	if (bWarehouseMeshesLoaded)
 	{
+		return PropBarrelMesh || PropBoxMesh || PropBeamMesh || PropBulkheadMesh
+			|| PropShelfMesh || PropCeilingLightMesh || PropLadderMesh;
+	}
+	bWarehouseMeshesLoaded = true;
+
+	// Paths mirror Content/Scene_Warehouse; first success wins. Safe no-op if pack missing.
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Aba_Storage_Barrel_Metal_Blue_01/SM_Ind_Aba_Storage_Barrel_Metal_Blue_01.SM_Ind_Aba_Storage_Barrel_Metal_Blue_01"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Barrel_Plastic_Blue_01/SM_Ind_War_Storage_Barrel_Plastic_Blue_01.SM_Ind_War_Storage_Barrel_Plastic_Blue_01"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Sto_Barrel_Metal_Rust_03/SM_Ind_Sto_Barrel_Metal_Rust_03.SM_Ind_Sto_Barrel_Metal_Rust_03"),
+		};
+		PropBarrelMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Box_Cardboard_Set_01/SM_Ind_War_Storage_Box_Cardboard_Set_01_A.SM_Ind_War_Storage_Box_Cardboard_Set_01_A"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Box_Cardboard_Set_02/SM_Ind_War_Storage_Box_Cardboard_Set_02_A.SM_Ind_War_Storage_Box_Cardboard_Set_02_A"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Box_Cardboard_Worn_02/SM_Ind_War_Storage_Box_Cardboard_Worn_02.SM_Ind_War_Storage_Box_Cardboard_Worn_02"),
+		};
+		PropBoxMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Light_Ceiling_Metal_Hanging_01/SM_Ind_War_Light_Ceiling_Metal_Hanging_01.SM_Ind_War_Light_Ceiling_Metal_Hanging_01"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Light_Ceiling_Metal_Hanging_02/SM_Ind_War_Light_Ceiling_Metal_Hanging_02.SM_Ind_War_Light_Ceiling_Metal_Hanging_02"),
+		};
+		PropCeilingLightMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Equipment_Ladder_Metal_03/SM_Ind_War_Equipment_Ladder_Metal_03.SM_Ind_War_Equipment_Ladder_Metal_03"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Equipment_Ladder_Metal_Worn_01/SM_Ind_War_Equipment_Ladder_Metal_Worn_01.SM_Ind_War_Equipment_Ladder_Metal_Worn_01"),
+		};
+		PropLadderMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Con_Supplies_Beam_Metal_Rusty_01/SM_Ind_Con_Supplies_Beam_Metal_Rusty_01.SM_Ind_Con_Supplies_Beam_Metal_Rusty_01"),
+		};
+		PropBeamMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Bulkhead_Metal_Caged_01/SM_Ind_War_Bulkhead_Metal_Caged_01.SM_Ind_War_Bulkhead_Metal_Caged_01"),
+		};
+		PropBulkheadMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Pallet_Shelf_Metal_Modular_01/SM_Ind_War_Pallet_Shelf_Metal_Modular_01_A.SM_Ind_War_Pallet_Shelf_Metal_Modular_01_A"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Shelf_Metal_Rusted_02/SM_Ind_War_Storage_Shelf_Metal_Rusted_02.SM_Ind_War_Storage_Shelf_Metal_Rusted_02"),
+		};
+		PropShelfMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Pallet_Wood_Worn_01/SM_Ind_War_Storage_Pallet_Wood_Worn_01.SM_Ind_War_Storage_Pallet_Wood_Worn_01"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Pallet_Wood_Worn_04/SM_Ind_War_Storage_Pallet_Wood_Worn_04.SM_Ind_War_Storage_Pallet_Wood_Worn_04"),
+		};
+		PropPalletMesh = SoftLoadFirstMesh(Paths);
+	}
+	{
+		const TCHAR* Paths[] = {
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Cabinet_Metal_Rusty_01/SM_Ind_War_Storage_Cabinet_Metal_Rusty_01.SM_Ind_War_Storage_Cabinet_Metal_Rusty_01"),
+			TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Cabinet_Electric_Metal_Dirty_01/SM_Ind_War_Cabinet_Electric_Metal_Dirty_01.SM_Ind_War_Cabinet_Electric_Metal_Dirty_01"),
+		};
+		PropCabinetMesh = SoftLoadFirstMesh(Paths);
+	}
+
+	const int32 Loaded =
+		(PropBarrelMesh ? 1 : 0) + (PropBoxMesh ? 1 : 0) + (PropCeilingLightMesh ? 1 : 0)
+		+ (PropLadderMesh ? 1 : 0) + (PropBeamMesh ? 1 : 0) + (PropBulkheadMesh ? 1 : 0)
+		+ (PropShelfMesh ? 1 : 0) + (PropPalletMesh ? 1 : 0) + (PropCabinetMesh ? 1 : 0);
+
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("ArenaShell: warehouse soft-load %d/9 meshes (barrel=%d box=%d light=%d ladder=%d beam=%d bulkhead=%d shelf=%d pallet=%d cabinet=%d)"),
+		Loaded,
+		PropBarrelMesh ? 1 : 0, PropBoxMesh ? 1 : 0, PropCeilingLightMesh ? 1 : 0,
+		PropLadderMesh ? 1 : 0, PropBeamMesh ? 1 : 0, PropBulkheadMesh ? 1 : 0,
+		PropShelfMesh ? 1 : 0, PropPalletMesh ? 1 : 0, PropCabinetMesh ? 1 : 0);
+
+	return Loaded > 0;
+}
+
+void APFArenaShell::HideCubeDressingByPrefix(const TCHAR* Prefix)
+{
+	if (!Prefix)
+	{
+		return;
+	}
+	for (UStaticMeshComponent* Part : DressingParts)
+	{
+		if (Part && Part->GetName().StartsWith(Prefix))
+		{
+			Part->SetVisibility(false);
+			Part->SetHiddenInGame(true);
+			Part->SetCastShadow(false);
+		}
+	}
+}
+
+UStaticMeshComponent* APFArenaShell::MakeRuntimeMeshPart(const FString& Name, UStaticMesh* Mesh,
+                                                         const FVector& Center, const FVector& Scale,
+                                                         EPFShellCollision Mode, UMaterialInterface* Material,
+                                                         const FRotator& RelRot, bool bCastShadow)
+{
+	if (!Mesh || !ShellRoot)
+	{
+		return nullptr;
+	}
+
+	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(this, *Name);
+	if (!Comp)
+	{
+		return nullptr;
+	}
+	Comp->SetupAttachment(ShellRoot);
+	Comp->SetMobility(EComponentMobility::Static);
+	Comp->SetStaticMesh(Mesh);
+	if (Material)
+	{
+		Comp->SetMaterial(0, Material);
+	}
+	// Material == null → keep authored Megascans materials on the mesh.
+	Comp->SetRelativeLocation(Center);
+	Comp->SetRelativeRotation(RelRot);
+	Comp->SetRelativeScale3D(Scale);
+	Comp->SetCastShadow(bCastShadow);
+	Comp->SetCanEverAffectNavigation(false);
+	Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision); // backdrop is always cosmetic
+	(void)Mode; // reserved; drape never solid
+	Comp->RegisterComponent();
+	DressingParts.Add(Comp);
+	return Comp;
+}
+
+UStaticMeshComponent* APFArenaShell::PlaceBackdropFitted(const FString& Name, UStaticMesh* Mesh,
+                                                         const FVector& WorldXY, float GroundZ,
+                                                         const FVector& TargetSize, const FRotator& YawRot,
+                                                         bool bCastShadow)
+{
+	if (!Mesh)
+	{
+		return nullptr;
+	}
+
+	const FBoxSphereBounds B = Mesh->GetBounds();
+	const FVector MeshSize(
+		FMath::Max(B.BoxExtent.X * 2.f, 1.f),
+		FMath::Max(B.BoxExtent.Y * 2.f, 1.f),
+		FMath::Max(B.BoxExtent.Z * 2.f, 1.f));
+
+	FVector Scale = FVector::OneVector;
+	if (TargetSize.X > 1.f && TargetSize.Y > 1.f && TargetSize.Z > 1.f)
+	{
+		Scale = FVector(
+			TargetSize.X / MeshSize.X,
+			TargetSize.Y / MeshSize.Y,
+			TargetSize.Z / MeshSize.Z);
+		// Prefer uniform when extreme squash would look broken.
+		const float MaxA = FMath::Max3(Scale.X, Scale.Y, Scale.Z);
+		const float MinA = FMath::Min3(Scale.X, Scale.Y, Scale.Z);
+		if (MaxA > MinA * 3.5f)
+		{
+			const float Sc = TargetSize.Z / MeshSize.Z;
+			Scale = FVector(Sc, Sc, Sc);
+		}
+	}
+
+	// Pivot so mesh bottom sits on GroundZ.
+	const FVector Loc(
+		WorldXY.X - B.Origin.X * Scale.X,
+		WorldXY.Y - B.Origin.Y * Scale.Y,
+		GroundZ - (B.Origin.Z - B.BoxExtent.Z) * Scale.Z);
+
+	return MakeRuntimeMeshPart(Name, Mesh, Loc, Scale, EPFShellCollision::Cosmetic,
+		/*Material=*/nullptr, YawRot, bCastShadow);
+}
+
+void APFArenaShell::BuildWarehouseBackdropDrape()
+{
+	if (bWarehouseDrapeBuilt || bMapBackdropActive)
+	{
+		return;
+	}
+	if (CVarWarehouseBackdrop.GetValueOnGameThread() == 0)
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("ArenaShell: warehouse backdrop OFF (pf.WarehouseBackdrop=0)"));
+		return;
+	}
+	// Dedicated servers don't render — skip soft-load cost.
+	if (const UWorld* World = GetWorld())
+	{
+		if (World->GetNetMode() == NM_DedicatedServer)
+		{
+			return;
+		}
+	}
+	if (!SoftLoadWarehouseMeshes())
+	{
+		UE_LOG(PaintForgeLog, Log,
+			TEXT("ArenaShell: no Scene_Warehouse meshes — keeping cube dressing only"));
+		return;
+	}
+	bWarehouseDrapeBuilt = true;
+
+	int32 Spawned = 0;
+
+	// ---- 1) Roof beams under ceiling (replace cube trusses when beam mesh exists) ----
+	if (PropBeamMesh)
+	{
+		const FBoxSphereBounds BB = PropBeamMesh->GetBounds();
+		const float MeshLen = FMath::Max(BB.BoxExtent.X, BB.BoxExtent.Y) * 2.f;
+		const float SpanY = FieldY + 120.f;
+		const float Uniform = (MeshLen > 1.f) ? (SpanY / MeshLen) : 1.f;
+		// Orient long axis along Y (N–S). Assume mesh is long on local X → yaw 90.
 		int32 Idx = 0;
-		for (float X = 600.f; X < FieldX; X += 1000.f)
+		for (float X = 400.f; X < FieldX; X += 800.f)
 		{
-			DressingParts.Add(MakeMeshPart(FString::Printf(TEXT("PropBarrelS%d"), Idx),
-				PropBarrelMesh, FVector(X, -90.f, 0.f), FVector(1.f),
-				EPFShellCollision::Cosmetic, nullptr, FRotator::ZeroRotator, true));
-			DressingParts.Add(MakeMeshPart(FString::Printf(TEXT("PropBarrelN%d"), Idx),
-				PropBarrelMesh, FVector(X, FieldY + 90.f, 0.f), FVector(1.f),
-				EPFShellCollision::Cosmetic, nullptr, FRotator(0.f, 35.f, 0.f), true));
-			++Idx;
+			const FVector Loc(X, FieldY * 0.5f, TrussZ);
+			const FVector Scale(Uniform, Uniform * 0.85f, Uniform * 0.85f);
+			if (MakeRuntimeMeshPart(FString::Printf(TEXT("DrapeBeam%d"), Idx++),
+				PropBeamMesh, Loc, Scale, EPFShellCollision::Cosmetic, nullptr,
+				FRotator(0.f, 90.f, 0.f), true))
+			{
+				++Spawned;
+			}
 		}
+		HideCubeDressingByPrefix(TEXT("TrussMain"));
+		HideCubeDressingByPrefix(TEXT("TrussHanger"));
+		HideCubeDressingByPrefix(TEXT("Purlin"));
 	}
 
-	// Cardboard box stacks outside spawn walls (west / east exteriors).
-	if (PropBoxMesh)
-	{
-		const float BayYs[3] = { FieldY * 0.25f, FieldY * 0.5f, FieldY * 0.75f };
-		for (int32 i = 0; i < 3; ++i)
-		{
-			DressingParts.Add(MakeMeshPart(FString::Printf(TEXT("PropBoxW%d"), i),
-				PropBoxMesh, FVector(-120.f, BayYs[i], 0.f), FVector(1.2f),
-				EPFShellCollision::Cosmetic, nullptr, FRotator::ZeroRotator, true));
-			DressingParts.Add(MakeMeshPart(FString::Printf(TEXT("PropBoxE%d"), i),
-				PropBoxMesh, FVector(FieldX + 120.f, BayYs[i], 0.f), FVector(1.2f),
-				EPFShellCollision::Cosmetic, nullptr, FRotator(0.f, 90.f, 0.f), true));
-		}
-	}
-
-	// Real hanging warehouse lights under the ceiling deck.
+	// ---- 2) Real hanging bay lights (replace cube BayLight*) ----
 	if (PropCeilingLightMesh)
 	{
 		int32 Idx = 0;
@@ -419,23 +664,189 @@ void APFArenaShell::BuildWarehouseProps()
 		{
 			for (float Y = 1000.f; Y < FieldY; Y += 1400.f)
 			{
-				DressingParts.Add(MakeMeshPart(FString::Printf(TEXT("PropLight%d"), Idx++),
-					PropCeilingLightMesh, FVector(X, Y, CeilingZ - 80.f), FVector(1.f),
-					EPFShellCollision::Cosmetic, nullptr, FRotator::ZeroRotator, true));
+				// Hang under ceiling deck; slight scale for visibility.
+				if (MakeRuntimeMeshPart(FString::Printf(TEXT("DrapeLight%d"), Idx++),
+					PropCeilingLightMesh, FVector(X, Y, CeilingZ - 90.f), FVector(1.15f),
+					EPFShellCollision::Cosmetic, nullptr, FRotator::ZeroRotator, true))
+				{
+					++Spawned;
+				}
+			}
+		}
+		HideCubeDressingByPrefix(TEXT("BayLight"));
+	}
+
+	// ---- 3) Dock bulkheads on west/east exteriors (replace cube DockDoor*) ----
+	if (PropBulkheadMesh)
+	{
+		const float BayYs[3] = { FieldY * 0.25f, FieldY * 0.5f, FieldY * 0.75f };
+		// Target ~500 wide × 80 deep × 700 tall roll-up bay look.
+		const FVector BaySize(80.f, 520.f, 720.f);
+		for (int32 i = 0; i < 3; ++i)
+		{
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeDockW%d"), i), PropBulkheadMesh,
+				FVector(-90.f, BayYs[i], 0.f), 0.f, BaySize, FRotator(0.f, 90.f, 0.f)))
+			{
+				++Spawned;
+			}
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeDockE%d"), i), PropBulkheadMesh,
+				FVector(FieldX + 90.f, BayYs[i], 0.f), 0.f, BaySize, FRotator(0.f, -90.f, 0.f)))
+			{
+				++Spawned;
+			}
+		}
+		HideCubeDressingByPrefix(TEXT("DockDoor"));
+		HideCubeDressingByPrefix(TEXT("DockHdr"));
+	}
+
+	// ---- 4) Pallet shelves along exterior long walls (OUTSIDE play Y) ----
+	if (PropShelfMesh)
+	{
+		int32 Idx = 0;
+		// ~2.5 m wide racks, ~4 m tall, sit outside Y bounds.
+		const FVector ShelfSize(280.f, 120.f, 420.f);
+		for (float X = 500.f; X < FieldX; X += 900.f)
+		{
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeShelfS%d"), Idx), PropShelfMesh,
+				FVector(X, -160.f, 0.f), 0.f, ShelfSize, FRotator(0.f, 0.f, 0.f)))
+			{
+				++Spawned;
+			}
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeShelfN%d"), Idx), PropShelfMesh,
+				FVector(X, FieldY + 160.f, 0.f), 0.f, ShelfSize, FRotator(0.f, 180.f, 0.f)))
+			{
+				++Spawned;
+			}
+			++Idx;
+		}
+	}
+
+	// ---- 5) Barrels + pallets + box stacks along exteriors ----
+	if (PropBarrelMesh)
+	{
+		int32 Idx = 0;
+		const FVector BarrelSize(100.f, 100.f, 140.f);
+		for (float X = 700.f; X < FieldX; X += 1100.f)
+		{
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeBarrelS%d"), Idx), PropBarrelMesh,
+				FVector(X, -95.f, 0.f), 0.f, BarrelSize, FRotator::ZeroRotator))
+			{
+				++Spawned;
+			}
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeBarrelN%d"), Idx), PropBarrelMesh,
+				FVector(X + 200.f, FieldY + 95.f, 0.f), 0.f, BarrelSize, FRotator(0.f, 40.f, 0.f)))
+			{
+				++Spawned;
+			}
+			++Idx;
+		}
+	}
+	if (PropPalletMesh)
+	{
+		int32 Idx = 0;
+		const FVector PalletSize(160.f, 140.f, 25.f);
+		for (float X = 900.f; X < FieldX; X += 1400.f)
+		{
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapePalletS%d"), Idx), PropPalletMesh,
+				FVector(X, -200.f, 0.f), 0.f, PalletSize, FRotator(0.f, 15.f, 0.f)))
+			{
+				++Spawned;
+			}
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapePalletN%d"), Idx), PropPalletMesh,
+				FVector(X, FieldY + 200.f, 0.f), 0.f, PalletSize, FRotator(0.f, -20.f, 0.f)))
+			{
+				++Spawned;
+			}
+			++Idx;
+		}
+	}
+	if (PropBoxMesh)
+	{
+		const float BayYs[3] = { FieldY * 0.25f, FieldY * 0.5f, FieldY * 0.75f };
+		const FVector BoxSize(180.f, 140.f, 160.f);
+		for (int32 i = 0; i < 3; ++i)
+		{
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeBoxW%d"), i), PropBoxMesh,
+				FVector(-180.f, BayYs[i] + 220.f, 0.f), 0.f, BoxSize, FRotator::ZeroRotator))
+			{
+				++Spawned;
+			}
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeBoxE%d"), i), PropBoxMesh,
+				FVector(FieldX + 180.f, BayYs[i] - 220.f, 0.f), 0.f, BoxSize, FRotator(0.f, 90.f, 0.f)))
+			{
+				++Spawned;
 			}
 		}
 	}
 
-	// Ladders on exterior mid-wall for silhouette (cosmetic).
+	// ---- 6) Ladders mid exterior N/S ----
 	if (PropLadderMesh)
 	{
-		DressingParts.Add(MakeMeshPart(TEXT("PropLadderS"),
-			PropLadderMesh, FVector(FieldX * 0.5f, -70.f, 0.f), FVector(1.f),
-			EPFShellCollision::Cosmetic, nullptr, FRotator(0.f, 0.f, 0.f), true));
-		DressingParts.Add(MakeMeshPart(TEXT("PropLadderN"),
-			PropLadderMesh, FVector(FieldX * 0.5f, FieldY + 70.f, 0.f), FVector(1.f),
-			EPFShellCollision::Cosmetic, nullptr, FRotator(0.f, 180.f, 0.f), true));
+		const FVector LadderSize(60.f, 40.f, 500.f);
+		if (PlaceBackdropFitted(TEXT("DrapeLadderS"), PropLadderMesh,
+			FVector(FieldX * 0.5f, -75.f, 0.f), 0.f, LadderSize, FRotator(0.f, 0.f, 0.f)))
+		{
+			++Spawned;
+		}
+		if (PlaceBackdropFitted(TEXT("DrapeLadderN"), PropLadderMesh,
+			FVector(FieldX * 0.5f, FieldY + 75.f, 0.f), 0.f, LadderSize, FRotator(0.f, 180.f, 0.f)))
+		{
+			++Spawned;
+		}
 	}
+
+	// ---- 7) Cabinets / electrical at dock corners (exterior) ----
+	if (PropCabinetMesh)
+	{
+		const FVector CabSize(90.f, 70.f, 180.f);
+		const FVector Cabs[4] = {
+			FVector(-130.f, 180.f, 0.f),
+			FVector(-130.f, FieldY - 180.f, 0.f),
+			FVector(FieldX + 130.f, 180.f, 0.f),
+			FVector(FieldX + 130.f, FieldY - 180.f, 0.f),
+		};
+		const float Yaws[4] = { 90.f, 90.f, -90.f, -90.f };
+		for (int32 i = 0; i < 4; ++i)
+		{
+			if (PlaceBackdropFitted(FString::Printf(TEXT("DrapeCab%d"), i), PropCabinetMesh,
+				Cabs[i], 0.f, CabSize, FRotator(0.f, Yaws[i], 0.f)))
+			{
+				++Spawned;
+			}
+		}
+	}
+
+	// ---- 8) A few props around the warm-up pen (south) for venue continuity ----
+	if (PropBarrelMesh)
+	{
+		const FVector BarrelSize(100.f, 100.f, 140.f);
+		if (PlaceBackdropFitted(TEXT("DrapePenBarrel0"), PropBarrelMesh,
+			FVector(PenCenterX - 400.f, PenCenterY - PenHalf - 80.f, 0.f), 0.f, BarrelSize,
+			FRotator::ZeroRotator))
+		{
+			++Spawned;
+		}
+		if (PlaceBackdropFitted(TEXT("DrapePenBarrel1"), PropBarrelMesh,
+			FVector(PenCenterX + 450.f, PenCenterY - PenHalf - 90.f, 0.f), 0.f, BarrelSize,
+			FRotator(0.f, 55.f, 0.f)))
+		{
+			++Spawned;
+		}
+	}
+	if (PropPalletMesh)
+	{
+		if (PlaceBackdropFitted(TEXT("DrapePenPallet"), PropPalletMesh,
+			FVector(PenCenterX, PenCenterY - PenHalf - 140.f, 0.f), 0.f,
+			FVector(160.f, 140.f, 25.f), FRotator(0.f, 10.f, 0.f)))
+		{
+			++Spawned;
+		}
+	}
+
+	// If full map stream later activates, SetMapBackdropActive already hides DressingParts.
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("ArenaShell: warehouse backdrop drape spawned %d cosmetic meshes (outside/above play volume)"),
+		Spawned);
 }
 
 UStaticMeshComponent* APFArenaShell::MakeShapePart(const FString& Name, const FVector& Center,
@@ -532,7 +943,9 @@ void APFArenaShell::BeginPlay()
 		}
 	}
 
-	// Note: warehouse Megascans props keep authored materials (no tint).
+	// Soft-load Scene_Warehouse meshes and drape exterior props (NoCollision, outside play volume).
+	// Cube dressing from the ctor remains as fallback / structure when the pack is missing.
+	BuildWarehouseBackdropDrape();
 
 	// Clients mirror the barrier from the replicated phase; the server is driven by the GameMode.
 	if (!HasAuthority())
