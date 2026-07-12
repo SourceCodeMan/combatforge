@@ -37,5 +37,10 @@ Plugins/**/Intermediate/
 Thumbs.db
 desktop.ini
 
+# --- Packaged playtest / server drops (local only) ---
+Packaged/
+Deploy/playtest/docker/server-linux/**
+!Deploy/playtest/docker/server-linux/.gitkeep
+
 # --- Crash dumps / local logs outside Saved/ ---
 *.dmp
