@@ -160,11 +160,11 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		RifleFPMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		RifleFPMesh->SetCastShadow(false);
 		// Held-rifle pose in ViewModelRoot space (+X forward, +Y right, +Z up). The mesh models forward along
-		// its local +Y, so yaw -90 points the barrel into the screen; then scaled down and set lower-right.
-		RifleFPMesh->SetRelativeLocation(FVector(2.f, 5.f, -3.f));
-		RifleFPMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
-		RifleFPMesh->SetRelativeScale3D(FVector(0.4f));
-		MuzzleLocalFP = FVector(34.f, 3.f, -5.f);   // rifle barrel tip in ViewModelRoot space (drives the FP flash)
+		// its local +Y, so yaw -90 points the barrel into the screen; slightly larger + lower for "in hands" feel.
+		RifleFPMesh->SetRelativeLocation(FVector(4.f, 6.f, -4.f));
+		RifleFPMesh->SetRelativeRotation(FRotator(-2.f, -90.f, 2.f));
+		RifleFPMesh->SetRelativeScale3D(FVector(0.45f));
+		MuzzleLocalFP = FVector(38.f, 3.f, -5.f);   // rifle barrel tip in ViewModelRoot space (drives the FP flash)
 		WeaponMesh = RifleMesh;                      // third-person seam (attaches to the hand bone in ApplyArtLoadout)
 	}
 	else
@@ -257,12 +257,25 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	{
 		ThirdPersonAnimClass = MannequinAnimFinder.Class;   // same skeleton -> one anim BP for both teams
 	}
-	// Per-team body tint material (muted team color + subtle team-rim). Fallback: no tint (native mannequin mat).
+	// Soft team-tint fallback (used only when native mannequin MIs are missing).
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamBodyMatFinder(
 		TEXT("/Game/Materials/M_PF_TeamBody.M_PF_TeamBody"));
 	if (TeamBodyMatFinder.Succeeded())
 	{
 		TeamBodyMaterial = TeamBodyMatFinder.Object;
+	}
+	// Prefer native mannequin materials so kids see textured Manny/Quinn, not a flat team wash.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MannyMatFinder(
+		TEXT("/Game/Characters/Mannequins/Materials/Manny/MI_Manny_01_New.MI_Manny_01_New"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> QuinnMatFinder(
+		TEXT("/Game/Characters/Mannequins/Materials/Quinn/MI_Quinn_01.MI_Quinn_01"));
+	if (MannyMatFinder.Succeeded())
+	{
+		Team0BodyMaterial = MannyMatFinder.Object;
+	}
+	if (QuinnMatFinder.Succeeded())
+	{
+		Team1BodyMaterial = QuinnMatFinder.Object;
 	}
 	// TP weapon: same SM_Rifle as the FP viewmodel so remote players see a held gun (not a cube).
 	if (RifleMeshFinder.Succeeded())
@@ -754,12 +767,64 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 		GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight()));
 	}
 	GetMesh()->SetVisibility(true);
+	GetMesh()->SetHiddenInGame(false);
 	GetMesh()->SetOwnerNoSee(true);           // first-person: owner doesn't see own TP body
+	GetMesh()->SetCastShadow(true);
+	GetMesh()->bCastDynamicShadow = true;
 	if (BodyMesh != nullptr) { BodyMesh->SetVisibility(false); }
 	if (HeadMesh != nullptr) { HeadMesh->SetVisibility(false); }
 
 	CachedBodyTeamId = Team;
 	bUsingArtBody = true;
+
+	// Team body swap rebuilds the skeletal mesh — re-seat the rifle in the hand.
+	AttachWeaponToHand();
+}
+
+void APaintForgeCharacter::AttachWeaponToHand()
+{
+	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
+	{
+		return;
+	}
+
+	WeaponMeshComp->SetStaticMesh(WeaponMesh);
+	WeaponMeshComp->SetVisibility(true);
+	WeaponMeshComp->SetHiddenInGame(false);
+	WeaponMeshComp->SetOwnerNoSee(true);   // owner uses the FP viewmodel; remotes see the TP gun
+	WeaponMeshComp->SetCastShadow(true);
+	if (RifleMaterial != nullptr)
+	{
+		const int32 Mats = WeaponMeshComp->GetNumMaterials();
+		for (int32 i = 0; i < Mats; ++i)
+		{
+			WeaponMeshComp->SetMaterial(i, RifleMaterial);   // no missing Lyra MI refs
+		}
+	}
+
+	USkeletalMeshComponent* Body = GetMesh();
+	if (!bUsingArtBody || Body == nullptr)
+	{
+		return;
+	}
+
+	// DoesSocketExist only lists authored sockets; UE5 mannequin hand is a BONE (hand_r).
+	const bool bHasSocket = Body->DoesSocketExist(WeaponAttachSocket);
+	const bool bHasBone = Body->GetBoneIndex(WeaponAttachSocket) != INDEX_NONE;
+	if (!bHasSocket && !bHasBone)
+	{
+		UE_LOG(PaintForgeLog, Warning,
+			TEXT("AttachWeaponToHand: no socket/bone '%s' on %s — gun stays on mesh root."),
+			*WeaponAttachSocket.ToString(),
+			Body->GetSkeletalMeshAsset() ? *Body->GetSkeletalMeshAsset()->GetName() : TEXT("(none)"));
+		return;
+	}
+
+	WeaponMeshComp->AttachToComponent(Body,
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponAttachSocket);
+	WeaponMeshComp->SetRelativeLocation(WeaponRelativeLocation);
+	WeaponMeshComp->SetRelativeRotation(WeaponRelativeRotation);
+	WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
 }
 
 void APaintForgeCharacter::ApplyArtLoadout()
@@ -779,24 +844,7 @@ void APaintForgeCharacter::ApplyArtLoadout()
 		FirstPersonArms->SetVisibility(true);
 	}
 
-	if (WeaponMesh != nullptr && WeaponMeshComp != nullptr)
-	{
-		WeaponMeshComp->SetStaticMesh(WeaponMesh);
-		WeaponMeshComp->SetVisibility(true);
-		if (RifleMaterial != nullptr)
-		{
-			const int32 Mats = WeaponMeshComp->GetNumMaterials();
-			for (int32 i = 0; i < Mats; ++i)
-			{
-				WeaponMeshComp->SetMaterial(i, RifleMaterial);   // no missing Lyra MI refs
-			}
-		}
-		if (bUsingArtBody && GetMesh() != nullptr && GetMesh()->DoesSocketExist(WeaponAttachSocket))
-		{
-			WeaponMeshComp->AttachToComponent(GetMesh(),
-				FAttachmentTransformRules::SnapToTargetIncludingScale, WeaponAttachSocket);
-		}
-	}
+	AttachWeaponToHand();
 
 	SetTeamColor(CachedTeamId);   // re-tint whatever body is now active (skeletal or cubes)
 }
@@ -842,16 +890,32 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 		HeadMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
 	}
 
-	// Art body: apply the team-tint material to EVERY material slot (the mannequin can have more than one).
-	if (bUsingArtBody && GetMesh() != nullptr && TeamBodyMaterial != nullptr)
+	// Art body: prefer native Manny/Quinn materials (textured characters kids can read as "people").
+	// Fall back to M_PF_TeamBody soft tint only when the pack MIs are missing.
+	if (bUsingArtBody && GetMesh() != nullptr)
 	{
-		const int32 NumMats = GetMesh()->GetNumMaterials();
-		for (int32 Slot = 0; Slot < NumMats; ++Slot)
+		UMaterialInterface* NativeMat = (TeamId == 1)
+			? (Team1BodyMaterial ? Team1BodyMaterial.Get() : Team0BodyMaterial.Get())
+			: Team0BodyMaterial.Get();
+
+		if (NativeMat != nullptr)
 		{
-			if (UMaterialInstanceDynamic* BodyArtMID =
-					GetMesh()->CreateAndSetMaterialInstanceDynamicFromMaterial(Slot, TeamBodyMaterial))
+			const int32 NumMats = GetMesh()->GetNumMaterials();
+			for (int32 Slot = 0; Slot < NumMats; ++Slot)
 			{
-				BodyArtMID->SetVectorParameterValue(TEXT("Color"), BodyTint);
+				GetMesh()->SetMaterial(Slot, NativeMat);
+			}
+		}
+		else if (TeamBodyMaterial != nullptr)
+		{
+			const int32 NumMats = GetMesh()->GetNumMaterials();
+			for (int32 Slot = 0; Slot < NumMats; ++Slot)
+			{
+				if (UMaterialInstanceDynamic* BodyArtMID =
+						GetMesh()->CreateAndSetMaterialInstanceDynamicFromMaterial(Slot, TeamBodyMaterial))
+				{
+					BodyArtMID->SetVectorParameterValue(TEXT("Color"), BodyTint);
+				}
 			}
 		}
 	}

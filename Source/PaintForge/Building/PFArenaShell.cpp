@@ -64,19 +64,13 @@ APFArenaShell::APFArenaShell()
 		TEXT("/Game/Materials/M_PF_ArenaMark.M_PF_ArenaMark"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	// Real warehouse surfaces (Megascans/Fab, VT). Prefer these; fall back to the generated arena
-	// materials, then BasicShapeMaterial — so a checkout without the (heavy) warehouse scene still runs.
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhFloorFinder(
-		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Tile.M_Tile"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhWallFinder(
-		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Metal.M_Metal"));
-
+	// Prefer the cooked M_PF_* arena pack (triplanar concrete, always shipped with the kids build).
+	// Optional warehouse Fab dump (Scene_Warehouse) is intentionally NOT preferred here — it's multi-GB,
+	// Virtual-Textured, and untracked; packaging without it must still look like a CQB warehouse.
 	CubeMesh = CubeFinder.Object;
 	UMaterialInterface* const Basic = BasicMatFinder.Succeeded() ? BasicMatFinder.Object.Get() : nullptr;
-	UMaterialInterface* const GenFloor = FloorFinder.Succeeded() ? FloorFinder.Object.Get() : Basic;
-	UMaterialInterface* const GenWall = WallFinder.Succeeded() ? WallFinder.Object.Get() : Basic;
-	FloorMaterial = WhFloorFinder.Succeeded() ? WhFloorFinder.Object.Get() : GenFloor;
-	WallMaterial = WhWallFinder.Succeeded() ? WhWallFinder.Object.Get() : GenWall;
+	FloorMaterial = FloorFinder.Succeeded() ? FloorFinder.Object.Get() : Basic;
+	WallMaterial = WallFinder.Succeeded() ? WallFinder.Object.Get() : Basic;
 	MetalMaterial = MetalFinder.Succeeded() ? MetalFinder.Object.Get() : Basic;
 	MarkMaterial = MarkFinder.Succeeded() ? MarkFinder.Object.Get() : Basic;
 
@@ -264,6 +258,72 @@ void APFArenaShell::BuildWarehouseDressing()
 		FVector(FieldX * 0.5f, -55.f, 1100.f),
 		FVector(64.f, 0.12f, 0.12f),
 		EPFShellCollision::Cosmetic, MetalMaterial));
+
+	// ---- Playtest polish: more "warehouse arena" silhouette without solid collision ----
+
+	// High-bay light fixtures under the ceiling (emissive-looking metal boxes + glow cores).
+	int32 LightIdx = 0;
+	for (float X = 800.f; X < FieldX; X += 1600.f)
+	{
+		for (float Y = 800.f; Y < FieldY; Y += 1200.f)
+		{
+			const int32 Idx = LightIdx++;
+			// Housing
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("BayLightH%d"), Idx),
+				FVector(X, Y, CeilingZ - 40.f),
+				FVector(2.2f, 1.0f, 0.25f),
+				EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+			// Warm "lamp" core (Mark material reads brighter under the lighting rig)
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("BayLightC%d"), Idx),
+				FVector(X, Y, CeilingZ - 55.f),
+				FVector(1.8f, 0.7f, 0.08f),
+				EPFShellCollision::Cosmetic, MarkMaterial));
+		}
+	}
+
+	// Interior wall pads / bounce panels just inside the perimeter (cosmetic only, thin).
+	// Read as airsoft field padding without blocking movement (NoCollision).
+	int32 PadIdx = 0;
+	for (float X = 400.f; X < FieldX; X += 800.f)
+	{
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("PadN%d"), PadIdx),
+			FVector(X, FieldY - 25.f, 150.f),
+			FVector(3.5f, 0.18f, 3.0f),
+			EPFShellCollision::Cosmetic, WallMaterial));
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("PadS%d"), PadIdx),
+			FVector(X, 25.f, 150.f),
+			FVector(3.5f, 0.18f, 3.0f),
+			EPFShellCollision::Cosmetic, WallMaterial));
+		++PadIdx;
+	}
+
+	// Floor court rings — dashed lane markers along the long axis (reads as a real field).
+	int32 LaneIdx = 0;
+	for (float X = 600.f; X < FieldX - 200.f; X += 400.f)
+	{
+		if (FMath::Abs(X - FieldX * 0.5f) < 250.f)
+		{
+			continue;   // leave the midline stripe alone
+		}
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("LaneMark%d"), LaneIdx++),
+			FVector(X, FieldY * 0.5f, 1.2f),
+			FVector(0.6f, 8.f, 0.015f),
+			EPFShellCollision::Cosmetic, MarkMaterial));
+	}
+
+	// Corner safety bollards (visual weight at spawn corners, outside solid walls).
+	const FVector Bollards[4] = {
+		FVector(120.f, 120.f, 60.f),
+		FVector(FieldX - 120.f, 120.f, 60.f),
+		FVector(120.f, FieldY - 120.f, 60.f),
+		FVector(FieldX - 120.f, FieldY - 120.f, 60.f),
+	};
+	for (int32 i = 0; i < 4; ++i)
+	{
+		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("Bollard%d"), i),
+			Bollards[i], FVector(0.45f, 0.45f, 1.2f),
+			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+	}
 }
 
 UStaticMeshComponent* APFArenaShell::MakeShapePart(const FString& Name, const FVector& Center,
@@ -316,16 +376,36 @@ void APFArenaShell::BeginPlay()
 	// Tints (MIDs are runtime objects — never created in the ctor).
 	if (SpawnStrips.Num() >= 2)
 	{
+		// Stronger team-readable spawn paint (kids need to know "my side" at a glance).
 		ApplyTint(SpawnStrips[0], PFColors::ForTeam(0));
 		ApplyTint(SpawnStrips[1], PFColors::ForTeam(1));
 	}
-	// Hazard yellow-gray midline stripe; posts get a cold industrial gray metal tint.
-	const FLinearColor HazardGray(0.55f, 0.52f, 0.18f);
+	// Hazard yellow midline stripe; posts get a cold industrial gray metal tint.
+	const FLinearColor HazardGray(0.72f, 0.68f, 0.18f);
 	const FLinearColor PostGray(0.28f, 0.30f, 0.32f);
+	const FLinearColor LaneWhite(0.85f, 0.86f, 0.88f);
+	const FLinearColor BayLamp(1.0f, 0.92f, 0.70f);
 	ApplyTint(MidlineStripe, HazardGray);
 	for (UStaticMeshComponent* Post : MidlinePosts)
 	{
 		ApplyTint(Post, PostGray);
+	}
+	// Dressing cosmetics that use MarkMaterial: bay light cores + lane marks.
+	for (UStaticMeshComponent* Part : DressingParts)
+	{
+		if (Part == nullptr)
+		{
+			continue;
+		}
+		const FString Name = Part->GetName();
+		if (Name.StartsWith(TEXT("BayLightC")))
+		{
+			ApplyTint(Part, BayLamp);
+		}
+		else if (Name.StartsWith(TEXT("LaneMark")))
+		{
+			ApplyTint(Part, LaneWhite);
+		}
 	}
 
 	// Clients mirror the barrier from the replicated phase; the server is driven by the GameMode.

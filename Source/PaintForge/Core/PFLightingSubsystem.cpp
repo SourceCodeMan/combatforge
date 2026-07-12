@@ -36,22 +36,22 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	// Airsoft / CQB field mood: overcast industrial yard — muted, readable, not bright speedball.
+	// Airsoft / CQB warehouse mood: readable industrial interior, not washed-out outdoor speedball.
 	// All natively spawnable, zero authored assets (T17). Local/cosmetic only — never replicate.
 	if (ADirectionalLight* Sun = World.SpawnActor<ADirectionalLight>(
 			ADirectionalLight::StaticClass(),
-			// Lower winter sun — long soft shadows across the 64×40 m field
-			FTransform(FRotator(-38.f, -50.f, 0.f), FVector::ZeroVector), Params))
+			// Higher angle so the dressed ceiling + trusses cast interesting but short shadows
+			FTransform(FRotator(-52.f, -40.f, 0.f), FVector::ZeroVector), Params))
 	{
 		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
 		{
 			SunComp->SetMobility(EComponentMobility::Movable);
-			SunComp->SetIntensity(3.2f);   // was 6 — dimmer outdoor-yard daylight
-			SunComp->SetLightColor(FLinearColor(0.92f, 0.94f, 1.0f));   // cool overcast white
+			SunComp->SetIntensity(4.4f);   // bright enough that concrete + mannequins read on mid PCs
+			SunComp->SetLightColor(FLinearColor(1.0f, 0.97f, 0.92f));   // warm warehouse bay light
 			SunComp->SetAtmosphereSunLight(true);
 			SunComp->SetDynamicShadowDistanceMovableLight(16000.f);   // field-scale, not open-world
-			SunComp->SetShadowBias(0.4f);
-			SunComp->SetSpecularScale(0.35f);   // damp specular glitter on metal posts
+			SunComp->SetShadowBias(0.35f);
+			SunComp->SetSpecularScale(0.4f);
 		}
 	}
 
@@ -75,8 +75,8 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		{
 			SkyComp->SetMobility(EComponentMobility::Movable);
 			SkyComp->SetRealTimeCapture(true);   // ambient from atmosphere (no cubemap)
-			SkyComp->SetIntensity(0.85f);
-			SkyComp->SetLowerHemisphereColor(FLinearColor(0.08f, 0.09f, 0.10f));
+			SkyComp->SetIntensity(1.15f);        // lift fill so walls/characters aren't muddy
+			SkyComp->SetLowerHemisphereColor(FLinearColor(0.12f, 0.12f, 0.11f));
 		}
 	}
 
@@ -86,11 +86,11 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		if (UExponentialHeightFogComponent* FogComp = Fog->GetComponent())
 		{
 			// Soft distance softener across 64 m field — depth without washing the play area.
-			FogComp->SetFogDensity(0.018f);
-			FogComp->SetFogHeightFalloff(0.12f);
-			FogComp->SetFogInscatteringColor(FLinearColor(0.45f, 0.50f, 0.55f));
-			FogComp->SetFogMaxOpacity(0.55f);
-			FogComp->SetStartDistance(400.f);   // keep near play sharp
+			FogComp->SetFogDensity(0.012f);
+			FogComp->SetFogHeightFalloff(0.14f);
+			FogComp->SetFogInscatteringColor(FLinearColor(0.50f, 0.52f, 0.55f));
+			FogComp->SetFogMaxOpacity(0.40f);
+			FogComp->SetStartDistance(600.f);   // keep near play sharp
 			FogComp->SetVolumetricFog(false);   // cheap; friends on mid PCs
 		}
 	}
@@ -109,17 +109,17 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.bOverride_AutoExposureMinBrightness = true; PP.AutoExposureMinBrightness = 1.f;
 		PP.bOverride_AutoExposureMaxBrightness = true; PP.AutoExposureMaxBrightness = 1.f;
 
-		// Slightly desaturated industrial grade; keep contrast for target readability.
-		PP.bOverride_BloomIntensity = true;    PP.BloomIntensity = 0.25f;
-		PP.bOverride_VignetteIntensity = true; PP.VignetteIntensity = 0.42f;
-		PP.bOverride_ColorSaturation = true;   PP.ColorSaturation = FVector4(0.90, 0.90, 0.92, 1.0);
-		PP.bOverride_ColorContrast = true;     PP.ColorContrast = FVector4(1.08, 1.08, 1.06, 1.0);
-		PP.bOverride_ColorGamma = true;        PP.ColorGamma = FVector4(1.0, 1.0, 1.02, 1.0);
-		PP.bOverride_ColorGain = true;         PP.ColorGain = FVector4(0.98, 0.99, 1.02, 1.0);
+		// Clean industrial grade — a bit more punch so mannequins + concrete read on kids' monitors.
+		PP.bOverride_BloomIntensity = true;    PP.BloomIntensity = 0.30f;
+		PP.bOverride_VignetteIntensity = true; PP.VignetteIntensity = 0.28f;
+		PP.bOverride_ColorSaturation = true;   PP.ColorSaturation = FVector4(0.96, 0.96, 0.98, 1.0);
+		PP.bOverride_ColorContrast = true;     PP.ColorContrast = FVector4(1.10, 1.10, 1.08, 1.0);
+		PP.bOverride_ColorGamma = true;        PP.ColorGamma = FVector4(1.02, 1.02, 1.03, 1.0);
+		PP.bOverride_ColorGain = true;         PP.ColorGain = FVector4(1.0, 1.0, 1.02, 1.0);
 
-		// Mild cool temperature toward warehouse yard (without crushing team colors).
-		PP.bOverride_WhiteTemp = true; PP.WhiteTemp = 6200.f;
-		PP.bOverride_WhiteTint = true; PP.WhiteTint = 0.05f;
+		// Neutral-warm warehouse (team paint colors stay readable).
+		PP.bOverride_WhiteTemp = true; PP.WhiteTemp = 5800.f;
+		PP.bOverride_WhiteTint = true; PP.WhiteTint = 0.02f;
 	}
 
 	UE_LOG(PaintForgeLog, Log, TEXT("PFLightingSubsystem: CQB lighting rig spawned (netmode %d)"),

@@ -117,6 +117,12 @@ protected:
 	/** Mounts the per-team skeletal body (Manny=0 / Quinn=1) with feet alignment; gated by CachedBodyTeamId. */
 	void ApplyTeamBody(uint8 Team);
 
+	/**
+	 * Attaches WeaponMeshComp to the TP hand bone with a held-rifle grip pose.
+	 * Safe to call when mesh/weapon is missing (no-op). Re-run after team body swaps.
+	 */
+	void AttachWeaponToHand();
+
 	/** Timer callbacks: snap flash/light off first; smoke lingers a beat longer (airsoft juice). */
 	void ClearMuzzleFlash();
 	void ClearMuzzleSmoke();
@@ -154,7 +160,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // hand bone on the TP body (Manny)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // per-team body mat ("Color" param)
+	// Held-rifle grip in hand_r bone space (SM_Rifle: local +Y is barrel-forward).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(-3.f, 8.f, -2.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(0.f, 90.f, -5.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(1.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
+	// Native mannequin MIs (keep textured Manny/Quinn look; avoid full-body team wash).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> Team0BodyMaterial = nullptr; // MI_Manny_01
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> Team1BodyMaterial = nullptr; // MI_Quinn_01
 	bool bUsingArtBody = false;   // true once ThirdPersonBodyMesh mounted; gates the SetTeamColor/eliminate branches
 
 	// ---- Weapon cosmetics: FP marker viewmodel + muzzle flash/smoke (engine primitives, no Niagara) ----
