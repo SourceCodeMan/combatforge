@@ -340,7 +340,7 @@ void UPFResultsWidget::RefreshResult(const APaintForgeGameState& GS)
 			}
 			if (GS.bSuddenDeath)
 			{
-				Score += TEXT("  ·  sudden death");
+				Score += TEXT("  ·  showdown");
 			}
 		}
 		ScoreText->SetText(FText::FromString(Score));

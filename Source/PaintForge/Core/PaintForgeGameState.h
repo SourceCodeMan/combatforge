@@ -26,6 +26,8 @@ public:
 	// ---- Replicated state (all registered in GetLifetimeReplicatedProps) ----
 	UPROPERTY(ReplicatedUsing=OnRep_Phase)      EPFMatchPhase Phase = EPFMatchPhase::Lobby;
 	UPROPERTY(Replicated)                       float  PhaseEndServerTime = 0.f;   // 0 = untimed (Lobby)
+	/** Full length of the current phase when it was stamped (server seconds). Vote ring uses this. */
+	UPROPERTY(Replicated)                       float  PhaseDuration = 0.f;
 	UPROPERTY(ReplicatedUsing=OnRep_RoundState) EPFRoundState RoundState = EPFRoundState::None;
 	UPROPERTY(Replicated)                       float  RoundStateEndServerTime = 0.f;
 	UPROPERTY(Replicated)                       uint8  RoundNumber = 0;            // 1-based during Combat

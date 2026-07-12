@@ -68,7 +68,7 @@ void UPFScoreboardWidget::BuildTree()
 		VSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 
-	// Round context line ("Round 3", sudden death flag).
+	// Round context line ("Round 3", showdown flag).
 	RoundText = WidgetTree->ConstructWidget<UTextBlock>();
 	RoundText->SetFont(PFBoardFont(13, false));
 	RoundText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.6f)));
@@ -195,7 +195,7 @@ void UPFScoreboardWidget::RefreshRows()
 			Round = FString::Printf(TEXT("Round %d"), GS->RoundNumber);
 			if (GS->bSuddenDeath)
 			{
-				Round += TEXT("  ·  SUDDEN DEATH");
+				Round += TEXT("  ·  SHOWDOWN");
 			}
 		}
 		RoundText->SetText(FText::FromString(Round));

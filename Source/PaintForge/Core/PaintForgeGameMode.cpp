@@ -839,7 +839,7 @@ void APaintForgeGameMode::StartNextRound()
 		&APaintForgeGameMode::BeginLiveRound, FreezeDuration, false);
 
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: round %d freeze (%s)"),
-		GS->RoundNumber, bSuddenDeathRoundActive ? TEXT("SUDDEN DEATH") : TEXT("normal"));
+		GS->RoundNumber, bSuddenDeathRoundActive ? TEXT("SHOWDOWN") : TEXT("normal"));
 }
 
 void APaintForgeGameMode::ResetPawnForRound(APaintForgeCharacter* Pawn, APaintForgePlayerState* PS, uint8 RoundHP)

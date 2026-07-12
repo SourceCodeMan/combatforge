@@ -487,14 +487,16 @@ int32 UPFVoteWidget::NativePaint(const FPaintArgs& Args, const FGeometry& Allott
 	const int32 MaxLayer = Super::NativePaint(
 		Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
 
-	// 20 s countdown ring around the timer number.
+	// Countdown ring around the timer number — normalize against the stamped phase length
+	// (GameMode::VotePhaseDuration), not a local hardcode (pre-playtest finding #2).
 	const UWorld* World = GetWorld();
 	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
 	if (!GS || GS->Phase != EPFMatchPhase::Vote)
 	{
 		return MaxLayer;
 	}
-	const float Fraction = FMath::Clamp(GS->GetPhaseTimeRemaining() / VoteDuration, 0.f, 1.f);
+	const float FullScale = (GS->PhaseDuration > 0.f) ? GS->PhaseDuration : VoteDurationFallback;
+	const float Fraction = FMath::Clamp(GS->GetPhaseTimeRemaining() / FullScale, 0.f, 1.f);
 	if (Fraction <= 0.f)
 	{
 		return MaxLayer;

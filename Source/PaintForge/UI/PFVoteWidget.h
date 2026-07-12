@@ -40,7 +40,7 @@ private:
  *  - Step 2: 8 chips (PFVoteCategories::All + HintText); click cycles
  *    neutral -> liked -> disliked -> neutral; <= 4 total selections (T30);
  *    SUBMIT live immediately
- *  - 20 s countdown ring from GameState::GetPhaseTimeRemaining
+ *  - countdown ring from GameState::GetPhaseTimeRemaining / PhaseDuration
  *  - timeout/submit -> PC->ServerSubmitVote; no thumb at timeout = Abstained
  *  - exactly one submission per player (widget disables after send)
  */
@@ -94,7 +94,8 @@ private:
 
 	static constexpr int32 NumChips = 8;
 	static constexpr int32 MaxSelections = 4;   // liked + disliked combined (T30)
-	static constexpr float VoteDuration = 20.f; // ring normalization (T3)
+	/** Fallback only if PhaseDuration has not replicated yet (T3 default = 20 s). */
+	static constexpr float VoteDurationFallback = 20.f;
 	/**
 	 * Timeout auto-submit fires this many seconds BEFORE the phase deadline so the
 	 * ServerSubmitVote RPC lands before the server's FinalizeVotePhase timer marks
