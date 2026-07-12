@@ -802,6 +802,33 @@ void APaintForgeGameMode::RespawnCombatant(APaintForgePlayerState* PS, uint8 Rou
 	}
 }
 
+void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim)
+{
+	if (!Victim)
+	{
+		return;
+	}
+	// Timed reset-in-place (Skirmish + the Respawn variant): the victim is NOT marked dead, move-locked,
+	// or death-cammed — after RespawnDelay it heals to full and teleports to its team spawn. PS is
+	// re-fetched inside the timer via the weak victim (safe if it despawned). Works for players and bots.
+	TWeakObjectPtr<APaintForgeCharacter> WeakVictim(Victim);
+	TWeakObjectPtr<APaintForgeGameMode> WeakThis(this);
+	FTimerHandle RespawnHandle;
+	GetWorldTimerManager().SetTimer(RespawnHandle,
+		FTimerDelegate::CreateLambda([WeakThis, WeakVictim]()
+		{
+			if (WeakThis.IsValid() && WeakVictim.IsValid())
+			{
+				WeakVictim->GetHealth()->ResetForRound(3);
+				if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
+				{
+					WeakThis->TeleportPawnTo(WeakVictim.Get(), WeakThis->GetSpawnTransform(PS));
+				}
+			}
+		}),
+		RespawnDelay, false);
+}
+
 // ---------------------------------------------------------------------------
 // Bots (fill teams to the selected format — server only)
 // ---------------------------------------------------------------------------
@@ -951,6 +978,19 @@ void APaintForgeGameMode::BeginLiveRound()
 		return;
 	}
 
+	if (GS->MatchType == EPFMatchType::Skirmish)
+	{
+		// One continuous Live period; the match ends by tag-cap (NotifyPawnEliminated) or the timer.
+		// NO CheckElimVictory — Skirmish never resolves by team-wipe (everyone respawns).
+		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
+		ApplyServerMoveLocks();
+		GetWorldTimerManager().SetTimer(RoundTimerHandle, this,
+			&APaintForgeGameMode::ResolveSkirmishOnTimer, SkirmishMatchDuration, false);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Skirmish LIVE (%.0f s, first to %d tags)"),
+			SkirmishMatchDuration, SkirmishTagTarget);
+		return;
+	}
+
 	const float Duration = bSuddenDeathRoundActive ? SuddenDeathDuration : EffectiveRoundDuration;
 	GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + Duration);
 	ApplyServerMoveLocks();
@@ -985,6 +1025,41 @@ void APaintForgeGameMode::ResolveRoundOnTimer()
 	EndRound(Winner);
 }
 
+void APaintForgeGameMode::ResolveSkirmishOnTimer()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	// Timer expiry: more tags wins; equal = draw (overtime is a future extension).
+	uint8 Winner = TeamNone;
+	if (GS->TeamScores[0] > GS->TeamScores[1])
+	{
+		Winner = 0;
+	}
+	else if (GS->TeamScores[1] > GS->TeamScores[0])
+	{
+		Winner = 1;
+	}
+	EndSkirmish(Winner);
+}
+
+void APaintForgeGameMode::EndSkirmish(uint8 WinnerTeam)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat)
+	{
+		return;   // guards the tag-cap + timer double-fire race
+	}
+	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
+	PendingMatchWinner = WinnerTeam;
+	PendingMatchResult = MakeMatchResult(WinnerTeam);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Skirmish over — winner team %d (%d-%d)"),
+		WinnerTeam, GS->TeamScores[0], GS->TeamScores[1]);
+	SetPhase(EPFMatchPhase::Vote);   // same Combat→Vote jump EndRound uses for a decided match
+}
+
 void APaintForgeGameMode::CheckElimVictory()
 {
 	APaintForgeGameState* GS = GetPFGameState();
@@ -992,9 +1067,9 @@ void APaintForgeGameMode::CheckElimVictory()
 	{
 		return;
 	}
-	if (RespawnMode == EPFRespawnMode::Respawn)
+	if (RespawnMode == EPFRespawnMode::Respawn || GS->MatchType == EPFMatchType::Skirmish)
 	{
-		return;   // respawn variant: rounds resolve on the timer only
+		return;   // respawn variant / Skirmish: resolve on the timer / tag-cap only, never by team-wipe
 	}
 
 	const uint8 AliveA = GS->AliveCounts[0];
@@ -1133,13 +1208,23 @@ FPFMatchResult APaintForgeGameMode::MakeMatchResult(uint8 MatchWinner) const
 	Result.WinnerTeam = MatchWinner;
 	if (GS)
 	{
-		Result.RoundWinsA = GS->TeamRoundWins[0];
-		Result.RoundWinsB = GS->TeamRoundWins[1];
-		Result.RoundsPlayed = GS->RoundNumber;
+		if (GS->MatchType == EPFMatchType::Skirmish)
+		{
+			// Reuse the round-win fields for the final tag counts (semantic reuse; clamp to field width).
+			Result.RoundWinsA = static_cast<uint8>(FMath::Min<int32>(GS->TeamScores[0], 255));
+			Result.RoundWinsB = static_cast<uint8>(FMath::Min<int32>(GS->TeamScores[1], 255));
+			Result.RoundsPlayed = 1;
+		}
+		else
+		{
+			Result.RoundWinsA = GS->TeamRoundWins[0];
+			Result.RoundWinsB = GS->TeamRoundWins[1];
+			Result.RoundsPlayed = GS->RoundNumber;
+		}
 		Result.MatchDurationSec = FMath::RoundToInt32(
 			FMath::Max(0.f, GS->GetServerWorldTimeSeconds() - MatchStartServerTime));
 	}
-	Result.bSuddenDeath = bSuddenDeathPlayed;
+	Result.bSuddenDeath = bSuddenDeathPlayed;   // always false in Skirmish
 	return Result;
 }
 
@@ -1208,25 +1293,30 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 	Entry.ServerTime = GS->GetServerWorldTimeSeconds();
 	GS->ServerAddElimEntry(Entry);
 
+	// SKIRMISH: credit the shooter's TEAM a tag, check the tag cap, then respawn the victim in place.
+	// Inserted BEFORE the RoundElimination path and returns before it — the victim is never marked
+	// "out for the round", move-locked, death-cammed, or removed from AliveCounts.
+	if (GS->MatchType == EPFMatchType::Skirmish)
+	{
+		if (ShooterPS && FinalHit.ShooterTeam != VictimPS->TeamId && FinalHit.ShooterTeam <= 1)
+		{
+			uint16 TagsA = GS->TeamScores[0];
+			uint16 TagsB = GS->TeamScores[1];
+			if (FinalHit.ShooterTeam == 0) { ++TagsA; } else { ++TagsB; }
+			GS->ServerSetTeamScores(TagsA, TagsB);   // replicates + HUD refresh via OnRep_Score
+			if ((FinalHit.ShooterTeam == 0 ? TagsA : TagsB) >= SkirmishTagTarget)
+			{
+				EndSkirmish(FinalHit.ShooterTeam);
+				return;
+			}
+		}
+		RespawnVictimAtTeamSpawn(Victim);
+		return;
+	}
+
 	if (RespawnMode == EPFRespawnMode::Respawn)
 	{
-		// 04 Variant B kept cheap: timed reset in place of round elimination.
-		TWeakObjectPtr<APaintForgeCharacter> WeakVictim(Victim);
-		TWeakObjectPtr<APaintForgeGameMode> WeakThis(this);
-		FTimerHandle RespawnHandle;
-		GetWorldTimerManager().SetTimer(RespawnHandle,
-			FTimerDelegate::CreateLambda([WeakThis, WeakVictim]()
-			{
-				if (WeakThis.IsValid() && WeakVictim.IsValid())
-				{
-					WeakVictim->GetHealth()->ResetForRound(3);
-					if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
-					{
-						WeakThis->TeleportPawnTo(WeakVictim.Get(), WeakThis->GetSpawnTransform(PS));
-					}
-				}
-			}),
-			RespawnDelay, false);
+		RespawnVictimAtTeamSpawn(Victim);   // 04 Variant B: timed reset in place of round elimination
 		return;
 	}
 
@@ -1567,6 +1657,23 @@ uint8 APaintForgeGameMode::FindFreeRosterIndex() const
 
 void APaintForgeGameMode::ComputeEffectiveScaling()
 {
+	// Skirmish: one continuous timed period, win by tag count — bypass all round scaling. RoundWinsToTake
+	// carries the tag TARGET for the HUD (clamped to its uint8 field; the real win-check uses the uint16).
+	if (APaintForgeGameState* SkGS = GetPFGameState())
+	{
+		if (SkGS->MatchType == EPFMatchType::Skirmish)
+		{
+			const uint8 TargetU8 = static_cast<uint8>(FMath::Min<int32>(SkirmishTagTarget, 255));
+			EffectiveRoundWinsToTake = TargetU8;
+			EffectiveMaxRounds = 1;
+			EffectiveRoundDuration = SkirmishMatchDuration;
+			SkGS->ServerSetRoundWinsToTake(TargetU8);
+			UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Skirmish — first to %d tags, %.0f s"),
+				SkirmishTagTarget, SkirmishMatchDuration);
+			return;
+		}
+	}
+
 	// Format = the SELECTED team size (bots fill to it), not the live human count — so a 2-human 4v4
 	// still plays first-to-4, not the ≤2v2 small format. With bots off, fall back to live team counts.
 	const APaintForgeGameState* GS = GetPFGameState();

@@ -30,6 +30,7 @@ public:
 	UPROPERTY(Replicated)                       float  RoundStateEndServerTime = 0.f;
 	UPROPERTY(Replicated)                       uint8  RoundNumber = 0;            // 1-based during Combat
 	UPROPERTY(ReplicatedUsing=OnRep_Score)      uint8  TeamRoundWins[2] = {0, 0};
+	UPROPERTY(ReplicatedUsing=OnRep_Score)      uint16 TeamScores[2]    = {0, 0};   // Skirmish tag counts (reuses OnRep_Score)
 	UPROPERTY(ReplicatedUsing=OnRep_AliveCounts)uint8  AliveCounts[2]   = {0, 0};
 	UPROPERTY(Replicated)                       bool   bSuddenDeath = false;
 	UPROPERTY(ReplicatedUsing=OnRep_ElimFeed)   TArray<FPFElimEntry> ElimFeed;     // capped at 50, oldest trimmed
@@ -55,6 +56,7 @@ public:
 	void ServerSetPhaseEndTime(float EndServerTime);         // re-stamp within a phase (lobby/build countdowns)
 	void ServerSetRoundNumber(uint8 NewRoundNumber);
 	void ServerSetTeamRoundWins(uint8 WinsA, uint8 WinsB);
+	void ServerSetTeamScores(uint16 ScoreA, uint16 ScoreB);   // Skirmish tags; reuses OnRep_Score broadcast
 	void ServerSetAliveCounts(uint8 AliveA, uint8 AliveB);
 	void ServerAddElimEntry(const FPFElimEntry& Entry);
 	void ServerSetVoteTally(const FPFVoteTally& NewTally);

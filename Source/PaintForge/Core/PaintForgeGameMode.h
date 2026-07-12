@@ -50,6 +50,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") bool  bFillWithBots        = true;    // top each team up to the format size
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFBuildMode DefaultBuildMode = EPFBuildMode::Creative;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFMatchType DefaultMatchType = EPFMatchType::Elimination;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") uint16 SkirmishTagTarget    = 50;      // first team to N tags wins
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period
 
 	// ---- The only phase mutator in the codebase ----
 	void SetPhase(EPFMatchPhase NewPhase);            // server; updates GameState, stamps timers, side effects
@@ -90,6 +92,10 @@ protected:
 	void OnIntermissionEnd();
 	void StartSuddenDeath();
 
+	// ---- (intra) Skirmish match type (team frag-count; siblings, never touch the Elimination path) ----
+	void ResolveSkirmishOnTimer();                     // timer expiry: higher tags wins, tie = draw
+	void EndSkirmish(uint8 WinnerTeam);                // 0/1 winner, 255 = draw → Combat→Vote jump
+
 	// ---- (intra) lobby / build countdowns ----
 	void BeginLobbyStartCountdown(bool bForced);
 	void CancelLobbyStartCountdown();
@@ -109,6 +115,8 @@ protected:
 	void TeleportPawnTo(APaintForgeCharacter* Pawn, const FTransform& Transform);
 	// Controller-agnostic per-round respawn (players AND bots): resets HP + teleports, or restarts if no pawn.
 	void RespawnCombatant(APaintForgePlayerState* PS, uint8 RoundHP);
+	// Skirmish/Respawn: timed reset-in-place of an eliminated victim at its team spawn (no round-out).
+	void RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim);
 	void RecountAlive();
 
 	// ---- (intra) bots (fill teams to the selected format — server only) ----

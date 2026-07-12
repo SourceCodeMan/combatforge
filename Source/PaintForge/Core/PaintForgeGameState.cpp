@@ -36,6 +36,7 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APaintForgeGameState, RoundWinsToTake);
 	DOREPLIFETIME(APaintForgeGameState, BuildMode);
 	DOREPLIFETIME(APaintForgeGameState, MatchType);
+	DOREPLIFETIME(APaintForgeGameState, TeamScores);
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +144,18 @@ void APaintForgeGameState::ServerSetTeamRoundWins(uint8 WinsA, uint8 WinsB)
 	TeamRoundWins[0] = WinsA;
 	TeamRoundWins[1] = WinsB;
 	OnRep_Score();
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetTeamScores(uint16 ScoreA, uint16 ScoreB)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	TeamScores[0] = ScoreA;
+	TeamScores[1] = ScoreB;
+	OnRep_Score();       // same broadcast the HUD already binds (OnMatchScoreChangedEvent)
 	ForceNetUpdate();
 }
 
@@ -258,6 +271,8 @@ void APaintForgeGameState::ServerResetMatchState()
 	bSuddenDeath = false;
 	TeamRoundWins[0] = 0;
 	TeamRoundWins[1] = 0;
+	TeamScores[0] = 0;
+	TeamScores[1] = 0;
 	AliveCounts[0] = 0;
 	AliveCounts[1] = 0;
 	ElimFeed.Reset();
