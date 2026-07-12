@@ -38,13 +38,13 @@ NAME = "M_PF_ImpactMark"
 PATH = "/Game/Materials"
 FULL = PATH + "/" + NAME
 
+# Delete + recreate on re-run: delete_all_material_expressions on a LOADED asset crashes on
+# check(!IsRooted()) (UObjectBaseUtility) — the documented gotcha. Wipe the .uasset and rebuild fresh.
 if unreal.EditorAssetLibrary.does_asset_exist(FULL):
-    mat = unreal.EditorAssetLibrary.load_asset(FULL)
-    MEL.delete_all_material_expressions(mat)
-    log("rebuilding existing " + FULL)
-else:
-    mat = tools.create_asset(NAME, PATH, unreal.Material, unreal.MaterialFactoryNew())
-    log("creating " + FULL)
+    unreal.EditorAssetLibrary.delete_asset(FULL)
+    log("deleted existing " + FULL)
+mat = tools.create_asset(NAME, PATH, unreal.Material, unreal.MaterialFactoryNew())
+log("creating " + FULL)
 
 trySet(mat, "material_domain", unreal.MaterialDomain.MD_DEFERRED_DECAL)
 trySet(mat, "blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
