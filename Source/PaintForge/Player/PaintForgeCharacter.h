@@ -61,6 +61,9 @@ public:
 	void  OnFireCosmetic();        // owning client: viewmodel recoil kick only (airsoft — no flash)
 	void  OnRemoteFireCosmetic();  // remote viewers: no flash (airsoft); reserved for future feel
 
+	/** Hide FP viewmodel + TP rifle during BuildPhase (marker away while placing). */
+	void UpdateBuildPhaseWeaponVisibility();
+
 	// ---- AActor / ACharacter ----
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;

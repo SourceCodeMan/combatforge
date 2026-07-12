@@ -9,6 +9,7 @@
 
 class APaintForgeCharacter;
 class APaintForgePlayerState;
+class UImage;
 class UPFBuildComponent;
 class UTextBlock;
 
@@ -20,6 +21,7 @@ class UTextBlock;
  *    flash at the 30 s / 10 s warnings (T2)
  *  - per-team ready counts "Ready 3/4 — 2/4" (0.5 s roster poll)
  *  - deny flash on OnPlaceDeniedEvent
+ *  - center aim reticle (cross + dot) — combat HUD is swapped out in Build
  * Pawn wiring is pushed in by UPFRootHUDWidget (BindToPawn) on possession change.
  */
 UCLASS()
@@ -60,6 +62,11 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> EquippedText;
 	UPROPERTY() TObjectPtr<UTextBlock> DenyText;
 	UPROPERTY() TObjectPtr<UTextBlock> HintText;
+
+	/** Placement aim reticle (combat crosshair is not on-screen during Build). */
+	UPROPERTY() TObjectPtr<UImage> AimDot;
+	UPROPERTY() TObjectPtr<UImage> AimLineH;
+	UPROPERTY() TObjectPtr<UImage> AimLineV;
 
 	TWeakObjectPtr<UPFBuildComponent> BoundBuild;
 	TWeakObjectPtr<APaintForgePlayerState> BoundPlayerState;

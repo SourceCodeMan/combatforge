@@ -278,6 +278,8 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 	}
 
 	// --- Height cap (walls: level 0..2 only — a level-3-based wall breaches the cap) ---
+	// Strict: top of piece must stay under HeightCap so stacked floors can't form a deck you
+	// jump over the perimeter from. (Perimeter walls + escape lid also block escape.)
 	const int32 Level = Q.Z / 3;
 	if (Q.Type == EPFPieceType::Wall && Level > PFGrid::Levels - 2)
 	{
@@ -287,7 +289,9 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	if (Bounds.Max.Z > static_cast<float>(PFGrid::HeightCapUU) + 0.5f)
+	// Leave a small air gap under the escape lid / wall rim (no piece crowns at 1200 flat).
+	constexpr float HeightCapSlackUU = 8.f;
+	if (Bounds.Max.Z > static_cast<float>(PFGrid::HeightCapUU) - HeightCapSlackUU)
 	{
 		return EPFDenyReason::HeightCap;
 	}

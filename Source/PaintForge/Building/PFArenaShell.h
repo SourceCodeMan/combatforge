@@ -92,6 +92,8 @@ private:
 
 	UPROPERTY() TObjectPtr<USceneComponent> ShellRoot;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> FieldFloor;
+	/** Invisible ceiling lid above HeightCap — stops jumping out after building high. */
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> EscapeLid;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> PerimeterWalls;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SpawnStrips;      // [0]=side A (west), [1]=side B (east)
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> MidlinePosts;

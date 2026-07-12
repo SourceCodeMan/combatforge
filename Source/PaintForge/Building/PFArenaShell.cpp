@@ -18,7 +18,12 @@ namespace
 {
 	constexpr float FieldX = static_cast<float>(PFGrid::CellsX * PFGrid::CellUU);   // 6400
 	constexpr float FieldY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);   // 4000
-	constexpr float PerimeterH = static_cast<float>(PFGrid::HeightCapUU);           // 1200
+	// Perimeter must be taller than HeightCap + jump: players can stand on max-height floors
+	// (~1200) and jump over a wall that only reaches the height cap.
+	constexpr float PerimeterH = static_cast<float>(PFGrid::HeightCapUU) + 600.f;   // 1800
+	// Solid lid just above build cap so you can't leap over the rim from the top deck.
+	constexpr float EscapeLidZ = static_cast<float>(PFGrid::HeightCapUU) + 150.f;   // 1350
+	constexpr float EscapeLidThickness = 40.f;
 	constexpr float SpawnZ = 100.f;            // capsule half-height + clearance over the Z=0 floor
 
 	// Warm-up pen: 2000×2000 uu, centered south of the field at Y = -3000 (T29).
@@ -108,19 +113,41 @@ APFArenaShell::APFArenaShell()
 		FVector(FieldX * 0.5f, FieldY * 0.5f, -15.f), FVector(64.f, 40.f, 0.3f),
 		EPFShellCollision::SolidBuildable, FloorMaterial);
 
-	// --- 4 perimeter walls, h = 1200, hugging the field bounds (slightly long to close corners) ---
+	// --- 4 perimeter walls (taller than height cap so max-deck + jump can't clear them) ---
+	// Cube is 100 uu; scale Z = PerimeterH/100. Slightly long to close corners.
+	const float WallScaleZ = PerimeterH * 0.01f;
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallN"),
-		FVector(FieldX * 0.5f, FieldY + 10.f, PerimeterH * 0.5f), FVector(64.4f, 0.2f, 12.f),
+		FVector(FieldX * 0.5f, FieldY + 10.f, PerimeterH * 0.5f), FVector(64.4f, 0.2f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallS"),
-		FVector(FieldX * 0.5f, -10.f, PerimeterH * 0.5f), FVector(64.4f, 0.2f, 12.f),
+		FVector(FieldX * 0.5f, -10.f, PerimeterH * 0.5f), FVector(64.4f, 0.2f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallW"),
-		FVector(-10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, 40.4f, 12.f),
+		FVector(-10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, 40.4f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallE"),
-		FVector(FieldX + 10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, 40.4f, 12.f),
+		FVector(FieldX + 10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, 40.4f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
+
+	// Invisible escape lid: blocks pawns from hopping over the build volume rim.
+	// Paintballs pass through (Ignore) so high shots still work; build trace ignores it too.
+	{
+		UStaticMeshComponent* Lid = MakeShapePart(TEXT("EscapeLid"),
+			FVector(FieldX * 0.5f, FieldY * 0.5f, EscapeLidZ + EscapeLidThickness * 0.5f),
+			FVector(64.4f, 40.4f, EscapeLidThickness * 0.01f),
+			EPFShellCollision::Solid, WallMaterial);
+		if (Lid)
+		{
+			Lid->SetVisibility(false);
+			Lid->SetHiddenInGame(true);
+			Lid->SetCastShadow(false);
+			// Only block pawns — not paintballs / build snaps.
+			Lid->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Ignore);
+			Lid->SetCollisionResponseToChannel(PF_ECC_BuildTrace, ECR_Ignore);
+			Lid->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+			EscapeLid = Lid;
+		}
+	}
 
 	// --- Team-tinted spawn-strip floor tiles over the spawn columns (x = 0 and x = 15) ---
 	SpawnStrips.Add(MakeShapePart(TEXT("SpawnStripA"),
@@ -613,6 +640,12 @@ void APFArenaShell::SetMapBackdropActive(bool bActive)
 	SetVis(PenFloor);
 	for (UStaticMeshComponent* Wall : PenWalls) { SetVis(Wall); }
 	for (UStaticMeshComponent* Part : DressingParts) { SetVis(Part); }
+	// Escape lid stays invisible always (collision-only).
+	if (EscapeLid)
+	{
+		EscapeLid->SetVisibility(false);
+		EscapeLid->SetHiddenInGame(true);
+	}
 
 	// Spawn strips + midline stay visible (gameplay landmarks).
 	UE_LOG(PaintForgeLog, Log, TEXT("ArenaShell: map backdrop %s (cube shell hidden, collision kept)"),

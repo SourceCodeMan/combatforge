@@ -8,8 +8,10 @@
 #include "Player/PaintForgeCharacter.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Brushes/SlateColorBrush.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -164,6 +166,27 @@ void UPFBuildHUDWidget::BuildTree()
 		CSlot->SetPosition(FVector2D(32.f, -36.f));
 		CSlot->SetAutoSize(true);
 	}
+
+	// Center aim reticle — combat HUD is off during Build; gun is hidden, so this is the
+	// placement aim. Soft white cross + solid center dot.
+	auto MakeAimPiece = [this, RootCanvas](const FVector2D& Size, float Opacity) -> UImage*
+	{
+		UImage* Img = WidgetTree->ConstructWidget<UImage>();
+		Img->SetBrush(FSlateColorBrush(FLinearColor::White));
+		Img->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, Opacity));
+		if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(Img))
+		{
+			CSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+			CSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			CSlot->SetPosition(FVector2D::ZeroVector);
+			CSlot->SetSize(Size);
+			CSlot->SetZOrder(20);
+		}
+		return Img;
+	};
+	AimLineH = MakeAimPiece(FVector2D(22.f, 2.f), 0.85f);
+	AimLineV = MakeAimPiece(FVector2D(2.f, 22.f), 0.85f);
+	AimDot = MakeAimPiece(FVector2D(4.f, 4.f), 0.95f);
 }
 
 void UPFBuildHUDWidget::NativeConstruct()

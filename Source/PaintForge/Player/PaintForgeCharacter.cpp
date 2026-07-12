@@ -4,6 +4,7 @@
 
 #include "PaintForge.h"
 #include "Core/PaintForgeTypes.h"
+#include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerController.h"
 #include "Player/PFCharacterMovementComponent.h"
 #include "Player/PFCameraShakes.h"
@@ -360,6 +361,9 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 
 	// Quantum (and any sequence-driven body): idle ↔ walk ↔ run without an AnimBP.
 	UpdateSequenceLocomotion();
+
+	// Build phase: no marker in hands (placement HUD has its own aim dot).
+	UpdateBuildPhaseWeaponVisibility();
 
 	// TP rifle: rest in hand bone; raise to aim line only while ADS / firing.
 	if (WeaponRaiseHoldSec > 0.f)
@@ -1035,6 +1039,42 @@ void APaintForgeCharacter::ApplyRaisedWeaponPose()
 	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
 	WeaponMeshComp->SetWorldScale3D(WeaponRelativeScale);
 	bWeaponInRaisedPose = true;
+}
+
+void APaintForgeCharacter::UpdateBuildPhaseWeaponVisibility()
+{
+	bool bHideForBuild = false;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const APaintForgeGameState* GS = World->GetGameState<APaintForgeGameState>())
+		{
+			bHideForBuild = (GS->Phase == EPFMatchPhase::Build);
+		}
+	}
+
+	// FP viewmodel (owner): fully off during build so it doesn't block placement.
+	if (ViewModelRoot != nullptr)
+	{
+		ViewModelRoot->SetVisibility(!bHideForBuild, /*bPropagateToChildren=*/true);
+	}
+	// TP rifle (remotes): also hide so builders don't look armed.
+	if (WeaponMeshComp != nullptr)
+	{
+		// Don't fight elimination hide — elim appearance owns that path.
+		if (bHideForBuild)
+		{
+			WeaponMeshComp->SetHiddenInGame(true);
+		}
+		// When leaving build, re-show unless eliminated (SetEliminatedAppearance may re-hide).
+		else if (const UPFHealthComponent* Health = GetHealth())
+		{
+			WeaponMeshComp->SetHiddenInGame(Health->bEliminated);
+		}
+		else
+		{
+			WeaponMeshComp->SetHiddenInGame(false);
+		}
+	}
 }
 
 void APaintForgeCharacter::UpdateWeaponHoldPose()
