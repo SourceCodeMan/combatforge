@@ -14,17 +14,7 @@
 #include "Building/PFBuildGrid.h"
 #include "Voting/PFRatingSubsystem.h"
 
-#include "Components/LightComponent.h"
 #include "GameFramework/PawnMovementComponent.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/VolumetricCloudComponent.h"
-#include "Components/ExponentialHeightFogComponent.h"
-#include "Engine/DirectionalLight.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "Engine/SkyLight.h"
-#include "Engine/PostProcessVolume.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
@@ -94,61 +84,15 @@ void APaintForgeGameMode::SpawnArenaActors()
 	ArenaShell = World->SpawnActor<APFArenaShell>(APFArenaShell::StaticClass(), FTransform::Identity, Params);
 	BuildGrid  = World->SpawnActor<APFBuildGrid>(APFBuildGrid::StaticClass(), FTransform::Identity, Params);
 
-	// Lighting rig (02 §3.5): all natively spawnable, zero assets — the level itself stays empty (T17).
-	// Modern kit: sun (atmosphere sun) + SkyAtmosphere + real-time-capture SkyLight + height fog +
-	// volumetric clouds + an unbound graded PostProcess volume. Turns the empty stage into a lit game world.
-	if (ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(
-			ADirectionalLight::StaticClass(),
-			FTransform(FRotator(-46.f, -35.f, 0.f), FVector::ZeroVector), Params))
-	{
-		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
-		{
-			SunComp->SetMobility(EComponentMobility::Movable);
-			SunComp->SetIntensity(6.f);
-			SunComp->SetLightColor(FLinearColor(1.0f, 0.96f, 0.88f));
-			SunComp->SetAtmosphereSunLight(true);   // drives the SkyAtmosphere sun disc + sky colour
-			SunComp->SetDynamicShadowDistanceMovableLight(20000.f);
-		}
-	}
-	World->SpawnActor<ASkyAtmosphere>(ASkyAtmosphere::StaticClass(), FTransform::Identity, Params);   // sky + horizon
-	if (ASkyLight* Sky = World->SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FTransform::Identity, Params))
-	{
-		if (USkyLightComponent* SkyComp = Sky->GetLightComponent())
-		{
-			SkyComp->SetMobility(EComponentMobility::Movable);
-			SkyComp->SetRealTimeCapture(true);      // ambient bounce captured from the atmosphere (no cubemap)
-			SkyComp->SetIntensity(1.f);
-		}
-	}
-	if (AExponentialHeightFog* Fog = World->SpawnActor<AExponentialHeightFog>(
-			AExponentialHeightFog::StaticClass(), FTransform::Identity, Params))
-	{
-		if (UExponentialHeightFogComponent* FogComp = Fog->GetComponent())
-		{
-			FogComp->SetFogDensity(0.015f);
-		}
-	}
-	World->SpawnActor<AVolumetricCloud>(AVolumetricCloud::StaticClass(), FTransform::Identity, Params);   // sky detail
-	if (APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>(
-			APostProcessVolume::StaticClass(), FTransform::Identity, Params))
-	{
-		PPV->bUnbound = true;
-		PPV->Priority = 1.f;
-		FPostProcessSettings& PP = PPV->Settings;
-		PP.bOverride_AutoExposureMinBrightness = true; PP.AutoExposureMinBrightness = 1.f;   // lock exposure
-		PP.bOverride_AutoExposureMaxBrightness = true; PP.AutoExposureMaxBrightness = 1.f;
-		PP.bOverride_BloomIntensity = true;            PP.BloomIntensity = 0.6f;
-		PP.bOverride_VignetteIntensity = true;         PP.VignetteIntensity = 0.35f;
-		PP.bOverride_ColorSaturation = true;           PP.ColorSaturation = FVector4(1.06, 1.06, 1.06, 1.0);
-		PP.bOverride_ColorContrast = true;             PP.ColorContrast = FVector4(1.04, 1.04, 1.04, 1.0);
-	}
+	// The lighting rig is spawned per-machine by UPFLightingSubsystem (host AND every remote client) so
+	// clients aren't left with an unlit scene — the server-only GameMode must not own render-only actors.
 
 	if (AWorldSettings* WorldSettings = World->GetWorldSettings())
 	{
 		WorldSettings->KillZ = -1000.f;
 	}
 
-	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: arena shell, build grid and lighting spawned"));
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: arena shell and build grid spawned"));
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +108,11 @@ void APaintForgeGameMode::PostLogin(APlayerController* NewPlayer)
 	{
 		int32 TeamA = 0, TeamB = 0;
 		GetTeamCounts(TeamA, TeamB);
-		const uint8 NewTeam = (TeamB < TeamA) ? 1 : 0;   // smaller team; tie → A
+		// Balance on HUMAN counts, not bot-padded totals — otherwise every mid-match joiner stacks on
+		// team 0 (bots keep the totals equal, so the tie always resolves to 0).
+		const int32 HumansA = TeamA - GetTeamCountByKind(0, /*bBotsOnly=*/true);
+		const int32 HumansB = TeamB - GetTeamCountByKind(1, /*bBotsOnly=*/true);
+		const uint8 NewTeam = (HumansB < HumansA) ? 1 : 0;   // fewer real players; tie → A
 		PS->ServerSetTeam(NewTeam, FindFreeRosterIndex());
 	}
 
@@ -177,11 +125,24 @@ void APaintForgeGameMode::PostLogin(APlayerController* NewPlayer)
 		// Joiners during Combat enter the current round alive at their team spawn.
 		// CONTRACT-GAP: contract is silent on mid-round joiners; alive-at-spawn is the smallest
 		// implementation that keeps alive counts and elim-victory checks self-consistent.
-		// If bots have already filled this player's team to the format size, free a slot by dropping a bot.
+		// Keep the joined team at/under the format size. Prefer to free a bot slot; if the team is all
+		// humans (no bot to drop), move the joiner to the other side when it has room, so no team
+		// exceeds the format (which would also alias onto the 6 fixed spawn slots).
 		if (bFillWithBots && GetPFGameState() && PS->TeamId <= 1 &&
 			GetTeamCountByKind(PS->TeamId, /*bBotsOnly=*/false) > GetPFGameState()->TargetTeamSize)
 		{
-			TrimOneBotFromTeam(PS->TeamId);
+			if (GetTeamCountByKind(PS->TeamId, /*bBotsOnly=*/true) > 0)
+			{
+				TrimOneBotFromTeam(PS->TeamId);
+			}
+			else
+			{
+				const uint8 Other = static_cast<uint8>(1 - PS->TeamId);
+				if (GetTeamCountByKind(Other, /*bBotsOnly=*/false) < GetPFGameState()->TargetTeamSize)
+				{
+					PS->ServerSetTeam(Other, PS->RosterIndex);
+				}
+			}
 		}
 
 		if (GetPFGameState() && GetPFGameState()->Phase == EPFMatchPhase::Combat)
@@ -626,6 +587,12 @@ void APaintForgeGameMode::HostCycleTeam(APaintForgePlayerState* Target)
 		return;
 	}
 	const uint8 NewTeam = (Target->TeamId == 0) ? 1 : 0;
+	// Don't overstack a side beyond the format size (also protects the 6 fixed spawn slots per team).
+	if (GetTeamCountByKind(NewTeam, /*bBotsOnly=*/false) >= GS->TargetTeamSize)
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host cycle refused - team %d already at format size"), NewTeam);
+		return;
+	}
 	Target->ServerSetTeam(NewTeam, Target->RosterIndex);
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host moved %s to team %d"), *Target->GetPlayerName(), NewTeam);
 }
@@ -1340,9 +1307,10 @@ void APaintForgeGameMode::FinalizeVotePhase()
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
-		if (!PS || PS->bHasVoted)
+		if (!PS || PS->bHasVoted || PS->IsABot())
 		{
-			continue;
+			continue;   // bots don't vote — excluding them here matches CheckAllVotesIn so the
+			            // timeout tally + persisted rating record aren't polluted with bot abstains
 		}
 		PS->bHasVoted = true;
 		++Tally.Abstained;
@@ -1555,6 +1523,13 @@ void APaintForgeGameMode::ComputeEffectiveScaling()
 		EffectiveMaxRounds = MaxRounds;
 		EffectiveRoundDuration = RoundDuration;
 	}
+	// Replicate the resolved win threshold so the HUD renders the right pip count instead of inferring
+	// it from the live (bot-padded / leaver-shrunk) player count.
+	if (APaintForgeGameState* MutableGS = GetPFGameState())
+	{
+		MutableGS->ServerSetRoundWinsToTake(EffectiveRoundWinsToTake);
+	}
+
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: match format first-to-%d, max %d rounds, %.0f s rounds"),
 		EffectiveRoundWinsToTake, EffectiveMaxRounds, EffectiveRoundDuration);
 }

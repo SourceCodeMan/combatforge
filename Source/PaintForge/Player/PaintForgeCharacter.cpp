@@ -670,15 +670,20 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 	{
 		GetMesh()->SetAnimInstanceClass(ThirdPersonAnimClass);
 	}
-	// Align: face +X (standard ACharacter -90 yaw), and snap the mesh's LOWEST point (feet) to the
-	// capsule bottom — robust to import origin (MeshMinZ = feet Z in mesh-local space). Manny and Quinn
-	// share bounds, but computing per-chosen-mesh keeps it correct if a future team body differs.
+	// Align: face +X (standard ACharacter -90 yaw), feet at the capsule bottom. Use the FEET-AT-ORIGIN
+	// convention (-halfHeight, matching the ctor smoothing baseline) rather than a per-mesh -MeshMinZ
+	// term: on simulated proxies the Character Movement Component's network smoothing forces the mesh
+	// relative Z back to the ctor baseline every tick, so a -MeshMinZ correction would be discarded and
+	// the body would float/sink on other players' screens. Assert the convention so a bad import fails
+	// loudly here instead of silently floating in networked play.
 	GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
 	if (const UCapsuleComponent* Cap = GetCapsuleComponent())
 	{
 		const float MeshMinZ = Chosen->GetBounds().GetBox().Min.Z;
-		GetMesh()->SetRelativeLocation(
-			FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight() - MeshMinZ));
+		ensureMsgf(FMath::IsNearlyZero(MeshMinZ, 2.f),
+			TEXT("Team body %s isn't feet-at-origin (minZ=%.1f); it will float on remote screens. Re-import with the origin at the feet."),
+			*Chosen->GetName(), MeshMinZ);
+		GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight()));
 	}
 	GetMesh()->SetVisibility(true);
 	GetMesh()->SetOwnerNoSee(true);           // first-person: owner doesn't see own TP body

@@ -334,10 +334,10 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 		return;
 	}
 
-	// Effective wins-to-take: <=2v2 formats play first-to-3 (T15). The GameMode config
-	// isn't replicated, so infer from the roster size; never show fewer pips than a team
-	// already has wins (guards a mid-match leaver dropping the roster to <=4).
-	int32 EffectivePips = (GS->PlayerArray.Num() <= SmallFormatMaxPlayers) ? SmallFormatPips : MaxPips;
+	// Effective wins-to-take is resolved server-side from the format and replicated on GameState
+	// (RoundWinsToTake) — read it directly instead of inferring from the live (bot-padded /
+	// leaver-shrunk) roster size. Never show fewer pips than a team already has wins.
+	int32 EffectivePips = (GS->RoundWinsToTake > 0) ? GS->RoundWinsToTake : MaxPips;
 	EffectivePips = FMath::Max3(EffectivePips,
 		static_cast<int32>(GS->TeamRoundWins[0]), static_cast<int32>(GS->TeamRoundWins[1]));
 	UpdatePipVisibility(FMath::Min(EffectivePips, MaxPips));
