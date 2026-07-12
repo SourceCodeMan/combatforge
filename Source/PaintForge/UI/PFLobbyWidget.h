@@ -9,6 +9,9 @@
 
 class APaintForgePlayerState;
 class UPFLobbyWidget;
+class UBorder;
+class UButton;
+class UCanvasPanel;
 class UTextBlock;
 class UVerticalBox;
 
@@ -55,15 +58,33 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
+	// Host match-setup controls (server re-validates host-ness; these are UX gating only).
+	UFUNCTION() void OnModeClicked();
+	UFUNCTION() void OnTypeClicked();
+	UFUNCTION() void OnFormatClicked();
+	UFUNCTION() void OnLoadoutClicked();
+	UFUNCTION() void OnLoadoutClose();
+
 private:
 	void BuildTree();
+	void BuildConfigPanel(UCanvasPanel* RootCanvas);
+	void BuildLoadoutOverlay(UCanvasPanel* RootCanvas);
+	UButton* MakeConfigButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText);
 	void RefreshRoster();
+	void RefreshConfig();
 	bool IsLocalHost() const;
 
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> CountdownText;
 	UPROPERTY() TObjectPtr<UTextBlock> FooterText;
 	UPROPERTY() TObjectPtr<UVerticalBox> RosterBox;
+
+	// Match-setup panel (host-editable, replicated on GameState so everyone sees the selection).
+	UPROPERTY() TObjectPtr<UTextBlock> ModeValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> TypeValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> FormatValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> ConfigHintText;
+	UPROPERTY() TObjectPtr<UBorder> LoadoutOverlay;   // stub screen (nothing to equip yet)
 
 	float PollAccum = 0.f;
 	/** Cheap change detection so rows are only rebuilt when the roster actually changed. */
