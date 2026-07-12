@@ -8,8 +8,12 @@
 #include "Core/PaintForgePlayerState.h"
 #include "Core/PaintForgeTypes.h"
 #include "Combat/PFWeaponComponent.h"
+#include "Objectives/PFControlPointActor.h"
+#include "Objectives/PFFlagActor.h"
+#include "Objectives/PFObjectiveLayout.h"
 
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 
 // Live playtest knob: override skill for newly spawned bots (takes effect next build/round). -1 = default.
@@ -111,73 +115,95 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 
 	APaintForgeCharacter* Target = CurrentTarget.Get();
-	if (Target == nullptr)
+
+	// Objective goal (Domination / Hardpoint / CTF): where this bot should push, even with no enemy in
+	// sight. Fight modes leave it unset, so the bot only acts when it has an enemy.
+	FVector ObjGoal;
+	const bool bHasObjective = ComputeObjectiveGoal(ObjGoal);
+	if (Target == nullptr && !bHasObjective)
 	{
 		SetFiring(false);
-		return;
+		return;   // nothing to fight and no objective to push — idle
 	}
 
-	const FVector BotEye = Bot->GetActorLocation() + FVector(0.f, 0.f, 60.f);
-	const FVector TargetChest = Target->GetActorLocation() + FVector(0.f, 0.f, 40.f);
-	const FVector ToTarget = TargetChest - BotEye;
-	const float Dist = ToTarget.Size();
-
-	// Aim: re-roll a random error every AimJitterInterval, then EASE control rotation toward the target at a
-	// capped turn rate (AimTurnRate). A low turn rate + wide error means bots lag strafing players and miss
-	// — beatable by juking. The weapon and the server dir-gate read control rotation, so this IS the shot dir.
-	AimJitterTimer -= DeltaSeconds;
-	if (AimJitterTimer <= 0.f)
+	// --- Aim + fire (only with an enemy). Re-roll a random error every AimJitterInterval, then EASE control
+	// rotation toward the target at a capped turn rate so bots lag strafers and miss. Fire in range, past the
+	// reaction gap, with LOS. The weapon + server dir-gate read control rotation, so this IS the shot dir.
+	if (Target != nullptr)
 	{
-		AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
-		AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
-		AimJitterTimer = AimJitterInterval;
-	}
-	FRotator DesiredAim = ToTarget.Rotation();
-	DesiredAim.Yaw += AimJitterYaw;
-	DesiredAim.Pitch = FMath::Clamp(DesiredAim.Pitch + AimJitterPitch, -80.f, 80.f);
-	SetControlRotation(FMath::RInterpTo(GetControlRotation(), DesiredAim, DeltaSeconds, AimTurnRate));
+		const FVector BotEye = Bot->GetActorLocation() + FVector(0.f, 0.f, 60.f);
+		const FVector TargetChest = Target->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+		const FVector ToTarget = TargetChest - BotEye;
+		const float Dist = ToTarget.Size();
 
-	// Movement: hold a stand-off band — close if too far, back up if too close, strafe in-band — then
-	// steer that desired direction around cover/walls (reactive whiskers) and break out if we get pinned.
-	// (Reactive nav suits the single open arena + sparse player-built cover; a runtime navmesh is the
-	// documented v2 for complex maps and precise objective routing.)
+		AimJitterTimer -= DeltaSeconds;
+		if (AimJitterTimer <= 0.f)
+		{
+			AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
+			AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
+			AimJitterTimer = AimJitterInterval;
+		}
+		FRotator DesiredAim = ToTarget.Rotation();
+		DesiredAim.Yaw += AimJitterYaw;
+		DesiredAim.Pitch = FMath::Clamp(DesiredAim.Pitch + AimJitterPitch, -80.f, 80.f);
+		SetControlRotation(FMath::RInterpTo(GetControlRotation(), DesiredAim, DeltaSeconds, AimTurnRate));
+
+		SetFiring((Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && HasLineOfSight(Target));
+	}
+	else
+	{
+		SetFiring(false);   // pushing an objective with nobody in sight — hold fire
+	}
+
+	// --- Movement: pick a heading, steer it around cover, break out if pinned. In objective modes the bot
+	// heads for its point/flag (still fighting on the way); otherwise it holds a stand-off band on the enemy.
 	StrafeTimer -= DeltaSeconds;
 	if (StrafeTimer <= 0.f)
 	{
 		StrafeSign = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
 		StrafeTimer = StrafeSwitchInterval;
 	}
-	const FVector Flat = FVector(ToTarget.X, ToTarget.Y, 0.f).GetSafeNormal();
-	const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
+	const FVector BotLoc = Bot->GetActorLocation();
+	FVector Flat;          // primary heading (also drives the unstick escape)
 	FVector DesiredDir;
-	if (Dist > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
-	else if (Dist < MinRangeUU)    { DesiredDir = -Flat; }
-	else                           { DesiredDir = Right * StrafeSign; }
+	if (bHasObjective)
+	{
+		Flat = FVector(ObjGoal.X - BotLoc.X, ObjGoal.Y - BotLoc.Y, 0.f).GetSafeNormal();
+		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
+		if (FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU) { DesiredDir = (Flat + Right * StrafeSign * 0.25f).GetSafeNormal(); }
+		else                                                          { DesiredDir = Right * StrafeSign; }   // on the point: hold + stay dodgy
+	}
+	else
+	{
+		const FVector ToEnemy = Target->GetActorLocation() - BotLoc;
+		Flat = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
+		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
+		const float Dist = ToEnemy.Size2D();
+		if (Dist > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
+		else if (Dist < MinRangeUU)    { DesiredDir = -Flat; }
+		else                           { DesiredDir = Right * StrafeSign; }
+	}
 
 	// Unstick: if we wanted to move but barely have over the last sample window, peel off sideways a beat.
 	StuckSampleTimer -= DeltaSeconds;
 	if (EscapeTimer > 0.f)
 	{
 		EscapeTimer -= DeltaSeconds;
-		DesiredDir = (Right * EscapeSign - Flat * 0.35f).GetSafeNormal();
+		DesiredDir = (FVector::CrossProduct(FVector::UpVector, Flat) * EscapeSign - Flat * 0.35f).GetSafeNormal();
 	}
 	else if (StuckSampleTimer <= 0.f)
 	{
 		if (!StuckSamplePos.IsZero()
-			&& FVector::DistSquared2D(Bot->GetActorLocation(), StuckSamplePos) < FMath::Square(StuckMoveThresh))
+			&& FVector::DistSquared2D(BotLoc, StuckSamplePos) < FMath::Square(StuckMoveThresh))
 		{
 			EscapeTimer = 0.7f;
 			EscapeSign = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
 		}
-		StuckSamplePos = Bot->GetActorLocation();
+		StuckSamplePos = BotLoc;
 		StuckSampleTimer = 0.5f;
 	}
 
 	Bot->AddMovementInput(SteerAvoidingObstacles(DesiredDir), 1.f);
-
-	// Fire only in range, past the reaction gap, and with a clear line of sight (don't hose cover).
-	const bool bWantFire = (Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && HasLineOfSight(Target);
-	SetFiring(bWantFire);
 }
 
 APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
@@ -254,6 +280,113 @@ bool APFBotController::IsTargetEngageable(const APaintForgeCharacter* Target) co
 		return false;   // drifted out of engage range → let it re-scan for a nearer foe
 	}
 	return HasLineOfSight(Target);   // hold the target only while we can still see it
+}
+
+void APFBotController::EnsureObjectivesCached()
+{
+	// Objectives are spawned once per match; only (re)scan while our cache is empty/stale — this covers a
+	// bot that existed before the objective actors spawned, and a fresh match. Counts are tiny (<=3 CP, <=2 flag).
+	const bool bHavePoints = ControlPointsCache.Num() > 0 && ControlPointsCache[0].IsValid();
+	const bool bHaveFlags  = FlagsCache.Num() > 0 && FlagsCache[0].IsValid();
+	if (bHavePoints || bHaveFlags)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	ControlPointsCache.Reset();
+	FlagsCache.Reset();
+	for (TActorIterator<APFControlPointActor> It(World); It; ++It) { ControlPointsCache.Add(*It); }
+	for (TActorIterator<APFFlagActor> It(World); It; ++It)          { FlagsCache.Add(*It); }
+}
+
+bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
+{
+	const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
+	const APaintForgePlayerState* MyPS = GetPlayerState<APaintForgePlayerState>();
+	const APaintForgeCharacter* Bot = GetBotCharacter();
+	if (GS == nullptr || MyPS == nullptr || Bot == nullptr)
+	{
+		return false;
+	}
+	const EPFMatchType Mode = GS->MatchType;
+	if (Mode != EPFMatchType::Domination && Mode != EPFMatchType::Hardpoint && Mode != EPFMatchType::CaptureFlag)
+	{
+		return false;   // fight modes have no objective goal
+	}
+	EnsureObjectivesCached();
+	const uint8 MyTeam = MyPS->TeamId;
+	const FVector BotLoc = Bot->GetActorLocation();
+
+	if (Mode == EPFMatchType::CaptureFlag)
+	{
+		// Find my home flag (for the home location) and check whether I'm carrying the enemy flag.
+		APFFlagActor* HomeFlag = nullptr;
+		bool bCarryingEnemyFlag = false;
+		for (const TWeakObjectPtr<APFFlagActor>& FlagPtr : FlagsCache)
+		{
+			APFFlagActor* Flag = FlagPtr.Get();
+			if (Flag == nullptr) { continue; }
+			if (Flag->GetOwnerTeam() == MyTeam) { HomeFlag = Flag; }
+			else if (Flag->GetCarrier() == MyPS) { bCarryingEnemyFlag = true; }
+		}
+		const FVector MyHome = HomeFlag ? HomeFlag->GetHomeLocation() : PFObjectiveLayout::FlagHome(MyTeam);
+		if (bCarryingEnemyFlag)
+		{
+			OutGoal = MyHome;   // run it home to score
+			return true;
+		}
+		// Not carrying: go grab the nearest grabbable (not-carried) enemy flag.
+		APFFlagActor* BestFlag = nullptr;
+		float BestSq = TNumericLimits<float>::Max();
+		for (const TWeakObjectPtr<APFFlagActor>& FlagPtr : FlagsCache)
+		{
+			APFFlagActor* Flag = FlagPtr.Get();
+			if (Flag == nullptr || Flag->GetOwnerTeam() == MyTeam || Flag->IsCarried()) { continue; }
+			const float DSq = FVector::DistSquared(BotLoc, Flag->GetActorLocation());
+			if (DSq < BestSq) { BestSq = DSq; BestFlag = Flag; }
+		}
+		OutGoal = BestFlag ? BestFlag->GetActorLocation() : MyHome;   // else escort/defend near home
+		return true;
+	}
+
+	// Domination / Hardpoint: head for a control point.
+	APFControlPointActor* GoalCP = nullptr;
+	if (Mode == EPFMatchType::Hardpoint)
+	{
+		float BestSq = TNumericLimits<float>::Max();
+		for (const TWeakObjectPtr<APFControlPointActor>& CPPtr : ControlPointsCache)
+		{
+			APFControlPointActor* CP = CPPtr.Get();
+			if (CP == nullptr || !CP->IsPointActive()) { continue; }
+			const float DSq = FVector::DistSquared(BotLoc, CP->GetActorLocation());
+			if (DSq < BestSq) { BestSq = DSq; GoalCP = CP; }
+		}
+	}
+	else   // Domination: nearest point we don't already own (else nearest to defend)
+	{
+		float BestUnownedSq = TNumericLimits<float>::Max();
+		float BestAnySq = TNumericLimits<float>::Max();
+		APFControlPointActor* NearestAny = nullptr;
+		for (const TWeakObjectPtr<APFControlPointActor>& CPPtr : ControlPointsCache)
+		{
+			APFControlPointActor* CP = CPPtr.Get();
+			if (CP == nullptr) { continue; }
+			const float DSq = FVector::DistSquared(BotLoc, CP->GetActorLocation());
+			if (DSq < BestAnySq) { BestAnySq = DSq; NearestAny = CP; }
+			if (CP->GetControllingTeam() != MyTeam && DSq < BestUnownedSq) { BestUnownedSq = DSq; GoalCP = CP; }
+		}
+		if (GoalCP == nullptr) { GoalCP = NearestAny; }
+	}
+	if (GoalCP != nullptr)
+	{
+		OutGoal = GoalCP->GetActorLocation();
+		return true;
+	}
+	return false;
 }
 
 bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target) const

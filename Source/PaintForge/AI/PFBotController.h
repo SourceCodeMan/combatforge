@@ -7,6 +7,8 @@
 #include "PFBotController.generated.h"
 
 class APaintForgeCharacter;
+class APFControlPointActor;
+class APFFlagActor;
 
 /**
  * Server-only roster-filling bot (contract addendum: bots fill teams to the selected format).
@@ -65,6 +67,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeUU = 320.f;    // forward look-ahead for cover avoidance
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeRadius = 30.f; // sweep radius (~pawn width) for the avoidance probe
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float StuckMoveThresh = 45.f;  // min 2D move per 0.5s before we count as stuck
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
 
 private:
 	APaintForgeCharacter* GetBotCharacter() const;
@@ -74,6 +77,8 @@ private:
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
 	FVector SteerAvoidingObstacles(const FVector& DesiredDir) const;   // whisker-steer a move dir around cover/walls
 	bool IsTargetEngageable(const APaintForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
+	bool ComputeObjectiveGoal(FVector& OutGoal);   // Dom/Hardpoint/CTF: where to push (false in fight modes)
+	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)
 
 	TWeakObjectPtr<APaintForgeCharacter> CurrentTarget;
 	float TargetRefreshTimer = 0.f;
@@ -88,5 +93,8 @@ private:
 	float StuckSampleTimer = 0.f;
 	float EscapeTimer = 0.f;
 	float EscapeSign = 1.f;
+	// Objective-mode targets (Domination / Hardpoint / CTF), cached once per match.
+	TArray<TWeakObjectPtr<APFControlPointActor>> ControlPointsCache;
+	TArray<TWeakObjectPtr<APFFlagActor>> FlagsCache;
 	bool  bFiring = false;
 };
