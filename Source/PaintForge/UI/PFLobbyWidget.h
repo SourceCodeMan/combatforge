@@ -83,6 +83,7 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> TypeValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> FormatValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> BotsValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> MapValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> ConfigHintText;
 	UPROPERTY() TObjectPtr<UBorder> LoadoutOverlay;   // stub screen (nothing to equip yet)
 

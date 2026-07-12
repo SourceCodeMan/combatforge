@@ -9,6 +9,26 @@
 #include "Core/PaintForgeTypes.h"
 #include "PFRatingSubsystem.generated.h"
 
+/** One ranked community arena for the pregame map picker (host disk catalog). */
+USTRUCT()
+struct PAINTFORGE_API FPFCommunityMapInfo
+{
+	GENERATED_BODY()
+
+	/** Filename only under Saved/Arenas/ (e.g. arena_20260712_….json). */
+	UPROPERTY() FString FileName;
+	UPROPERTY() FString ArenaId;
+	/** Short human label for UI lists. */
+	UPROPERTY() FString DisplayName;
+	/** Vote score (up=+2, down=−1) + piece-count soft boost. */
+	UPROPERTY() int32 Score = 0;
+	UPROPERTY() int32 PieceCount = 0;
+	UPROPERTY() int32 TeamSize = 0;
+	UPROPERTY() int32 ThumbUp = 0;
+	UPROPERTY() int32 ThumbDown = 0;
+	UPROPERTY() FString CreatedUtc;
+};
+
 /**
  * Match record lifecycle + vote persistence (contract §3.7, B13, T24).
  *
@@ -61,8 +81,18 @@ public:
 	/**
 	 * Loads a whole saved community arena (both halves, unchanged) for Improvement mode — everyone
 	 * builds on top of it. Server-only; false if none saved. The injector re-mints piece ids.
+	 * Prefer PreferredFileName when non-empty and valid; else highest-ranked / most recent.
 	 */
-	bool PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces) const;
+	bool PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces, const FString& PreferredFileName = FString()) const;
+
+	/**
+	 * Ranked community catalog for the map picker (top MaxCount, default 100).
+	 * Host disk only (Saved/Arenas/*.json). Safe to call from the listen-host boot menu.
+	 */
+	void ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMaps, int32 MaxCount = 100) const;
+
+	/** Load a specific Saved/Arenas file by filename (basename only). */
+	bool LoadCommunityArenaByFileName(const FString& FileName, TArray<FPFBuildPieceRec>& OutPieces) const;
 
 private:
 	/** One staged vote (AddVote input, held until CommitMatchRecord). Not a USTRUCT: no GC refs. */
@@ -77,6 +107,10 @@ private:
 
 	/** Loads + parses the most-recent Saved/Arenas/*.json into records. False if none/parse fail. */
 	bool LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces) const;
+
+	/** Parse one arena JSON file into map info + pieces; false if unusable. */
+	bool ParseArenaFile(const FString& AbsolutePath, const FString& FileName,
+	                    FPFCommunityMapInfo& OutInfo, TArray<FPFBuildPieceRec>& OutPieces) const;
 
 	/** Serializes CurrentRecordJson to CurrentFilePath. Logs and returns false on failure. */
 	bool WriteRecordToDisk() const;

@@ -226,6 +226,148 @@ FString UPFRatingSubsystem::GetCurrentArenaId() const
 	return bRecordActive ? CurrentArenaId : FString();
 }
 
+bool UPFRatingSubsystem::ParseArenaFile(const FString& AbsolutePath, const FString& FileName,
+	FPFCommunityMapInfo& OutInfo, TArray<FPFBuildPieceRec>& OutPieces) const
+{
+	OutInfo = FPFCommunityMapInfo();
+	OutPieces.Reset();
+
+	FString Json;
+	if (!FFileHelper::LoadFileToString(Json, *AbsolutePath))
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+
+	int32 TeamSize = 0;
+	if (!FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), OutPieces, TeamSize) || OutPieces.Num() == 0)
+	{
+		return false;
+	}
+
+	OutInfo.FileName = FileName;
+	OutInfo.PieceCount = OutPieces.Num();
+	OutInfo.TeamSize = TeamSize;
+	Root->TryGetStringField(TEXT("arenaId"), OutInfo.ArenaId);
+	Root->TryGetStringField(TEXT("createdUtc"), OutInfo.CreatedUtc);
+
+	// Vote tally → rank score (up +2, down −1).
+	const TArray<TSharedPtr<FJsonValue>>* Votes = nullptr;
+	if (Root->TryGetArrayField(TEXT("votes"), Votes) && Votes)
+	{
+		for (const TSharedPtr<FJsonValue>& Val : *Votes)
+		{
+			const TSharedPtr<FJsonObject>* VObj = nullptr;
+			if (!Val.IsValid() || !Val->TryGetObject(VObj) || !VObj || !(*VObj).IsValid())
+			{
+				continue;
+			}
+			FString Thumb;
+			(*VObj)->TryGetStringField(TEXT("thumb"), Thumb);
+			if (Thumb.Equals(TEXT("up"), ESearchCase::IgnoreCase))
+			{
+				++OutInfo.ThumbUp;
+				OutInfo.Score += 2;
+			}
+			else if (Thumb.Equals(TEXT("down"), ESearchCase::IgnoreCase))
+			{
+				++OutInfo.ThumbDown;
+				OutInfo.Score -= 1;
+			}
+		}
+	}
+	// Soft boost for developed forts so empty vote records still rank by craft.
+	OutInfo.Score += FMath::Clamp(OutInfo.PieceCount / 10, 0, 50);
+
+	const FString ShortId = OutInfo.ArenaId.IsEmpty()
+		? FileName.Left(12)
+		: OutInfo.ArenaId.Left(8);
+	const FString DatePart = OutInfo.CreatedUtc.IsEmpty()
+		? TEXT("")
+		: OutInfo.CreatedUtc.Left(10);
+	OutInfo.DisplayName = FString::Printf(TEXT("%s  ·  %d pcs  ·  %+d"),
+		DatePart.IsEmpty() ? *ShortId : *DatePart,
+		OutInfo.PieceCount, OutInfo.Score);
+	return true;
+}
+
+void UPFRatingSubsystem::ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMaps, int32 MaxCount) const
+{
+	OutMaps.Reset();
+	// Catalog is host-local disk; pure clients get an empty list (host picks, GS replicates choice).
+	const UGameInstance* GI = GetGameInstance();
+	const UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (World && World->GetNetMode() == NM_Client)
+	{
+		return;
+	}
+
+	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
+
+	// arenaId → best entry (same fort played multiple matches → one picker row).
+	TMap<FString, FPFCommunityMapInfo> BestByArena;
+	for (const FString& FileName : Files)
+	{
+		FPFCommunityMapInfo Info;
+		TArray<FPFBuildPieceRec> Pieces;
+		if (!ParseArenaFile(Dir / FileName, FileName, Info, Pieces))
+		{
+			continue;
+		}
+		const FString Key = Info.ArenaId.IsEmpty() ? FileName : Info.ArenaId;
+		if (const FPFCommunityMapInfo* Existing = BestByArena.Find(Key))
+		{
+			if (Info.Score < Existing->Score
+				|| (Info.Score == Existing->Score && Info.PieceCount < Existing->PieceCount))
+			{
+				continue;
+			}
+		}
+		BestByArena.Add(Key, Info);
+	}
+
+	BestByArena.GenerateValueArray(OutMaps);
+	OutMaps.Sort([](const FPFCommunityMapInfo& A, const FPFCommunityMapInfo& B)
+	{
+		if (A.Score != B.Score) { return A.Score > B.Score; }
+		if (A.PieceCount != B.PieceCount) { return A.PieceCount > B.PieceCount; }
+		return A.FileName > B.FileName;   // newer timestamp prefix sorts higher
+	});
+
+	const int32 Cap = FMath::Clamp(MaxCount, 1, 100);
+	if (OutMaps.Num() > Cap)
+	{
+		OutMaps.SetNum(Cap);
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: community map catalog %d (cap %d)"),
+		OutMaps.Num(), Cap);
+}
+
+bool UPFRatingSubsystem::LoadCommunityArenaByFileName(const FString& FileName,
+	TArray<FPFBuildPieceRec>& OutPieces) const
+{
+	OutPieces.Reset();
+	if (FileName.IsEmpty() || FileName.Contains(TEXT("..")) || FileName.Contains(TEXT("/"))
+		|| FileName.Contains(TEXT("\\")))
+	{
+		return false;   // path traversal guard — basename only
+	}
+	if (!FileName.EndsWith(TEXT(".json")))
+	{
+		return false;
+	}
+	const FString Path = FPaths::ProjectSavedDir() / TEXT("Arenas") / FileName;
+	FPFCommunityMapInfo Info;
+	return ParseArenaFile(Path, FileName, Info, OutPieces);
+}
+
 bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces) const
 {
 	OutPieces.Reset();
@@ -233,33 +375,27 @@ bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces
 	{
 		return false;
 	}
+	// Prefer ranked catalog #1; fall back to newest non-empty file.
+	TArray<FPFCommunityMapInfo> Top;
+	ListTopCommunityMaps(Top, 1);
+	if (Top.Num() > 0 && LoadCommunityArenaByFileName(Top[0].FileName, OutPieces))
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: loaded top community arena %s (%d pieces)"),
+			*Top[0].FileName, OutPieces.Num());
+		return true;
+	}
+
 	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
 	TArray<FString> Files;
 	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
 	if (Files.Num() == 0)
 	{
-		return false;   // no community arenas saved yet
+		return false;
 	}
-	// v1: the most-recent file (names are timestamp-sorted). Vote-ranked selection can refine this later.
 	Files.Sort();
-	// Try newest → oldest and skip empty/unparseable files: a Play-only (or nobody-built) match records
-	// an EMPTY arena, and picking only the single newest file would let that degenerate record shadow
-	// every good community arena on disk. Return the first non-empty parseable one instead.
 	for (int32 Idx = Files.Num() - 1; Idx >= 0; --Idx)
 	{
-		FString Json;
-		if (!FFileHelper::LoadFileToString(Json, *(Dir / Files[Idx])))
-		{
-			continue;
-		}
-		TSharedPtr<FJsonObject> Root;
-		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
-		{
-			continue;
-		}
-		int32 TeamSize = 0;
-		if (FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), OutPieces, TeamSize) && OutPieces.Num() > 0)
+		if (LoadCommunityArenaByFileName(Files[Idx], OutPieces))
 		{
 			UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: loaded community arena %s (%d pieces)"),
 				*Files[Idx], OutPieces.Num());
@@ -269,8 +405,13 @@ bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces
 	return false;
 }
 
-bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces) const
+bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces,
+	const FString& PreferredFileName) const
 {
+	if (!PreferredFileName.IsEmpty() && LoadCommunityArenaByFileName(PreferredFileName, OutPieces))
+	{
+		return true;
+	}
 	return LoadMostRecentArena(OutPieces);   // whole arena, both halves, unchanged
 }
 

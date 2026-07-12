@@ -701,27 +701,29 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		RecountAlive();
 
 		// Community inject (after bots exist, grid cleared, before FreezeBuild) so it replicates
-		// through the build window and is captured by BeginMatchRecord at Combat. Skipped in Play-only.
-		//   Improvement → whole saved arena; both teams improve their half.
-		//   Creative    → only an all-bot team's half is filled (nobody is there to build it).
-		if (BuildGrid && GS->BuildMode != EPFBuildMode::PlayOnly)
+		// through the build window and is captured by BeginMatchRecord at Combat.
+		//   Improvement / Play-only → whole community arena (host-picked or top-ranked).
+		//   Creative               → only an all-bot team's half is filled.
+		if (BuildGrid)
 		{
 			if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
 			{
-				if (GS->BuildMode == EPFBuildMode::Improvement)
+				if (GS->BuildMode == EPFBuildMode::Improvement || GS->BuildMode == EPFBuildMode::PlayOnly)
 				{
 					TArray<FPFBuildPieceRec> Whole;
-					if (Rating->PickCommunityArena(Whole))
+					if (Rating->PickCommunityArena(Whole, GS->SelectedCommunityMapFile))
 					{
 						BuildGrid->ServerInjectPieces(Whole);
-						UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Improvement loaded %d community pieces"),
-							Whole.Num());
+						UE_LOG(PaintForgeLog, Log,
+							TEXT("GameMode: %s loaded %d community pieces (map=%s)"),
+							GS->BuildMode == EPFBuildMode::PlayOnly ? TEXT("PlayOnly") : TEXT("Improvement"),
+							Whole.Num(),
+							GS->SelectedCommunityMapFile.IsEmpty() ? TEXT("auto") : *GS->SelectedCommunityMapFile);
 					}
 					else
 					{
-						// No Saved/Arenas/*.json with geometry yet — fall back to empty field (Creative-like).
 						UE_LOG(PaintForgeLog, Warning,
-							TEXT("GameMode: Improvement — no community arena on disk; starting empty"));
+							TEXT("GameMode: community mode — no arena on disk; starting empty"));
 					}
 				}
 				else   // Creative: only an all-bot team's half needs filling
@@ -740,7 +742,6 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 					}
 				}
 			}
-			// Actual injected count after validation skips (invalid team/type filtered in inject).
 			const int32 N = BuildGrid->GetPieces().Num();
 			GS->ServerSetCommunityBasePieces(static_cast<uint16>(FMath::Clamp(N, 0, 65535)));
 		}
@@ -1018,6 +1019,32 @@ void APaintForgeGameMode::HostSetMatchType(EPFMatchType NewType)
 		GS->ServerSetBuildMode(EPFBuildMode::PlayOnly);
 	}
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set match type %d"), static_cast<int32>(NewType));
+}
+
+void APaintForgeGameMode::HostSetCommunityMap(const FString& FileName, const FString& Label)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Lobby)
+	{
+		return;
+	}
+	// Empty FileName = auto (top-ranked). Non-empty must exist on disk.
+	if (!FileName.IsEmpty())
+	{
+		if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
+		{
+			TArray<FPFBuildPieceRec> Probe;
+			if (!Rating->LoadCommunityArenaByFileName(FileName, Probe))
+			{
+				UE_LOG(PaintForgeLog, Warning,
+					TEXT("GameMode: host community map rejected (missing/bad): %s"), *FileName);
+				return;
+			}
+		}
+	}
+	GS->ServerSetSelectedCommunityMap(FileName, Label);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set community map '%s' (%s)"),
+		FileName.IsEmpty() ? TEXT("auto") : *FileName, *Label);
 }
 
 // ---------------------------------------------------------------------------

@@ -77,6 +77,7 @@ public:
 	void HostSetFillWithBots(bool bFill);              // Lobby only: top teams with bots at Lobby→Build
 	void HostSetBuildMode(EPFBuildMode NewMode);       // Lobby only: Creative / Improvement / Play-only
 	void HostSetMatchType(EPFMatchType NewType);       // Lobby only: Elimination / FFA / Skirmish / …
+	void HostSetCommunityMap(const FString& FileName, const FString& Label); // Lobby: Improvement/PlayOnly
 
 	// Objective actors → GameMode (server). Carrier state is stamped on PlayerState.
 	void NotifyFlagTouched(class APFFlagActor* Flag, APaintForgePlayerState* Toucher);

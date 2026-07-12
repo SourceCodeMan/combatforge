@@ -39,6 +39,8 @@ public:
 	UFUNCTION(Server, Reliable) void ServerHostSetFillWithBots(bool bFill); // Lobby only: fill roster with bots
 	UFUNCTION(Server, Reliable) void ServerHostSetBuildMode(uint8 Mode);    // Lobby only: 0=Creative 1=Improvement 2=PlayOnly
 	UFUNCTION(Server, Reliable) void ServerHostSetMatchType(uint8 Type);    // Lobby only: 0=Elim 1=FFA 2=Skirmish 3=CTF 4=Dom 5=Hardpoint
+	/** Lobby only: host community map pick (filename under Saved/Arenas/, empty = auto). */
+	UFUNCTION(Server, Reliable) void ServerHostSetCommunityMap(const FString& FileName, const FString& Label);
 	/** Remote client → host: append a log chunk under Saved/ClientLogs/ (LAN crash triage). */
 	UFUNCTION(Server, Reliable, WithValidation) void ServerShipClientLog(const FString& Chunk);
 

@@ -693,6 +693,19 @@ void APaintForgePlayerController::ServerHostSetMatchType_Implementation(uint8 Ty
 	}
 }
 
+void APaintForgePlayerController::ServerHostSetCommunityMap_Implementation(const FString& FileName,
+	const FString& Label)
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
+	{
+		GM->HostSetCommunityMap(FileName, Label);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Client → host log ship (LAN crash triage)
 // ---------------------------------------------------------------------------

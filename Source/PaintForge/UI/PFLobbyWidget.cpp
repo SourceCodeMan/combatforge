@@ -277,6 +277,7 @@ void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 	AddReadOnlyRow(Box, TEXT("TYPE"), TypeValueText);
 	AddReadOnlyRow(Box, TEXT("FORMAT"), FormatValueText);
 	AddReadOnlyRow(Box, TEXT("BOTS"), BotsValueText);
+	AddReadOnlyRow(Box, TEXT("MAP"), MapValueText);
 
 	UButton* LoadoutBtn = WidgetTree->ConstructWidget<UButton>();
 	LoadoutBtn->SetBackgroundColor(FLinearColor(0.14f, 0.12f, 0.05f, 0.9f));
@@ -397,6 +398,27 @@ void UPFLobbyWidget::RefreshConfig()
 	if (BotsValueText)
 	{
 		BotsValueText->SetText(FText::FromString(GS->bFillWithBots ? TEXT("On") : TEXT("Off")));
+	}
+	if (MapValueText)
+	{
+		const bool bNeedsMap = GS->BuildMode == EPFBuildMode::Improvement
+			|| GS->BuildMode == EPFBuildMode::PlayOnly;
+		if (!bNeedsMap)
+		{
+			MapValueText->SetText(FText::FromString(TEXT("—")));
+		}
+		else if (!GS->SelectedCommunityMapLabel.IsEmpty())
+		{
+			MapValueText->SetText(FText::FromString(GS->SelectedCommunityMapLabel));
+		}
+		else if (!GS->SelectedCommunityMapFile.IsEmpty())
+		{
+			MapValueText->SetText(FText::FromString(GS->SelectedCommunityMapFile));
+		}
+		else
+		{
+			MapValueText->SetText(FText::FromString(TEXT("Auto (top ranked)")));
+		}
 	}
 	if (ConfigHintText)
 	{

@@ -38,6 +38,8 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APaintForgeGameState, RoundWinsToTake);
 	DOREPLIFETIME(APaintForgeGameState, BuildMode);
 	DOREPLIFETIME(APaintForgeGameState, MatchType);
+	DOREPLIFETIME(APaintForgeGameState, SelectedCommunityMapFile);
+	DOREPLIFETIME(APaintForgeGameState, SelectedCommunityMapLabel);
 	DOREPLIFETIME(APaintForgeGameState, TeamScores);
 	DOREPLIFETIME(APaintForgeGameState, CommunityBasePieces);
 }
@@ -281,6 +283,24 @@ void APaintForgeGameState::ServerSetMatchType(EPFMatchType NewType)
 		return;
 	}
 	MatchType = NewType;
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetSelectedCommunityMap(const FString& FileName, const FString& Label)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	// Basename only — reject path traversal.
+	FString Clean = FileName;
+	Clean.ReplaceInline(TEXT("\\"), TEXT("/"));
+	if (Clean.Contains(TEXT("..")) || Clean.Contains(TEXT("/")))
+	{
+		Clean.Reset();
+	}
+	SelectedCommunityMapFile = Clean;
+	SelectedCommunityMapLabel = Label.Left(120);
 	ForceNetUpdate();
 }
 

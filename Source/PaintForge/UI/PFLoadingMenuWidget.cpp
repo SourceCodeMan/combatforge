@@ -5,6 +5,8 @@
 #include "PaintForge.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerController.h"
+#include "Voting/PFRatingSubsystem.h"
+#include "Engine/GameInstance.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Brushes/SlateColorBrush.h"
@@ -115,6 +117,25 @@ namespace
 	}
 }
 
+// ---------------------------------------------------------------- map row button
+
+void UPFMapPickButton::InitRow(UPFLoadingMenuWidget* InOwner, int32 InSlotIndex)
+{
+	OwnerWidget = InOwner;
+	SlotIndex = InSlotIndex;
+	OnClicked.AddUniqueDynamic(this, &UPFMapPickButton::HandleClicked);
+}
+
+void UPFMapPickButton::HandleClicked()
+{
+	if (OwnerWidget.IsValid())
+	{
+		OwnerWidget->NotifyMapSlotClicked(SlotIndex);
+	}
+}
+
+// -------------------------------------------------------------- loading menu
+
 TSharedRef<SWidget> UPFLoadingMenuWidget::RebuildWidget()
 {
 	if (WidgetTree && !WidgetTree->RootWidget)
@@ -210,6 +231,99 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 
 	AddHowToLine(Box, TEXT("MODE vs TYPE"), 14, true, Head);
 	AddHowToLine(Box, TEXT("Mode = build style (Creative / Improvement / Play-Only). Type = win condition (Elim, Skirmish, CTF…)."), 12, false, Dim);
+	AddHowToLine(Box, TEXT("Improvement & Play-Only: pick a community map (top 100, 10 per page) on Match Setup."), 12, false, Dim);
+}
+
+void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
+{
+	MapPickerBox = WidgetTree->ConstructWidget<UVerticalBox>();
+	if (UVerticalBoxSlot* V = Parent->AddChildToVerticalBox(MapPickerBox))
+	{
+		V->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+
+	MapPickerHeader = WidgetTree->ConstructWidget<UTextBlock>();
+	MapPickerHeader->SetText(FText::FromString(TEXT("COMMUNITY MAP")));
+	MapPickerHeader->SetFont(PFLoadFont(13, true));
+	MapPickerHeader->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
+	MapPickerHeader->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = MapPickerBox->AddChildToVerticalBox(MapPickerHeader))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+	}
+
+	MapSelectedLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	MapSelectedLabel->SetFont(PFLoadFont(12, false));
+	MapSelectedLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.88f, 1.f)));
+	MapSelectedLabel->SetJustification(ETextJustify::Center);
+	MapSelectedLabel->SetAutoWrapText(true);
+	if (UVerticalBoxSlot* V = MapPickerBox->AddChildToVerticalBox(MapSelectedLabel))
+	{
+		V->SetHorizontalAlignment(HAlign_Fill);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+	}
+
+	// Auto + page controls
+	UHorizontalBox* PageRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	MapAutoBtn = MakeMenuTab(TEXT("  AUTO (TOP)  "), TEXT("MapAuto"));
+	MapAutoBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnMapAutoClicked);
+	MapPagePrevBtn = MakeMenuTab(TEXT("  <  "), TEXT("MapPrev"));
+	MapPagePrevBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnMapPagePrev);
+	MapPageNextBtn = MakeMenuTab(TEXT("  >  "), TEXT("MapNext"));
+	MapPageNextBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnMapPageNext);
+	MapPageLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	MapPageLabel->SetFont(PFLoadFont(12, true));
+	MapPageLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.87f, 0.9f)));
+	MapPageLabel->SetJustification(ETextJustify::Center);
+
+	auto AddH = [PageRow](UWidget* W, float Pad = 3.f)
+	{
+		if (UHorizontalBoxSlot* H = PageRow->AddChildToHorizontalBox(W))
+		{
+			H->SetPadding(FMargin(Pad, 0.f));
+			H->SetVerticalAlignment(VAlign_Center);
+		}
+	};
+	AddH(MapAutoBtn);
+	AddH(MapPagePrevBtn);
+	if (UHorizontalBoxSlot* H = PageRow->AddChildToHorizontalBox(MapPageLabel))
+	{
+		H->SetPadding(FMargin(8.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Center);
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+	AddH(MapPageNextBtn);
+	if (UVerticalBoxSlot* V = MapPickerBox->AddChildToVerticalBox(PageRow))
+	{
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+
+	MapSlotButtons.Reset();
+	MapSlotLabels.Reset();
+	for (int32 i = 0; i < MapsPerPage; ++i)
+	{
+		UPFMapPickButton* Row = WidgetTree->ConstructWidget<UPFMapPickButton>(
+			UPFMapPickButton::StaticClass(), *FString::Printf(TEXT("MapSlot%d"), i));
+		Row->SetBackgroundColor(FLinearColor(0.10f, 0.11f, 0.14f, 0.95f));
+		Row->InitRow(this, i);
+
+		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
+		Lab->SetFont(PFLoadFont(12, false));
+		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.91f, 0.94f)));
+		Lab->SetJustification(ETextJustify::Left);
+		Row->AddChild(Lab);
+
+		MapSlotButtons.Add(Row);
+		MapSlotLabels.Add(Lab);
+		if (UVerticalBoxSlot* V = MapPickerBox->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(0.f, 2.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+	}
 }
 
 void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
@@ -298,7 +412,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	}
 
 	USizeBox* MenuSizer = WidgetTree->ConstructWidget<USizeBox>();
-	MenuSizer->SetWidthOverride(480.f);
+	MenuSizer->SetWidthOverride(520.f);
 	MenuSwitcher = WidgetTree->ConstructWidget<UWidgetSwitcher>();
 	MenuSizer->SetContent(MenuSwitcher);
 
@@ -377,6 +491,8 @@ void UPFLoadingMenuWidget::BuildTree()
 		V->SetPadding(FMargin(0.f, 4.f, 0.f, 2.f));
 		V->SetHorizontalAlignment(HAlign_Fill);
 	}
+
+	BuildMapPicker(SetupCol);
 
 	SetupHintText = WidgetTree->ConstructWidget<UTextBlock>();
 	SetupHintText->SetFont(PFLoadFont(12, false));
@@ -490,7 +606,9 @@ void UPFLoadingMenuWidget::NativeConstruct()
 	}
 
 	SeedFromGameState();
+	ReloadMapCatalog();
 	RefreshSetupLabels();
+	RefreshMapPicker();
 	SelectMenuTab(0);
 	SetStatus(TEXT("Preparing…"));
 	UE_LOG(PaintForgeLog, Log, TEXT("LoadingMenu: boot menu up — warmup starting"));
@@ -514,6 +632,7 @@ void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 	{
 		SeedFromGameState();
 		RefreshSetupLabels();
+		RefreshMapPicker();
 	}
 }
 
@@ -541,7 +660,121 @@ void UPFLoadingMenuWidget::SeedFromGameState()
 		SelectedMatchType = GS->MatchType;
 		SelectedTeamSize = (GS->TargetTeamSize >= 6) ? 6 : 4;
 		bSelectedFillBots = GS->bFillWithBots;
+		// Mirror host map pick when we have a catalog match.
+		if (!GS->SelectedCommunityMapFile.IsEmpty())
+		{
+			SelectedMapCatalogIndex = INDEX_NONE;
+			for (int32 i = 0; i < MapCatalog.Num(); ++i)
+			{
+				if (MapCatalog[i].FileName == GS->SelectedCommunityMapFile)
+				{
+					SelectedMapCatalogIndex = i;
+					break;
+				}
+			}
+		}
+		else if (!IsLocalHost())
+		{
+			SelectedMapCatalogIndex = INDEX_NONE;
+		}
 	}
+}
+
+bool UPFLoadingMenuWidget::NeedsCommunityMap() const
+{
+	return SelectedBuildMode == EPFBuildMode::Improvement
+		|| SelectedBuildMode == EPFBuildMode::PlayOnly;
+}
+
+void UPFLoadingMenuWidget::ReloadMapCatalog()
+{
+	MapCatalog.Reset();
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (UPFRatingSubsystem* Rating = GI->GetSubsystem<UPFRatingSubsystem>())
+		{
+			Rating->ListTopCommunityMaps(MapCatalog, MaxMaps);
+		}
+	}
+	const int32 PageCount = FMath::Max(1, FMath::DivideAndRoundUp(FMath::Max(MapCatalog.Num(), 1), MapsPerPage));
+	MapPageIndex = FMath::Clamp(MapPageIndex, 0, PageCount - 1);
+	if (SelectedMapCatalogIndex != INDEX_NONE && !MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
+	{
+		SelectedMapCatalogIndex = INDEX_NONE;
+	}
+}
+
+void UPFLoadingMenuWidget::RefreshMapPicker()
+{
+	const bool bShow = NeedsCommunityMap();
+	if (MapPickerBox)
+	{
+		MapPickerBox->SetVisibility(bShow ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (!bShow)
+	{
+		return;
+	}
+
+	const int32 Total = MapCatalog.Num();
+	const int32 PageCount = FMath::Max(1, FMath::DivideAndRoundUp(FMath::Max(Total, 1), MapsPerPage));
+	MapPageIndex = FMath::Clamp(MapPageIndex, 0, PageCount - 1);
+	const int32 Start = MapPageIndex * MapsPerPage;
+	const int32 End = FMath::Min(Start + MapsPerPage, Total);
+
+	if (MapPageLabel)
+	{
+		if (Total == 0)
+		{
+			MapPageLabel->SetText(FText::FromString(TEXT("No maps saved yet")));
+		}
+		else
+		{
+			MapPageLabel->SetText(FText::FromString(FString::Printf(
+				TEXT("%d–%d of %d"), Start + 1, End, Total)));
+		}
+	}
+	if (MapSelectedLabel)
+	{
+		if (SelectedMapCatalogIndex == INDEX_NONE)
+		{
+			MapSelectedLabel->SetText(FText::FromString(
+				Total > 0 ? TEXT("Selected: Auto (highest ranked)")
+				          : TEXT("Selected: empty field (no Saved/Arenas)")));
+		}
+		else if (MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
+		{
+			MapSelectedLabel->SetText(FText::FromString(FString::Printf(
+				TEXT("Selected: #%d  %s"),
+				SelectedMapCatalogIndex + 1, *MapCatalog[SelectedMapCatalogIndex].DisplayName)));
+		}
+	}
+
+	const bool bHost = IsLocalHost();
+	for (int32 SlotIdx = 0; SlotIdx < MapsPerPage; ++SlotIdx)
+	{
+		const int32 CatalogIdx = Start + SlotIdx;
+		const bool bValid = MapCatalog.IsValidIndex(CatalogIdx);
+		if (MapSlotButtons.IsValidIndex(SlotIdx) && MapSlotButtons[SlotIdx])
+		{
+			MapSlotButtons[SlotIdx]->SetVisibility(bValid ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+			MapSlotButtons[SlotIdx]->SetIsEnabled(bHost && bValid);
+			const bool bSelected = bValid && CatalogIdx == SelectedMapCatalogIndex;
+			MapSlotButtons[SlotIdx]->SetBackgroundColor(bSelected
+				? FLinearColor(0.25f, 0.22f, 0.08f, 0.98f)
+				: FLinearColor(0.10f, 0.11f, 0.14f, 0.95f));
+		}
+		if (MapSlotLabels.IsValidIndex(SlotIdx) && MapSlotLabels[SlotIdx] && bValid)
+		{
+			const FPFCommunityMapInfo& M = MapCatalog[CatalogIdx];
+			MapSlotLabels[SlotIdx]->SetText(FText::FromString(FString::Printf(
+				TEXT("  #%d  %s  (+%d / -%d)"),
+				CatalogIdx + 1, *M.DisplayName, M.ThumbUp, M.ThumbDown)));
+		}
+	}
+	if (MapPagePrevBtn) { MapPagePrevBtn->SetIsEnabled(bHost && MapPageIndex > 0); }
+	if (MapPageNextBtn) { MapPageNextBtn->SetIsEnabled(bHost && MapPageIndex < PageCount - 1); }
+	if (MapAutoBtn) { MapAutoBtn->SetIsEnabled(bHost); }
 }
 
 void UPFLoadingMenuWidget::RefreshSetupLabels()
@@ -586,7 +819,9 @@ void UPFLoadingMenuWidget::RefreshSetupLabels()
 	{
 		SetupHintText->SetText(FText::FromString(
 			IsLocalHost()
-				? TEXT("Click MODE / TYPE / FORMAT to cycle · bots checkbox · applied live")
+				? (NeedsCommunityMap()
+					? TEXT("Improvement/Play-Only: pick a community map below (10 per page)")
+					: TEXT("Click MODE / TYPE / FORMAT to cycle · bots checkbox · applied live"))
 				: TEXT("Host chooses match setup · waiting for Enter")));
 	}
 	// Non-host: still clickable visually but handlers no-op; dim slightly via background.
@@ -596,6 +831,65 @@ void UPFLoadingMenuWidget::RefreshSetupLabels()
 	if (ModeButton)   { ModeButton->SetBackgroundColor(BtnBg); }
 	if (TypeButton)   { TypeButton->SetBackgroundColor(BtnBg); }
 	if (FormatButton) { FormatButton->SetBackgroundColor(BtnBg); }
+
+	RefreshMapPicker();
+}
+
+void UPFLoadingMenuWidget::NotifyMapSlotClicked(int32 SlotIndex)
+{
+	if (!IsLocalHost() || bDismissed || !NeedsCommunityMap())
+	{
+		return;
+	}
+	const int32 CatalogIdx = MapPageIndex * MapsPerPage + SlotIndex;
+	if (!MapCatalog.IsValidIndex(CatalogIdx))
+	{
+		return;
+	}
+	SelectedMapCatalogIndex = CatalogIdx;
+	RefreshMapPicker();
+	ApplyMapSelectionToHost();
+}
+
+void UPFLoadingMenuWidget::OnMapPagePrev()
+{
+	if (!IsLocalHost() || MapPageIndex <= 0) { return; }
+	--MapPageIndex;
+	RefreshMapPicker();
+}
+
+void UPFLoadingMenuWidget::OnMapPageNext()
+{
+	if (!IsLocalHost()) { return; }
+	const int32 PageCount = FMath::Max(1, FMath::DivideAndRoundUp(FMath::Max(MapCatalog.Num(), 1), MapsPerPage));
+	if (MapPageIndex >= PageCount - 1) { return; }
+	++MapPageIndex;
+	RefreshMapPicker();
+}
+
+void UPFLoadingMenuWidget::OnMapAutoClicked()
+{
+	if (!IsLocalHost() || bDismissed) { return; }
+	SelectedMapCatalogIndex = INDEX_NONE;
+	RefreshMapPicker();
+	ApplyMapSelectionToHost();
+}
+
+void UPFLoadingMenuWidget::ApplyMapSelectionToHost()
+{
+	if (!IsLocalHost()) { return; }
+	FString File;
+	FString Label = TEXT("Auto (top ranked)");
+	if (MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
+	{
+		File = MapCatalog[SelectedMapCatalogIndex].FileName;
+		Label = FString::Printf(TEXT("#%d %s"), SelectedMapCatalogIndex + 1,
+			*MapCatalog[SelectedMapCatalogIndex].DisplayName);
+	}
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->ServerHostSetCommunityMap(File, Label);
+	}
 }
 
 void UPFLoadingMenuWidget::OnModeClicked()
@@ -609,6 +903,10 @@ void UPFLoadingMenuWidget::OnModeClicked()
 	// FFA is play-only by nature — nudge build mode if needed is still host's call.
 	RefreshSetupLabels();
 	ApplySelectionsToHost();
+	if (NeedsCommunityMap())
+	{
+		ApplyMapSelectionToHost();
+	}
 }
 
 void UPFLoadingMenuWidget::OnTypeClicked()
@@ -667,6 +965,10 @@ void UPFLoadingMenuWidget::ApplySelectionsToHost()
 		PC->ServerHostSetMatchType(static_cast<uint8>(SelectedMatchType));
 		PC->ServerHostSetFormat(SelectedTeamSize);
 		PC->ServerHostSetFillWithBots(bSelectedFillBots);
+	}
+	if (NeedsCommunityMap())
+	{
+		ApplyMapSelectionToHost();
 	}
 }
 
