@@ -41,16 +41,23 @@ This is the v1 **graybox** milestone: the complete match loop with zero editor-a
 
 ## LAN / VPN playtest (friends on the network)
 
-Connect-by-IP (no EOS yet). Full guide: [`Deploy/playtest/README.md`](Deploy/playtest/README.md).
+Connect-by-IP (no EOS yet). Use **current `main`**.
+
+- Operator checklist: [`docs/playtest-checklist.md`](docs/playtest-checklist.md)
+- Full host guide: [`Deploy/playtest/README.md`](Deploy/playtest/README.md)
 
 ```powershell
+git pull origin main
 .\Deploy\playtest\run-listen.ps1            # host + play on this PC (port 7777)
 .\Deploy\playtest\print-host-ips.ps1        # share LAN/VPN IP with friends
-# friends (packaged client):  open <ip>:7777  or  .\connect.ps1 -Server <ip>
+# friends:  open <ip>:7777
+.\Deploy\playtest\smoke-improvement.ps1     # automated inject smoke (optional)
 ```
 
+**First kids match:** Lobby TYPE=Skirmish, MODE=Play-Only, FORMAT=4v4, Enter to start.
+
 Launcher UE cannot build a true `PaintForgeServer` target; playtest uses the game binary
-as listen or `-server -nullrhi`. Docker notes in the playtest README.
+as listen or `-server -nullrhi`.
 
 ## Getting started (Windows)
 
