@@ -164,3 +164,52 @@ TSharedRef<FJsonObject> FPFArenaSerialization::BuildLayoutJson(const TArray<FPFB
 
 	return Root;
 }
+
+bool FPFArenaSerialization::ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
+	TArray<FPFBuildPieceRec>& OutPieces, int32& OutTeamSize)
+{
+	OutPieces.Reset();
+	OutTeamSize = 0;
+	Root->TryGetNumberField(TEXT("teamSize"), OutTeamSize);
+
+	const TArray<TSharedPtr<FJsonValue>>* PieceArray = nullptr;
+	if (!Root->TryGetArrayField(TEXT("pieces"), PieceArray) || PieceArray == nullptr)
+	{
+		return false;
+	}
+
+	OutPieces.Reserve(PieceArray->Num());
+	for (const TSharedPtr<FJsonValue>& Val : *PieceArray)
+	{
+		const TSharedPtr<FJsonObject>* Obj = nullptr;
+		if (!Val.IsValid() || !Val->TryGetObject(Obj) || Obj == nullptr || !(*Obj).IsValid())
+		{
+			continue;
+		}
+		int32 T = 0, X = 0, Y = 0, Z = 0, R = 0, Own = 0, Team = 0, Id = 0;
+		(*Obj)->TryGetNumberField(TEXT("id"), Id);
+		(*Obj)->TryGetNumberField(TEXT("t"), T);
+		(*Obj)->TryGetNumberField(TEXT("x"), X);
+		(*Obj)->TryGetNumberField(TEXT("y"), Y);
+		(*Obj)->TryGetNumberField(TEXT("z"), Z);
+		(*Obj)->TryGetNumberField(TEXT("r"), R);
+		(*Obj)->TryGetNumberField(TEXT("own"), Own);
+		(*Obj)->TryGetNumberField(TEXT("team"), Team);
+
+		if (T < 0 || T >= static_cast<int32>(EPFPieceType::MAX_Count) || Team < 0 || Team > 1)
+		{
+			continue;   // skip corrupt records (would index the 14-ISM array out of range)
+		}
+		FPFBuildPieceRec Rec;
+		Rec.PieceId  = static_cast<uint16>(Id);   // re-minted by the injector; not trusted here
+		Rec.Type     = static_cast<EPFPieceType>(T);
+		Rec.X        = static_cast<int16>(X);
+		Rec.Y        = static_cast<int16>(Y);
+		Rec.Z        = static_cast<int16>(Z);
+		Rec.Rot      = static_cast<uint8>(R);
+		Rec.OwnerIdx = static_cast<uint8>(Own);
+		Rec.Team     = static_cast<uint8>(Team);
+		OutPieces.Add(Rec);
+	}
+	return OutPieces.Num() > 0;
+}

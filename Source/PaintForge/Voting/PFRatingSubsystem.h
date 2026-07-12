@@ -50,6 +50,14 @@ public:
 	/** SHA1-hex arena fingerprint of the active record; empty outside an active record. */
 	FString GetCurrentArenaId() const;
 
+	/**
+	 * Picks a saved community arena from Saved/Arenas/, takes its more-developed half, and remaps that
+	 * half into TargetTeam's plot (X translation between plots) so it can be injected for an all-bot
+	 * team. Server-only; returns false if no saved arena exists. (v1 picks the most-recent file; vote
+	 * ranking can refine the pick later.)
+	 */
+	bool PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, uint8 TargetTeam) const;
+
 private:
 	/** One staged vote (AddVote input, held until CommitMatchRecord). Not a USTRUCT: no GC refs. */
 	struct FPFPendingVote

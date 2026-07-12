@@ -33,4 +33,12 @@ struct PAINTFORGE_API FPFArenaSerialization
 	static TSharedRef<FJsonObject> BuildLayoutJson(const TArray<FPFBuildPieceRec>& Pieces,
 	                                               const FString& MatchId, int32 TeamSize,
 	                                               const FDateTime& CreatedUtc);
+
+	/**
+	 * Inverse of BuildLayoutJson's piece block: parses the "pieces" array back into records (and reads
+	 * "teamSize"). PieceId is read but the caller MUST re-mint ids before injecting into a live grid.
+	 * Returns false if there are no valid pieces.
+	 */
+	static bool ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
+	                            TArray<FPFBuildPieceRec>& OutPieces, int32& OutTeamSize);
 };

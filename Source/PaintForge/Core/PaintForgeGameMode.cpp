@@ -419,6 +419,29 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		}
 		RecountAlive();
 
+		// All-bot team → auto-fill THAT team's half from a community-favorite arena (nobody is there to
+		// build it). Injected here (after bots exist, grid cleared, before FreezeBuild) so it replicates
+		// through the build window and is captured by BeginMatchRecord at Combat. Skipped in Play-only
+		// (which flashes past the build phase).
+		if (BuildGrid && GS->BuildMode != EPFBuildMode::PlayOnly)
+		{
+			if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
+			{
+				for (uint8 BotTeam = 0; BotTeam <= 1; ++BotTeam)
+				{
+					const int32 Total = GetTeamCountByKind(BotTeam, /*bBotsOnly=*/false);
+					if (Total > 0 && Total == GetTeamCountByKind(BotTeam, /*bBotsOnly=*/true))
+					{
+						TArray<FPFBuildPieceRec> Half;
+						if (Rating->PickCommunityHalf(Half, BotTeam))
+						{
+							BuildGrid->ServerInjectPieces(Half);
+						}
+					}
+				}
+			}
+		}
+
 		// Play-only mode runs all the Build-phase SETUP above (match reset, bots, spawns) but skips the
 		// build TIME — flash straight to Combat. (Creative/Improvement get the full build window.)
 		const bool bPlayOnly = (GS->BuildMode == EPFBuildMode::PlayOnly);

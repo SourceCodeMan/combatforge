@@ -226,6 +226,74 @@ FString UPFRatingSubsystem::GetCurrentArenaId() const
 	return bRecordActive ? CurrentArenaId : FString();
 }
 
+bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, uint8 TargetTeam) const
+{
+	OutHalf.Reset();
+	if (!IsServerContext() || TargetTeam > 1)
+	{
+		return false;
+	}
+
+	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
+	if (Files.Num() == 0)
+	{
+		return false;   // no community arenas saved yet
+	}
+	// v1: the most-recent file (names are timestamp-sorted). Vote-ranked selection can refine this later.
+	Files.Sort();
+	const FString ChosenPath = Dir / Files.Last();
+
+	FString Json;
+	if (!FFileHelper::LoadFileToString(Json, *ChosenPath))
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		UE_LOG(PaintForgeLog, Warning, TEXT("RatingSubsystem: could not parse arena %s"), *ChosenPath);
+		return false;
+	}
+
+	TArray<FPFBuildPieceRec> All;
+	int32 TeamSize = 0;
+	if (!FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), All, TeamSize))
+	{
+		return false;
+	}
+
+	// Take the more-developed side (more pieces) and translate it into TargetTeam's plot.
+	int32 CountA = 0, CountB = 0;
+	for (const FPFBuildPieceRec& Rec : All)
+	{
+		(Rec.Team == 0 ? CountA : CountB)++;
+	}
+	const uint8 SourceHalf = (CountA >= CountB) ? 0 : 1;
+	// Plot A = cells 1..6, Plot B = cells 9..14 → 8 cells apart = 32 sub-grid units in X (PFGrid).
+	const int16 PlotDeltaSub = 32;
+
+	for (const FPFBuildPieceRec& Rec : All)
+	{
+		if (Rec.Team != SourceHalf)
+		{
+			continue;
+		}
+		FPFBuildPieceRec Out = Rec;
+		if (SourceHalf != TargetTeam)
+		{
+			Out.X += (TargetTeam == 1) ? PlotDeltaSub : static_cast<int16>(-PlotDeltaSub);
+		}
+		Out.Team = TargetTeam;
+		OutHalf.Add(Out);
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: picked community half from %s (%d pieces → team %d)"),
+		*Files.Last(), OutHalf.Num(), TargetTeam);
+	return OutHalf.Num() > 0;
+}
+
 bool UPFRatingSubsystem::IsServerContext() const
 {
 	const UGameInstance* GameInstance = GetGameInstance();

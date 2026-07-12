@@ -553,6 +553,33 @@ void APFBuildGrid::ClearAll()
 	UE_LOG(PaintForgeLog, Log, TEXT("BuildGrid: cleared"));
 }
 
+void APFBuildGrid::ServerInjectPieces(const TArray<FPFBuildPieceRec>& InPieces)
+{
+	if (!HasAuthority() || bBuildFrozen)
+	{
+		return;
+	}
+	int32 Injected = 0;
+	for (const FPFBuildPieceRec& In : InPieces)
+	{
+		if (In.Team > 1 || In.Type >= EPFPieceType::MAX_Count)
+		{
+			continue;   // never index the 14-ISM array out of range
+		}
+		// Same add sequence as TryPlacePiece: re-mint the id, dirty the FastArray, mirror locally.
+		FPFBuildPieceRec Rec = In;
+		Rec.PieceId = ++NextPieceId;   // monotonic; never reuse the source file's id
+		FPFBuildPieceRec& Added = Pieces.Items.Add_GetRef(Rec);
+		Pieces.MarkItemDirty(Added);   // FastArray delta → clients
+		AddPieceLocal(Added);          // server-side ISM + occupancy (client path fires via PostReplicatedAdd)
+		++Injected;
+	}
+	if (Injected > 0)
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("BuildGrid: injected %d community pieces"), Injected);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Local mirror (ISM instances + occupancy) — server directly, clients via FastArray
 // ---------------------------------------------------------------------------

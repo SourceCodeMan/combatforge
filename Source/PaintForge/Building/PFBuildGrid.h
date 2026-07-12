@@ -100,6 +100,13 @@ public:
 	/** Lobby→Build (rematch): wipes array + ISMs + occupancy, unfreezes, resets piece ids. */
 	void ClearAll();
 
+	/**
+	 * Server-only: inject pre-built pieces (community-map load) into the live grid — re-mints each
+	 * PieceId, dirties the FastArray so it replicates, and mirrors the ISM/occupancy locally. Bypasses
+	 * budget/rate/plot checks by design (the caller has already chosen legal, remapped coordinates).
+	 */
+	void ServerInjectPieces(const TArray<FPFBuildPieceRec>& InPieces);
+
 	/** Fingerprint / serialization input. */
 	const TArray<FPFBuildPieceRec>& GetPieces() const { return Pieces.Items; }
 
