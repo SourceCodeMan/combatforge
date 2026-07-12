@@ -99,6 +99,21 @@ Defaults on boot: **Skirmish**, **Creative**, **4v4**, bots fill.
 
 ---
 
+## Client logs on the host (after kids crash)
+
+Remote clients stream log lines to the host every ~1 s over the game connection.
+
+On the **host** after a session:
+
+```
+Saved\ClientLogs\<PlayerName>_<timestamp>.log
+```
+
+```powershell
+explorer .\Saved\ClientLogs
+.\Deploy\playtest\collect-crash-evidence.ps1   # zips logs + ClientLogs
+```
+
 ## Smoke tests (automated)
 
 ```powershell

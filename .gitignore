@@ -40,6 +40,7 @@ desktop.ini
 # --- Packaged playtest / server drops (local only) ---
 Packaged/
 Build/
+# Client logs shipped over the wire land under Saved/ (already ignored via Saved/)
 Deploy/playtest/docker/server-linux/**
 !Deploy/playtest/docker/server-linux/.gitkeep
 

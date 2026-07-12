@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Core/PaintForgeTypes.h"
+#include "Core/PFClientLogShip.h"
 #include "PaintForgePlayerController.generated.h"
 
 class APaintForgeCharacter;
@@ -36,6 +37,8 @@ public:
 	UFUNCTION(Server, Reliable) void ServerHostSetFormat(uint8 TeamSize);   // Lobby only: 4v4 / 6v6
 	UFUNCTION(Server, Reliable) void ServerHostSetBuildMode(uint8 Mode);    // Lobby only: 0=Creative 1=Improvement 2=PlayOnly
 	UFUNCTION(Server, Reliable) void ServerHostSetMatchType(uint8 Type);    // Lobby only: 0=Elim 1=FFA 2=Skirmish 3=CTF 4=Dom 5=Hardpoint
+	/** Remote client → host: append a log chunk under Saved/ClientLogs/ (LAN crash triage). */
+	UFUNCTION(Server, Reliable, WithValidation) void ServerShipClientLog(const FString& Chunk);
 
 	// Console convenience for the host to configure the match in the lobby.
 	UFUNCTION(Exec) void PFFormat(int32 TeamSize);   // "PFFormat 6"
@@ -80,6 +83,12 @@ protected:
 	void CreateHUDIfNeeded();
 	void TrySendGuidHash();
 
+	// ---- (intra) client → host log ship (LAN crash triage) ----
+	void StartClientLogShip();
+	void StopClientLogShip();
+	void TickClientLogShip();
+	void FlushClientLogShip();   // send remaining buffer (EndPlay / periodic)
+
 	// ---- (intra) input handlers (PC-level actions) ----
 	void OnReadyToggle();
 	void OnHostStartPressed();
@@ -102,6 +111,12 @@ private:
 	FTimerHandle InputRetryHandle;      // Enhanced Input subsystem may not exist at first call (02 R1)
 	FTimerHandle GameStateRetryHandle;
 	FTimerHandle DeathCamHandle;
+	FTimerHandle ClientLogShipTimer;
+
+	/** Remote-client GLog tee; only live when NM_Client + local. */
+	TUniquePtr<FPFClientLogCapture> ClientLogCapture;
+	/** Server: append path for this connection's shipped client log. */
+	FString ServerClientLogPath;
 
 	bool bGameStateBound = false;
 	bool bGuidHashSent = false;

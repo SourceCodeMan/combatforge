@@ -7,6 +7,7 @@
 #include "Core/PaintForgeGameMode.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerState.h"
+#include "Core/PFClientLogShip.h"
 #include "Player/PaintForgeCharacter.h"
 #include "Input/PFInputConfig.h"
 #include "UI/PFRootHUDWidget.h"
@@ -19,14 +20,20 @@
 #include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/InputSettings.h"
+#include "HAL/FileManager.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "Misc/DateTime.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "TimerManager.h"
 
 namespace
 {
 	constexpr float InputRetryInterval = 0.25f;   // 02 R1: subsystem may not exist at first call
 	constexpr float DeathCamDuration   = 0.5f;    // T5: locked death cam before teammate spectate
+	constexpr float ClientLogShipInterval = 1.0f; // flush staged client logs to host each second
+	constexpr int32 ClientLogChunkMaxChars = 1800; // stay under reliable RPC comfort size
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +106,7 @@ void APaintForgePlayerController::BeginPlayingState()
 		CreateHUDIfNeeded();
 		ApplyInputForPhase();   // internally retries until the EI subsystem is alive (02 R1)
 		TrySendGuidHash();
+		StartClientLogShip();   // remote clients only — tee GLog → host Saved/ClientLogs
 	}
 }
 
@@ -113,6 +121,10 @@ void APaintForgePlayerController::OnPossess(APawn* InPawn)
 
 void APaintForgePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// Best-effort flush before the connection dies (won't run on hard crash — periodic ship covers that).
+	FlushClientLogShip();
+	StopClientLogShip();
+
 	if (APaintForgeGameState* GS = GetPFGameState())
 	{
 		GS->OnPhaseChangedEvent.RemoveAll(this);
@@ -123,6 +135,7 @@ void APaintForgePlayerController::EndPlay(const EEndPlayReason::Type EndPlayReas
 		World->GetTimerManager().ClearTimer(InputRetryHandle);
 		World->GetTimerManager().ClearTimer(GameStateRetryHandle);
 		World->GetTimerManager().ClearTimer(DeathCamHandle);
+		World->GetTimerManager().ClearTimer(ClientLogShipTimer);
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -590,6 +603,111 @@ void APaintForgePlayerController::ServerHostSetMatchType_Implementation(uint8 Ty
 	{
 		GM->HostSetMatchType(static_cast<EPFMatchType>(Type));
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Client → host log ship (LAN crash triage)
+// ---------------------------------------------------------------------------
+
+void APaintForgePlayerController::StartClientLogShip()
+{
+	// Only pure remote clients — listen-host already has its own Saved/Logs on disk.
+	if (!IsLocalController() || GetNetMode() != NM_Client)
+	{
+		return;
+	}
+	if (ClientLogCapture.IsValid())
+	{
+		return;
+	}
+	ClientLogCapture = MakeUnique<FPFClientLogCapture>();
+	if (GLog)
+	{
+		GLog->AddOutputDevice(ClientLogCapture.Get());
+	}
+	GetWorldTimerManager().SetTimer(ClientLogShipTimer, this,
+		&APaintForgePlayerController::TickClientLogShip, ClientLogShipInterval, /*bLoop=*/true);
+	UE_LOG(PaintForgeLog, Log, TEXT("ClientLogShip: started (shipping to host every %.1fs)"),
+		ClientLogShipInterval);
+	// Immediate banner so the host file is non-empty even if the client dies early.
+	ServerShipClientLog(FString::Printf(
+		TEXT("=== ClientLogShip start machine=%s player=%s ===\n"),
+		FPlatformProcess::ComputerName(),
+		GetPlayerState<APlayerState>() ? *GetPlayerState<APlayerState>()->GetPlayerName() : TEXT("?")));
+}
+
+void APaintForgePlayerController::StopClientLogShip()
+{
+	if (ClientLogCapture.IsValid() && GLog)
+	{
+		GLog->RemoveOutputDevice(ClientLogCapture.Get());
+	}
+	ClientLogCapture.Reset();
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(ClientLogShipTimer);
+	}
+}
+
+void APaintForgePlayerController::TickClientLogShip()
+{
+	FlushClientLogShip();
+}
+
+void APaintForgePlayerController::FlushClientLogShip()
+{
+	if (!ClientLogCapture.IsValid() || !IsLocalController() || GetNetMode() != NM_Client)
+	{
+		return;
+	}
+	// Drain in multiple chunks if backlog is large (e.g. after a hitch).
+	for (int32 i = 0; i < 8; ++i)
+	{
+		const FString Chunk = ClientLogCapture->TakeChunk(ClientLogChunkMaxChars);
+		if (Chunk.IsEmpty())
+		{
+			break;
+		}
+		ServerShipClientLog(Chunk);
+	}
+}
+
+bool APaintForgePlayerController::ServerShipClientLog_Validate(const FString& Chunk)
+{
+	// Reject absurd payloads (DoS / bad client). Normal chunks are ~1–2 KB.
+	return Chunk.Len() <= 4000;
+}
+
+void APaintForgePlayerController::ServerShipClientLog_Implementation(const FString& Chunk)
+{
+	if (!HasAuthority() || Chunk.IsEmpty())
+	{
+		return;
+	}
+	if (ServerClientLogPath.IsEmpty())
+	{
+		const FString Dir = FPaths::ProjectSavedDir() / TEXT("ClientLogs");
+		IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+		FString Name = TEXT("client");
+		if (const APlayerState* PS = PlayerState)
+		{
+			Name = PS->GetPlayerName();
+		}
+		// Filesystem-safe name.
+		Name = Name.Replace(TEXT(" "), TEXT("_"));
+		Name = Name.Replace(TEXT(":"), TEXT("-"));
+		Name = Name.Replace(TEXT("/"), TEXT("-"));
+		Name = Name.Replace(TEXT("\\"), TEXT("-"));
+		const FString Stamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+		ServerClientLogPath = Dir / FString::Printf(TEXT("%s_%s.log"), *Name, *Stamp);
+		const FString Header = FString::Printf(
+			TEXT("=== Host received client log for %s @ %s ===\n"),
+			*Name, *FDateTime::Now().ToIso8601());
+		FFileHelper::SaveStringToFile(Header, *ServerClientLogPath);
+		UE_LOG(PaintForgeLog, Log, TEXT("ClientLogShip: writing remote log -> %s"), *ServerClientLogPath);
+	}
+	FFileHelper::SaveStringToFile(Chunk, *ServerClientLogPath,
+		FFileHelper::EEncodingOptions::AutoDetect, &IFileManager::Get(), FILEWRITE_Append);
 }
 
 void APaintForgePlayerController::PFFormat(int32 TeamSize)
