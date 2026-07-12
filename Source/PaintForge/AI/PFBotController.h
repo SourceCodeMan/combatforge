@@ -23,6 +23,16 @@ class APaintForgeCharacter;
  * ethos): acquire the nearest visible enemy, face it, hold a stand-off band with simple strafing,
  * and fire on line-of-sight. Deliberately imperfect (per-acquisition aim error) so bots are beatable.
  */
+
+/** Bot skill preset — scales aim error, reaction time and engage range. Rookie is the kid-test default. */
+UENUM()
+enum class EPFBotSkill : uint8
+{
+	Rookie,        // kids: sloppy aim, slow to notice, shorter engage range
+	Regular,       // the original beatable-but-competent brain
+	Sharpshooter   // tighter aim, faster reaction — adult scrims
+};
+
 UCLASS()
 class PAINTFORGE_API APFBotController : public AAIController
 {
@@ -41,17 +51,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float PreferredRangeUU = 1400.f;   // stand-off band centre
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float MinRangeUU = 700.f;          // back up if closer
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float TargetRefreshInterval = 0.4f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimErrorDeg = 3.5f;          // beatable, not laser-accurate
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimErrorDeg = 3.5f;          // beatable, not laser-accurate (ApplySkill overrides)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float StrafeSwitchInterval = 1.8f;
+
+	// Kid-test difficulty: Skill picks the numbers in ApplySkill(); ReactionDelay is the "notice" gap
+	// before a freshly-acquired target may be fired on. Default Rookie = easy bots for the kids' session.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") EPFBotSkill Skill = EPFBotSkill::Rookie;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ReactionDelay = 0.6f;
 
 private:
 	APaintForgeCharacter* GetBotCharacter() const;
 	APaintForgeCharacter* AcquireNearestEnemy() const;
 	bool HasLineOfSight(const APaintForgeCharacter* Target) const;
 	void SetFiring(bool bFire);
+	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
 
 	TWeakObjectPtr<APaintForgeCharacter> CurrentTarget;
 	float TargetRefreshTimer = 0.f;
+	float FireHoldTimer = 0.f;   // counts down after acquiring a NEW target; fire is blocked until <= 0 (reaction gap)
 	float StrafeTimer = 0.f;
 	float StrafeSign = 1.f;
 	float AimJitterYaw = 0.f;

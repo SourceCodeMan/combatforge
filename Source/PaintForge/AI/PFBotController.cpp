@@ -28,12 +28,31 @@ void APFBotController::OnPossess(APawn* InPawn)
 	Super::OnPossess(InPawn);
 	CurrentTarget = nullptr;
 	bFiring = false;
+	FireHoldTimer = 0.f;
+	ApplySkill();
 }
 
 void APFBotController::OnUnPossess()
 {
 	SetFiring(false);
 	Super::OnUnPossess();
+}
+
+void APFBotController::ApplySkill()
+{
+	// One knob for the whole bot difficulty. Rookie is deliberately soft for the kids' session: wide
+	// aim error, a long "notice" delay before it opens up, and a shorter engage range so it doesn't
+	// snipe them across the field. Regular is the original brain; Sharpshooter tightens it for scrims.
+	switch (Skill)
+	{
+	case EPFBotSkill::Rookie:
+		AimErrorDeg = 8.0f;  ReactionDelay = 0.60f;  EngageRangeUU = 3200.f;  break;
+	case EPFBotSkill::Sharpshooter:
+		AimErrorDeg = 1.5f;  ReactionDelay = 0.12f;  EngageRangeUU = 5500.f;  break;
+	case EPFBotSkill::Regular:
+	default:
+		AimErrorDeg = 3.5f;  ReactionDelay = 0.30f;  EngageRangeUU = 4500.f;  break;
+	}
 }
 
 void APFBotController::Tick(float DeltaSeconds)
@@ -61,12 +80,18 @@ void APFBotController::Tick(float DeltaSeconds)
 	// Refresh the target periodically (and immediately if the cached one died/despawned). Re-roll the
 	// aim error on each acquisition so bots miss believably instead of being perfect.
 	TargetRefreshTimer -= DeltaSeconds;
+	FireHoldTimer -= DeltaSeconds;
 	if (TargetRefreshTimer <= 0.f || !CurrentTarget.IsValid())
 	{
+		APaintForgeCharacter* PrevTarget = CurrentTarget.Get();
 		CurrentTarget = AcquireNearestEnemy();
 		TargetRefreshTimer = TargetRefreshInterval;
 		AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
 		AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
+		if (CurrentTarget.IsValid() && CurrentTarget.Get() != PrevTarget)
+		{
+			FireHoldTimer = ReactionDelay;   // a fresh target isn't shot at until the bot "notices" it
+		}
 	}
 
 	APaintForgeCharacter* Target = CurrentTarget.Get();
@@ -113,8 +138,8 @@ void APFBotController::Tick(float DeltaSeconds)
 		Bot->AddMovementInput(Right * StrafeSign, 1.f);
 	}
 
-	// Fire only in range and with a clear line of sight (don't hose cover).
-	const bool bWantFire = (Dist <= EngageRangeUU) && HasLineOfSight(Target);
+	// Fire only in range, past the reaction gap, and with a clear line of sight (don't hose cover).
+	const bool bWantFire = (Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && HasLineOfSight(Target);
 	SetFiring(bWantFire);
 }
 
@@ -128,6 +153,9 @@ APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
 		return nullptr;
 	}
 	const uint8 MyTeam = MyPS->TeamId;
+	// Free-for-All has no teams — every other living combatant is a target. Team modes keep the
+	// teammate/unassigned filter. (Reads MatchType only; the FFA rules themselves live in GameMode.)
+	const bool bFFA = (GS->MatchType == EPFMatchType::FreeForAll);
 
 	APaintForgeCharacter* Best = nullptr;
 	float BestDistSq = TNumericLimits<float>::Max();
@@ -138,9 +166,13 @@ APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
 		{
 			continue;
 		}
-		if (OtherPS->TeamId > 1 || OtherPS->TeamId == MyTeam || !OtherPS->bAliveInRound)
+		if (!OtherPS->bAliveInRound)
 		{
-			continue;   // teammate, unassigned, or already out
+			continue;   // already out
+		}
+		if (!bFFA && (OtherPS->TeamId > 1 || OtherPS->TeamId == MyTeam))
+		{
+			continue;   // team modes: skip teammate / unassigned
 		}
 		APaintForgeCharacter* OtherChar = Cast<APaintForgeCharacter>(OtherPS->GetPawn());
 		if (OtherChar == nullptr)
