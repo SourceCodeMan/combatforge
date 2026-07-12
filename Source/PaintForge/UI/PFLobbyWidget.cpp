@@ -52,6 +52,28 @@ namespace
 		default:                        return TEXT("Elimination");
 		}
 	}
+
+	/** One-line how-to for the match TYPE row (kids-friendly). */
+	FString MatchTypeBlurb(EPFMatchType Type)
+	{
+		switch (Type)
+		{
+		case EPFMatchType::Elimination:
+			return TEXT("Last team standing · first to N round wins");
+		case EPFMatchType::FreeForAll:
+			return TEXT("Solo · most tags · no teams · play-only");
+		case EPFMatchType::Skirmish:
+			return TEXT("Teams · most tags · everyone respawns");
+		case EPFMatchType::CaptureFlag:
+			return TEXT("Grab their flag · score at your base · first to 3");
+		case EPFMatchType::Domination:
+			return TEXT("Hold points A / MID / B · score over time");
+		case EPFMatchType::Hardpoint:
+			return TEXT("One rotating point · hold it · score over time");
+		default:
+			return TEXT("");
+		}
+	}
 }
 
 // ---------------------------------------------------------------- row button
@@ -345,6 +367,15 @@ void UPFLobbyWidget::RefreshConfig()
 	if (ModeValueText)   { ModeValueText->SetText(FText::FromString(BuildModeLabel(GS->BuildMode))); }
 	if (TypeValueText)   { TypeValueText->SetText(FText::FromString(MatchTypeLabel(GS->MatchType))); }
 	if (FormatValueText) { FormatValueText->SetText(FText::FromString(FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize))); }
+	if (ConfigHintText)
+	{
+		const FString HostLine = IsLocalHost()
+			? TEXT("Host: click a row to change")
+			: TEXT("Host controls the match setup");
+		const FString Blurb = MatchTypeBlurb(GS->MatchType);
+		ConfigHintText->SetText(FText::FromString(
+			Blurb.IsEmpty() ? HostLine : FString::Printf(TEXT("%s\n%s"), *Blurb, *HostLine)));
+	}
 }
 
 void UPFLobbyWidget::NativeConstruct()
@@ -361,12 +392,7 @@ void UPFLobbyWidget::NativeConstruct()
 		FooterText->SetText(FText::FromString(Hints));
 	}
 
-	if (ConfigHintText)
-	{
-		ConfigHintText->SetText(FText::FromString(IsLocalHost()
-			? TEXT("Host: click a row to change")
-			: TEXT("Host controls the match setup")));
-	}
+	RefreshConfig(); // mode blurb + host line (GS may already be valid)
 
 	PollAccum = PollInterval; // refresh on first tick
 	LastRosterSignature.Reset();

@@ -169,6 +169,19 @@ void UPFCombatHUDWidget::BuildTree()
 		VSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 
+	// Objective status (CTF carrier / Dom·HP on-point) sits under the score strip.
+	ObjectiveStatusText = WidgetTree->ConstructWidget<UTextBlock>();
+	ObjectiveStatusText->SetFont(PFCombatFont(15, true));
+	ObjectiveStatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.9f, 0.35f)));
+	ObjectiveStatusText->SetJustification(ETextJustify::Center);
+	ObjectiveStatusText->SetText(FText::GetEmpty());
+	ObjectiveStatusText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UVerticalBoxSlot* VSlot = TopBox->AddChildToVerticalBox(ObjectiveStatusText))
+	{
+		VSlot->SetHorizontalAlignment(HAlign_Center);
+		VSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+	}
+
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(TopBox))
 	{
 		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
@@ -651,6 +664,64 @@ void UPFCombatHUDWidget::UpdateBanner(float InDeltaTime)
 	BannerText->SetText(FText::FromString(Banner));
 }
 
+void UPFCombatHUDWidget::UpdateObjectiveStatus()
+{
+	if (!ObjectiveStatusText)
+	{
+		return;
+	}
+	const APaintForgeGameState* GS = BoundGameState.Get();
+	const APaintForgePlayerState* LocalPS =
+		GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<APaintForgePlayerState>() : nullptr;
+	if (!GS || !LocalPS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		ObjectiveStatusText->SetVisibility(ESlateVisibility::Collapsed);
+		ObjectiveStatusText->SetText(FText::GetEmpty());
+		return;
+	}
+
+	FString Status;
+	FLinearColor Color(1.f, 0.9f, 0.35f);
+
+	if (GS->MatchType == EPFMatchType::CaptureFlag)
+	{
+		if (LocalPS->bCarryingFlag && LocalPS->CarriedFlagTeam <= 1)
+		{
+			Status = TEXT("⚑ FLAG — return to your base");
+			Color = PFColors::ForTeam(LocalPS->CarriedFlagTeam);
+		}
+	}
+	else if (GS->MatchType == EPFMatchType::Domination || GS->MatchType == EPFMatchType::Hardpoint)
+	{
+		if (LocalPS->StandingOnPoint != 255)
+		{
+			static const TCHAR* PointNames[] = { TEXT("A"), TEXT("MID"), TEXT("B") };
+			const int32 Idx = FMath::Clamp(static_cast<int32>(LocalPS->StandingOnPoint), 0, 2);
+			if (GS->MatchType == EPFMatchType::Hardpoint)
+			{
+				Status = FString::Printf(TEXT("● HARDPOINT %s"), PointNames[Idx]);
+			}
+			else
+			{
+				Status = FString::Printf(TEXT("● POINT %s"), PointNames[Idx]);
+			}
+			Color = (LocalPS->TeamId <= 1)
+				? PFColors::ForTeam(LocalPS->TeamId)
+				: FLinearColor(1.f, 0.9f, 0.35f);
+		}
+	}
+
+	if (Status.IsEmpty())
+	{
+		ObjectiveStatusText->SetVisibility(ESlateVisibility::Collapsed);
+		ObjectiveStatusText->SetText(FText::GetEmpty());
+		return;
+	}
+	ObjectiveStatusText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ObjectiveStatusText->SetText(FText::FromString(Status));
+	ObjectiveStatusText->SetColorAndOpacity(FSlateColor(Color));
+}
+
 void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
@@ -659,6 +730,7 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 
 	UpdateCrosshair();
 	UpdateBanner(InDeltaTime);
+	UpdateObjectiveStatus();
 
 	if (const APaintForgeGameState* GS = BoundGameState.Get())
 	{
@@ -673,7 +745,11 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 		}
 		// FreeForAll TagCount rides PlayerState OnRep (no GameState score event) — refresh the
 		// YOU/LEAD strip here so clients stay live without a dedicated multicast.
-		if (GS->MatchType == EPFMatchType::FreeForAll)
+		// Objective PS flags (carrier / on-point) also lack a GS multicast — keep strip live.
+		if (GS->MatchType == EPFMatchType::FreeForAll
+			|| GS->MatchType == EPFMatchType::CaptureFlag
+			|| GS->MatchType == EPFMatchType::Domination
+			|| GS->MatchType == EPFMatchType::Hardpoint)
 		{
 			HandleScoreChanged();
 		}

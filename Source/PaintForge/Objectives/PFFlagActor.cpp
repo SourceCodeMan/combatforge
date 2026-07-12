@@ -14,6 +14,7 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -97,6 +98,7 @@ void APFFlagActor::ServerGiveTo(APaintForgePlayerState* Carrier)
 	{
 		return;
 	}
+	GetWorldTimerManager().ClearTimer(DropReturnTimer);
 	CarrierPS = Carrier;
 	bCarried = true;
 	bAtHome = false;
@@ -110,6 +112,7 @@ void APFFlagActor::ServerReturnHome()
 	{
 		return;
 	}
+	GetWorldTimerManager().ClearTimer(DropReturnTimer);
 	CarrierPS.Reset();
 	bCarried = false;
 	bAtHome = true;
@@ -131,7 +134,26 @@ void APFFlagActor::ServerDropAt(const FVector& WorldLoc)
 	SetActorLocation(FVector(WorldLoc.X, WorldLoc.Y, PFObjectiveLayout::FloorZ));
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
+	// Auto-return so a dropped flag can't soft-lock a kids match forever.
+	GetWorldTimerManager().SetTimer(DropReturnTimer, this,
+		&APFFlagActor::HandleDropReturnTimer, DropReturnDelaySec, false);
 	ForceNetUpdate();
+}
+
+void APFFlagActor::HandleDropReturnTimer()
+{
+	if (!HasAuthority() || bCarried || bAtHome)
+	{
+		return;
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("Flag team %d auto-returned after drop timeout"), OwnerTeam);
+	ServerReturnHome();
+}
+
+void APFFlagActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(DropReturnTimer);
+	Super::EndPlay(EndPlayReason);
 }
 
 void APFFlagActor::Tick(float DeltaSeconds)

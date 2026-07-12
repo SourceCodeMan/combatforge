@@ -58,6 +58,8 @@ private:
 
 	void UpdateCrosshair();
 	void UpdateBanner(float InDeltaTime);
+	/** CTF carrier / Dom-HP on-point strip (reads local PlayerState each tick). */
+	void UpdateObjectiveStatus();
 
 	/** Collapses the center-nearest pips so only the effective wins-to-take show (T15). */
 	void UpdatePipVisibility(int32 EffectiveCount);
@@ -75,6 +77,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> AliveTextA;
 	UPROPERTY() TObjectPtr<UTextBlock> AliveTextB;
 	UPROPERTY() TObjectPtr<UTextBlock> BannerText;
+	/** Objective callout under the top score strip (carrier / on-point). Hidden when idle. */
+	UPROPERTY() TObjectPtr<UTextBlock> ObjectiveStatusText;
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsA;
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsB;
 	UPROPERTY() TArray<TObjectPtr<USizeBox>> PipSizersA;

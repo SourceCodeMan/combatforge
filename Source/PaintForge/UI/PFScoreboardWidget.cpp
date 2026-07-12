@@ -249,8 +249,9 @@ void UPFScoreboardWidget::RefreshRows()
 	FString Signature;
 	for (const APaintForgePlayerState* PS : Roster)
 	{
-		Signature += FString::Printf(TEXT("%s|%d|%d|%d|%d|%d|%d;"), *PS->GetPlayerName(), PS->TeamId,
-			PS->Eliminations, PS->TimesEliminated, PS->MatchScore, PS->TagCount, PS->bAliveInRound ? 1 : 0);
+		Signature += FString::Printf(TEXT("%s|%d|%d|%d|%d|%d|%d|%d|%d;"), *PS->GetPlayerName(), PS->TeamId,
+			PS->Eliminations, PS->TimesEliminated, PS->MatchScore, PS->TagCount, PS->bAliveInRound ? 1 : 0,
+			PS->bCarryingFlag ? 1 : 0, static_cast<int32>(PS->StandingOnPoint));
 	}
 	if (Signature == LastSignature)
 	{
@@ -359,11 +360,25 @@ void UPFScoreboardWidget::AddRow(const APaintForgePlayerState* PS)
 		HSlot->SetPadding(FMargin(0.f, 3.f, 10.f, 3.f));
 	}
 
-	// Player name.
+	// Player name (+ FLAG / ON POINT markers for objective modes).
 	UTextBlock* NameText = WidgetTree->ConstructWidget<UTextBlock>();
-	NameText->SetText(FText::FromString(PS->GetPlayerName()));
+	FString DisplayName = PS->GetPlayerName();
+	if (PS->bCarryingFlag)
+	{
+		DisplayName += TEXT("  ⚑ FLAG");
+	}
+	else if (PS->StandingOnPoint != 255)
+	{
+		static const TCHAR* PointNames[] = { TEXT("A"), TEXT("MID"), TEXT("B") };
+		const int32 Idx = FMath::Clamp(static_cast<int32>(PS->StandingOnPoint), 0, 2);
+		DisplayName += FString::Printf(TEXT("  ·  %s"), PointNames[Idx]);
+	}
+	NameText->SetText(FText::FromString(DisplayName));
 	NameText->SetFont(PFBoardFont(15, false));
-	NameText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	NameText->SetColorAndOpacity(FSlateColor(
+		PS->bCarryingFlag && PS->CarriedFlagTeam <= 1
+			? PFColors::ForTeam(PS->CarriedFlagTeam)
+			: FLinearColor::White));
 	if (UHorizontalBoxSlot* HSlot = Row->AddChildToHorizontalBox(NameText))
 	{
 		HSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));

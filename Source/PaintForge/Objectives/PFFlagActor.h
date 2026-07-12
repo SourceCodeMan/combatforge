@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/TimerHandle.h"
 #include "PFFlagActor.generated.h"
 
 class APaintForgePlayerState;
@@ -34,16 +35,20 @@ public:
 
 	/** Server: attach visual to carrier pawn; hide at base. */
 	void ServerGiveTo(APaintForgePlayerState* Carrier);
-	/** Server: detach, clear carrier, teleport to home. */
+	/** Server: detach, clear carrier, teleport to home. Cancels drop timer. */
 	void ServerReturnHome();
-	/** Server: drop at world location (not carried, not home). */
+	/** Server: drop at world location (not carried, not home). Auto-returns after DropReturnDelaySec. */
 	void ServerDropAt(const FVector& WorldLoc);
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 protected:
 	virtual void BeginPlay() override;
+
+	/** Server timer callback: uncontested dropped flag returns home. */
+	void HandleDropReturnTimer();
 
 	UFUNCTION()
 	void OnPickupOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -67,4 +72,8 @@ private:
 
 	/** Server-only carrier; clients see attach via follow-tick when bCarried. */
 	TWeakObjectPtr<APaintForgePlayerState> CarrierPS;
+	FTimerHandle DropReturnTimer;
+
+	/** Seconds on the ground before a dropped flag auto-returns home. */
+	static constexpr float DropReturnDelaySec = 12.f;
 };

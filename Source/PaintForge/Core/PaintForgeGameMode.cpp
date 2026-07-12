@@ -1589,12 +1589,22 @@ void APaintForgeGameMode::NotifyFlagTouched(APFFlagActor* Flag, APaintForgePlaye
 
 	const uint8 FlagTeam = Flag->GetOwnerTeam();
 
-	// Own flag at home: if carrying the enemy flag → CAPTURE.
+	// Own flag:
+	//  - dropped (not home, not carried) → ally RETURN
+	//  - at home + carrying enemy → CAPTURE
+	//  - away while still carried by enemy → no-op
 	if (FlagTeam == Toucher->TeamId)
 	{
+		if (!Flag->IsAtHome() && !Flag->IsCarried())
+		{
+			Flag->ServerReturnHome();
+			UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s returned team %d flag"),
+				*Toucher->GetPlayerName(), FlagTeam);
+			return;
+		}
 		if (!Flag->IsAtHome())
 		{
-			return;   // own flag is away — no capture until it's back
+			return;   // still out with an enemy carrier — no capture / no return
 		}
 		if (!Toucher->bCarryingFlag || Toucher->CarriedFlagTeam == Toucher->TeamId)
 		{
@@ -2118,14 +2128,15 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 		return;
 	}
 
-	// CAPTURE THE FLAG: carrier death returns the flag home; no tag scoring; respawn like Skirmish.
+	// CAPTURE THE FLAG: carrier death DROPS the flag (auto-return timer on the actor); ally can
+	// return it early by touch. No tag scoring; respawn like Skirmish.
 	if (GS->MatchType == EPFMatchType::CaptureFlag)
 	{
 		if (VictimPS->bCarryingFlag)
 		{
 			if (APFFlagActor* Carried = GetFlagForTeam(VictimPS->CarriedFlagTeam))
 			{
-				Carried->ServerReturnHome();
+				Carried->ServerDropAt(Victim->GetActorLocation());
 			}
 			VictimPS->ServerSetFlagCarry(false, 255);
 		}
