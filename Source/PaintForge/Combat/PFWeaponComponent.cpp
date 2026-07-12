@@ -220,6 +220,10 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	FRandomStream Stream = MakeShotStream(PS->GetPlayerId(), ShotIndexCounter);
 	const FVector SpreadedDir = Stream.VRandCone(BaseDir, FMath::DegreesToRadians(HalfAngleDeg));
 
+	// Raise TP gun + FP recoil BEFORE sampling muzzle so balls leave the aim-line barrel,
+	// not the hip-carry tip.
+	Char->OnFireCosmetic();
+
 	if (!Char->HasAuthority())
 	{
 		// Owning-client cosmetic: instant tracer from the camera muzzle (04 §5.1). A listen
@@ -250,7 +254,6 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	{
 		Audio->PlayMuzzle();
 	}
-	Char->OnFireCosmetic();   // viewmodel recoil only (airsoft — no muzzle flash)
 
 	FPFShotPacket Packet;
 	Packet.Origin = Char->GetMuzzleLocation(false);   // server-muzzle convention (04 §2.2)

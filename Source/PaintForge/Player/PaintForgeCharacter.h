@@ -126,13 +126,19 @@ protected:
 	void AttachWeaponToHand();
 
 	/**
-	 * TP rifle always stays parented to the hand bone (no world-space "shoulder raise" —
-	 * that was reading as stuck on both Quantum and Survival).
+	 * TP rifle: hand-carry at rest; raise to eye/aim line while ADS or firing so the
+	 * muzzle (and ball spawn) isn't at hip height. Always returns to the hand when idle.
 	 */
 	void UpdateWeaponHoldPose();
 
-	/** Snap to resolved hand bone with grip offsets. */
+	/** True while ADS / fire held / brief post-shot window. */
+	bool ShouldRaiseWeapon() const;
+
+	/** Snap to resolved hand bone with grip offsets (idle carry). */
 	void ApplyHandWeaponPose();
+
+	/** Capsule/eye aim-line pose (shooting) — re-parented off the hand for this window only. */
+	void ApplyRaisedWeaponPose();
 
 	/**
 	 * Quantum (no matching AnimBP): drive idle/walk/run via AnimSingleNodeInstance.
@@ -142,6 +148,9 @@ protected:
 
 	/** Find a usable weapon attach bone/socket name on the live body. */
 	FName ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const;
+
+	/** Eye world position (capsule top - eye offset) for aim-line raise + muzzle fallback. */
+	FVector GetEyeWorldLocation() const;
 
 	/** Builds the primitive marker viewmodel (receiver/guard/barrel/stock/mag/grip) under Parent. */
 	void BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube, UStaticMesh* Cylinder,
@@ -212,11 +221,16 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilRecoverSpeed = 11.f;
 	// Local tip of SM_Rifle when barrel-forward is +Y (after TP world yaw -90).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector RifleMuzzleLocalTP = FVector(0.f, 58.f, 4.f);
+	/** How long the TP gun stays raised after a shot (covers auto-fire gaps + remotes). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.45f;
+	// Raised pose: mesh origin relative to eye (forward / right / down along aim basis).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedFromEye = FVector(28.f, 14.f, -8.f);
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
 	FVector RecoilOffset = FVector::ZeroVector;       // decays to zero each tick (owner)
 	float   RecoilPitch = 0.f;                        // deg, decays to zero
+	float   WeaponRaiseHoldSec = 0.f;                 // countdown while briefly raised after shot
 	/** Sequence-driven locomotion (0=none, 1=idle, 2=walk, 3=run). */
 	uint8   SeqLocoState = 0;
 	bool    bSequenceLocoActive = false;              // Quantum single-node path

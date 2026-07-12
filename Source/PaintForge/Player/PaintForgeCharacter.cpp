@@ -366,7 +366,11 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 	// Build phase: no marker in hands (placement HUD has its own aim dot).
 	UpdateBuildPhaseWeaponVisibility();
 
-	// TP rifle always in hands (no world-space shoulder pose).
+	// TP rifle: hand-carry, or eye-line raise while ADS / firing (then back to hand).
+	if (WeaponRaiseHoldSec > 0.f)
+	{
+		WeaponRaiseHoldSec = FMath::Max(0.f, WeaponRaiseHoldSec - DeltaSeconds);
+	}
 	UpdateWeaponHoldPose();
 
 	if (IsLocallyControlled())
@@ -1080,6 +1084,67 @@ void APaintForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 	}
 }
 
+bool APaintForgeCharacter::ShouldRaiseWeapon() const
+{
+	// Raise whenever we're aiming or shooting so the muzzle leaves hip height.
+	if (IsADS())
+	{
+		return true;
+	}
+	if (bFireHeld)
+	{
+		return true;
+	}
+	if (WeaponComponent != nullptr && WeaponComponent->WantsFire())
+	{
+		return true;
+	}
+	if (WeaponRaiseHoldSec > 0.f)
+	{
+		return true;
+	}
+	return false;
+}
+
+FVector APaintForgeCharacter::GetEyeWorldLocation() const
+{
+	if (const UCapsuleComponent* Cap = GetCapsuleComponent())
+	{
+		const float EyeUp = Cap->GetScaledCapsuleHalfHeight() - CameraEyeOffsetFromCapsuleTop;
+		return GetActorLocation() + Cap->GetUpVector() * EyeUp;
+	}
+	return GetActorLocation() + FVector(0.f, 0.f, 60.f);
+}
+
+void APaintForgeCharacter::ApplyRaisedWeaponPose()
+{
+	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
+	{
+		return;
+	}
+
+	const FRotator Aim = GetBaseAimRotation();
+	const FRotationMatrix AimM(Aim);
+	// Place mesh origin so the barrel sits on the aim line at eye height (not hip).
+	const FVector Origin = GetEyeWorldLocation()
+		+ AimM.GetUnitAxis(EAxis::X) * WeaponRaisedFromEye.X
+		+ AimM.GetUnitAxis(EAxis::Y) * WeaponRaisedFromEye.Y
+		+ AimM.GetUnitAxis(EAxis::Z) * WeaponRaisedFromEye.Z;
+
+	if (USceneComponent* Root = GetRootComponent())
+	{
+		if (WeaponMeshComp->GetAttachParent() != Root)
+		{
+			WeaponMeshComp->AttachToComponent(Root,
+				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		}
+	}
+	WeaponMeshComp->SetWorldLocation(Origin);
+	// SM_Rifle / olive: local +Y is barrel-forward → yaw -90 into aim +X.
+	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
+	WeaponMeshComp->SetWorldScale3D(WeaponRelativeScale);
+}
+
 void APaintForgeCharacter::UpdateWeaponHoldPose()
 {
 	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr || !bUsingArtBody)
@@ -1090,8 +1155,16 @@ void APaintForgeCharacter::UpdateWeaponHoldPose()
 	{
 		return;
 	}
-	// Always re-seat on the hand bone so ADS/fire never leaves a world-space shoulder pose.
-	ApplyHandWeaponPose();
+	// Critical: always choose every frame — raise while shooting, hand when idle
+	// (previous "edge only" return-to-hand left the gun stuck at the shoulder).
+	if (ShouldRaiseWeapon())
+	{
+		ApplyRaisedWeaponPose();
+	}
+	else
+	{
+		ApplyHandWeaponPose();
+	}
 }
 
 void APaintForgeCharacter::ApplyArtLoadout()
@@ -1226,23 +1299,19 @@ FVector APaintForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 		return FirstPersonCamera->GetComponentLocation() + FirstPersonCamera->GetForwardVector() * 55.f;
 	}
 
-	// Authoritative / remote: tip of the TP rifle when it's posed on the aim line.
-	// Keeps balls leaving the barrel instead of a low hip offset under the gun.
+	// Authoritative / remote: when the TP gun is raised onto the aim line (parent = capsule root),
+	// spawn from the barrel tip. When it's still hand-carried at the hip, use eye-line — never
+	// the hip tip (balls looking like they come off the dirt).
 	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr && bUsingArtBody
-		&& !WeaponMeshComp->bHiddenInGame)
+		&& !WeaponMeshComp->bHiddenInGame
+		&& WeaponMeshComp->GetAttachParent() == GetRootComponent())
 	{
 		return WeaponMeshComp->GetComponentTransform().TransformPosition(RifleMuzzleLocalTP);
 	}
 
-	// Fallback eye-line (no art body yet): capsule eye height + barrel-length forward.
+	// Eye-line fallback (hip-carry or no art body) — never use the hand-gun tip at the hip.
 	const FRotationMatrix AimBasis(GetBaseAimRotation());
-	float EyeUp = 60.f;
-	if (const UCapsuleComponent* Cap = GetCapsuleComponent())
-	{
-		EyeUp = Cap->GetUnscaledCapsuleHalfHeight() - CameraEyeOffsetFromCapsuleTop;
-	}
-	return GetActorLocation()
-		+ FVector(0.f, 0.f, EyeUp)
+	return GetEyeWorldLocation()
 		+ AimBasis.GetUnitAxis(EAxis::X) * 65.f
 		+ AimBasis.GetUnitAxis(EAxis::Y) * 10.f;
 }
@@ -1312,12 +1381,23 @@ void APaintForgeCharacter::SetupWeaponMaterials()
 
 void APaintForgeCharacter::OnFireCosmetic()
 {
-	// Airsoft marker: viewmodel recoil only — no muzzle flash; TP gun stays in hands.
+	// Airsoft marker: viewmodel recoil only — no muzzle flash.
 	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f);
 	RecoilPitch += RecoilKickPitchDeg;
+	// Keep TP gun raised through the shot cadence so muzzle/balls aren't hip-height.
+	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
+	if (bUsingArtBody)
+	{
+		ApplyRaisedWeaponPose();
+	}
 }
 
 void APaintForgeCharacter::OnRemoteFireCosmetic()
 {
-	// Airsoft: no flash; TP gun stays hand-attached.
+	// Airsoft: no flash. Brief TP raise so remotes see the marker up with the shot.
+	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
+	if (bUsingArtBody)
+	{
+		ApplyRaisedWeaponPose();
+	}
 }
