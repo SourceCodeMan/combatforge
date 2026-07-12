@@ -86,6 +86,7 @@ public:
 protected:
 	// ---- Engine overrides ----
 	virtual void BeginPlay() override;
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
 	virtual void RestartPlayer(AController* NewPlayer) override;
@@ -173,6 +174,10 @@ protected:
 	void GetTeamCounts(int32& OutTeamA, int32& OutTeamB) const;
 	int32 GetTeamSlotIndex(const APaintForgePlayerState* PS) const;
 	bool AreAllPlayersReady(const APaintForgePlayerState* IgnorePS = nullptr) const;
+	/** True if PS still has a live Controller (filters disconnect ghosts in PlayerArray). */
+	static bool IsActiveRosterMember(const APaintForgePlayerState* PS);
+	/** Destroy orphaned human PlayerStates that no longer own a Controller. */
+	void ScrubGhostPlayerStates(const APaintForgePlayerState* KeepPS = nullptr);
 	uint8 FindFreeRosterIndex() const;
 	void ComputeEffectiveScaling();
 	FPFMatchResult MakeMatchResult(uint8 MatchWinner) const;

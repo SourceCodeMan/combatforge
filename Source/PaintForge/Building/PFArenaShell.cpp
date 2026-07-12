@@ -64,11 +64,19 @@ APFArenaShell::APFArenaShell()
 		TEXT("/Game/Materials/M_PF_ArenaMark.M_PF_ArenaMark"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	// Real warehouse surfaces (Megascans/Fab, VT). Prefer these; fall back to the generated arena
+	// materials, then BasicShapeMaterial — so a checkout without the (heavy) warehouse scene still runs.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhFloorFinder(
+		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Tile.M_Tile"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhWallFinder(
+		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Metal.M_Metal"));
 
 	CubeMesh = CubeFinder.Object;
 	UMaterialInterface* const Basic = BasicMatFinder.Succeeded() ? BasicMatFinder.Object.Get() : nullptr;
-	FloorMaterial = FloorFinder.Succeeded() ? FloorFinder.Object.Get() : Basic;
-	WallMaterial = WallFinder.Succeeded() ? WallFinder.Object.Get() : Basic;
+	UMaterialInterface* const GenFloor = FloorFinder.Succeeded() ? FloorFinder.Object.Get() : Basic;
+	UMaterialInterface* const GenWall = WallFinder.Succeeded() ? WallFinder.Object.Get() : Basic;
+	FloorMaterial = WhFloorFinder.Succeeded() ? WhFloorFinder.Object.Get() : GenFloor;
+	WallMaterial = WhWallFinder.Succeeded() ? WhWallFinder.Object.Get() : GenWall;
 	MetalMaterial = MetalFinder.Succeeded() ? MetalFinder.Object.Get() : Basic;
 	MarkMaterial = MarkFinder.Succeeded() ? MarkFinder.Object.Get() : Basic;
 

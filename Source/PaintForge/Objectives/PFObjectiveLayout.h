@@ -12,7 +12,12 @@
  */
 namespace PFObjectiveLayout
 {
-	constexpr float FloorZ = 50.f;
+	/**
+	 * World Z for objective actor pivots sitting on the Z=0 floor slab.
+	 * Engine Cylinder (h=100) scaled Z=0.15 → height 15 uu → center at 7.5.
+	 * Previous FloorZ=50 left Dom/HP pads floating mid-air.
+	 */
+	constexpr float FloorZ = 8.f;
 
 	/** Center of cell (Cx, Cy) at floor height. */
 	inline FVector CellCenter(int32 Cx, int32 Cy, float Z = FloorZ)

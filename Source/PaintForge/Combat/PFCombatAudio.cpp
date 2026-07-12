@@ -135,12 +135,17 @@ namespace
 
 	USoundWaveProcedural* MakeWaveShell(UObject* Outer, float DurationSec)
 	{
-		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(Outer);
+		// Procedural one-shots are fragile on packaged clients if fields are incomplete —
+		// missing sample rate / virtualization often yields total silence (kids playtest).
+		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(Outer, NAME_None, RF_Transient);
 		Wave->SetSampleRate(kSampleRate);
 		Wave->NumChannels = 1;
 		Wave->bLooping = false;
+		Wave->bProcedural = true;
 		Wave->SoundGroup = SOUNDGROUP_Default;
 		Wave->Duration = DurationSec;
+		Wave->VirtualizationMode = EVirtualizationMode::Disabled;
+		Wave->bCanProcessAsync = false;
 		return Wave;
 	}
 }
@@ -220,12 +225,15 @@ void UPFCombatAudio::EnsureSounds()
 void UPFCombatAudio::PlayUI(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm,
 	float Volume, float Pitch)
 {
-	if (!CanPlay() || Wave == nullptr)
+	if (!CanPlay() || Wave == nullptr || Pcm.Num() == 0)
 	{
 		return;
 	}
-	QueuePcm(Wave, Pcm);
-	UGameplayStatics::PlaySound2D(this, Wave, Volume, Pitch);
+	// Fresh shell per play: reusing one drained procedural wave is a common silence bug.
+	const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
+	USoundWaveProcedural* Live = MakeWaveShell(this, Dur);
+	QueuePcm(Live, Pcm);
+	UGameplayStatics::PlaySound2D(this, Live, Volume, Pitch);
 }
 
 void UPFCombatAudio::PlayWorld(USoundWaveProcedural* /*Wave*/, const TArray<uint8>& Pcm,
@@ -236,8 +244,9 @@ void UPFCombatAudio::PlayWorld(USoundWaveProcedural* /*Wave*/, const TArray<uint
 		return;
 	}
 	// Fresh wave per shot so auto-fire concurrency doesn't share one drained FIFO.
+	// Outer=this (component) so GC can't collect mid-play (TransientPackage was risky).
 	const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
-	USoundWaveProcedural* Wave = MakeWaveShell(GetTransientPackage(), Dur);
+	USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
 	QueuePcm(Wave, Pcm);
 
 	FVector Loc = FVector::ZeroVector;
@@ -250,48 +259,56 @@ void UPFCombatAudio::PlayWorld(USoundWaveProcedural* /*Wave*/, const TArray<uint
 		Loc = Owner->GetActorLocation();
 	}
 
-	UGameplayStatics::SpawnSoundAtLocation(this, Wave, Loc, FRotator::ZeroRotator,
-		Volume, Pitch, 0.f, CombatAttenuation, Concurrency);
+	// 3D first; if attenuation is missing, still hear it as 2D so playtest isn't silent.
+	if (CombatAttenuation)
+	{
+		UGameplayStatics::SpawnSoundAtLocation(this, Wave, Loc, FRotator::ZeroRotator,
+			Volume, Pitch, 0.f, CombatAttenuation, Concurrency);
+	}
+	else
+	{
+		UGameplayStatics::PlaySound2D(this, Wave, Volume, Pitch);
+	}
 }
 
 void UPFCombatAudio::PlayHitmarker()
 {
 	EnsureSounds();
-	PlayUI(SndHitmarker, PcmHitmarker, 0.7f, FMath::FRandRange(0.98f, 1.05f));
+	PlayUI(SndHitmarker, PcmHitmarker, 1.0f, FMath::FRandRange(0.98f, 1.05f));
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Hitmarker (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayElim()
 {
 	EnsureSounds();
-	PlayUI(SndElim, PcmElim, 0.85f, 1.f);
+	PlayUI(SndElim, PcmElim, 1.0f, 1.f);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Elim (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayMuzzle()
 {
 	EnsureSounds();
-	PlayWorld(SndMuzzle, PcmMuzzle, 0.75f, FMath::FRandRange(0.92f, 1.08f), MuzzleConcurrency);
+	PlayWorld(SndMuzzle, PcmMuzzle, 1.0f, FMath::FRandRange(0.92f, 1.08f), MuzzleConcurrency);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Muzzle (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlaySplatIncoming()
 {
 	EnsureSounds();
-	PlayUI(SndSplatIncoming, PcmSplatIncoming, 0.8f, FMath::FRandRange(0.95f, 1.05f));
+	PlayUI(SndSplatIncoming, PcmSplatIncoming, 1.0f, FMath::FRandRange(0.95f, 1.05f));
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] SplatIncoming (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayBreakout()
 {
 	EnsureSounds();
-	PlayUI(SndBreakout, PcmBreakout, 0.9f, 1.f);
+	PlayUI(SndBreakout, PcmBreakout, 1.0f, 1.f);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Breakout (%s)"), *GetNameSafe(GetOwner()));
 }
 
 void UPFCombatAudio::PlayDenied()
 {
 	EnsureSounds();
-	PlayUI(SndDenied, PcmDenied, 0.65f, 1.f);
+	PlayUI(SndDenied, PcmDenied, 0.85f, 1.f);
 	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Denied (%s)"), *GetNameSafe(GetOwner()));
 }

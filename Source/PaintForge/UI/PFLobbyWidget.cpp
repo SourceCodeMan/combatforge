@@ -496,13 +496,23 @@ void UPFLobbyWidget::RefreshRoster()
 	}
 
 	// Stable display order: team A, team B, unassigned; then by name.
+	// Skip ghost PlayerStates (no Controller) so disconnects don't leave a second un-ready row.
 	TArray<APaintForgePlayerState*> Roster;
 	for (APlayerState* PS : GS->PlayerArray)
 	{
-		if (APaintForgePlayerState* PFPS = Cast<APaintForgePlayerState>(PS))
+		APaintForgePlayerState* PFPS = Cast<APaintForgePlayerState>(PS);
+		if (!PFPS)
 		{
-			Roster.Add(PFPS);
+			continue;
 		}
+		const bool bLive = PFPS->IsABot()
+			? (PFPS->GetOwningController() != nullptr)
+			: (PFPS->GetPlayerController() != nullptr || PFPS->GetOwningController() != nullptr);
+		if (!bLive)
+		{
+			continue;
+		}
+		Roster.Add(PFPS);
 	}
 	Roster.Sort([](const APaintForgePlayerState& A, const APaintForgePlayerState& B)
 	{

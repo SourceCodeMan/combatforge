@@ -119,6 +119,8 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	// weapon mesh drops in later by re-pointing the parts (or via the WeaponMesh art-loadout seam).
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> RifleMeshFinder(TEXT("/Game/Weapons/Rifle/Mesh/SM_Rifle.SM_Rifle"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RifleMatFinder(TEXT("/Game/Weapons/Rifle/M_PF_Rifle.M_PF_Rifle"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FlashMatFinder(
 		TEXT("/Game/Materials/M_PF_Flash.M_PF_Flash"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SmokeMatFinder(
@@ -135,13 +137,37 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	ViewModelHomeLoc = FVector(28.f, 10.f, -13.f);   // forward-right-down of the eye, classic viewmodel pose
 	ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc);
 
-	BuildMarker(ViewModelRoot, TEXT("VM_"), CubeMesh, CylMesh, MarkerPartsFP, MuzzleLocalFP);
-	for (TObjectPtr<UStaticMeshComponent>& Part : MarkerPartsFP)
+	// First-person weapon: the real rifle if available (Lyra SM_Rifle + generated M_PF_Rifle, self-contained),
+	// otherwise the primitive marker gun. We build ONE or the OTHER — building no primitive means the
+	// eliminate/respawn visibility propagate (SetChildVisibility) can never re-show an old primitive gun.
+	if (UStaticMesh* RifleMesh = RifleMeshFinder.Succeeded() ? RifleMeshFinder.Object.Get() : nullptr)
 	{
-		if (Part != nullptr)
+		RifleMaterial = RifleMatFinder.Succeeded() ? RifleMatFinder.Object.Get() : nullptr;
+		RifleFPMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RifleFPMesh"));
+		RifleFPMesh->SetupAttachment(ViewModelRoot);
+		RifleFPMesh->SetStaticMesh(RifleMesh);
+		if (RifleMaterial != nullptr) { RifleFPMesh->SetMaterial(0, RifleMaterial); }
+		RifleFPMesh->SetOnlyOwnerSee(true);
+		RifleFPMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		RifleFPMesh->SetCastShadow(false);
+		// Held-rifle pose in ViewModelRoot space (+X forward, +Y right, +Z up). The mesh models forward along
+		// its local +Y, so yaw -90 points the barrel into the screen; then scaled down and set lower-right.
+		RifleFPMesh->SetRelativeLocation(FVector(2.f, 5.f, -3.f));
+		RifleFPMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+		RifleFPMesh->SetRelativeScale3D(FVector(0.4f));
+		MuzzleLocalFP = FVector(34.f, 3.f, -5.f);   // rifle barrel tip in ViewModelRoot space (drives the FP flash)
+		WeaponMesh = RifleMesh;                      // third-person seam (attaches to the hand bone in ApplyArtLoadout)
+	}
+	else
+	{
+		BuildMarker(ViewModelRoot, TEXT("VM_"), CubeMesh, CylMesh, MarkerPartsFP, MuzzleLocalFP);
+		for (TObjectPtr<UStaticMeshComponent>& Part : MarkerPartsFP)
 		{
-			if (GunBaseMat != nullptr) { Part->SetMaterial(0, GunBaseMat); }
-			Part->SetOnlyOwnerSee(true);   // the marker is the owner's first-person viewmodel
+			if (Part != nullptr)
+			{
+				if (GunBaseMat != nullptr) { Part->SetMaterial(0, GunBaseMat); }
+				Part->SetOnlyOwnerSee(true);   // the marker is the owner's first-person viewmodel
+			}
 		}
 	}
 
@@ -228,6 +254,11 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	if (TeamBodyMatFinder.Succeeded())
 	{
 		TeamBodyMaterial = TeamBodyMatFinder.Object;
+	}
+	// TP weapon: same SM_Rifle as the FP viewmodel so remote players see a held gun (not a cube).
+	if (RifleMeshFinder.Succeeded())
+	{
+		WeaponMesh = RifleMeshFinder.Object;
 	}
 
 	// Set the mesh's relative transform HERE (ctor), not just in BeginPlay: the Character Movement
@@ -743,6 +774,7 @@ void APaintForgeCharacter::ApplyArtLoadout()
 	{
 		WeaponMeshComp->SetStaticMesh(WeaponMesh);
 		WeaponMeshComp->SetVisibility(true);
+		if (RifleMaterial != nullptr) { WeaponMeshComp->SetMaterial(0, RifleMaterial); }   // real rifle skin, not the missing Lyra MI
 		if (bUsingArtBody && GetMesh() != nullptr && GetMesh()->DoesSocketExist(WeaponAttachSocket))
 		{
 			WeaponMeshComp->AttachToComponent(GetMesh(),
@@ -832,6 +864,9 @@ void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	if (ViewModelRoot != nullptr)
 	{
 		ViewModelRoot->SetVisibility(!bEliminated, /*bPropagateToChildren=*/true);
+		// The propagate un-hides EVERY child — re-hide the muzzle FX, which must only flash during a shot.
+		if (MuzzleFlashFP != nullptr) { MuzzleFlashFP->SetVisibility(false); }
+		if (MuzzleSmokeFP != nullptr) { MuzzleSmokeFP->SetVisibility(false); }
 	}
 }
 
