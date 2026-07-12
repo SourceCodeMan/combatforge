@@ -21,7 +21,10 @@
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/CommandLine.h"
 #include "Misc/Guid.h"
+#include "Misc/Parse.h"
 #include "TimerManager.h"
 
 namespace
@@ -71,7 +74,125 @@ void APaintForgeGameMode::BeginPlay()
 		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks in Lobby / menu
 		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
 	}
+
+#if !UE_BUILD_SHIPPING
+	// Deploy/playtest/smoke-improvement.ps1: editor -game -nullrhi -SmokeImprovement
+	if (FParse::Param(FCommandLine::Get(), TEXT("SmokeImprovement")))
+	{
+		bFillWithBots = true;   // need two sides for a normal lobby→build
+		SmokeImprovementStep = 0;
+		SmokeImprovementElapsed = 0.f;
+		GetWorldTimerManager().SetTimer(SmokeImprovementTimer, this,
+			&APaintForgeGameMode::TickSmokeImprovement, 0.5f, true);
+		UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: Improvement path armed (-SmokeImprovement)"));
+	}
+#endif
 }
+
+#if !UE_BUILD_SHIPPING
+void APaintForgeGameMode::TickSmokeImprovement()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return;
+	}
+	SmokeImprovementElapsed += 0.5f;
+
+	// Hard timeout — never hang a CI/playtest host.
+	if (SmokeImprovementElapsed > 90.f)
+	{
+		UE_LOG(PaintForgeLog, Error, TEXT("SMOKE: Improvement FAIL (timeout %.0fs, phase=%d, basePieces=%d)"),
+			SmokeImprovementElapsed, static_cast<int32>(GS->Phase), GS->CommunityBasePieces);
+		GetWorldTimerManager().ClearTimer(SmokeImprovementTimer);
+		FGenericPlatformMisc::RequestExit(false);
+		return;
+	}
+
+	switch (SmokeImprovementStep)
+	{
+	case 0:   // Wait for a human host to exist in Lobby, then configure Improvement.
+		if (GS->Phase != EPFMatchPhase::Lobby)
+		{
+			return;
+		}
+		{
+			bool bHaveHost = false;
+			for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(It->Get()))
+				{
+					if (PC->IsLocalController())
+					{
+						bHaveHost = true;
+						break;
+					}
+				}
+			}
+			if (!bHaveHost)
+			{
+				return;
+			}
+		}
+		HostSetMatchType(EPFMatchType::Skirmish);       // team mode so bots fill
+		HostSetBuildMode(EPFBuildMode::Improvement);
+		HostSetFormat(2);                               // small format → faster fill
+		UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: configured Improvement + Skirmish 2v2"));
+		SmokeImprovementStep = 1;
+		break;
+
+	case 1:   // Force the lobby countdown once (host path).
+		if (GS->Phase != EPFMatchPhase::Lobby)
+		{
+			SmokeImprovementStep = 2;
+			return;
+		}
+		if (!bLobbyCountdownActive)
+		{
+			HostForceStart();
+			UE_LOG(PaintForgeLog, Warning, TEXT("SMOKE: HostForceStart (lobby countdown)"));
+		}
+		if (GS->Phase == EPFMatchPhase::Build || GS->Phase == EPFMatchPhase::Combat)
+		{
+			SmokeImprovementStep = 2;
+		}
+		break;
+
+	case 2:   // Build inject is synchronous at Lobby→Build — assert CommunityBasePieces.
+		if (GS->Phase == EPFMatchPhase::Lobby)
+		{
+			return;   // still counting down
+		}
+		if (GS->Phase == EPFMatchPhase::Build || GS->Phase == EPFMatchPhase::Combat)
+		{
+			const uint16 N = GS->CommunityBasePieces;
+			if (N > 0)
+			{
+				UE_LOG(PaintForgeLog, Warning,
+					TEXT("SMOKE: Improvement PASS (CommunityBasePieces=%d, phase=%d)"),
+					N, static_cast<int32>(GS->Phase));
+			}
+			else
+			{
+				UE_LOG(PaintForgeLog, Error,
+					TEXT("SMOKE: Improvement FAIL (CommunityBasePieces=0 — seed Saved/Arenas or inject broke)"));
+			}
+			SmokeImprovementStep = 3;
+			GetWorldTimerManager().ClearTimer(SmokeImprovementTimer);
+			// Short grace so the log flushes, then exit.
+			FTimerHandle ExitHandle;
+			GetWorldTimerManager().SetTimer(ExitHandle, FTimerDelegate::CreateLambda([]()
+			{
+				FGenericPlatformMisc::RequestExit(false);
+			}), 1.5f, false);
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+#endif
 
 void APaintForgeGameMode::SpawnArenaActors()
 {
