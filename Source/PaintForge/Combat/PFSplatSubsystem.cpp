@@ -5,26 +5,30 @@
 #include "PaintForge.h"
 #include "Combat/PFPaintballProjectile.h"
 #include "Core/PaintForgeGameState.h"
+#include "Components/DecalComponent.h"
 #include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/CollisionProfile.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
-#include "UObject/ConstructorHelpers.h"
+#include "UObject/SoftObjectPtr.h"
 
 namespace
 {
 	constexpr float PendingBrightness = 0.6f;      // 60% variant (contract §3.4)
 	constexpr float PendingLifetimeSec = 0.6f;     // unconfirmed window (04 §5.2)
-	constexpr float SplatDiscScale = 0.4f;         // (0.4, 0.4, 0.02) disc (02 §3.4)
-	constexpr float SplatDiscThickness = 0.02f;
+	constexpr float PendingFadeOutSec = 0.2f;      // 04 §5.2 fade (closes prior CONTRACT-GAP)
+	// Disc was sphere@scale 0.4 → ~40 uu diameter; jitter 0.8–1.3×. DecalSize X = projection depth.
+	constexpr float SplatSizeUU = 40.f;
+	constexpr float SplatProjectionDepthUU = 16.f;
 	constexpr float SplatNormalOffsetUU = 1.f;
 	constexpr float JitterMin = 0.8f;
 	constexpr float JitterMax = 1.3f;
+
+	// Soft path — CDO FObjectFinder is only reliable for /Engine content (playbook §2).
+	TSoftObjectPtr<UMaterialInterface> SplatDecalMatRef(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_PaintSplatDecal.M_PF_PaintSplatDecal")));
 
 	int32 TeamIndex(uint8 Team)
 	{
@@ -34,28 +38,7 @@ namespace
 
 UPFSplatSubsystem::UPFSplatSubsystem()
 {
-	// CDO-time engine-asset references (02 D10) so the cooker packages them.
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
-		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (SphereFinder.Succeeded())
-	{
-		SplatMesh = SphereFinder.Object;
-	}
-	// Prefer the matte-emissive paint material; keep BasicShapeMaterial as the guaranteed fallback.
-	// Both expose a vector param named exactly "Color" (the cross-project MID contract), so the four
-	// team MIDs and every SetVectorParameterValue("Color", ...) call site work unchanged either way.
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PaintFinder(
-		TEXT("/Game/Materials/M_PF_PaintSplat.M_PF_PaintSplat"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
-		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (PaintFinder.Succeeded())
-	{
-		BaseMaterial = PaintFinder.Object;
-	}
-	else if (MaterialFinder.Succeeded())
-	{
-		BaseMaterial = MaterialFinder.Object;
-	}
+	// Material loaded lazily in EnsureInfrastructure (rendering worlds only).
 }
 
 bool UPFSplatSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
@@ -138,8 +121,10 @@ void UPFSplatSubsystem::ResetPool()
 {
 	for (int32 i = 0; i < SplatComps.Num(); ++i)
 	{
-		if (UStaticMeshComponent* Comp = SplatComps[i])
+		if (UDecalComponent* Comp = SplatComps[i])
 		{
+			// Cancel any in-flight fade/lifespan so the pooled component is not destroyed.
+			Comp->SetFadeOut(0.f, 0.f, /*DestroyOwnerAfterFade=*/false);
 			Comp->SetVisibility(false);
 		}
 	}
@@ -224,6 +209,19 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 		}
 	}
 
+	// Load /Game decal material on demand (never touch render packages on dedicated servers —
+	// EnsureInfrastructure is only called from rendering spawn paths).
+	if (BaseMaterial == nullptr)
+	{
+		BaseMaterial = SplatDecalMatRef.LoadSynchronous();
+		if (BaseMaterial == nullptr)
+		{
+			UE_LOG(PaintForgeLog, Warning,
+				TEXT("Splat decal material missing at %s — run Scripts/gen_splat_decal_material.py"),
+				TEXT("/Game/Materials/M_PF_PaintSplatDecal.M_PF_PaintSplatDecal"));
+		}
+	}
+
 	if (ConfirmedMIDs.Num() == 0 && BaseMaterial != nullptr)
 	{
 		ConfirmedMIDs.SetNum(2);
@@ -247,22 +245,20 @@ int32 UPFSplatSubsystem::TakeNextSlot()
 	return Slot;
 }
 
-UStaticMeshComponent* UPFSplatSubsystem::GetOrCreateSplatComp(int32 Index)
+UDecalComponent* UPFSplatSubsystem::GetOrCreateSplatComp(int32 Index)
 {
 	if (!SplatComps.IsValidIndex(Index) || SplatHolder == nullptr)
 	{
 		return nullptr;
 	}
-	UStaticMeshComponent* Comp = SplatComps[Index];
-	if (Comp == nullptr)
+	// SetFadeOut schedules DestroyComponent after the fade — recreate if the slot was reclaimed.
+	UDecalComponent* Comp = SplatComps[Index];
+	if (!IsValid(Comp))
 	{
-		Comp = NewObject<UStaticMeshComponent>(SplatHolder);
-		Comp->SetStaticMesh(SplatMesh);
-		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Comp->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
-		Comp->SetCastShadow(false);
+		Comp = NewObject<UDecalComponent>(SplatHolder);
+		Comp->bDestroyOwnerAfterFade = false;
 		Comp->SetVisibility(false);
-		Comp->SetComponentTickEnabled(false);
+		Comp->SetUsingAbsoluteScale(true);
 		Comp->RegisterComponent();
 		Comp->AttachToComponent(SplatHolder->GetRootComponent(),
 			FAttachmentTransformRules::KeepWorldTransform);
@@ -274,7 +270,7 @@ UStaticMeshComponent* UPFSplatSubsystem::GetOrCreateSplatComp(int32 Index)
 void UPFSplatSubsystem::PlaceSplat(int32 Index, const FVector& Loc, const FVector& Normal,
 	uint8 Team, bool bPending, uint32 ShotIndex)
 {
-	UStaticMeshComponent* Comp = GetOrCreateSplatComp(Index);
+	UDecalComponent* Comp = GetOrCreateSplatComp(Index);
 	const UWorld* World = GetWorld();
 	if (Comp == nullptr || World == nullptr)
 	{
@@ -284,23 +280,28 @@ void UPFSplatSubsystem::PlaceSplat(int32 Index, const FVector& Loc, const FVecto
 	const int32 TIdx = TeamIndex(Team);
 	if (ConfirmedMIDs.IsValidIndex(TIdx) && PendingMIDs.IsValidIndex(TIdx))
 	{
-		Comp->SetMaterial(0, bPending ? PendingMIDs[TIdx].Get() : ConfirmedMIDs[TIdx].Get());
+		Comp->SetDecalMaterial(bPending ? PendingMIDs[TIdx].Get() : ConfirmedMIDs[TIdx].Get());
 	}
 
-	// Disc aligned Z-to-normal, +1 uu offset, random yaw + 0.8–1.3× jitter (02 §3.4).
+	// Decals project along local X (engine DeferredDecal.usf swizzle). Align X to the surface
+	// normal, then random-spin around the normal for variety (mesh era used MakeFromZ + yaw).
 	FVector SafeNormal = Normal.GetSafeNormal();
 	if (SafeNormal.IsNearlyZero())
 	{
 		SafeNormal = FVector::UpVector;
 	}
-	const FQuat Align = FRotationMatrix::MakeFromZ(SafeNormal).ToQuat();
-	const FQuat RandomYaw(FVector::UpVector, FMath::FRandRange(0.f, 2.f * UE_PI));
+	const FQuat Align = FRotationMatrix::MakeFromX(SafeNormal).ToQuat();
+	const FQuat RandomYaw(SafeNormal, FMath::FRandRange(0.f, 2.f * UE_PI));
 	const float Jitter = FMath::FRandRange(JitterMin, JitterMax);
-	const FVector Scale(SplatDiscScale * Jitter, SplatDiscScale * Jitter, SplatDiscThickness);
+	const float Size = SplatSizeUU * Jitter;
+	// DecalSize = (projection half-extent along X, half-width Y, half-height Z)
+	Comp->DecalSize = FVector(SplatProjectionDepthUU, Size, Size);
 
-	Comp->SetWorldTransform(
-		FTransform(Align * RandomYaw, Loc + SafeNormal * SplatNormalOffsetUU, Scale));
+	// Cancel any prior fade/lifespan so a recycled slot is fully opaque and not destroyed.
+	Comp->SetFadeOut(0.f, 0.f, /*DestroyOwnerAfterFade=*/false);
+	Comp->SetWorldLocationAndRotation(Loc + SafeNormal * SplatNormalOffsetUU, (Align * RandomYaw).Rotator());
 	Comp->SetVisibility(true);
+	Comp->MarkRenderStateDirty();
 
 	FSplatMeta& M = SplatMeta[Index];
 	M.bActive = true;
@@ -325,12 +326,15 @@ void UPFSplatSubsystem::TickPendingExpiry()
 		FSplatMeta& M = SplatMeta[i];
 		if (M.bActive && M.bPending && Now - M.SpawnTime > PendingLifetimeSec)
 		{
-			// CONTRACT-GAP: 04 §5.2 asks for a 0.2 s fade-out, but the opaque
-			// BasicShapeMaterial cannot alpha-fade (same graybox concession as T7);
-			// unconfirmed pendings hide instantly at the 0.6 s deadline instead.
-			if (UStaticMeshComponent* Comp = SplatComps.IsValidIndex(i) ? SplatComps[i].Get() : nullptr)
+			// 0.2 s alpha fade (04 §5.2). DestroyOwnerAfterFade MUST stay false — the
+			// component is pooled on a shared holder actor. After the fade, LifeSpanCallback
+			// DestroyComponent's the decal; GetOrCreateSplatComp recreates on next use.
+			if (UDecalComponent* Comp = SplatComps.IsValidIndex(i) ? SplatComps[i].Get() : nullptr)
 			{
-				Comp->SetVisibility(false);
+				if (IsValid(Comp))
+				{
+					Comp->SetFadeOut(0.f, PendingFadeOutSec, /*DestroyOwnerAfterFade=*/false);
+				}
 			}
 			M = FSplatMeta();
 		}

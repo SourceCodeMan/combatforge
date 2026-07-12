@@ -11,25 +11,23 @@
 class AActor;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
-class UStaticMesh;
-class UStaticMeshComponent;
+class UDecalComponent;
 class APFPaintballProjectile;
 
 /**
  * Client-side world splats (B10, 02 §3.4, contract §3.4).
  *
- * Pool of 256 squashed engine-sphere mesh components (disc scale 0.4×0.4×0.02, jitter
- * 0.8–1.3×, +1 uu normal offset, random yaw), tinted through four shared team MIDs:
- * confirmed (full team color) and pending (60% brightness) per team. Round-robin recycles
- * the oldest. Splats persist across rounds within a match (T20); ResetPool() fires on
- * BuildPhase entry only — this subsystem self-binds to the GameState phase delegate.
+ * Pool of 256 deferred-decal components (projected onto receiving surfaces), tinted through
+ * four shared team MIDs: confirmed (full team color) and pending (60% brightness) per team.
+ * Round-robin recycles the oldest. Splats persist across rounds within a match (T20); ResetPool()
+ * fires on BuildPhase entry only — this subsystem self-binds to the GameState phase delegate.
  *
  * Pending/confirmed reconcile: the owning client's cosmetic projectile leaves a pending
  * splat; a confirmed splat within 75 uu consumes it (04 §5.2). Unconfirmed pendings expire
- * after 0.6 s.
+ * after 0.6 s with a 0.2 s fade-out (SetFadeOut).
  *
  * Also hosts the per-client cosmetic-projectile pool of 64 (intra to pkg-weapons; 04 §5.3).
- * Does nothing on dedicated/server-only worlds.
+ * Does nothing on dedicated/server-only worlds. Never replicates.
  */
 UCLASS()
 class PAINTFORGE_API UPFSplatSubsystem : public UWorldSubsystem
@@ -71,19 +69,18 @@ private:
 	bool  IsRenderingWorld() const;                  // false on dedicated servers
 	void  EnsureInfrastructure();                    // holder actor + MIDs (lazy)
 	int32 TakeNextSlot();                            // round-robin
-	UStaticMeshComponent* GetOrCreateSplatComp(int32 Index);
+	UDecalComponent* GetOrCreateSplatComp(int32 Index);
 	void  PlaceSplat(int32 Index, const FVector& Loc, const FVector& Normal, uint8 Team,
 	                 bool bPending, uint32 ShotIndex);
 	void  TickPendingExpiry();
 	void  HandlePhaseChanged(EPFMatchPhase NewPhase);
 	void  TryBindGameState();
 
-	UPROPERTY() TObjectPtr<UStaticMesh>        SplatMesh;
 	UPROPERTY() TObjectPtr<UMaterialInterface> BaseMaterial;
 	UPROPERTY() TObjectPtr<AActor>             SplatHolder;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> ConfirmedMIDs;   // [teamIdx 0/1]
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> PendingMIDs;     // 60% brightness
-	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SplatComps;   // lazily filled to PoolSize
+	UPROPERTY() TArray<TObjectPtr<UDecalComponent>> SplatComps;   // lazily filled to PoolSize
 
 	TArray<FSplatMeta> SplatMeta;
 	int32 NextSlot = 0;
