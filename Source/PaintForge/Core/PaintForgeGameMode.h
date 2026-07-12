@@ -121,8 +121,8 @@ protected:
 	void ResolveHardpointOnTimer();
 	void EndHardpoint(uint8 WinnerTeam);
 	void CheckHardpointAbandon();
-	void TickDominationScoring();                      // 1 Hz: own points → TeamScores
-	void TickHardpointScoring();                       // 1 Hz: active point owner → TeamScores
+	void TickDominationScoring();                      // 1 Hz: sole occupancy on each pad → TeamScores
+	void TickHardpointScoring();                       // 1 Hz: sole occupancy on active hill → TeamScores
 	void RotateHardpoint();                            // advance active control-point slot
 	void SpawnObjectiveActors();                       // flags / control points from PFGrid layout
 	void DestroyObjectiveActors();

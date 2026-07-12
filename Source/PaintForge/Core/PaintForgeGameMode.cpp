@@ -1910,17 +1910,18 @@ void APaintForgeGameMode::TickDominationScoring()
 		}
 		int32 OutA = 0, OutB = 0;
 		const uint8 Sole = CP->ServerQueryOccupancy(OutA, OutB);
+
+		// Capture / hold: sole occupancy flips (or reaffirms) owner. Contested does not flip.
+		// Empty does not flip either — pad keeps last-captured color for map readability —
+		// but empty NEVER scores (was the bug: sticky owner + 1 Hz score with nobody on pad).
 		if (Sole <= 1)
 		{
 			CP->ServerSetControllingTeam(Sole);
 		}
-		// Contested / empty keeps prior owner (no flip without presence).
 
 		// Stamp PS for anyone currently on this pad (HUD).
 		if (OutA + OutB > 0)
 		{
-			// Occupancy re-query for PS stamp via sphere is already done; walk players near point.
-			// Lightweight: any living player whose pawn is within capture radius.
 			const FVector CPLoc = CP->GetActorLocation();
 			constexpr float RadiusSq = 350.f * 350.f;
 			for (APlayerState* PSBase : GS->PlayerArray)
@@ -1940,9 +1941,9 @@ void APaintForgeGameMode::TickDominationScoring()
 			}
 		}
 
-		const uint8 PointOwner = CP->GetControllingTeam();
-		if (PointOwner == 0) { ++ScoreA; bScored = true; }
-		else if (PointOwner == 1) { ++ScoreB; bScored = true; }
+		// Score only while a single team is present on the pad this tick.
+		if (Sole == 0) { ++ScoreA; bScored = true; }
+		else if (Sole == 1) { ++ScoreB; bScored = true; }
 	}
 
 	if (bScored)
@@ -1993,9 +1994,16 @@ void APaintForgeGameMode::TickHardpointScoring()
 
 	int32 OutA = 0, OutB = 0;
 	const uint8 Sole = Active->ServerQueryOccupancy(OutA, OutB);
+
+	// Hardpoint: pad is neutral unless a single team is standing on it right now.
+	// Empty / contested → no owner, no score (sticky owner was awarding points to an empty hill).
 	if (Sole <= 1)
 	{
 		Active->ServerSetControllingTeam(Sole);
+	}
+	else
+	{
+		Active->ServerSetControllingTeam(255);
 	}
 
 	const FVector CPLoc = Active->GetActorLocation();
@@ -2016,18 +2024,19 @@ void APaintForgeGameMode::TickHardpointScoring()
 		}
 	}
 
-	const uint8 PointOwner = Active->GetControllingTeam();
-	if (PointOwner > 1)
+	// Score only while sole occupancy this tick.
+	if (Sole > 1)
 	{
 		return;
 	}
 	uint16 ScoreA = GS->TeamScores[0];
 	uint16 ScoreB = GS->TeamScores[1];
-	if (PointOwner == 0) { ++ScoreA; } else { ++ScoreB; }
+	if (Sole == 0) { ++ScoreA; }
+	else { ++ScoreB; }   // Sole == 1
 	GS->ServerSetTeamScores(ScoreA, ScoreB);
-	if ((PointOwner == 0 ? ScoreA : ScoreB) >= SkirmishTagTarget)
+	if ((Sole == 0 ? ScoreA : ScoreB) >= SkirmishTagTarget)
 	{
-		EndHardpoint(PointOwner);
+		EndHardpoint(Sole);
 	}
 }
 
