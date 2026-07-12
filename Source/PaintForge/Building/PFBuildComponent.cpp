@@ -352,6 +352,17 @@ void UPFBuildComponent::UpdatePlacementGhostAndTurbo(const FVector& CamLoc, cons
 			{
 				RampRotOffset = 0;   // ramp offset resets after each placement (Fortnite behavior)
 			}
+			// Local place thunk — server may still deny; deny tone overlays if so.
+			if (const APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetOwner()))
+			{
+				if (Char->IsLocallyControlled())
+				{
+					if (UPFCombatAudio* Audio = Char->GetCombatAudio())
+					{
+						Audio->PlayPlace();
+					}
+				}
+			}
 		}
 	}
 }
@@ -399,6 +410,16 @@ void UPFBuildComponent::UpdateDeleteToolAndTurbo(bool bTraceHit, const FHitResul
 			ServerDeletePiece(TargetId);
 			LastDeleteSentId = TargetId;
 			LastSendTime = Now;
+			if (const APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetOwner()))
+			{
+				if (Char->IsLocallyControlled())
+				{
+					if (UPFCombatAudio* Audio = Char->GetCombatAudio())
+					{
+						Audio->PlayDelete();
+					}
+				}
+			}
 		}
 	}
 }

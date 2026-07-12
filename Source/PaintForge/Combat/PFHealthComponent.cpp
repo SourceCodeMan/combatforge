@@ -217,6 +217,11 @@ void UPFHealthComponent::ClientPaintHitTaken_Implementation(FVector_NetQuantize 
 		if (UPFCombatAudio* Audio = Owner->FindComponentByClass<UPFCombatAudio>())
 		{
 			Audio->PlaySplatIncoming();
+			// Own death stinger (shooter already gets PlayElim on hit confirm).
+			if (NewHP == 0)
+			{
+				Audio->PlayElim();
+			}
 		}
 	}
 }

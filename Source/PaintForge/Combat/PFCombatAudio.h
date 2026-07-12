@@ -12,17 +12,21 @@ class USoundAttenuation;
 class USoundConcurrency;
 
 /**
- * Combat audio hooks (04 §4, contract §3.4). Non-replicated — every call site is already
- * client-correct. Prefers Free_Sounds_Pack cues when present; falls back to procedural
- * one-shots so a checkout without the pack still has audio.
+ * Combat / UI audio hooks (04 §4, contract §3.4). Non-replicated — every call site is
+ * already client-correct. Prefers Free_Sounds_Pack cues when present; falls back to
+ * procedural one-shots so a checkout without the pack still has audio.
  *
  * Call-site map:
- *   PlayHitmarker()     — UPFCombatFeedbackWidget on hit confirm
- *   PlayElim()          — UPFCombatFeedbackWidget on own elim confirm
- *   PlayMuzzle()        — UPFWeaponComponent, per shot (local + remote cosmetic)
- *   PlaySplatIncoming() — UPFHealthComponent, owning client on paint hit taken
+ *   PlayHitmarker()     — feedback widget on hit confirm
+ *   PlayElim()          — shooter elim confirm + victim death
+ *   PlayMuzzle()        — weapon, per shot (local + remote cosmetic)
+ *   PlaySplatIncoming() — health, owning client on paint hit taken
  *   PlayBreakout()      — PC on round Live (T6 horn)
- *   PlayDenied()        — UPFBuildComponent on placement denial
+ *   PlayDenied()        — build placement denial
+ *   PlayReload()        — weapon reload start (local)
+ *   PlayPlace()         — build place (local optimistic)
+ *   PlayDelete()        — build delete (local optimistic)
+ *   PlayReady()         — ready toggle (optional UI)
  */
 UCLASS()
 class PAINTFORGE_API UPFCombatAudio : public UActorComponent
@@ -38,16 +42,19 @@ public:
 	void PlaySplatIncoming();
 	void PlayBreakout();
 	void PlayDenied();
+	void PlayReload();
+	void PlayPlace();
+	void PlayDelete();
+	void PlayReady();
 
 private:
 	bool CanPlay() const;
 	void EnsureSounds();
 
 	/** Prefer imported cue; else procedural PCM. */
-	void PlayUI(USoundBase* Preferred, USoundWaveProcedural* Wave, const TArray<uint8>& Pcm,
-		float Volume, float Pitch);
-	void PlayWorld(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/, const TArray<uint8>& Pcm,
-		float Volume, float Pitch, USoundConcurrency* Concurrency);
+	void PlayUI(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch);
+	void PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch,
+		USoundConcurrency* Concurrency);
 
 	static void QueuePcm(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm);
 
@@ -58,14 +65,10 @@ private:
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueSplatIncoming;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueBreakout;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueDenied;
-
-	// Procedural fallbacks.
-	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndHitmarker;
-	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndElim;
-	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndMuzzle;
-	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndSplatIncoming;
-	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndBreakout;
-	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> SndDenied;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueReload;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CuePlace;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueDelete;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueReady;
 
 	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> CombatAttenuation;
 	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> MuzzleConcurrency;
@@ -76,6 +79,10 @@ private:
 	TArray<uint8> PcmSplatIncoming;
 	TArray<uint8> PcmBreakout;
 	TArray<uint8> PcmDenied;
+	TArray<uint8> PcmReload;
+	TArray<uint8> PcmPlace;
+	TArray<uint8> PcmDelete;
+	TArray<uint8> PcmReady;
 
 	bool bSoundsReady = false;
 };

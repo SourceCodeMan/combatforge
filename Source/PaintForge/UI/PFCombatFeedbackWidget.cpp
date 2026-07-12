@@ -8,6 +8,7 @@
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerState.h"
 #include "Player/PaintForgeCharacter.h"
+#include "Player/PFCameraShakes.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Camera/PlayerCameraManager.h"
@@ -87,6 +88,18 @@ void UPFCombatFeedbackWidget::BuildTree()
 		ArcImages.Add(Arc);
 	}
 
+	// Full-screen damage flash (under ticks, over arcs).
+	DamageFlash = WidgetTree->ConstructWidget<UImage>();
+	DamageFlash->SetBrush(FSlateColorBrush(FLinearColor::White));
+	DamageFlash->SetColorAndOpacity(FLinearColor(1.f, 0.15f, 0.1f, 0.f));
+	DamageFlash->SetVisibility(ESlateVisibility::HitTestInvisible);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(DamageFlash))
+	{
+		CSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		CSlot->SetOffsets(FMargin(0.f));
+		CSlot->SetZOrder(4);
+	}
+
 	// ---- Hitmarker: 4 diagonal ticks around the crosshair ----
 	HitmarkerPanel = WidgetTree->ConstructWidget<UCanvasPanel>();
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(HitmarkerPanel))
@@ -94,7 +107,7 @@ void UPFCombatFeedbackWidget::BuildTree()
 		CSlot->SetAnchors(FAnchors(0.5f, 0.5f));
 		CSlot->SetAlignment(FVector2D(0.5f, 0.5f));
 		CSlot->SetPosition(FVector2D::ZeroVector);
-		CSlot->SetSize(FVector2D(60.f, 60.f));
+		CSlot->SetSize(FVector2D(72.f, 72.f));
 		CSlot->SetZOrder(6);
 	}
 
@@ -318,7 +331,26 @@ void UPFCombatFeedbackWidget::HandleHitTaken(FVector ShooterLoc, uint8 ShooterTe
 {
 	const float RelYawDeg = ComputeRelativeYawDeg(ShooterLoc);
 
-	// ---- Damage-direction arc: on the 140 px circle at the shooter's bearing ----
+	// Camera punch so tags read through the view.
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraShake(UPFHitTakenShake::StaticClass());
+		}
+	}
+
+	// Full-screen flash (team paint color of the shooter).
+	DamageFlashRemaining = DamageFlashDuration;
+	if (DamageFlash)
+	{
+		FLinearColor C = PFColors::ForTeam(ShooterTeam);
+		C.A = 0.28f;
+		DamageFlash->SetColorAndOpacity(C);
+		DamageFlash->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
+
+	// ---- Damage-direction arc: on the circle at the shooter's bearing ----
 	int32 ArcIdx = 0;
 	for (int32 i = 1; i < ArcPoolSize; ++i)
 	{
@@ -334,17 +366,16 @@ void UPFCombatFeedbackWidget::HandleHitTaken(FVector ShooterLoc, uint8 ShooterTe
 		if (UCanvasPanelSlot* CSlot = Cast<UCanvasPanelSlot>(Arc->Slot))
 		{
 			CSlot->SetPosition(Pos);
+			CSlot->SetSize(FVector2D(72.f, 12.f));
 		}
 		Arc->SetRenderTransformAngle(RelYawDeg); // tangent to the circle
 		Arc->SetColorAndOpacity(PFColors::ForTeam(ShooterTeam));
-		Arc->SetRenderOpacity(0.8f);
+		Arc->SetRenderOpacity(0.9f);
 		Arc->SetVisibility(ESlateVisibility::HitTestInvisible);
 		ArcRemaining[ArcIdx] = ArcDuration;
 	}
 
-	// No PlaySplatIncoming() here: the contracted call site (§3.4 call-site map) is
-	// UPFHealthComponent::ClientPaintHitTaken, which fires the audio before broadcasting
-	// OnLocalPaintHitTakenEvent — playing it here too doubled the sound per hit taken.
+	// No PlaySplatIncoming() here: Health::ClientPaintHitTaken owns the audio.
 
 	// ---- Mask splats: wiped fully on elimination (04 §4), else 2-3 new blobs ----
 	if (NewHP == 0)
@@ -431,13 +462,13 @@ void UPFCombatFeedbackWidget::NativeTick(const FGeometry& MyGeometry, float InDe
 
 	TryBindGameState(); // GameState can arrive late on clients
 
-	// ---- Hitmarker: scale 1.2 -> 1.0, opacity 1 -> 0 over 0.15 s ----
+	// ---- Hitmarker: scale down + fade ----
 	if (HitmarkerRemaining > 0.f)
 	{
 		HitmarkerRemaining = FMath::Max(0.f, HitmarkerRemaining - InDeltaTime);
 		const float Alpha = HitmarkerRemaining / HitmarkerDuration; // 1 -> 0
-		const float BaseScale = bHitmarkerElim ? 1.4f : 1.f;
-		const float Scale = BaseScale * FMath::Lerp(1.f, 1.2f, Alpha);
+		const float BaseScale = bHitmarkerElim ? 1.55f : 1.1f;
+		const float Scale = BaseScale * FMath::Lerp(1.f, 1.25f, Alpha);
 		if (HitmarkerPanel)
 		{
 			HitmarkerPanel->SetRenderScale(FVector2D(Scale, Scale));
@@ -455,7 +486,25 @@ void UPFCombatFeedbackWidget::NativeTick(const FGeometry& MyGeometry, float InDe
 		}
 	}
 
-	// ---- Damage arcs: opacity 0.8 -> 0 over 0.75 s ----
+	// ---- Damage flash vignette ----
+	if (DamageFlashRemaining > 0.f)
+	{
+		DamageFlashRemaining = FMath::Max(0.f, DamageFlashRemaining - InDeltaTime);
+		if (DamageFlash)
+		{
+			const float A = 0.28f * (DamageFlashRemaining / DamageFlashDuration);
+			FLinearColor C = DamageFlash->GetColorAndOpacity();
+			C.A = A;
+			DamageFlash->SetColorAndOpacity(C);
+			if (DamageFlashRemaining <= 0.f)
+			{
+				C.A = 0.f;
+				DamageFlash->SetColorAndOpacity(C);
+			}
+		}
+	}
+
+	// ---- Damage arcs ----
 	for (int32 i = 0; i < ArcPoolSize; ++i)
 	{
 		if (ArcRemaining[i] > 0.f)
@@ -463,7 +512,7 @@ void UPFCombatFeedbackWidget::NativeTick(const FGeometry& MyGeometry, float InDe
 			ArcRemaining[i] = FMath::Max(0.f, ArcRemaining[i] - InDeltaTime);
 			if (UImage* Arc = ArcImages.IsValidIndex(i) ? ArcImages[i].Get() : nullptr)
 			{
-				Arc->SetRenderOpacity(0.8f * (ArcRemaining[i] / ArcDuration));
+				Arc->SetRenderOpacity(0.9f * (ArcRemaining[i] / ArcDuration));
 				if (ArcRemaining[i] <= 0.f)
 				{
 					Arc->SetVisibility(ESlateVisibility::Hidden);
@@ -486,7 +535,7 @@ void UPFCombatFeedbackWidget::NativeTick(const FGeometry& MyGeometry, float InDe
 			continue;
 		}
 		const float Age = BlobAge[i];
-		if (Age >= BlobLifetime)
+		if (Age >= BlobLifeSeconds)
 		{
 			BlobAge[i] = -1.f;
 			Blob->SetVisibility(ESlateVisibility::Hidden);
@@ -495,9 +544,9 @@ void UPFCombatFeedbackWidget::NativeTick(const FGeometry& MyGeometry, float InDe
 		{
 			Blob->SetRenderOpacity(FMath::Lerp(0.85f, 0.35f, Age / BlobFadePhase));
 		}
-		else if (Age > BlobLifetime - 1.f)
+		else if (Age > BlobLifeSeconds - 1.f)
 		{
-			Blob->SetRenderOpacity(0.35f * (BlobLifetime - Age)); // final 1 s wipe
+			Blob->SetRenderOpacity(0.35f * (BlobLifeSeconds - Age)); // final 1 s wipe
 		}
 		else
 		{

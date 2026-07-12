@@ -17,12 +17,9 @@ class UTextBlock;
 
 /**
  * Owning-client combat feedback (contract §3.6, 04 §4):
- *  - Weapon->OnHitConfirmedEvent -> hitmarker (4 ticks, 0.15 s; elim variant
- *    x1.4 team-tinted) + CombatAudio->PlayHitmarker()/PlayElim()
- *  - Health->OnLocalPaintHitTakenEvent -> damage-direction arc (radius 140 px,
- *    0.75 s fade) + mask splats (2-3 blobs, edge-biased, 60-140 px,
- *    0.85 -> 0.35 opacity over 1 s, wiped over 6 s or on round reset, CAP 6)
- *  - "SPLATTED [name]" center text 0.9 s on own elim confirm
+ *  - Weapon->OnHitConfirmedEvent -> hitmarker + PlayHitmarker()/PlayElim()
+ *  - Health->OnLocalPaintHitTakenEvent -> damage arc, mask splats, camera punch, flash
+ *  - "SPLATTED [name]" center text on own elim confirm
  * Pawn wiring is pushed in by UPFRootHUDWidget (BindToPawn) on possession change.
  */
 UCLASS()
@@ -75,17 +72,22 @@ private:
 	float ElimTextRemaining = 0.f;
 	bool bElimTextNamePending = false;
 
+	// ---- Damage vignette flash ----
+	UPROPERTY() TObjectPtr<UImage> DamageFlash;
+	float DamageFlashRemaining = 0.f;
+
 	TWeakObjectPtr<APaintForgeCharacter> BoundPawn;
 	TWeakObjectPtr<UPFWeaponComponent> BoundWeapon;
 	TWeakObjectPtr<UPFHealthComponent> BoundHealth;
 	TWeakObjectPtr<APaintForgeGameState> BoundGameState;
 
 	static constexpr int32 ArcPoolSize = 6;
-	static constexpr int32 BlobPoolSize = 6;   // cap 6 concurrent (04 §4)
-	static constexpr float HitmarkerDuration = 0.15f;
-	static constexpr float ArcDuration = 0.75f;
-	static constexpr float ArcRadiusPx = 140.f;
-	static constexpr float BlobFadePhase = 1.f;   // 0.85 -> 0.35 opacity
-	static constexpr float BlobLifetime = 6.f;    // full wipe
-	static constexpr float ElimTextDuration = 0.9f;
+	static constexpr int32 BlobPoolSize = 6;
+	static constexpr float HitmarkerDuration = 0.22f;
+	static constexpr float ArcDuration = 0.85f;
+	static constexpr float ArcRadiusPx = 150.f;
+	static constexpr float BlobFadePhase = 1.f;
+	static constexpr float BlobLifeSeconds = 6.f;
+	static constexpr float ElimTextDuration = 1.15f;
+	static constexpr float DamageFlashDuration = 0.22f;
 };

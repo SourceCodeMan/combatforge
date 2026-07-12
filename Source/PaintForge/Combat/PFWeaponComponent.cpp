@@ -520,6 +520,10 @@ void UPFWeaponComponent::BeginReload(double Now)
 		{
 			Char->SetADS(false);
 		}
+		if (UPFCombatAudio* Audio = Char->GetCombatAudio())
+		{
+			Audio->PlayReload();
+		}
 	}
 
 	OnReloadStateChangedEvent.Broadcast(true);   // predicted/host broadcast; remote owner via OnRep

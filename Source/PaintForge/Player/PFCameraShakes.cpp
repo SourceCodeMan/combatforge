@@ -55,15 +55,42 @@ UPFFireShake::UPFFireShake(const FObjectInitializer& ObjectInitializer)
 	Pattern->BlendInTime = 0.01f;
 	Pattern->BlendOutTime = 0.03f;
 
-	// 0.3 degree pitch kick: quarter-wave rise across the 0.06 s life.
-	Pattern->Pitch.Amplitude = 0.3f;
+	// Slightly punchier report for core feel (still subtle at 12 bps).
+	Pattern->Pitch.Amplitude = 0.42f;
 	Pattern->Pitch.Frequency = 4.f;
 	Pattern->Pitch.InitialOffsetType = EInitialWaveOscillatorOffsetType::Zero;
 
-	// 0.15 degree yaw with a random phase per instance = random yaw direction.
-	Pattern->Yaw.Amplitude = 0.15f;
+	Pattern->Yaw.Amplitude = 0.2f;
 	Pattern->Yaw.Frequency = 15.f;
 	Pattern->Yaw.InitialOffsetType = EInitialWaveOscillatorOffsetType::Random;
+
+	SetRootShakePattern(Pattern);
+}
+
+UPFHitTakenShake::UPFHitTakenShake(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	bSingleInstance = true;
+
+	UWaveOscillatorCameraShakePattern* Pattern =
+		ObjectInitializer.CreateDefaultSubobject<UWaveOscillatorCameraShakePattern>(this, TEXT("HitTakenShakePattern"));
+	ZeroAllOscillators(Pattern);
+
+	Pattern->Duration = 0.14f;
+	Pattern->BlendInTime = 0.01f;
+	Pattern->BlendOutTime = 0.08f;
+
+	Pattern->Pitch.Amplitude = 1.1f;
+	Pattern->Pitch.Frequency = 6.f;
+	Pattern->Pitch.InitialOffsetType = EInitialWaveOscillatorOffsetType::Zero;
+
+	Pattern->Yaw.Amplitude = 0.7f;
+	Pattern->Yaw.Frequency = 9.f;
+	Pattern->Yaw.InitialOffsetType = EInitialWaveOscillatorOffsetType::Random;
+
+	Pattern->Roll.Amplitude = 0.35f;
+	Pattern->Roll.Frequency = 8.f;
+	Pattern->Roll.InitialOffsetType = EInitialWaveOscillatorOffsetType::Random;
 
 	SetRootShakePattern(Pattern);
 }

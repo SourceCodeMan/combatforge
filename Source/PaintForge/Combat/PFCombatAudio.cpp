@@ -78,67 +78,82 @@ namespace
 		return Out;
 	}
 
-	TArray<int16> SynthMuzzle()
+	TArray<int16> MixAdd(const TArray<int16>& A, const TArray<int16>& B, float BScale = 1.f)
 	{
-		// Short noise snap + tiny mid click — marker "pop", not rifle crack.
-		const TArray<int16> Noise = SynthNoiseBurst(0.028f, 0.55f, 0.45f);
-		const TArray<int16> Click = SynthSineBlip(1800.f, 0.012f, 0.22f, 0.001f, 0.008f);
-		const int32 N = FMath::Max(Noise.Num(), Click.Num());
+		const int32 N = FMath::Max(A.Num(), B.Num());
 		TArray<int16> Out;
 		Out.SetNumZeroed(N);
-		for (int32 i = 0; i < Noise.Num(); ++i) { Out[i] = Noise[i]; }
-		for (int32 i = 0; i < Click.Num(); ++i)
+		for (int32 i = 0; i < A.Num(); ++i) { Out[i] = A[i]; }
+		for (int32 i = 0; i < B.Num(); ++i)
 		{
-			const int32 Mix = static_cast<int32>(Out[i]) + static_cast<int32>(Click[i]);
+			const int32 Mix = static_cast<int32>(Out[i]) + static_cast<int32>(B[i] * BScale);
 			Out[i] = static_cast<int16>(FMath::Clamp(Mix, -32767, 32767));
 		}
 		return Out;
 	}
 
+	TArray<int16> SynthMuzzle()
+	{
+		return MixAdd(SynthNoiseBurst(0.028f, 0.55f, 0.45f),
+			SynthSineBlip(1800.f, 0.012f, 0.22f, 0.001f, 0.008f));
+	}
+
 	TArray<int16> SynthHitmarker()
 	{
-		return SynthSineBlip(1650.f, 0.045f, 0.35f, 0.001f, 0.025f);
+		return SynthSineBlip(1650.f, 0.05f, 0.42f, 0.001f, 0.028f);
 	}
 
 	TArray<int16> SynthElim()
 	{
 		return Concat(
-			SynthSineBlip(980.f, 0.06f, 0.4f, 0.002f, 0.03f),
-			SynthSineBlip(620.f, 0.09f, 0.38f, 0.002f, 0.05f));
+			SynthSineBlip(980.f, 0.07f, 0.45f, 0.002f, 0.03f),
+			SynthSineBlip(620.f, 0.11f, 0.42f, 0.002f, 0.06f));
 	}
 
 	TArray<int16> SynthSplatIncoming()
 	{
-		const TArray<int16> Thump = SynthSineBlip(140.f, 0.07f, 0.45f, 0.003f, 0.05f);
-		const TArray<int16> Noise = SynthNoiseBurst(0.05f, 0.25f, 0.25f);
-		const int32 N = FMath::Max(Thump.Num(), Noise.Num());
-		TArray<int16> Out;
-		Out.SetNumZeroed(N);
-		for (int32 i = 0; i < Thump.Num(); ++i) { Out[i] = Thump[i]; }
-		for (int32 i = 0; i < Noise.Num(); ++i)
-		{
-			const int32 Mix = static_cast<int32>(Out[i]) + static_cast<int32>(Noise[i] / 2);
-			Out[i] = static_cast<int16>(FMath::Clamp(Mix, -32767, 32767));
-		}
-		return Out;
+		return MixAdd(SynthSineBlip(140.f, 0.08f, 0.5f, 0.003f, 0.05f),
+			SynthNoiseBurst(0.055f, 0.28f, 0.25f), 0.55f);
 	}
 
 	TArray<int16> SynthBreakout()
 	{
 		return Concat(
-			SynthSineBlip(440.f, 0.18f, 0.4f, 0.01f, 0.04f),
-			SynthSineBlip(660.f, 0.28f, 0.42f, 0.01f, 0.08f));
+			SynthSineBlip(440.f, 0.18f, 0.42f, 0.01f, 0.04f),
+			SynthSineBlip(660.f, 0.28f, 0.45f, 0.01f, 0.08f));
 	}
 
 	TArray<int16> SynthDenied()
 	{
-		return SynthSineBlip(180.f, 0.12f, 0.4f, 0.002f, 0.04f);
+		return SynthSineBlip(180.f, 0.12f, 0.42f, 0.002f, 0.04f);
+	}
+
+	TArray<int16> SynthReload()
+	{
+		// Soft mechanical click-clack for hopper flip.
+		return Concat(
+			SynthSineBlip(420.f, 0.04f, 0.28f, 0.001f, 0.02f),
+			SynthNoiseBurst(0.06f, 0.18f, 0.4f));
+	}
+
+	TArray<int16> SynthPlace()
+	{
+		return MixAdd(SynthNoiseBurst(0.04f, 0.35f, 0.5f),
+			SynthSineBlip(320.f, 0.03f, 0.25f, 0.001f, 0.02f));
+	}
+
+	TArray<int16> SynthDelete()
+	{
+		return SynthSineBlip(90.f, 0.08f, 0.35f, 0.002f, 0.05f);
+	}
+
+	TArray<int16> SynthReady()
+	{
+		return SynthSineBlip(880.f, 0.06f, 0.3f, 0.002f, 0.03f);
 	}
 
 	USoundWaveProcedural* MakeWaveShell(UObject* Outer, float DurationSec)
 	{
-		// Procedural one-shots are fragile on packaged clients if fields are incomplete —
-		// missing sample rate / virtualization often yields total silence (kids playtest).
 		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(Outer, NAME_None, RF_Transient);
 		Wave->SetSampleRate(kSampleRate);
 		Wave->NumChannels = 1;
@@ -150,12 +165,22 @@ namespace
 		Wave->bCanProcessAsync = false;
 		return Wave;
 	}
+
+	float ReadSfxVolumeScale()
+	{
+		float Sfx = 1.f;
+		if (GConfig)
+		{
+			GConfig->GetFloat(TEXT("PaintForge"), TEXT("SfxVolume"), Sfx, GGameUserSettingsIni);
+		}
+		return FMath::Clamp(Sfx, 0.f, 1.f);
+	}
 }
 
 UPFCombatAudio::UPFCombatAudio()
 {
 	PrimaryComponentTick.bCanEverTick = false;
-	SetIsReplicatedByDefault(false);   // pure local cosmetics; callers are already side-correct
+	SetIsReplicatedByDefault(false);
 }
 
 bool UPFCombatAudio::CanPlay() const
@@ -182,44 +207,58 @@ void UPFCombatAudio::EnsureSounds()
 	}
 	bSoundsReady = true;
 
-	// Free_Sounds_Pack cues (optional). Soft load so a checkout without the pack still boots.
 	auto LoadCue = [](const TCHAR* Path) -> USoundBase*
 	{
 		return LoadObject<USoundBase>(nullptr, Path);
 	};
+
 	CueHitmarker = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_1-1_Cue.Interface_1-1_Cue"));
 	CueElim = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Special_Collectible_26-1_Cue.Special_Collectible_26-1_Cue"));
-	// Real gun report for the marker (not the Sci-Fi laser). Prefer short gunshot variants.
 	CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_7-1_Cue.Gunshot_7-1_Cue"));
 	if (CueMuzzle == nullptr)
 	{
 		CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_1-1_Cue.Gunshot_1-1_Cue"));
 	}
 	CueSplatIncoming = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Hit_Generic_5-1_Cue.Hit_Generic_5-1_Cue"));
+	if (CueSplatIncoming == nullptr)
+	{
+		CueSplatIncoming = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Hit_Generic_2-1_Cue.Hit_Generic_2-1_Cue"));
+	}
 	CueBreakout = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Whoosh_4-1_Cue.Whoosh_4-1_Cue"));
 	CueDenied = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_3-3_Cue.Interface_3-3_Cue"));
+	// Build / reload / ready — wood + metal pack pieces that read as physical without sci-fi lasers.
+	CueReload = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Sci-Fi_Gun_1_Reload_Cue.Sci-Fi_Gun_1_Reload_Cue"));
+	if (CueReload == nullptr)
+	{
+		CueReload = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Draw_Weapon_Metal_1-1_Cue.Draw_Weapon_Metal_1-1_Cue"));
+	}
+	CuePlace = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Wood_Move_2-1_Cue.Wood_Move_2-1_Cue"));
+	if (CuePlace == nullptr)
+	{
+		CuePlace = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Nail_Wood_1-1_Cue.Nail_Wood_1-1_Cue"));
+	}
+	CueDelete = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Wood_Chop_1-4_Cue.Wood_Chop_1-4_Cue"));
+	if (CueDelete == nullptr)
+	{
+		CueDelete = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Rock_Impact_11_Cue.Rock_Impact_11_Cue"));
+	}
+	CueReady = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Special_Collectible_9-1_Cue.Special_Collectible_9-1_Cue"));
+	if (CueReady == nullptr)
+	{
+		CueReady = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Magical_Interface_5-1_Cue.Magical_Interface_5-1_Cue"));
+	}
 
-	// Procedural PCM always built as silent-pack fallback.
 	PcmHitmarker = PackPcm(SynthHitmarker());
 	PcmElim = PackPcm(SynthElim());
 	PcmMuzzle = PackPcm(SynthMuzzle());
 	PcmSplatIncoming = PackPcm(SynthSplatIncoming());
 	PcmBreakout = PackPcm(SynthBreakout());
 	PcmDenied = PackPcm(SynthDenied());
+	PcmReload = PackPcm(SynthReload());
+	PcmPlace = PackPcm(SynthPlace());
+	PcmDelete = PackPcm(SynthDelete());
+	PcmReady = PackPcm(SynthReady());
 
-	auto Dur = [](const TArray<uint8>& Pcm) -> float
-	{
-		return static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
-	};
-
-	SndHitmarker = MakeWaveShell(this, Dur(PcmHitmarker));
-	SndElim = MakeWaveShell(this, Dur(PcmElim));
-	SndMuzzle = MakeWaveShell(this, Dur(PcmMuzzle));
-	SndSplatIncoming = MakeWaveShell(this, Dur(PcmSplatIncoming));
-	SndBreakout = MakeWaveShell(this, Dur(PcmBreakout));
-	SndDenied = MakeWaveShell(this, Dur(PcmDenied));
-
-	// 3D falloff across the 64×40 m field.
 	CombatAttenuation = NewObject<USoundAttenuation>(this);
 	{
 		FSoundAttenuationSettings& S = CombatAttenuation->Attenuation;
@@ -228,10 +267,9 @@ void UPFCombatAudio::EnsureSounds()
 		S.DistanceAlgorithm = EAttenuationDistanceModel::Linear;
 		S.AttenuationShape = EAttenuationShape::Sphere;
 		S.FalloffDistance = 4500.f;
-		S.AttenuationShapeExtents = FVector(600.f);   // full volume within ~6 m
+		S.AttenuationShapeExtents = FVector(600.f);
 	}
 
-	// Cap auto-fire voices (12 bps × several players).
 	MuzzleConcurrency = NewObject<USoundConcurrency>(this);
 	{
 		FSoundConcurrencySettings& C = MuzzleConcurrency->Concurrency;
@@ -241,28 +279,17 @@ void UPFCombatAudio::EnsureSounds()
 		C.RetriggerTime = 0.f;
 	}
 
-	UE_LOG(PaintForgeLog, Log, TEXT("[Audio] cues loaded: muzzle=%s hit=%s elim=%s splat=%s"),
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("[Audio] cues: muzzle=%s hit=%s elim=%s splat=%s reload=%s place=%s"),
 		CueMuzzle ? TEXT("yes") : TEXT("proc"),
 		CueHitmarker ? TEXT("yes") : TEXT("proc"),
 		CueElim ? TEXT("yes") : TEXT("proc"),
-		CueSplatIncoming ? TEXT("yes") : TEXT("proc"));
+		CueSplatIncoming ? TEXT("yes") : TEXT("proc"),
+		CueReload ? TEXT("yes") : TEXT("proc"),
+		CuePlace ? TEXT("yes") : TEXT("proc"));
 }
 
-namespace
-{
-	float ReadSfxVolumeScale()
-	{
-		float Sfx = 1.f;
-		if (GConfig)
-		{
-			GConfig->GetFloat(TEXT("PaintForge"), TEXT("SfxVolume"), Sfx, GGameUserSettingsIni);
-		}
-		return FMath::Clamp(Sfx, 0.f, 1.f);
-	}
-}
-
-void UPFCombatAudio::PlayUI(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/,
-	const TArray<uint8>& Pcm, float Volume, float Pitch)
+void UPFCombatAudio::PlayUI(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch)
 {
 	if (!CanPlay())
 	{
@@ -278,15 +305,14 @@ void UPFCombatAudio::PlayUI(USoundBase* Preferred, USoundWaveProcedural* /*Wave*
 	{
 		return;
 	}
-	// Fresh shell per play: reusing one drained procedural wave is a common silence bug.
 	const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
 	USoundWaveProcedural* Live = MakeWaveShell(this, Dur);
 	QueuePcm(Live, Pcm);
 	UGameplayStatics::PlaySound2D(this, Live, Vol, Pitch);
 }
 
-void UPFCombatAudio::PlayWorld(USoundBase* Preferred, USoundWaveProcedural* /*Wave*/,
-	const TArray<uint8>& Pcm, float Volume, float Pitch, USoundConcurrency* Concurrency)
+void UPFCombatAudio::PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch,
+	USoundConcurrency* Concurrency)
 {
 	if (!CanPlay())
 	{
@@ -331,42 +357,60 @@ void UPFCombatAudio::PlayWorld(USoundBase* Preferred, USoundWaveProcedural* /*Wa
 void UPFCombatAudio::PlayHitmarker()
 {
 	EnsureSounds();
-	PlayUI(CueHitmarker, SndHitmarker, PcmHitmarker, 1.0f, FMath::FRandRange(0.98f, 1.05f));
-	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Hitmarker (%s)"), *GetNameSafe(GetOwner()));
+	PlayUI(CueHitmarker, PcmHitmarker, 1.05f, FMath::FRandRange(0.98f, 1.06f));
 }
 
 void UPFCombatAudio::PlayElim()
 {
 	EnsureSounds();
-	PlayUI(CueElim, SndElim, PcmElim, 1.0f, 1.f);
-	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Elim (%s)"), *GetNameSafe(GetOwner()));
+	PlayUI(CueElim, PcmElim, 1.1f, 1.f);
 }
 
 void UPFCombatAudio::PlayMuzzle()
 {
 	EnsureSounds();
-	// Slightly quieter + varied pitch so 12 bps auto-fire doesn't blast kids' speakers.
-	PlayWorld(CueMuzzle, SndMuzzle, PcmMuzzle, 0.70f, FMath::FRandRange(0.94f, 1.06f), MuzzleConcurrency);
-	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Muzzle (%s)"), *GetNameSafe(GetOwner()));
+	PlayWorld(CueMuzzle, PcmMuzzle, 0.72f, FMath::FRandRange(0.94f, 1.06f), MuzzleConcurrency);
 }
 
 void UPFCombatAudio::PlaySplatIncoming()
 {
 	EnsureSounds();
-	PlayUI(CueSplatIncoming, SndSplatIncoming, PcmSplatIncoming, 1.0f, FMath::FRandRange(0.95f, 1.05f));
-	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] SplatIncoming (%s)"), *GetNameSafe(GetOwner()));
+	PlayUI(CueSplatIncoming, PcmSplatIncoming, 1.05f, FMath::FRandRange(0.94f, 1.06f));
 }
 
 void UPFCombatAudio::PlayBreakout()
 {
 	EnsureSounds();
-	PlayUI(CueBreakout, SndBreakout, PcmBreakout, 1.0f, 1.f);
-	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Breakout (%s)"), *GetNameSafe(GetOwner()));
+	PlayUI(CueBreakout, PcmBreakout, 1.05f, 1.f);
 }
 
 void UPFCombatAudio::PlayDenied()
 {
 	EnsureSounds();
-	PlayUI(CueDenied, SndDenied, PcmDenied, 0.85f, 1.f);
-	UE_LOG(PaintForgeLog, Verbose, TEXT("[Audio] Denied (%s)"), *GetNameSafe(GetOwner()));
+	PlayUI(CueDenied, PcmDenied, 0.9f, 1.f);
+}
+
+void UPFCombatAudio::PlayReload()
+{
+	EnsureSounds();
+	PlayUI(CueReload, PcmReload, 0.85f, FMath::FRandRange(0.96f, 1.04f));
+}
+
+void UPFCombatAudio::PlayPlace()
+{
+	EnsureSounds();
+	// World-ish feel but 2D so turbo-build doesn't need a location spam path.
+	PlayUI(CuePlace, PcmPlace, 0.7f, FMath::FRandRange(0.95f, 1.08f));
+}
+
+void UPFCombatAudio::PlayDelete()
+{
+	EnsureSounds();
+	PlayUI(CueDelete, PcmDelete, 0.75f, FMath::FRandRange(0.92f, 1.05f));
+}
+
+void UPFCombatAudio::PlayReady()
+{
+	EnsureSounds();
+	PlayUI(CueReady, PcmReady, 0.8f, 1.f);
 }

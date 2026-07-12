@@ -34,3 +34,16 @@ class PAINTFORGE_API UPFFireShake : public UCameraShakeBase
 public:
 	UPFFireShake(const FObjectInitializer& ObjectInitializer);
 };
+
+/**
+ * Paint hit taken: short punch so getting tagged reads through the camera.
+ * Single-instance so multi-hits restart rather than stack forever.
+ */
+UCLASS()
+class PAINTFORGE_API UPFHitTakenShake : public UCameraShakeBase
+{
+	GENERATED_BODY()
+
+public:
+	UPFHitTakenShake(const FObjectInitializer& ObjectInitializer);
+};
