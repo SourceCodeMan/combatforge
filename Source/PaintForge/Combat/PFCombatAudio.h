@@ -6,6 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "PFCombatAudio.generated.h"
 
+class UAudioComponent;
 class USoundBase;
 class USoundWaveProcedural;
 class USoundAttenuation;
@@ -46,6 +47,10 @@ public:
 	void PlayPlace();
 	void PlayDelete();
 	void PlayReady();
+	void PlayFootstep(bool bSprint);
+	/** Soft arena bed (local only). Idempotent start; stop on end play. */
+	void StartAmbientBed();
+	void StopAmbientBed();
 
 private:
 	bool CanPlay() const;
@@ -69,9 +74,13 @@ private:
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CuePlace;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueDelete;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueReady;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueFootstep;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueAmbient;
 
 	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> CombatAttenuation;
+	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> FootstepAttenuation;
 	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> MuzzleConcurrency;
+	UPROPERTY(Transient) TObjectPtr<UAudioComponent> AmbientComp;
 
 	TArray<uint8> PcmHitmarker;
 	TArray<uint8> PcmElim;
@@ -83,6 +92,7 @@ private:
 	TArray<uint8> PcmPlace;
 	TArray<uint8> PcmDelete;
 	TArray<uint8> PcmReady;
+	TArray<uint8> PcmFootstep;
 
 	bool bSoundsReady = false;
 };

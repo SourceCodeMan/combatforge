@@ -129,7 +129,7 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 
 	ViewModelRoot = CreateDefaultSubobject<USceneComponent>(TEXT("ViewModelRoot"));
 	ViewModelRoot->SetupAttachment(FirstPersonCamera);
-	ViewModelHomeLoc = FVector(28.f, 10.f, -13.f);   // forward-right-down of the eye, classic viewmodel pose
+	ViewModelHomeLoc = FVector(26.f, 9.f, -12.f);   // forward-right-down of the eye, classic viewmodel pose
 	ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc);
 
 	// First-person weapon: the real rifle if available (Lyra SM_Rifle + generated M_PF_Rifle, self-contained),
@@ -155,13 +155,13 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		RifleFPMesh->SetOnlyOwnerSee(true);
 		RifleFPMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		RifleFPMesh->SetCastShadow(false);
-		// Held-rifle pose in ViewModelRoot space (+X forward, +Y right, +Z up). The mesh models forward along
-		// its local +Y, so yaw -90 points the barrel into the screen; slightly larger + lower for "in hands" feel.
-		RifleFPMesh->SetRelativeLocation(FVector(4.f, 6.f, -4.f));
-		RifleFPMesh->SetRelativeRotation(FRotator(-2.f, -90.f, 2.f));
-		RifleFPMesh->SetRelativeScale3D(FVector(0.45f));
+		// Held-rifle pose in ViewModelRoot space (+X forward, +Y right, +Z up). Mesh +Y = barrel.
+		// Slightly tucked for "in hands"; ADS pulls ViewModelRoot toward iron-sight center.
+		RifleFPMesh->SetRelativeLocation(FVector(3.f, 5.5f, -3.5f));
+		RifleFPMesh->SetRelativeRotation(FRotator(-1.5f, -90.f, 1.5f));
+		RifleFPMesh->SetRelativeScale3D(FVector(0.48f));
 		// Barrel tip in ViewModelRoot space — cosmetic balls spawn from here (not under the gun).
-		MuzzleLocalFP = FVector(40.f, 4.f, -4.f);
+		MuzzleLocalFP = FVector(42.f, 3.5f, -3.5f);
 		WeaponMesh = RifleMesh;                      // third-person seam (shoulder pose in UpdateWeaponHoldPose)
 	}
 	else
@@ -331,6 +331,15 @@ void APaintForgeCharacter::BeginPlay()
 
 	ApplyArtLoadout();       // swaps in real body/arms/weapon if assigned; no-op (graybox) otherwise
 	SetupWeaponMaterials();  // dark gunmetal marker + emissive flash blobs
+
+	// Soft wind/arena bed for the local player only (SFX volume scaled).
+	if (IsLocallyControlled())
+	{
+		if (UPFCombatAudio* Audio = GetCombatAudio())
+		{
+			Audio->StartAmbientBed();
+		}
+	}
 }
 
 void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -341,6 +350,10 @@ void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	GetWorldTimerManager().ClearTimer(SprintOutTimerHandle);
 	GetWorldTimerManager().ClearTimer(BufferedJumpClearHandle);
+	if (UPFCombatAudio* Audio = GetCombatAudio())
+	{
+		Audio->StopAmbientBed();
+	}
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -389,13 +402,40 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 			FirstPersonCamera->SetRelativeLocation(Rel);
 		}
 
-		// Viewmodel recoil recovery: the per-shot kick springs back toward the resting pose.
+		// Viewmodel: ADS pulls iron-sights toward center; recoil springs back each shot.
 		if (ViewModelRoot != nullptr)
 		{
 			RecoilOffset = FMath::VInterpTo(RecoilOffset, FVector::ZeroVector, DeltaSeconds, RecoilRecoverSpeed);
 			RecoilPitch = FMath::FInterpTo(RecoilPitch, 0.f, DeltaSeconds, RecoilRecoverSpeed);
-			ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc + RecoilOffset);
-			ViewModelRoot->SetRelativeRotation(FRotator(RecoilPitch, 0.f, 0.f));
+			const float Ads = FMath::Clamp(ADSAlpha, 0.f, 1.f);
+			const FVector Home = FMath::Lerp(ViewModelHomeLoc, ViewModelAdsLoc, Ads);
+			const FRotator HomeRot = FMath::Lerp(FRotator::ZeroRotator, ViewModelAdsRot, Ads);
+			ViewModelRoot->SetRelativeLocation(Home + RecoilOffset);
+			ViewModelRoot->SetRelativeRotation(FRotator(RecoilPitch + HomeRot.Pitch, HomeRot.Yaw, HomeRot.Roll));
+		}
+
+		// Footsteps — local only, grounded movement.
+		if (PFMovement != nullptr && !PFMovement->IsFalling() && !PFMovement->IsSliding())
+		{
+			const float Speed2D = GetVelocity().Size2D();
+			if (Speed2D > 80.f)
+			{
+				const bool bSprint = PFMovement->IsSprintingEffective();
+				const float Stride = bSprint ? FootstepStrideSprintUU : FootstepStrideWalkUU;
+				FootstepDistanceAccum += Speed2D * DeltaSeconds;
+				if (FootstepDistanceAccum >= Stride)
+				{
+					FootstepDistanceAccum = 0.f;
+					if (UPFCombatAudio* Audio = GetCombatAudio())
+					{
+						Audio->PlayFootstep(bSprint);
+					}
+				}
+			}
+			else
+			{
+				FootstepDistanceAccum = 0.f;
+			}
 		}
 	}
 }
@@ -1149,10 +1189,13 @@ void APaintForgeCharacter::ApplyRaisedWeaponPose()
 	const FRotator Aim = GetBaseAimRotation();
 	const FRotationMatrix AimM(Aim);
 	// Place mesh origin so the barrel sits on the aim line at eye height (not hip).
+	// ADS pulls the TP raise slightly closer for cleaner silhouette.
+	const float Ads = FMath::Clamp(GetADSAlpha(), 0.f, 1.f);
+	const FVector Raised = FMath::Lerp(WeaponRaisedFromEye, FVector(22.f, 10.f, -6.f), Ads);
 	const FVector Origin = GetEyeWorldLocation()
-		+ AimM.GetUnitAxis(EAxis::X) * WeaponRaisedFromEye.X
-		+ AimM.GetUnitAxis(EAxis::Y) * WeaponRaisedFromEye.Y
-		+ AimM.GetUnitAxis(EAxis::Z) * WeaponRaisedFromEye.Z;
+		+ AimM.GetUnitAxis(EAxis::X) * Raised.X
+		+ AimM.GetUnitAxis(EAxis::Y) * Raised.Y
+		+ AimM.GetUnitAxis(EAxis::Z) * Raised.Z;
 
 	if (USceneComponent* Root = GetRootComponent())
 	{

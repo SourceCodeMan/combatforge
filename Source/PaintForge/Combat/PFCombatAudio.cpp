@@ -7,6 +7,7 @@
 
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Sound/SoundAttenuation.h"
@@ -152,6 +153,12 @@ namespace
 		return SynthSineBlip(880.f, 0.06f, 0.3f, 0.002f, 0.03f);
 	}
 
+	TArray<int16> SynthFootstep()
+	{
+		return MixAdd(SynthNoiseBurst(0.035f, 0.32f, 0.55f),
+			SynthSineBlip(95.f, 0.04f, 0.22f, 0.001f, 0.025f), 0.7f);
+	}
+
 	USoundWaveProcedural* MakeWaveShell(UObject* Outer, float DurationSec)
 	{
 		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(Outer, NAME_None, RF_Transient);
@@ -247,6 +254,16 @@ void UPFCombatAudio::EnsureSounds()
 	{
 		CueReady = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Magical_Interface_5-1_Cue.Magical_Interface_5-1_Cue"));
 	}
+	CueFootstep = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Rock_Impact_11_Cue.Rock_Impact_11_Cue"));
+	if (CueFootstep == nullptr)
+	{
+		CueFootstep = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Wood_14-8_Cue.Wood_14-8_Cue"));
+	}
+	CueAmbient = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Ambient_Wind_Loop_1_Cue.Ambient_Wind_Loop_1_Cue"));
+	if (CueAmbient == nullptr)
+	{
+		CueAmbient = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Ambient_Birds_Loop_04_Cue.Ambient_Birds_Loop_04_Cue"));
+	}
 
 	PcmHitmarker = PackPcm(SynthHitmarker());
 	PcmElim = PackPcm(SynthElim());
@@ -258,6 +275,7 @@ void UPFCombatAudio::EnsureSounds()
 	PcmPlace = PackPcm(SynthPlace());
 	PcmDelete = PackPcm(SynthDelete());
 	PcmReady = PackPcm(SynthReady());
+	PcmFootstep = PackPcm(SynthFootstep());
 
 	CombatAttenuation = NewObject<USoundAttenuation>(this);
 	{
@@ -268,6 +286,17 @@ void UPFCombatAudio::EnsureSounds()
 		S.AttenuationShape = EAttenuationShape::Sphere;
 		S.FalloffDistance = 4500.f;
 		S.AttenuationShapeExtents = FVector(600.f);
+	}
+
+	FootstepAttenuation = NewObject<USoundAttenuation>(this);
+	{
+		FSoundAttenuationSettings& S = FootstepAttenuation->Attenuation;
+		S.bAttenuate = true;
+		S.bSpatialize = true;
+		S.DistanceAlgorithm = EAttenuationDistanceModel::Linear;
+		S.AttenuationShape = EAttenuationShape::Sphere;
+		S.FalloffDistance = 2200.f;
+		S.AttenuationShapeExtents = FVector(200.f);
 	}
 
 	MuzzleConcurrency = NewObject<USoundConcurrency>(this);
@@ -413,4 +442,74 @@ void UPFCombatAudio::PlayReady()
 {
 	EnsureSounds();
 	PlayUI(CueReady, PcmReady, 0.8f, 1.f);
+}
+
+void UPFCombatAudio::PlayFootstep(bool bSprint)
+{
+	EnsureSounds();
+	if (!CanPlay())
+	{
+		return;
+	}
+	const float Pitch = bSprint ? FMath::FRandRange(1.05f, 1.18f) : FMath::FRandRange(0.9f, 1.05f);
+	const float Vol = (bSprint ? 0.42f : 0.32f) * ReadSfxVolumeScale();
+
+	FVector Loc = FVector::ZeroVector;
+	if (const AActor* Owner = GetOwner())
+	{
+		Loc = Owner->GetActorLocation();
+	}
+
+	USoundBase* ToPlay = CueFootstep;
+	if (ToPlay == nullptr)
+	{
+		if (PcmFootstep.Num() == 0)
+		{
+			return;
+		}
+		const float Dur = static_cast<float>(PcmFootstep.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
+		USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
+		QueuePcm(Wave, PcmFootstep);
+		ToPlay = Wave;
+	}
+
+	if (FootstepAttenuation)
+	{
+		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
+			Vol, Pitch, 0.f, FootstepAttenuation, nullptr);
+	}
+	else
+	{
+		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
+	}
+}
+
+void UPFCombatAudio::StartAmbientBed()
+{
+	EnsureSounds();
+	if (!CanPlay() || AmbientComp != nullptr)
+	{
+		return;
+	}
+	if (CueAmbient == nullptr)
+	{
+		return;   // no loop without pack — skip silent proc spam
+	}
+	const float Vol = 0.22f * ReadSfxVolumeScale();
+	AmbientComp = UGameplayStatics::SpawnSound2D(this, CueAmbient, Vol, 1.f, 0.f, nullptr, true, false);
+	if (AmbientComp)
+	{
+		AmbientComp->bIsUISound = true;
+		AmbientComp->bAllowSpatialization = false;
+	}
+}
+
+void UPFCombatAudio::StopAmbientBed()
+{
+	if (AmbientComp)
+	{
+		AmbientComp->Stop();
+		AmbientComp->DestroyComponent();
+		AmbientComp = nullptr;
+	}
 }

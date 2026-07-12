@@ -499,7 +499,19 @@ void APaintForgePlayerController::OnReadyToggle()
 	}
 	if (GS->Phase == EPFMatchPhase::Lobby || GS->Phase == EPFMatchPhase::Build)
 	{
-		ServerSetReady(!PS->bReady);
+		const bool bNewReady = !PS->bReady;
+		ServerSetReady(bNewReady);
+		// Local ready click feedback when marking ready (not when un-readying).
+		if (bNewReady)
+		{
+			if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetPawn()))
+			{
+				if (UPFCombatAudio* Audio = Char->GetCombatAudio())
+				{
+					Audio->PlayReady();
+				}
+			}
+		}
 	}
 }
 

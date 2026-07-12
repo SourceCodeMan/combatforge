@@ -22,8 +22,9 @@
 
 namespace
 {
-	constexpr float ServerOriginToleranceUU = 150.f;   // 04 §5.1 anti-teleport-fire
-	constexpr float ServerDirToleranceDeg = 4.f;       // 04 §5.1
+	// Slightly forgiving for high-latency kids / listen-host (still rejects cheats).
+	constexpr float ServerOriginToleranceUU = 200.f;   // 04 §5.1 anti-teleport-fire
+	constexpr float ServerDirToleranceDeg = 5.5f;      // 04 §5.1 — ADS micro-desync + jitter
 	constexpr float FireTokenCap = 3.f;                // 04 §2.1 token bucket
 	constexpr float FireTokenRefillPerSec = 12.f;
 }
