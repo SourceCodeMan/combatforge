@@ -21,6 +21,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimBlueprintGeneratedClass.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -193,6 +194,11 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		TEXT("/Game/AnimStarterPack/Character/ASP_HeroTPP_AnimBlueprint"));
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannequinAnimFinder(
 		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
+	// Survival's own locomotion AnimBP + idle (its pack skeleton) — guaranteed match for team 1.
+	static ConstructorHelpers::FClassFinder<UAnimInstance> SurvivalAnimFinder(
+		TEXT("/Game/Survival_Character/Demo/Characters/Mannequins/Animations/ABP_Manny"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> SurvivalIdleFinder(
+		TEXT("/Game/Survival_Character/Demo/Characters/Mannequins/Animations/Manny/MM_Idle.MM_Idle"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> OliveRifleFinder(
 		TEXT("/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive"));
 
@@ -234,7 +240,13 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	if (MannequinAnimFinder.Succeeded())
 	{
 		ThirdPersonAnimClass = MannequinAnimFinder.Class;
+		// Quantum (team 0): the mannequin locomotion ABP (tested skeleton-compatible; ApplyTeamBody's guard
+		// drops to its own idle if it ever isn't). Full walk/run.
+		Team0AnimClass = MannequinAnimFinder.Class;
 	}
+	// Survival (team 1): its own pack AnimBP (walk/run) + idle as the safety fallback.
+	if (SurvivalAnimFinder.Succeeded()) { Team1AnimClass = SurvivalAnimFinder.Class; }
+	if (SurvivalIdleFinder.Succeeded()) { Team1IdleAnim = SurvivalIdleFinder.Object; }
 	if (AspAnimFinder.Succeeded())
 	{
 		// Available for HeroTPP-compatible meshes; not forced onto Quantum/Survival.
@@ -749,6 +761,18 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 	if (AnimClass == nullptr && bLooksLikeMannequin)
 	{
 		AnimClass = ThirdPersonAnimClass;
+	}
+
+	// Safety: only drive with an AnimBP whose target skeleton matches this mesh. A wrong ABP leaves a broken
+	// ref pose, so if it doesn't match we drop to the skeleton-checked idle below — never a T-pose regression.
+	if (AnimClass != nullptr)
+	{
+		const UAnimBlueprintGeneratedClass* GenClass = Cast<UAnimBlueprintGeneratedClass>(AnimClass.Get());
+		const USkeleton* AnimSkel = GenClass ? GenClass->GetTargetSkeleton() : nullptr;
+		if (AnimSkel != nullptr && AnimSkel != Chosen->GetSkeleton())
+		{
+			AnimClass = nullptr;
+		}
 	}
 
 	GetMesh()->Stop();
