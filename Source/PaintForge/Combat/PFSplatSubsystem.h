@@ -17,10 +17,11 @@ class APFPaintballProjectile;
 /**
  * Client-side world splats (B10, 02 §3.4, contract §3.4).
  *
- * Pool of 256 deferred-decal components (projected onto receiving surfaces), tinted through
- * four shared team MIDs: confirmed (full team color) and pending (60% brightness) per team.
- * Round-robin recycles the oldest. Splats persist across rounds within a match (T20); ResetPool()
- * fires on BuildPhase entry only — this subsystem self-binds to the GameState phase delegate.
+ * Pool of 256 deferred-decal impact marks (airsoft BB scuffs projected onto receiving surfaces),
+ * tinted through four shared team MIDs: confirmed (full team color) and pending (60% brightness)
+ * per team. Round-robin recycles the oldest. Marks persist across rounds within a match (T20);
+ * ResetPool() fires on BuildPhase entry only — this subsystem self-binds to the GameState phase
+ * delegate.
  *
  * Pending/confirmed reconcile: the owning client's cosmetic projectile leaves a pending
  * splat; a confirmed splat within 75 uu consumes it (04 §5.2). Unconfirmed pendings expire

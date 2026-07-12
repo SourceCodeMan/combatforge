@@ -19,16 +19,19 @@ namespace
 	constexpr float PendingBrightness = 0.6f;      // 60% variant (contract §3.4)
 	constexpr float PendingLifetimeSec = 0.6f;     // unconfirmed window (04 §5.2)
 	constexpr float PendingFadeOutSec = 0.2f;      // 04 §5.2 fade (closes prior CONTRACT-GAP)
-	// Disc was sphere@scale 0.4 → ~40 uu diameter; jitter 0.8–1.3×. DecalSize X = projection depth.
-	constexpr float SplatSizeUU = 40.f;
-	constexpr float SplatProjectionDepthUU = 16.f;
-	constexpr float SplatNormalOffsetUU = 1.f;
-	constexpr float JitterMin = 0.8f;
-	constexpr float JitterMax = 1.3f;
+	// Airsoft BB impact scuff — small pockmark, not a paint disc. DecalSize X = projection depth.
+	constexpr float SplatSizeUU = 14.f;
+	constexpr float SplatProjectionDepthUU = 8.f;
+	constexpr float SplatNormalOffsetUU = 0.5f;
+	constexpr float JitterMin = 0.75f;
+	constexpr float JitterMax = 1.35f;
+	constexpr float AspectMin = 0.72f;             // slight stretch → ricochet / scrape variety
+	constexpr float AspectMax = 1.28f;
 
 	// Soft path — CDO FObjectFinder is only reliable for /Engine content (playbook §2).
+	// Airsoft impact scuff (not paint). Soft-load — CDO FObjectFinder is /Engine-only reliable.
 	TSoftObjectPtr<UMaterialInterface> SplatDecalMatRef(
-		FSoftObjectPath(TEXT("/Game/Materials/M_PF_PaintSplatDecal.M_PF_PaintSplatDecal")));
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ImpactMark.M_PF_ImpactMark")));
 
 	int32 TeamIndex(uint8 Team)
 	{
@@ -217,8 +220,7 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 		if (BaseMaterial == nullptr)
 		{
 			UE_LOG(PaintForgeLog, Warning,
-				TEXT("Splat decal material missing at %s — run Scripts/gen_splat_decal_material.py"),
-				TEXT("/Game/Materials/M_PF_PaintSplatDecal.M_PF_PaintSplatDecal"));
+				TEXT("Impact decal material missing — run Scripts/gen_splat_decal_material.py"));
 		}
 	}
 
@@ -294,8 +296,9 @@ void UPFSplatSubsystem::PlaceSplat(int32 Index, const FVector& Loc, const FVecto
 	const FQuat RandomYaw(SafeNormal, FMath::FRandRange(0.f, 2.f * UE_PI));
 	const float Jitter = FMath::FRandRange(JitterMin, JitterMax);
 	const float Size = SplatSizeUU * Jitter;
+	const float Aspect = FMath::FRandRange(AspectMin, AspectMax);
 	// DecalSize = (projection half-extent along X, half-width Y, half-height Z)
-	Comp->DecalSize = FVector(SplatProjectionDepthUU, Size, Size);
+	Comp->DecalSize = FVector(SplatProjectionDepthUU, Size * Aspect, Size / Aspect);
 
 	// Cancel any prior fade/lifespan so a recycled slot is fully opaque and not destroyed.
 	Comp->SetFadeOut(0.f, 0.f, /*DestroyOwnerAfterFade=*/false);
