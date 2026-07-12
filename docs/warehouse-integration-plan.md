@@ -1,9 +1,10 @@
 # Warehouse / environment art integration — plan & findings
 
-_Status: STREAMED at runtime (2026‑07‑12). `UPFWarehouseStreamSubsystem` loads
-`/Game/Scene_Warehouse/Maps/Industrial_Warehouse` on host+clients when the package exists;
-`APFArenaShell` hides cube floor/walls/dressing but keeps collision + spawn/midline paint.
-Gameplay still boots from `L_Graybox`. VT must stay on (`r.VirtualTextures=True`)._
+_Status (2026‑07‑12): **full map stream is OFF by default** (`pf.StreamWarehouseMap 0`).
+Streaming `Industrial_Warehouse` on first PIE builds 100+ Nanite meshes and freezes the
+editor for many minutes at ~100% CPU. Arena uses shell + warehouse **materials** instead.
+To enable the full map after a one-time editor open of the warehouse map (so meshes compile):
+`pf.StreamWarehouseMap 1` then Play. VT must stay on (`r.VirtualTextures=True`)._
 
 ## What was downloaded (in `Content/`, currently untracked)
 - **`Scene_Warehouse/`** — a ~6.9 GB Megascans **Industrial Warehouse** scene: hero map `Maps/Industrial_Warehouse.umap`, PackedLevel prop actors (`Ind_War_Rack/BoxStack/Frame/HandTruck…`), storage shelves / pallets / crates / beams / cables / walls, plus its own materials, sequences, and `VisualFramework/DemoRoom`.

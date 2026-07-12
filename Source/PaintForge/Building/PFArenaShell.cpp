@@ -79,21 +79,13 @@ APFArenaShell::APFArenaShell()
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Tile.M_Tile"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhDemoMetalFinder(
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Metal.M_Metal"));
-	// Props (optional).
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> BarrelFinder(
-		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Aba_Storage_Barrel_Metal_Blue_01/SM_Ind_Aba_Storage_Barrel_Metal_Blue_01.SM_Ind_Aba_Storage_Barrel_Metal_Blue_01"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> BoxFinder(
-		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Box_Cardboard_Set_01/SM_Ind_War_Storage_Box_Cardboard_Set_01_A.SM_Ind_War_Storage_Box_Cardboard_Set_01_A"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> LightFinder(
-		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Light_Ceiling_Metal_Hanging_01/SM_Ind_War_Light_Ceiling_Metal_Hanging_01.SM_Ind_War_Light_Ceiling_Metal_Hanging_01"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> LadderFinder(
-		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Equipment_Ladder_Metal_03/SM_Ind_War_Equipment_Ladder_Metal_03.SM_Ind_War_Equipment_Ladder_Metal_03"));
-
+	// Heavy Megascans prop meshes are NOT hard-loaded here — first compile freezes PIE for minutes
+	// at ~100% CPU. Shell keeps materials + cube dressing; props can be re-enabled after meshes are built.
 	CubeMesh = CubeFinder.Object;
-	PropBarrelMesh = BarrelFinder.Succeeded() ? BarrelFinder.Object.Get() : nullptr;
-	PropBoxMesh = BoxFinder.Succeeded() ? BoxFinder.Object.Get() : nullptr;
-	PropCeilingLightMesh = LightFinder.Succeeded() ? LightFinder.Object.Get() : nullptr;
-	PropLadderMesh = LadderFinder.Succeeded() ? LadderFinder.Object.Get() : nullptr;
+	PropBarrelMesh = nullptr;
+	PropBoxMesh = nullptr;
+	PropCeilingLightMesh = nullptr;
+	PropLadderMesh = nullptr;
 
 	UMaterialInterface* const Basic = BasicMatFinder.Succeeded() ? BasicMatFinder.Object.Get() : nullptr;
 	UMaterialInterface* const GenFloor = FloorFinder.Succeeded() ? FloorFinder.Object.Get() : Basic;
