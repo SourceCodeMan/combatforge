@@ -52,3 +52,9 @@ MilitaryTrenchMegascansSa/
 
 # --- Crash dumps / local logs outside Saved/ ---
 *.dmp
+
+# --- Local junk ---
+Scripts/__pycache__/
+UpgradeLog.htm
+*.pyc
+
