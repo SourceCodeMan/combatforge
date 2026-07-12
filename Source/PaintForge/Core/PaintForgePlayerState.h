@@ -40,6 +40,15 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8 CarriedFlagTeam = 255;  // which team's flag (0/1), 255 = none
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8 StandingOnPoint = 255;  // control-point index, 255 = none
 
+	/**
+	 * Local-player "you're out" UI (replicated so pure clients see the timer).
+	 * 0 = playable / not out, 1 = waiting timed respawn (read RespawnAtServerTime),
+	 * 2 = out for the rest of the round (Elimination mode — spectate).
+	 */
+	UPROPERTY(Replicated) uint8 OutKind = 0;
+	/** Server world time when OutKind==1 player becomes playable again (GetServerWorldTimeSeconds). */
+	UPROPERTY(Replicated) float RespawnAtServerTime = 0.f;
+
 	FPFOnPlayerStateFlagsChanged OnFlagsChangedEvent;  // broadcast from OnRep_Flags + server setters
 
 	// Server-only mutators (GameMode / APFBuildGrid call these; they broadcast on host):
@@ -52,6 +61,9 @@ public:
 	void ServerAddTag();                               // FreeForAll: ++TagCount + flags refresh
 	void ServerSetFlagCarry(bool bCarrying, uint8 FlagTeam); // CTF: set/clear carrier
 	void ServerSetStandingOnPoint(uint8 PointIndex);         // Dom/HP: 255 = off point
+	void ServerSetOutWaitingRespawn(float AtServerTime);     // timed respawn countdown for HUD
+	void ServerSetOutForRound();                             // Elimination: out until next round
+	void ServerClearOutState();                              // back in play / round reset
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void PostInitializeComponents() override;

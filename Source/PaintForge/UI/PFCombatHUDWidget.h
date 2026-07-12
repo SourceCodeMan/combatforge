@@ -24,6 +24,7 @@ class UTextBlock;
  *  - round pips (first-to-4; first-to-3 at <=2v2 per T15), round timer, alive counts per team
  *  - own HP as 3 paint dots
  *  - elim feed (last 4 lines), freeze/intermission/sudden-death banners
+ *  - "YOU'RE OUT" full-screen when eliminated + respawn countdown (or out-for-round)
  */
 UCLASS()
 class PAINTFORGE_API UPFCombatHUDWidget : public UUserWidget
@@ -60,6 +61,8 @@ private:
 	void UpdateBanner(float InDeltaTime);
 	/** CTF carrier / Dom-HP on-point strip (reads local PlayerState each tick). */
 	void UpdateObjectiveStatus();
+	/** Full-screen "YOU'RE OUT" + respawn timer / out-for-round (local eliminated player only). */
+	void UpdateOutOverlay();
 
 	/** Collapses the center-nearest pips so only the effective wins-to-take show (T15). */
 	void UpdatePipVisibility(int32 EffectiveCount);
@@ -79,6 +82,12 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> BannerText;
 	/** Objective callout under the top score strip (carrier / on-point). Hidden when idle. */
 	UPROPERTY() TObjectPtr<UTextBlock> ObjectiveStatusText;
+
+	/** Full-screen elim overlay (dim + YOU'RE OUT + countdown). */
+	UPROPERTY() TObjectPtr<UImage> OutDim;
+	UPROPERTY() TObjectPtr<UTextBlock> OutTitleText;
+	UPROPERTY() TObjectPtr<UTextBlock> OutSubtitleText;
+
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsA;
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsB;
 	UPROPERTY() TArray<TObjectPtr<USizeBox>> PipSizersA;

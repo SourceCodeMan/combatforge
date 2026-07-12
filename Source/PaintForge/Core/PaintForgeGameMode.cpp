@@ -1060,6 +1060,10 @@ void APaintForgeGameMode::StartNextRound()
 
 void APaintForgeGameMode::ResetPawnForRound(APaintForgeCharacter* Pawn, APaintForgePlayerState* PS, uint8 RoundHP)
 {
+	if (PS)
+	{
+		PS->ServerClearOutState();
+	}
 	if (!Pawn || !PS)
 	{
 		return;
@@ -1095,6 +1099,7 @@ void APaintForgeGameMode::RespawnCombatant(APaintForgePlayerState* PS, uint8 Rou
 	{
 		return;
 	}
+	PS->ServerClearOutState();
 	if (APaintForgeCharacter* Pawn = Cast<APaintForgeCharacter>(PS->GetPawn()))
 	{
 		if (UPFHealthComponent* Health = Pawn->GetHealth())
@@ -1125,6 +1130,17 @@ void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim)
 	// Timed reset-in-place (Skirmish + the Respawn variant): the victim is NOT marked dead, move-locked,
 	// or death-cammed — after RespawnDelay it heals to full and teleports to its team spawn. PS is
 	// re-fetched inside the timer via the weak victim (safe if it despawned). Works for players and bots.
+	// Stamp OutKind + RespawnAtServerTime so the victim's HUD can show "YOU'RE OUT" + countdown.
+	if (APaintForgePlayerState* VictimPS = Victim->GetPlayerState<APaintForgePlayerState>())
+	{
+		float At = RespawnDelay;
+		if (const APaintForgeGameState* GS = GetPFGameState())
+		{
+			At = GS->GetServerWorldTimeSeconds() + RespawnDelay;
+		}
+		VictimPS->ServerSetOutWaitingRespawn(At);
+	}
+
 	TWeakObjectPtr<APaintForgeCharacter> WeakVictim(Victim);
 	TWeakObjectPtr<APaintForgeGameMode> WeakThis(this);
 	FTimerHandle RespawnHandle;
@@ -1133,6 +1149,10 @@ void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim)
 		{
 			if (WeakThis.IsValid() && WeakVictim.IsValid())
 			{
+				if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
+				{
+					PS->ServerClearOutState();
+				}
 				WeakVictim->GetHealth()->ResetForRound(3);
 				if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
 				{
@@ -2293,6 +2313,11 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 	// stats-free 1 s reset back to the pen, mirroring the dummy behavior.
 	if (GS->Phase == EPFMatchPhase::Lobby)
 	{
+		// Warm-up pen: short "you're out" + 1 s reset (same as dummies, but with HUD countdown).
+		if (VictimPS)
+		{
+			VictimPS->ServerSetOutWaitingRespawn(GS->GetServerWorldTimeSeconds() + 1.f);
+		}
 		TWeakObjectPtr<APaintForgeCharacter> WeakVictim(Victim);
 		TWeakObjectPtr<APaintForgeGameMode> WeakThis(this);
 		FTimerHandle ResetHandle;
@@ -2301,6 +2326,10 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 			{
 				if (WeakThis.IsValid() && WeakVictim.IsValid())
 				{
+					if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
+					{
+						PS->ServerClearOutState();
+					}
 					WeakVictim->GetHealth()->ResetForRound(3);
 					if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
 					{
@@ -2408,6 +2437,7 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 	// UPFHealthComponent's job (§3.4); the move lock here keeps the hidden pawn from being
 	// walked around for the rest of the round.
 	VictimPS->bAliveInRound = false;
+	VictimPS->ServerSetOutForRound();   // HUD: "YOU'RE OUT" / out for this round
 	if (APaintForgePlayerController* VictimPC = Cast<APaintForgePlayerController>(VictimPS->GetPlayerController()))
 	{
 		VictimPC->SetEliminatedMoveLock(true);
@@ -2647,6 +2677,7 @@ void APaintForgeGameMode::ResetPlayerMatchStats()
 			PS->bHasVoted = false;
 			PS->ServerSetFlagCarry(false, 255);
 			PS->ServerSetStandingOnPoint(255);
+			PS->ServerClearOutState();
 			PS->ForceNetUpdate();
 		}
 	}

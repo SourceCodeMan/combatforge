@@ -249,6 +249,46 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetPosition(FVector2D(-32.f, 32.f));
 		CSlot->SetAutoSize(true);
 	}
+
+	// ---- "YOU'RE OUT" full-screen overlay (hidden until eliminated) ----
+	OutDim = MakeSolidImage(WidgetTree, FLinearColor(0.02f, 0.02f, 0.04f, 0.72f));
+	OutDim->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(OutDim))
+	{
+		CSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		CSlot->SetOffsets(FMargin(0.f));
+		CSlot->SetZOrder(40);
+	}
+
+	OutTitleText = WidgetTree->ConstructWidget<UTextBlock>();
+	OutTitleText->SetText(FText::FromString(TEXT("YOU'RE OUT")));
+	OutTitleText->SetFont(PFCombatFont(56, true));
+	OutTitleText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
+	OutTitleText->SetJustification(ETextJustify::Center);
+	OutTitleText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(OutTitleText))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		CSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		CSlot->SetPosition(FVector2D(0.f, -28.f));
+		CSlot->SetAutoSize(true);
+		CSlot->SetZOrder(41);
+	}
+
+	OutSubtitleText = WidgetTree->ConstructWidget<UTextBlock>();
+	OutSubtitleText->SetText(FText::GetEmpty());
+	OutSubtitleText->SetFont(PFCombatFont(28, true));
+	OutSubtitleText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.95f)));
+	OutSubtitleText->SetJustification(ETextJustify::Center);
+	OutSubtitleText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(OutSubtitleText))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		CSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		CSlot->SetPosition(FVector2D(0.f, 36.f));
+		CSlot->SetAutoSize(true);
+		CSlot->SetZOrder(41);
+	}
 }
 
 void UPFCombatHUDWidget::NativeConstruct()
@@ -562,6 +602,23 @@ void UPFCombatHUDWidget::UpdateCrosshair()
 		return;
 	}
 
+	// While eliminated / out UI is up, keep the reticle hidden.
+	const bool bOut =
+		(BoundHealth.IsValid() && BoundHealth->bEliminated)
+		|| (PC->GetPlayerState<APaintForgePlayerState>()
+			&& PC->GetPlayerState<APaintForgePlayerState>()->OutKind != 0);
+	if (bOut)
+	{
+		const ESlateVisibility Hidden = ESlateVisibility::Hidden;
+		if (CrossLineTop)    { CrossLineTop->SetVisibility(Hidden); }
+		if (CrossLineBottom) { CrossLineBottom->SetVisibility(Hidden); }
+		if (CrossLineLeft)   { CrossLineLeft->SetVisibility(Hidden); }
+		if (CrossLineRight)  { CrossLineRight->SetVisibility(Hidden); }
+		if (CenterDot)       { CenterDot->SetVisibility(Hidden); }
+		return;
+	}
+	if (CenterDot) { CenterDot->SetVisibility(ESlateVisibility::HitTestInvisible); }
+
 	const bool bADS = Pawn->IsADS();
 	const ESlateVisibility LinesVis = bADS ? ESlateVisibility::Hidden : ESlateVisibility::HitTestInvisible;
 	if (CrossLineTop)    { CrossLineTop->SetVisibility(LinesVis); }
@@ -665,6 +722,74 @@ void UPFCombatHUDWidget::UpdateBanner(float InDeltaTime)
 	BannerText->SetText(FText::FromString(Banner));
 }
 
+void UPFCombatHUDWidget::UpdateOutOverlay()
+{
+	auto HideOut = [this]()
+	{
+		if (OutDim) { OutDim->SetVisibility(ESlateVisibility::Collapsed); }
+		if (OutTitleText) { OutTitleText->SetVisibility(ESlateVisibility::Collapsed); }
+		if (OutSubtitleText)
+		{
+			OutSubtitleText->SetVisibility(ESlateVisibility::Collapsed);
+			OutSubtitleText->SetText(FText::GetEmpty());
+		}
+	};
+
+	const UPFHealthComponent* Health = BoundHealth.Get();
+	const APaintForgePlayerState* LocalPS =
+		GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<APaintForgePlayerState>() : nullptr;
+
+	// Show only for the local human while their pawn is eliminated or PS says they're out.
+	const bool bHealthOut = Health != nullptr && Health->bEliminated;
+	const uint8 OutKind = LocalPS ? LocalPS->OutKind : 0;
+	const bool bPSOut = OutKind == 1 || OutKind == 2;
+	if (!bHealthOut && !bPSOut)
+	{
+		HideOut();
+		return;
+	}
+
+	if (OutDim) { OutDim->SetVisibility(ESlateVisibility::HitTestInvisible); }
+	if (OutTitleText)
+	{
+		OutTitleText->SetText(FText::FromString(TEXT("YOU'RE OUT")));
+		OutTitleText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
+
+	FString Subtitle;
+	if (OutKind == 2 || (LocalPS && !LocalPS->bAliveInRound && OutKind != 1))
+	{
+		Subtitle = TEXT("Out for this round — spectating");
+	}
+	else if (OutKind == 1 && LocalPS && BoundGameState.IsValid())
+	{
+		const float Remaining = LocalPS->RespawnAtServerTime
+			- BoundGameState->GetServerWorldTimeSeconds();
+		const int32 Secs = FMath::Max(0, FMath::CeilToInt(Remaining));
+		if (Secs > 0)
+		{
+			Subtitle = FString::Printf(TEXT("Respawning in %d…"), Secs);
+		}
+		else
+		{
+			Subtitle = TEXT("Respawning…");
+		}
+	}
+	else if (bHealthOut)
+	{
+		// Eliminated but PS stamp not in yet — keep the board up so kids still know.
+		Subtitle = TEXT("Waiting to respawn…");
+	}
+
+	if (OutSubtitleText)
+	{
+		OutSubtitleText->SetText(FText::FromString(Subtitle));
+		OutSubtitleText->SetVisibility(
+			Subtitle.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+	}
+
+}
+
 void UPFCombatHUDWidget::UpdateObjectiveStatus()
 {
 	if (!ObjectiveStatusText)
@@ -729,6 +854,7 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 
 	TryBindGameState(); // GameState can arrive late on clients
 
+	UpdateOutOverlay();
 	UpdateCrosshair();
 	UpdateBanner(InDeltaTime);
 	UpdateObjectiveStatus();

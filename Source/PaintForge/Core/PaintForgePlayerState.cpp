@@ -38,6 +38,8 @@ void APaintForgePlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 	DOREPLIFETIME(APaintForgePlayerState, bCarryingFlag);
 	DOREPLIFETIME(APaintForgePlayerState, CarriedFlagTeam);
 	DOREPLIFETIME(APaintForgePlayerState, StandingOnPoint);
+	DOREPLIFETIME(APaintForgePlayerState, OutKind);
+	DOREPLIFETIME(APaintForgePlayerState, RespawnAtServerTime);
 }
 
 void APaintForgePlayerState::ServerSetTeam(uint8 NewTeam, uint8 NewRosterIndex)
@@ -185,6 +187,43 @@ void APaintForgePlayerState::ServerSetStandingOnPoint(uint8 PointIndex)
 	}
 	StandingOnPoint = PointIndex;
 	OnRep_Flags();
+	ForceNetUpdate();
+}
+
+void APaintForgePlayerState::ServerSetOutWaitingRespawn(float AtServerTime)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	OutKind = 1;
+	RespawnAtServerTime = AtServerTime;
+	ForceNetUpdate();
+}
+
+void APaintForgePlayerState::ServerSetOutForRound()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	OutKind = 2;
+	RespawnAtServerTime = 0.f;
+	ForceNetUpdate();
+}
+
+void APaintForgePlayerState::ServerClearOutState()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (OutKind == 0 && RespawnAtServerTime == 0.f)
+	{
+		return;
+	}
+	OutKind = 0;
+	RespawnAtServerTime = 0.f;
 	ForceNetUpdate();
 }
 
