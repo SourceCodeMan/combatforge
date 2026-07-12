@@ -65,6 +65,8 @@ void APaintForgeGameMode::BeginPlay()
 	if (APaintForgeGameState* GS = GetPFGameState())
 	{
 		GS->ServerSetTargetTeamSize(DefaultTeamSize);   // 4v4 default; host can switch to 6v6 in Lobby
+		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks in Lobby / menu
+		GS->ServerSetMatchType(DefaultMatchType);       // Elimination default
 	}
 }
 
@@ -417,8 +419,16 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		}
 		RecountAlive();
 
+		// Play-only mode runs all the Build-phase SETUP above (match reset, bots, spawns) but skips the
+		// build TIME — flash straight to Combat. (Creative/Improvement get the full build window.)
+		const bool bPlayOnly = (GS->BuildMode == EPFBuildMode::PlayOnly);
+		if (bPlayOnly)
+		{
+			GS->ServerSetPhaseEndTime(Now + 0.1f);
+		}
 		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this,
-			&APaintForgeGameMode::StartNextRoundFromBuildEnd, BuildPhaseDuration, false);
+			&APaintForgeGameMode::StartNextRoundFromBuildEnd,
+			bPlayOnly ? 0.1f : BuildPhaseDuration, false);
 		break;
 	}
 
@@ -617,6 +627,28 @@ void APaintForgeGameMode::HostSetFormat(uint8 NewTeamSize)
 	GS->ServerSetTargetTeamSize(NewTeamSize);
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set format to %dv%d"),
 		GS->TargetTeamSize, GS->TargetTeamSize);
+}
+
+void APaintForgeGameMode::HostSetBuildMode(EPFBuildMode NewMode)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Lobby || NewMode >= EPFBuildMode::MAX_Count)
+	{
+		return;
+	}
+	GS->ServerSetBuildMode(NewMode);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set build mode %d"), static_cast<int32>(NewMode));
+}
+
+void APaintForgeGameMode::HostSetMatchType(EPFMatchType NewType)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Lobby || NewType >= EPFMatchType::MAX_Count)
+	{
+		return;
+	}
+	GS->ServerSetMatchType(NewType);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set match type %d"), static_cast<int32>(NewType));
 }
 
 // ---------------------------------------------------------------------------

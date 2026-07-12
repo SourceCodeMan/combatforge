@@ -34,6 +34,8 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APaintForgeGameState, MatchId);
 	DOREPLIFETIME(APaintForgeGameState, TargetTeamSize);
 	DOREPLIFETIME(APaintForgeGameState, RoundWinsToTake);
+	DOREPLIFETIME(APaintForgeGameState, BuildMode);
+	DOREPLIFETIME(APaintForgeGameState, MatchType);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +225,26 @@ void APaintForgeGameState::ServerSetRoundWinsToTake(uint8 NewWins)
 		return;
 	}
 	RoundWinsToTake = NewWins;
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetBuildMode(EPFBuildMode NewMode)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	BuildMode = NewMode;
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetMatchType(EPFMatchType NewType)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	MatchType = NewType;
 	ForceNetUpdate();
 }
 

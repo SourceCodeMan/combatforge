@@ -48,6 +48,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float RespawnDelay         = 5.f;     // Respawn mode only (04 Variant B)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") uint8 DefaultTeamSize      = 4;       // 4 (4v4) or 6 (6v6); bots fill to it
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") bool  bFillWithBots        = true;    // top each team up to the format size
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFBuildMode DefaultBuildMode = EPFBuildMode::Creative;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFMatchType DefaultMatchType = EPFMatchType::Elimination;
 
 	// ---- The only phase mutator in the codebase ----
 	void SetPhase(EPFMatchPhase NewPhase);            // server; updates GameState, stamps timers, side effects
@@ -65,6 +67,8 @@ public:
 	void HostCycleTeam(APaintForgePlayerState* Target); // Lobby only (T22)
 	void HostReturnToLobby();                          // Results only
 	void HostSetFormat(uint8 NewTeamSize);             // Lobby only: 4v4 / 6v6 (bots fill to it)
+	void HostSetBuildMode(EPFBuildMode NewMode);       // Lobby only: Creative / Improvement / Play-only
+	void HostSetMatchType(EPFMatchType NewType);       // Lobby only: Elimination / FFA / Skirmish / …
 
 	// Spawn transform for a player in the current round (side swap: even rounds swapped — B1):
 	FTransform GetSpawnTransform(const APaintForgePlayerState* PS) const;
