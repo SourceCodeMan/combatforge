@@ -1,4 +1,5 @@
-# LISTEN host — this PC is server AND a player (simplest playtest).
+# LISTEN host - this PC is server AND a player (simplest playtest).
+# ASCII-only so Windows PowerShell 5.1 parses cleanly.
 #
 # Priority: packaged/staged game -> Development game -> Unreal Editor -game ?Listen
 param(
@@ -42,7 +43,7 @@ elseif ($Editor) {
 	$Mode = "editor-listen"
 	$Exe = $Editor
 	$WorkDir = $ProjectRoot
-	# -game = play-in-standalone (not PIE multi-window); ?Listen makes this machine the host.
+	# -game = standalone; ?Listen makes this machine the host.
 	$Args = @(
 		$UProject,
 		$ListenUrl,
@@ -60,7 +61,7 @@ else {
 
 if ($ExtraArgs) { $Args += $ExtraArgs }
 
-Write-Host "==> PaintForge LISTEN host ($Mode) — you play on this machine"
+Write-Host "==> PaintForge LISTEN host ($Mode) - you play on this machine"
 Write-Host "    Exe:  $Exe"
 Write-Host "    URL:  $ListenUrl"
 Write-Host "    Port: $Port"
