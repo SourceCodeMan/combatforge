@@ -1,39 +1,70 @@
-# Launch packaged (or local) game as a LISTEN host — you play on this machine too.
+# LISTEN host — this PC is server AND a player (simplest playtest).
+#
+# Priority: packaged/staged game -> Development game -> Unreal Editor -game ?Listen
 param(
-	[string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+	[string]$ProjectRoot = "",
 	[int]$Port = 7777,
-	[string]$Map = "/Game/Maps/L_Graybox"
+	[string]$Map = "/Game/Maps/L_Graybox",
+	[string]$Engine = "C:\Program Files\Epic Games\UE_5.6",
+	[switch]$NoFirewall,
+	[switch]$PreferEditor,
+	[string]$ExtraArgs = ""
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+if (-not $ProjectRoot) { $ProjectRoot = Get-ProjectRoot $PSScriptRoot }
 
-$Candidates = @(
-	(Join-Path $ProjectRoot "Packaged\Playtest\Windows\PaintForge.exe"),
-	(Join-Path $ProjectRoot "Packaged\Playtest\Windows\PaintForge\Binaries\Win64\PaintForge.exe"),
-	(Join-Path $ProjectRoot "Binaries\Win64\PaintForge.exe"),
-	(Join-Path $ProjectRoot "Saved\StagedBuilds\Windows\PaintForge.exe"),
-	(Join-Path $ProjectRoot "Saved\StagedBuilds\Windows\PaintForge\Binaries\Win64\PaintForge.exe")
-)
+$UProject = Join-Path $ProjectRoot "PaintForge.uproject"
+if (-not (Test-Path $UProject)) { throw "Missing $UProject" }
+
+if (-not $NoFirewall) { Ensure-PlaytestFirewall -Port $Port }
+
+$GameExe = Find-PaintForgeExe $ProjectRoot "PaintForge.exe"
+$Editor = Get-UnrealEditor $Engine
+$ListenUrl = "${Map}?Listen"
+
 $Exe = $null
-foreach ($C in $Candidates) {
-	if (Test-Path $C) { $Exe = (Resolve-Path $C).Path; break }
-}
-if (-not $Exe) {
-	# deep scan staged/packaged
-	foreach ($Root in @("Packaged\Playtest","Saved\StagedBuilds")) {
-		$Hit = Get-ChildItem (Join-Path $ProjectRoot $Root) -Recurse -Filter "PaintForge.exe" -ErrorAction SilentlyContinue |
-			Select-Object -First 1
-		if ($Hit) { $Exe = $Hit.FullName; break }
+$Args = @()
+$WorkDir = $ProjectRoot
+$Mode = ""
+
+if (-not $PreferEditor -and $GameExe) {
+	$Mode = "game-listen"
+	$Exe = $GameExe
+	$WorkDir = Split-Path $Exe -Parent
+	$Args = @($ListenUrl, "-port=$Port", "-log")
+	if ($Exe -match "[\\/]Binaries[\\/]Win64[\\/]") {
+		$Args += "-project=$UProject"
 	}
 }
-if (-not $Exe) { throw "PaintForge.exe not found. Package a client first (package-playtest.ps1)." }
+elseif ($Editor) {
+	$Mode = "editor-listen"
+	$Exe = $Editor
+	$WorkDir = $ProjectRoot
+	# -game = play-in-standalone (not PIE multi-window); ?Listen makes this machine the host.
+	$Args = @(
+		$UProject,
+		$ListenUrl,
+		"-game",
+		"-log",
+		"-port=$Port",
+		"-WINDOWED",
+		"-ResX=1600",
+		"-ResY=900"
+	)
+}
+else {
+	throw "No host available. Install UE 5.6 or build/package PaintForge.exe."
+}
 
-# Listen URL: map?Listen -port=
-$Url = "${Map}?Listen"
-Write-Host "==> Listen host: $Exe"
-Write-Host "    $Url  port=$Port"
-Write-Host "    Friends: open <your-ip>:$Port"
+if ($ExtraArgs) { $Args += $ExtraArgs }
 
-$WorkDir = Split-Path $Exe -Parent
+Write-Host "==> PaintForge LISTEN host ($Mode) — you play on this machine"
+Write-Host "    Exe:  $Exe"
+Write-Host "    URL:  $ListenUrl"
+Write-Host "    Port: $Port"
+Write-JoinBanner -Port $Port
+
 Set-Location $WorkDir
-& $Exe $Url "-port=$Port" "-log"
+& $Exe @Args

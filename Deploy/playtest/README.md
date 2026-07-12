@@ -1,170 +1,122 @@
-# PaintForge LAN / VPN playtest server
+# PaintForge LAN / VPN playtest — **server piece**
 
-Host a match on this PC; friends on your LAN or VPN join by **IP:port**.
+Host a match on this PC. Friends join with `open <ip>:7777`.
 
-## How it works
-
-```
-┌──────────────────────────┐     UDP/TCP 7777      ┌─────────────────────┐
-│  Host PC (you)           │ ◄───────────────────► │ Friend PC           │
-│  Server process          │                       │ Packaged client     │
-│  (listen OR headless)    │                       │ open 192.168.x.x:7777│
-└──────────────────────────┘                       └─────────────────────┘
-```
-
-PaintForge has **no EOS/Steam matchmaking yet** (architecture D12). Join = engine connect string:
-
-```
-open 192.168.1.42:7777
-```
-
-Default map: `/Game/Maps/L_Graybox` · Default port: **7777**
-
-### Two host modes
-
-| Mode | Command style | You play on host PC? | When to use |
-|------|---------------|----------------------|-------------|
-| **Listen server** | `PaintForge.exe Map?Listen` | **Yes** (host is also a player) | Easiest playtest |
-| **Headless `-server`** | `PaintForge.exe Map -server -nullrhi` | No — join with a second client | Host PC is “server only” |
-
-### Engine note (important)
-
-Epic **Launcher** UE 5.6 builds **cannot compile `TargetType.Server`**  
-(`Server targets are not currently supported from this engine distribution`).
-
-- `Source/PaintForgeServer.Target.cs` is in the repo for a future **source-built** engine.
-- **Today’s scripts use the normal game binary** (`PaintForge.exe`) in listen or `-server` mode — that works with the Launcher engine and does not need a special server target.
+You do **not** need a full shipping client build to host. The scripts fall back to the
+**Unreal Editor** as a listen/dedicated-style host using project Content as-is.
 
 ---
 
-## Claude-safe scope
+## Mental model
 
-This branch only adds deploy scripts, docs, a future Server target file, and gitignore entries.
-It does **not** change GameMode, GameState, UI, combat, or lobby code.
+```
+Host PC                              Friend PC
+────────                             ─────────
+run-listen.ps1  (you play)     or
+run-server.ps1  (headless)   ◄──── open 192.168.x.x:7777
+```
+
+No EOS/Steam yet — raw IP net driver only.
+
+| Mode | Script | Host plays? | Needs packaged app? |
+|------|--------|-------------|---------------------|
+| **Listen** | `run-listen.ps1` / `start-host.bat` | Yes | No (editor works) |
+| **Headless server** | `run-server.ps1` / `start-server.bat` | No | No (editor works) |
+
+Default map `/Game/Maps/L_Graybox` · port **7777**.
 
 ---
 
-## Quick start (recommended)
-
-### A. You host and play (listen server)
-
-1. Package or use an existing staged client (see below).
-2. On the host PC:
+## Host right now (recommended)
 
 ```powershell
 cd D:\projects\paintforge
+git checkout feat/playtest-server
+
+# Option A — you play on this PC, friends join
 .\Deploy\playtest\run-listen.ps1
+
+# Option B — headless server; everyone (including you) joins as client
+.\Deploy\playtest\run-server.ps1
+# then on this PC: launch a normal game/editor client and:  open 127.0.0.1:7777
 ```
 
-3. Share an IP:
+Share an address:
 
 ```powershell
 .\Deploy\playtest\print-host-ips.ps1
 ```
 
-4. Friends launch their client and:
+Friends (once they have *any* runnable client — PIE on another machine is awkward; prefer a
+packaged client when you have one):
 
 ```
-open <your-ip>:7777
+open <your-lan-or-vpn-ip>:7777
 ```
 
-or:
+---
+
+## What the scripts try (in order)
+
+**`run-server.ps1` (headless)**  
+1. `PaintForgeServer.exe` if you ever have a source-engine server build  
+2. Packaged / staged / Dev `PaintForge.exe -server -nullrhi`  
+3. **`UnrealEditor.exe … -server -nullrhi`** ← works without packaging  
+
+**`run-listen.ps1` (host plays)**  
+1. Packaged / staged / Dev `PaintForge.exe Map?Listen`  
+2. **`UnrealEditor.exe … -game Map?Listen`** ← works without packaging  
+
+Force editor:
 
 ```powershell
-.\connect.ps1 -Server <your-ip>
-```
-
-### B. Headless-ish server (you join as a client)
-
-```powershell
-.\Deploy\playtest\run-server.ps1
-# then on this PC or another:
-.\Deploy\playtest\connect.ps1 -Server 127.0.0.1   # or LAN/VPN IP
+.\Deploy\playtest\run-server.ps1 -PreferEditor
+.\Deploy\playtest\run-listen.ps1 -PreferEditor
 ```
 
 ---
 
-## Getting a client build for friends
+## Engine limitation (Launcher UE 5.6)
 
-### Option 1 — already staged
-
-If you previously packaged from the editor, you may already have:
-
-`Saved\StagedBuilds\Windows\PaintForge.exe` (or under a subfolder)
-
-Zip that whole `Windows` (or `PaintForge`) tree and copy it to friends (network share / USB).
-
-### Option 2 — package via script
-
-Editor **closed**:
-
-```powershell
-.\Deploy\playtest\package-playtest.ps1
+```
+Server targets are not currently supported from this engine distribution.
 ```
 
-Output under `Packaged\Playtest\` (gitignored). Zip the **Windows client** folder for friends.
-
-First cook can take a long time.
-
-### Option 3 — editor PIE (dev only)
-
-PIE multiplayer is for local dev. For other PCs on the VPN, use a packaged client.
+So a true `PaintForgeServer` binary is **not** available until you use a **source-built** engine.
+`Source/PaintForgeServer.Target.cs` is kept for that day. Playtest hosting does not depend on it.
 
 ---
 
-## Docker Desktop
+## Docker
 
-Your Docker Desktop is in **Linux** mode.
+Docker Desktop Linux **cannot** run Win64 `PaintForge.exe`.  
+For LAN/VPN on this machine: **use the PowerShell scripts**, not Docker.
 
-| Approach | Works? |
-|----------|--------|
-| Run `run-server.ps1` on **Windows host** | **Yes — use this for playtest** |
-| Put **Win64** `PaintForge.exe` in a Linux container | **No** |
-| Linux dedicated server in Docker | Only after a **Linux** cook + source/Linux toolchain (advanced) |
-
-`Deploy/playtest/docker/` is a **stub** for a future Linux VPS. It is not required for LAN/VPN play on this PC.
+`docker/` is a stub for a future Linux VPS + Linux cook only.
 
 ---
 
-## VPN checklist (Tailscale / ZeroTier / etc.)
+## Claude-safe
 
-1. Host + friends on the same VPN mesh.
-2. Host runs `run-listen.ps1` or `run-server.ps1`.
-3. `print-host-ips.ps1` → give friends the **VPN** IP (not only LAN).
-4. Friends: `open <vpn-ip>:7777`.
-5. If join fails: Windows Firewall on host (script can open 7777), VPN “allow inbound”, confirm host log shows join attempts.
+This folder + `PaintForgeServer.Target.cs` only. No GameMode / UI / combat edits.
 
 ---
 
-## Scripts
+## Later (when the app “looks and plays better”)
 
-| Script | Purpose |
-|--------|---------|
-| `run-listen.ps1` | Host + play (recommended) |
-| `run-server.ps1` | Headless-style `-server -nullrhi` on game exe |
-| `print-host-ips.ps1` | IPs to share |
-| `connect.ps1` | Friend join helper (ship next to client exe) |
-| `package-playtest.ps1` | Cook/stage client for distribution |
-| `build-server.ps1` | Only works with **source** engine Server target |
-| `docker/*` | Future Linux container layout |
+1. `package-playtest.ps1` — cook a Windows client zip for friends  
+2. Copy zip + `connect.ps1` to their machines  
+3. Host with `run-server.ps1` or `run-listen.ps1` on the staged/packaged exe  
+
+Until then, editor-hosted listen/server is enough to validate join + phase loop on the network.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---------|-----|
-| Timeout joining | Wrong IP (try VPN IP); firewall UDP/TCP 7777 |
-| Server window closes immediately | Need a **cooked/packaged** game, not only editor DLL |
-| Friends can’t see host | Host bound to listen; check `print-host-ips`; disable strict firewall temporarily |
-| “Server targets not supported” | Expected on Launcher engine — use `run-listen.ps1` / `run-server.ps1` |
-| Host cosmetics weird | Listen-server host is also authority — known asymmetry; or use headless server + all clients |
-
----
-
-## What you install where
-
-| Machine | Needs |
-|---------|--------|
-| **Host (this PC)** | Repo or packaged build + `run-listen.ps1` / `run-server.ps1` |
-| **Friend** | Packaged **Windows client** zip only (no UE editor, no full repo) |
+| Issue | Fix |
+|-------|-----|
+| Timeout | Wrong IP (use VPN IP over Tailscale/etc.); firewall 7777 |
+| Editor host black screen then exit | Map path wrong; confirm `Content/Maps/L_Graybox.umap` exists |
+| Game.exe fails, no window | Dev binary without cook — use `-PreferEditor` |
+| Friends on VPN can’t join | Share VPN IP from `print-host-ips.ps1`; allow inbound on VPN |

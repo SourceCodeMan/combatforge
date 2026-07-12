@@ -1,87 +1,96 @@
-# Launch a headless-style PaintForge server for LAN/VPN playtest.
+# Headless-style playtest SERVER (no local player on this process).
 #
-# Uses the GAME binary with -server -nullrhi (Launcher UE cannot build TargetType.Server).
-# Prefers PaintForgeServer.exe only if present (source-engine builds).
+# Priority:
+#   1) PaintForgeServer.exe          (source-engine only; rare on Launcher UE)
+#   2) Packaged/staged PaintForge.exe  -server -nullrhi
+#   3) Development PaintForge.exe      -server -nullrhi -project=...
+#   4) UnrealEditor.exe                -server -nullrhi  (works BEFORE a full package)
+#
+# You do NOT need a shipping build of the whole app for this — editor host is fine for LAN/VPN.
 param(
-	[string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+	[string]$ProjectRoot = "",
 	[int]$Port = 7777,
 	[string]$Map = "/Game/Maps/L_Graybox",
+	[string]$Engine = "C:\Program Files\Epic Games\UE_5.6",
 	[switch]$NoFirewall,
+	[switch]$PreferEditor,
 	[string]$ExtraArgs = ""
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+if (-not $ProjectRoot) { $ProjectRoot = Get-ProjectRoot $PSScriptRoot }
 
-function Find-Exe([string]$Root, [string]$Name) {
-	$Hits = @()
-	foreach ($Rel in @(
-		"Binaries\Win64\$Name",
-		"Packaged\Playtest\Windows\$Name",
-		"Packaged\Playtest\Windows\PaintForge\Binaries\Win64\$Name",
-		"Packaged\Playtest\WindowsServer\$Name",
-		"Saved\StagedBuilds\Windows\$Name",
-		"Saved\StagedBuilds\Windows\PaintForge\Binaries\Win64\$Name"
-	)) {
-		$P = Join-Path $Root $Rel
-		if (Test-Path $P) { return (Resolve-Path $P).Path }
-	}
-	foreach ($Scan in @(
-		(Join-Path $Root "Packaged\Playtest"),
-		(Join-Path $Root "Saved\StagedBuilds"),
-		(Join-Path $Root "Binaries")
-	)) {
-		if (Test-Path $Scan) {
-			$F = Get-ChildItem $Scan -Recurse -Filter $Name -ErrorAction SilentlyContinue | Select-Object -First 1
-			if ($F) { return $F.FullName }
-		}
-	}
-	return $null
-}
+$UProject = Join-Path $ProjectRoot "PaintForge.uproject"
+if (-not (Test-Path $UProject)) { throw "Missing $UProject" }
 
-$ServerExe = Find-Exe $ProjectRoot "PaintForgeServer.exe"
-$GameExe = Find-Exe $ProjectRoot "PaintForge.exe"
+if (-not $NoFirewall) { Ensure-PlaytestFirewall -Port $Port }
 
-if (-not $NoFirewall) {
-	$RuleName = "PaintForge Playtest $Port"
-	if (-not (Get-NetFirewallRule -DisplayName "$RuleName UDP" -ErrorAction SilentlyContinue)) {
-		Write-Host "Adding firewall rules for TCP/UDP $Port (UAC prompt possible)..."
-		try {
-			Start-Process powershell -Verb RunAs -Wait -ArgumentList @(
-				"-NoProfile", "-Command",
-				"New-NetFirewallRule -DisplayName '$RuleName UDP' -Direction Inbound -Protocol UDP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue; " +
-				"New-NetFirewallRule -DisplayName '$RuleName TCP' -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue"
-			)
-		} catch {
-			Write-Host "Firewall rule skipped — open port $Port manually if friends cannot join."
-		}
-	}
-}
+$ServerExe = Find-PaintForgeExe $ProjectRoot "PaintForgeServer.exe"
+$GameExe = Find-PaintForgeExe $ProjectRoot "PaintForge.exe"
+$Editor = Get-UnrealEditor $Engine
 
-if ($ServerExe) {
-	Write-Host "==> Dedicated server binary: $ServerExe"
+$Exe = $null
+$Args = @()
+$WorkDir = $ProjectRoot
+$Mode = ""
+
+if (-not $PreferEditor -and $ServerExe) {
+	$Mode = "dedicated-binary"
 	$Exe = $ServerExe
+	$WorkDir = Split-Path $Exe -Parent
 	$Args = @($Map, "-log", "-port=$Port", "-NOHOMEDIR")
-} elseif ($GameExe) {
-	Write-Host "==> Game binary as headless server: $GameExe"
-	Write-Host "    (Launcher engine has no Server target — using -server -nullrhi)"
+}
+elseif (-not $PreferEditor -and $GameExe) {
+	# Packaged/staged game binaries don't need -project; Dev game may.
+	$Mode = "game-server"
 	$Exe = $GameExe
-	# -server: dedicated-style authority, no local player
-	# -nullrhi: no GPU window (still loads some modules; fine for LAN playtest)
+	$WorkDir = Split-Path $Exe -Parent
 	$Args = @($Map, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR")
-} else {
-	Write-Host "No PaintForge.exe / PaintForgeServer.exe found."
-	Write-Host "Package a build first, e.g. from editor or:"
-	Write-Host "  .\Deploy\playtest\package-playtest.ps1"
-	Write-Host "Or use an existing staged build under Saved\StagedBuilds\Windows\"
-	throw "Server/game binary missing"
+	# Development non-packaged game exe needs project path to find Content
+	if ($Exe -match "[\\/]Binaries[\\/]Win64[\\/]") {
+		$Args += "-project=$UProject"
+	}
+}
+elseif ($Editor) {
+	$Mode = "editor-server"
+	$Exe = $Editor
+	$WorkDir = $ProjectRoot
+	# Editor dedicated-style host: works with uncooked Content in the project tree.
+	$Args = @(
+		$UProject,
+		$Map,
+		"-server",
+		"-log",
+		"-port=$Port",
+		"-nullrhi",
+		"-nosound",
+		"-nosplash",
+		"-unattended"
+	)
+}
+else {
+	throw "No server host available. Install UE 5.6 editor or place a PaintForge.exe build."
 }
 
 if ($ExtraArgs) { $Args += $ExtraArgs }
 
-Write-Host "    Map=$Map  Port=$Port"
-Write-Host "    Friends: open <your-ip>:$Port   (.\print-host-ips.ps1)"
+Write-Host "==> PaintForge playtest SERVER ($Mode)"
+Write-Host "    Exe:  $Exe"
+Write-Host "    Map:  $Map"
+Write-Host "    Port: $Port"
+Write-JoinBanner -Port $Port
+Write-Host "Ctrl+C or close the window to stop the server."
 Write-Host ""
 
-$WorkDir = Split-Path $Exe -Parent
 Set-Location $WorkDir
 & $Exe @Args
+$Code = $LASTEXITCODE
+if ($Code -ne 0 -and $null -ne $Code) {
+	Write-Host "Server exited with code $Code"
+	if ($Mode -eq "game-server") {
+		Write-Host "Tip: try editor host instead:"
+		Write-Host "  .\Deploy\playtest\run-server.ps1 -PreferEditor"
+	}
+	exit $Code
+}
