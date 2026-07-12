@@ -137,18 +137,26 @@ void UPFScoreboardWidget::RefreshRows()
 		return;
 	}
 
+	// Skirmish shows team TAG counts + a SKIRMISH label; Elimination shows round wins + "Round N".
+	const bool bSkirmish = (GS->MatchType == EPFMatchType::Skirmish);
 	if (WinsAText)
 	{
-		WinsAText->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamRoundWins[0])));
+		WinsAText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
+			bSkirmish ? static_cast<int32>(GS->TeamScores[0]) : static_cast<int32>(GS->TeamRoundWins[0]))));
 	}
 	if (WinsBText)
 	{
-		WinsBText->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamRoundWins[1])));
+		WinsBText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
+			bSkirmish ? static_cast<int32>(GS->TeamScores[1]) : static_cast<int32>(GS->TeamRoundWins[1]))));
 	}
 	if (RoundText)
 	{
 		FString Round;
-		if (GS->RoundNumber > 0)
+		if (bSkirmish)
+		{
+			Round = TEXT("SKIRMISH");
+		}
+		else if (GS->RoundNumber > 0)
 		{
 			Round = FString::Printf(TEXT("Round %d"), GS->RoundNumber);
 			if (GS->bSuddenDeath)

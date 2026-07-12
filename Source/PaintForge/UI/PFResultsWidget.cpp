@@ -229,8 +229,10 @@ void UPFResultsWidget::RefreshAll()
 
 void UPFResultsWidget::RefreshResult(const APaintForgeGameState& GS)
 {
-	const uint8 WinsA = GS.TeamRoundWins[0];
-	const uint8 WinsB = GS.TeamRoundWins[1];
+	// Skirmish reports team TAG counts; Elimination reports round wins.
+	const bool bSkirmish = (GS.MatchType == EPFMatchType::Skirmish);
+	const int32 WinsA = bSkirmish ? static_cast<int32>(GS.TeamScores[0]) : static_cast<int32>(GS.TeamRoundWins[0]);
+	const int32 WinsB = bSkirmish ? static_cast<int32>(GS.TeamScores[1]) : static_cast<int32>(GS.TeamRoundWins[1]);
 
 	if (WinnerText)
 	{
@@ -250,13 +252,20 @@ void UPFResultsWidget::RefreshResult(const APaintForgeGameState& GS)
 	if (ScoreText)
 	{
 		FString Score = FString::Printf(TEXT("%d — %d"), WinsA, WinsB);
-		if (GS.RoundNumber > 0)
+		if (bSkirmish)
 		{
-			Score += FString::Printf(TEXT("  ·  %d rounds"), GS.RoundNumber);
+			Score += TEXT("  ·  tags");
 		}
-		if (GS.bSuddenDeath)
+		else
 		{
-			Score += TEXT("  ·  sudden death");
+			if (GS.RoundNumber > 0)
+			{
+				Score += FString::Printf(TEXT("  ·  %d rounds"), GS.RoundNumber);
+			}
+			if (GS.bSuddenDeath)
+			{
+				Score += TEXT("  ·  sudden death");
+			}
 		}
 		ScoreText->SetText(FText::FromString(Score));
 	}

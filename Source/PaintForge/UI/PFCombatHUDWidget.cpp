@@ -334,6 +334,26 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 		return;
 	}
 
+	if (GS->MatchType == EPFMatchType::Skirmish)
+	{
+		// Skirmish repurposes the top block for TAGS: collapse the round pips, show "first to N" in the
+		// round-number slot, and the two team tag totals in the (otherwise unused) alive row. The timer
+		// row renders the match countdown automatically via GetRoundTimeRemaining().
+		UpdatePipVisibility(0);
+		for (int32 i = 0; i < MaxPips; ++i)
+		{
+			if (PipsA.IsValidIndex(i) && PipsA[i]) { PipsA[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+			if (PipsB.IsValidIndex(i) && PipsB[i]) { PipsB[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+		}
+		if (RoundNumberText)
+		{
+			RoundNumberText->SetText(FText::FromString(FString::Printf(TEXT("first to %d"), GS->RoundWinsToTake)));
+		}
+		if (AliveTextA) { AliveTextA->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamScores[0]))); }
+		if (AliveTextB) { AliveTextB->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamScores[1]))); }
+		return;
+	}
+
 	// Effective wins-to-take is resolved server-side from the format and replicated on GameState
 	// (RoundWinsToTake) — read it directly instead of inferring from the live (bot-padded /
 	// leaver-shrunk) roster size. Never show fewer pips than a team already has wins.
@@ -390,6 +410,10 @@ void UPFCombatHUDWidget::HandleAliveCountsChanged()
 	if (!GS)
 	{
 		return;
+	}
+	if (GS->MatchType == EPFMatchType::Skirmish)
+	{
+		return;   // in Skirmish the alive row shows TAG totals (owned by HandleScoreChanged)
 	}
 	if (AliveTextA)
 	{
