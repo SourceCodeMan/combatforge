@@ -12,6 +12,8 @@ class AActor;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UDecalComponent;
+class UStaticMesh;
+class UStaticMeshComponent;
 class APFPaintballProjectile;
 
 /**
@@ -19,9 +21,9 @@ class APFPaintballProjectile;
  *
  * Pool of 256 deferred-decal impact marks (airsoft BB scuffs projected onto receiving surfaces),
  * tinted through four shared team MIDs: confirmed (full team color) and pending (60% brightness)
- * per team. Round-robin recycles the oldest. Marks persist across rounds within a match (T20);
- * ResetPool() fires on BuildPhase entry only — this subsystem self-binds to the GameState phase
- * delegate.
+ * per team, plus a small mesh dust-puff pool for hit juice. Round-robin recycles the oldest.
+ * Marks persist across rounds within a match (T20); ResetPool() fires on BuildPhase entry only —
+ * this subsystem self-binds to the GameState phase delegate.
  *
  * Pending/confirmed reconcile: the owning client's cosmetic projectile leaves a pending
  * splat; a confirmed splat within 75 uu consumes it (04 §5.2). Unconfirmed pendings expire
@@ -67,25 +69,42 @@ private:
 		uint8  Team = 0;
 	};
 
+	struct FPuffMeta
+	{
+		bool   bActive = false;
+		double HideAt = 0.0;
+	};
+
 	bool  IsRenderingWorld() const;                  // false on dedicated servers
 	void  EnsureInfrastructure();                    // holder actor + MIDs (lazy)
 	int32 TakeNextSlot();                            // round-robin
 	UDecalComponent* GetOrCreateSplatComp(int32 Index);
 	void  PlaceSplat(int32 Index, const FVector& Loc, const FVector& Normal, uint8 Team,
 	                 bool bPending, uint32 ShotIndex);
+	void  SpawnImpactPuff(const FVector& Loc, const FVector& Normal, uint8 Team);
+	UStaticMeshComponent* GetOrCreatePuffComp(int32 Index);
 	void  TickPendingExpiry();
 	void  HandlePhaseChanged(EPFMatchPhase NewPhase);
 	void  TryBindGameState();
 
 	UPROPERTY() TObjectPtr<UMaterialInterface> BaseMaterial;
+	UPROPERTY() TObjectPtr<UMaterialInterface> DustMaterial;
+	UPROPERTY() TObjectPtr<UStaticMesh>        PuffMesh;
 	UPROPERTY() TObjectPtr<AActor>             SplatHolder;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> ConfirmedMIDs;   // [teamIdx 0/1]
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> PendingMIDs;     // 60% brightness
 	UPROPERTY() TArray<TObjectPtr<UDecalComponent>> SplatComps;   // lazily filled to PoolSize
+	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> PuffComps;
+	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> PuffMIDs; // [teamIdx 0/1]
 
 	TArray<FSplatMeta> SplatMeta;
+	TArray<FPuffMeta>  PuffMeta;
 	int32 NextSlot = 0;
+	int32 NextPuffSlot = 0;
 	bool  bBoundToGameState = false;
+
+	static constexpr int32 PuffPoolSize = 48;
+	static constexpr float PuffLifetimeSec = 0.11f;
 
 	UPROPERTY() TArray<TObjectPtr<APFPaintballProjectile>> CosmeticPool;
 	int32 NextCosmeticSlot = 0;

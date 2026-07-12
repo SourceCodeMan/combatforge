@@ -121,8 +121,11 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FlashMatFinder(
 		TEXT("/Game/Materials/M_PF_Flash.M_PF_Flash"));
-	FlashMaterial = FlashMatFinder.Succeeded() ? FlashMatFinder.Object
-		: (MatFinder.Succeeded() ? MatFinder.Object : nullptr);
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SmokeMatFinder(
+		TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke"));
+	FlashMaterial = FlashMatFinder.Succeeded() ? FlashMatFinder.Object.Get()
+		: (MatFinder.Succeeded() ? MatFinder.Object.Get() : nullptr);
+	SmokeMaterial = SmokeMatFinder.Succeeded() ? SmokeMatFinder.Object.Get() : FlashMaterial.Get();
 	UStaticMesh* CubeMesh = CubeFinder.Succeeded() ? CubeFinder.Object : nullptr;
 	UStaticMesh* CylMesh = CylFinder.Succeeded() ? CylFinder.Object.Get() : CubeMesh;
 	UMaterialInterface* GunBaseMat = MatFinder.Succeeded() ? MatFinder.Object : nullptr;
@@ -142,38 +145,62 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		}
 	}
 
-	// FP muzzle flash blob (owner) — a small emissive sphere pulsed at the barrel tip.
+	// FP muzzle flash core (owner) — hot emissive sphere at the barrel tip.
 	MuzzleFlashFP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleFlashFP"));
 	MuzzleFlashFP->SetupAttachment(ViewModelRoot);
 	if (SphereFinder.Succeeded()) { MuzzleFlashFP->SetStaticMesh(SphereFinder.Object); }
 	if (FlashMaterial != nullptr) { MuzzleFlashFP->SetMaterial(0, FlashMaterial); }
 	MuzzleFlashFP->SetRelativeLocation(MuzzleLocalFP);
-	MuzzleFlashFP->SetRelativeScale3D(FVector(0.12f));
+	MuzzleFlashFP->SetRelativeScale3D(FVector(0.14f));
 	MuzzleFlashFP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	MuzzleFlashFP->SetCastShadow(false);
 	MuzzleFlashFP->SetOnlyOwnerSee(true);
 	MuzzleFlashFP->SetVisibility(false);
 
-	// TP muzzle flash blob (viewers) — world-placed at the shooter's marker each shot.
+	// FP muzzle smoke wisp — short residual gray puff just past the flash (airsoft, not paint spray).
+	MuzzleSmokeFP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleSmokeFP"));
+	MuzzleSmokeFP->SetupAttachment(ViewModelRoot);
+	if (SphereFinder.Succeeded()) { MuzzleSmokeFP->SetStaticMesh(SphereFinder.Object); }
+	if (SmokeMaterial != nullptr) { MuzzleSmokeFP->SetMaterial(0, SmokeMaterial); }
+	MuzzleSmokeFP->SetRelativeLocation(MuzzleLocalFP + FVector(6.f, 0.f, 0.f));
+	MuzzleSmokeFP->SetRelativeScale3D(FVector(0.18f, 0.10f, 0.10f));
+	MuzzleSmokeFP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleSmokeFP->SetCastShadow(false);
+	MuzzleSmokeFP->SetOnlyOwnerSee(true);
+	MuzzleSmokeFP->SetVisibility(false);
+
+	// TP muzzle flash core (viewers) — world-placed at the shooter's marker each shot.
 	MuzzleFlashTP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleFlashTP"));
 	MuzzleFlashTP->SetupAttachment(Capsule);
-	MuzzleFlashTP->SetUsingAbsoluteLocation(true);   // positioned in world space per shot
+	MuzzleFlashTP->SetUsingAbsoluteLocation(true);
 	if (SphereFinder.Succeeded()) { MuzzleFlashTP->SetStaticMesh(SphereFinder.Object); }
 	if (FlashMaterial != nullptr) { MuzzleFlashTP->SetMaterial(0, FlashMaterial); }
-	MuzzleFlashTP->SetRelativeScale3D(FVector(0.2f));
+	MuzzleFlashTP->SetRelativeScale3D(FVector(0.22f));
 	MuzzleFlashTP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	MuzzleFlashTP->SetCastShadow(false);
 	MuzzleFlashTP->SetOwnerNoSee(true);
 	MuzzleFlashTP->SetVisibility(false);
 
-	// Shared muzzle light — off except during a flash; world-placed at the active marker.
+	MuzzleSmokeTP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleSmokeTP"));
+	MuzzleSmokeTP->SetupAttachment(Capsule);
+	MuzzleSmokeTP->SetUsingAbsoluteLocation(true);
+	if (SphereFinder.Succeeded()) { MuzzleSmokeTP->SetStaticMesh(SphereFinder.Object); }
+	if (SmokeMaterial != nullptr) { MuzzleSmokeTP->SetMaterial(0, SmokeMaterial); }
+	MuzzleSmokeTP->SetRelativeScale3D(FVector(0.28f, 0.16f, 0.16f));
+	MuzzleSmokeTP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleSmokeTP->SetCastShadow(false);
+	MuzzleSmokeTP->SetOwnerNoSee(true);
+	MuzzleSmokeTP->SetVisibility(false);
+
+	// Shared muzzle light — tight bright pulse, no shadows (perf / multiplayer-friendly).
 	MuzzleLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("MuzzleLight"));
 	MuzzleLight->SetupAttachment(Capsule);
 	MuzzleLight->SetUsingAbsoluteLocation(true);
 	MuzzleLight->SetIntensity(0.f);
-	MuzzleLight->SetAttenuationRadius(700.f);
-	MuzzleLight->SetLightColor(FLinearColor(1.0f, 0.72f, 0.38f));
+	MuzzleLight->SetAttenuationRadius(MuzzleLightRadius);
+	MuzzleLight->SetLightColor(FLinearColor(1.0f, 0.70f, 0.32f));
 	MuzzleLight->SetCastShadows(false);
+	MuzzleLight->SetSpecularScale(0.2f);
 
 	// M1: default the art body to the imported UE Mannequin (Third Person content pack) so the
 	// graybox cubes become a real animated humanoid. .Succeeded() guards keep the graybox fallback
@@ -265,6 +292,7 @@ void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	GetWorldTimerManager().ClearTimer(SprintOutTimerHandle);
 	GetWorldTimerManager().ClearTimer(BufferedJumpClearHandle);
 	GetWorldTimerManager().ClearTimer(MuzzleFlashTimerHandle);
+	GetWorldTimerManager().ClearTimer(MuzzleSmokeTimerHandle);
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -886,69 +914,89 @@ void APaintForgeCharacter::SetupWeaponMaterials()
 		}
 	}
 
-	// Emissive flash blobs. Param names cover both the dedicated M_PF_Flash (EmissiveColor/Strength)
-	// and the BasicShapeMaterial fallback (Color); the absent one is a harmless no-op.
-	const FLinearColor FlashColor(6.f, 3.4f, 1.1f);
-	if (MuzzleFlashFP != nullptr)
+	// Emissive flash + smoke. Param names cover M_PF_Flash / M_PF_MuzzleSmoke and BasicShapeMaterial.
+	const FLinearColor FlashColor(8.f, 4.2f, 1.2f);
+	const FLinearColor SmokeColor(0.55f, 0.58f, 0.62f);
+	auto SetupEmissiveMID = [](UStaticMeshComponent* Comp, const FLinearColor& Color, float Strength)
+		-> UMaterialInstanceDynamic*
 	{
-		FlashMIDFP = MuzzleFlashFP->CreateAndSetMaterialInstanceDynamic(0);
-		if (FlashMIDFP != nullptr)
+		if (Comp == nullptr) { return nullptr; }
+		UMaterialInstanceDynamic* MID = Comp->CreateAndSetMaterialInstanceDynamic(0);
+		if (MID != nullptr)
 		{
-			FlashMIDFP->SetVectorParameterValue(TEXT("EmissiveColor"), FlashColor);
-			FlashMIDFP->SetScalarParameterValue(TEXT("EmissiveStrength"), 1.f);
-			FlashMIDFP->SetVectorParameterValue(TEXT("Color"), FlashColor);
+			MID->SetVectorParameterValue(TEXT("EmissiveColor"), Color);
+			MID->SetScalarParameterValue(TEXT("EmissiveStrength"), Strength);
+			MID->SetVectorParameterValue(TEXT("Color"), Color);
 		}
-	}
-	if (MuzzleFlashTP != nullptr)
-	{
-		FlashMIDTP = MuzzleFlashTP->CreateAndSetMaterialInstanceDynamic(0);
-		if (FlashMIDTP != nullptr)
-		{
-			FlashMIDTP->SetVectorParameterValue(TEXT("EmissiveColor"), FlashColor);
-			FlashMIDTP->SetScalarParameterValue(TEXT("EmissiveStrength"), 1.f);
-			FlashMIDTP->SetVectorParameterValue(TEXT("Color"), FlashColor);
-		}
-	}
+		return MID;
+	};
+	FlashMIDFP = SetupEmissiveMID(MuzzleFlashFP, FlashColor, 1.6f);
+	FlashMIDTP = SetupEmissiveMID(MuzzleFlashTP, FlashColor, 1.6f);
+	SmokeMIDFP = SetupEmissiveMID(MuzzleSmokeFP, SmokeColor, 0.5f);
+	SmokeMIDTP = SetupEmissiveMID(MuzzleSmokeTP, SmokeColor, 0.5f);
 }
 
 void APaintForgeCharacter::OnFireCosmetic()
 {
-	// Owning client: viewmodel recoil kick (recovered in Tick) + first-person flash + world light.
+	// Owning client: recoil kick + punchy FP flash + smoke wisp + tight world light.
 	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f);
 	RecoilPitch += RecoilKickPitchDeg;
 
+	const float FlashS = FMath::FRandRange(0.12f, 0.20f);
+	// Slightly flattened "petal" flash with random roll so frames don't look identical.
 	if (MuzzleFlashFP != nullptr)
 	{
-		MuzzleFlashFP->SetRelativeScale3D(FVector(FMath::FRandRange(0.10f, 0.16f)));
+		MuzzleFlashFP->SetRelativeScale3D(FVector(FlashS * 0.7f, FlashS * 1.15f, FlashS * 1.15f));
 		MuzzleFlashFP->SetRelativeRotation(FRotator(0.f, 0.f, FMath::FRandRange(0.f, 360.f)));
 		MuzzleFlashFP->SetVisibility(true);
+	}
+	if (MuzzleSmokeFP != nullptr)
+	{
+		const float SmokeS = FMath::FRandRange(0.16f, 0.24f);
+		MuzzleSmokeFP->SetRelativeScale3D(FVector(SmokeS * 1.6f, SmokeS * 0.85f, SmokeS * 0.85f));
+		MuzzleSmokeFP->SetVisibility(true);
 	}
 	if (MuzzleLight != nullptr)
 	{
 		MuzzleLight->SetWorldLocation(GetMuzzleLocation(/*bCosmetic=*/true));
-		MuzzleLight->SetIntensity(MuzzleLightIntensity);
+		MuzzleLight->SetAttenuationRadius(MuzzleLightRadius);
+		MuzzleLight->SetIntensity(MuzzleLightIntensity * FMath::FRandRange(0.85f, 1.1f));
 	}
 	GetWorldTimerManager().SetTimer(MuzzleFlashTimerHandle, this,
 		&APaintForgeCharacter::ClearMuzzleFlash, MuzzleFlashTime, false);
+	GetWorldTimerManager().SetTimer(MuzzleSmokeTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleSmoke, MuzzleSmokeTime, false);
 }
 
 void APaintForgeCharacter::OnRemoteFireCosmetic()
 {
-	// Remote viewers: a flash blob + light at the shooter's server-marker position.
+	// Remote viewers: flash + smoke + light at the shooter's marker position.
 	const FVector Muzzle = GetMuzzleLocation(/*bCosmetic=*/false);
+	const FVector AimFwd = GetBaseAimRotation().Vector();
 	if (MuzzleFlashTP != nullptr)
 	{
+		const float FlashS = FMath::FRandRange(0.18f, 0.28f);
 		MuzzleFlashTP->SetWorldLocation(Muzzle);
-		MuzzleFlashTP->SetRelativeScale3D(FVector(FMath::FRandRange(0.15f, 0.24f)));
+		MuzzleFlashTP->SetWorldScale3D(FVector(FlashS * 0.7f, FlashS * 1.15f, FlashS * 1.15f));
 		MuzzleFlashTP->SetVisibility(true);
+	}
+	if (MuzzleSmokeTP != nullptr)
+	{
+		const float SmokeS = FMath::FRandRange(0.22f, 0.32f);
+		MuzzleSmokeTP->SetWorldLocation(Muzzle + AimFwd * 12.f);
+		MuzzleSmokeTP->SetWorldScale3D(FVector(SmokeS * 1.5f, SmokeS * 0.9f, SmokeS * 0.9f));
+		MuzzleSmokeTP->SetVisibility(true);
 	}
 	if (MuzzleLight != nullptr)
 	{
 		MuzzleLight->SetWorldLocation(Muzzle);
-		MuzzleLight->SetIntensity(MuzzleLightIntensity);
+		MuzzleLight->SetAttenuationRadius(MuzzleLightRadius);
+		MuzzleLight->SetIntensity(MuzzleLightIntensity * FMath::FRandRange(0.85f, 1.1f));
 	}
 	GetWorldTimerManager().SetTimer(MuzzleFlashTimerHandle, this,
 		&APaintForgeCharacter::ClearMuzzleFlash, MuzzleFlashTime, false);
+	GetWorldTimerManager().SetTimer(MuzzleSmokeTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleSmoke, MuzzleSmokeTime, false);
 }
 
 void APaintForgeCharacter::ClearMuzzleFlash()
@@ -956,4 +1004,10 @@ void APaintForgeCharacter::ClearMuzzleFlash()
 	if (MuzzleFlashFP != nullptr) { MuzzleFlashFP->SetVisibility(false); }
 	if (MuzzleFlashTP != nullptr) { MuzzleFlashTP->SetVisibility(false); }
 	if (MuzzleLight != nullptr) { MuzzleLight->SetIntensity(0.f); }
+}
+
+void APaintForgeCharacter::ClearMuzzleSmoke()
+{
+	if (MuzzleSmokeFP != nullptr) { MuzzleSmokeFP->SetVisibility(false); }
+	if (MuzzleSmokeTP != nullptr) { MuzzleSmokeTP->SetVisibility(false); }
 }

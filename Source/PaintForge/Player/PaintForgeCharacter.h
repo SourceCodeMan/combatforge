@@ -117,8 +117,9 @@ protected:
 	/** Mounts the per-team skeletal body (Manny=0 / Quinn=1) with feet alignment; gated by CachedBodyTeamId. */
 	void ApplyTeamBody(uint8 Team);
 
-	/** Timer callback: end the current muzzle flash (hide the blobs, drop the light). */
+	/** Timer callbacks: snap flash/light off first; smoke lingers a beat longer (airsoft juice). */
 	void ClearMuzzleFlash();
+	void ClearMuzzleSmoke();
 
 	/** Builds the primitive marker viewmodel (receiver/guard/barrel/stock/mag/grip) under Parent. */
 	void BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube, UStaticMesh* Cylinder,
@@ -156,29 +157,36 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // per-team body mat ("Color" param)
 	bool bUsingArtBody = false;   // true once ThirdPersonBodyMesh mounted; gates the SetTeamColor/eliminate branches
 
-	// ---- Weapon cosmetics (M1 art pass): first-person marker viewmodel + muzzle flash (all primitives) ----
-	// The player finally sees a marker in hand; a real gun mesh drops in later by swapping the parts' meshes.
+	// ---- Weapon cosmetics: FP marker viewmodel + muzzle flash/smoke (engine primitives, no Niagara) ----
 	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<USceneComponent> ViewModelRoot;   // FP marker anchor (on camera)
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> MarkerPartsFP;                            // owner-only-see marker parts
-	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleFlashFP; // owner FP flash blob
-	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleFlashTP; // viewers' flash blob (world-placed)
-	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UPointLightComponent> MuzzleLight;    // brief world light per shot
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleFlashFP; // owner FP flash core
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleFlashTP; // viewers' flash core
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleSmokeFP; // owner FP smoke wisp
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> MuzzleSmokeTP; // viewers' smoke wisp
+	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UPointLightComponent> MuzzleLight;    // brief tight light pulse
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> MarkerMID;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> FlashMIDFP;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> FlashMIDTP;
-	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> FlashMaterial;   // base emissive (M_PF_Flash or fallback)
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> SmokeMIDFP;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> SmokeMIDTP;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> FlashMaterial;   // M_PF_Flash (or fallback)
+	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> SmokeMaterial;   // M_PF_MuzzleSmoke (or fallback)
 
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilKickUU = 3.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilKickPitchDeg = 1.6f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilRecoverSpeed = 11.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleFlashTime = 0.045f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleLightIntensity = 5000.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleFlashTime = 0.032f;   // snappy airsoft flash
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleSmokeTime = 0.12f;    // short residual wisp
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleLightIntensity = 9000.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float MuzzleLightRadius = 280.f;
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
 	FVector RecoilOffset = FVector::ZeroVector;       // decays to zero each tick (owner)
 	float   RecoilPitch = 0.f;                        // deg, decays to zero
 	FTimerHandle MuzzleFlashTimerHandle;
+	FTimerHandle MuzzleSmokeTimerHandle;
 
 	// ---- Config (04 §1) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;
