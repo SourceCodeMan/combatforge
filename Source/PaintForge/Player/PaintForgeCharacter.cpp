@@ -255,6 +255,11 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	{
 		TeamBodyMaterial = TeamBodyMatFinder.Object;
 	}
+	// TP weapon: same SM_Rifle as the FP viewmodel so remote players see a held gun (not a cube).
+	if (RifleMeshFinder.Succeeded())
+	{
+		WeaponMesh = RifleMeshFinder.Object;
+	}
 
 	// Set the mesh's relative transform HERE (ctor), not just in BeginPlay: the Character Movement
 	// Component captures this as its network-smoothing baseline for SIMULATED PROXIES. If it's only

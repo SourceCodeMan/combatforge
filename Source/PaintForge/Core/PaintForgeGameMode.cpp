@@ -18,6 +18,7 @@
 #include "Voting/PFRatingSubsystem.h"
 
 #include "GameFramework/PawnMovementComponent.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
@@ -62,10 +63,37 @@ APaintForgeGameMode::APaintForgeGameMode()
 // World bootstrap
 // ---------------------------------------------------------------------------
 
+void APaintForgeGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
+{
+	Super::InitGame(MapName, Options, ErrorMessage);
+	// Kids drop Wi‑Fi / force-quit mid-match; default UE timeouts leave ghost PlayerStates for a long
+	// time and make "two of me" / stuck Ready rows. Snappier drop detection for LAN playtest.
+	if (UWorld* World = GetWorld())
+	{
+		if (UNetDriver* Net = World->GetNetDriver())
+		{
+			Net->ConnectionTimeout = 12.f;
+			Net->InitialConnectTimeout = 20.f;
+			UE_LOG(PaintForgeLog, Log, TEXT("GameMode: net timeouts Connection=%.0fs Initial=%.0fs"),
+				Net->ConnectionTimeout, Net->InitialConnectTimeout);
+		}
+	}
+}
+
 void APaintForgeGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 	SpawnArenaActors();
+
+	// NetDriver is often created after InitGame for listen hosts — re-apply timeouts here.
+	if (UWorld* World = GetWorld())
+	{
+		if (UNetDriver* Net = World->GetNetDriver())
+		{
+			Net->ConnectionTimeout = 12.f;
+			Net->InitialConnectTimeout = 20.f;
+		}
+	}
 
 	EffectiveRoundWinsToTake = RoundWinsToTakeMatch;
 	EffectiveMaxRounds = MaxRounds;
@@ -274,6 +302,10 @@ void APaintForgeGameMode::SpawnArenaActors()
 
 void APaintForgeGameMode::PostLogin(APlayerController* NewPlayer)
 {
+	// Drop any human PlayerStates that lost their controller (ghosts from crash/force-quit).
+	// Must run before team assignment so roster slots free up for the rejoiner.
+	ScrubGhostPlayerStates(/*KeepPS=*/nullptr);
+
 	// Assign team + roster slot BEFORE Super::PostLogin so the initial pawn spawn already
 	// knows its side (RestartPlayer → GetSpawnTransform reads TeamId).
 	APaintForgePlayerState* PS = NewPlayer ? NewPlayer->GetPlayerState<APaintForgePlayerState>() : nullptr;
@@ -351,6 +383,7 @@ void APaintForgeGameMode::Logout(AController* Exiting)
 		// The leaver's PlayerState may linger in PlayerArray briefly; take them out of the
 		// alive count NOW so the post-logout victory check below is correct.
 		ExitingPS->bAliveInRound = false;
+		ExitingPS->ServerSetReady(false);   // ghosts must not block lobby Ready
 		// CTF: return any carried flag so the match doesn't soft-lock with a phantom carrier.
 		if (ExitingPS->bCarryingFlag)
 		{
@@ -361,6 +394,8 @@ void APaintForgeGameMode::Logout(AController* Exiting)
 			ExitingPS->ServerSetFlagCarry(false, 255);
 		}
 		ExitingPS->ServerSetStandingOnPoint(255);
+		// Free the roster slot so a rejoin doesn't collide (FindFreeRosterIndex scans PlayerArray).
+		ExitingPS->ServerSetTeam(TeamNone, 255);
 		if (TObjectPtr<APFTargetDummy>* Dummy = WarmupDummies.Find(ExitingPS))
 		{
 			if (*Dummy)
@@ -373,6 +408,14 @@ void APaintForgeGameMode::Logout(AController* Exiting)
 	}
 
 	Super::Logout(Exiting);
+
+	// Hard-destroy lingering human PlayerStates so the lobby never shows a second "ghost" row
+	// that can't ready (kids force-quit / Wi‑Fi drop mid-match).
+	if (IsValid(ExitingPS) && !ExitingPS->IsABot())
+	{
+		ExitingPS->Destroy();
+	}
+	ScrubGhostPlayerStates();
 
 	// A leaver can complete an elimination victory, an all-ready condition, or an all-voted
 	// condition. Their PlayerState may still sit in PlayerArray here, so the ready/vote scans
@@ -2606,6 +2649,53 @@ UPFRatingSubsystem* APaintForgeGameMode::GetRatingSubsystem() const
 	return GI ? GI->GetSubsystem<UPFRatingSubsystem>() : nullptr;
 }
 
+bool APaintForgeGameMode::IsActiveRosterMember(const APaintForgePlayerState* PS)
+{
+	if (!PS || !IsValid(PS))
+	{
+		return false;
+	}
+	// Bots always count while their AI controller owns them. Humans without a Controller are ghosts.
+	if (PS->IsABot())
+	{
+		return PS->GetOwningController() != nullptr;
+	}
+	return PS->GetPlayerController() != nullptr || PS->GetOwningController() != nullptr;
+}
+
+void APaintForgeGameMode::ScrubGhostPlayerStates(const APaintForgePlayerState* KeepPS)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || !HasAuthority())
+	{
+		return;
+	}
+	TArray<APaintForgePlayerState*> ToKill;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (!PS || PS == KeepPS || PS->IsABot())
+		{
+			continue;
+		}
+		if (!IsActiveRosterMember(PS))
+		{
+			ToKill.Add(PS);
+		}
+	}
+	for (APaintForgePlayerState* Ghost : ToKill)
+	{
+		UE_LOG(PaintForgeLog, Warning, TEXT("GameMode: scrubbing ghost PlayerState %s"),
+			*Ghost->GetPlayerName());
+		if (TObjectPtr<APFTargetDummy>* Dummy = WarmupDummies.Find(Ghost))
+		{
+			if (*Dummy) { (*Dummy)->Destroy(); }
+			WarmupDummies.Remove(Ghost);
+		}
+		Ghost->Destroy();
+	}
+}
+
 void APaintForgeGameMode::GetTeamCounts(int32& OutTeamA, int32& OutTeamB) const
 {
 	OutTeamA = 0;
@@ -2618,7 +2708,7 @@ void APaintForgeGameMode::GetTeamCounts(int32& OutTeamA, int32& OutTeamB) const
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
-		if (!PS)
+		if (!PS || !IsActiveRosterMember(PS))
 		{
 			continue;
 		}
@@ -2644,9 +2734,9 @@ bool APaintForgeGameMode::AreAllPlayersReady(const APaintForgePlayerState* Ignor
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
-		if (!PS || PS == IgnorePS || PS->IsABot())
+		if (!PS || PS == IgnorePS || PS->IsABot() || !IsActiveRosterMember(PS))
 		{
-			continue;   // bots never ready up — they don't gate the human ready check
+			continue;   // bots never ready; ghosts never block Ready
 		}
 		if (!PS->bReady)
 		{
@@ -2668,7 +2758,7 @@ uint8 APaintForgeGameMode::FindFreeRosterIndex() const
 			for (APlayerState* PSBase : GS->PlayerArray)
 			{
 				const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
-				if (PS && PS->RosterIndex == Candidate)
+				if (PS && IsActiveRosterMember(PS) && PS->RosterIndex == Candidate)
 				{
 					bTaken = true;
 					break;

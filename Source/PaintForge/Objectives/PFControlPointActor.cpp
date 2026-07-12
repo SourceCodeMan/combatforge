@@ -17,7 +17,8 @@
 namespace
 {
 	constexpr float CaptureRadiusUU = 350.f;   // ~0.9 cell
-	const FVector PadScale(3.5f, 3.5f, 0.15f); // flat disc on the floor
+	// Engine cylinder is h=100,r=50. XY scale → radius ~175 uu; Z=0.12 → thin pad on floor.
+	const FVector PadScale(3.5f, 3.5f, 0.12f);
 	const FLinearColor NeutralGray(0.45f, 0.45f, 0.5f);
 }
 
