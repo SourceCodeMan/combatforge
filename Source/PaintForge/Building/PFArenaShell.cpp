@@ -277,8 +277,9 @@ FTransform APFArenaShell::GetBuildStartTransform(uint8 Team, int32 SlotIdx) cons
 {
 	const int32 Slot = FMath::Clamp(SlotIdx, 0, PFGrid::SpawnPointsPerTeam - 1);
 	const bool bTeamA = (Team != 1);
-	// Just inside the plot's spawn-side edge (cells 1-2 / 13-14), looking down-plot at the midline.
-	const float X = bTeamA ? 2.f * PFGrid::CellUU : FieldX - 2.f * PFGrid::CellUU;
+	// On the spawn column (cell 0 / cell 15) — never part of any plot, matching the Combat spawn — so
+	// injected community geometry (all-bot half / Improvement map) can never embed a pawn at build start.
+	const float X = bTeamA ? 0.5f * PFGrid::CellUU : FieldX - 0.5f * PFGrid::CellUU;
 	const float Y = (Slot + 0.5f) * TeamSpawnSpacingY;
 	const float Yaw = bTeamA ? 0.f : 180.f;
 	return FTransform(FRotator(0.f, Yaw, 0.f), FVector(X, Y, SpawnZ));

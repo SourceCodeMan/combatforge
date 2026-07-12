@@ -242,28 +242,31 @@ bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces
 	}
 	// v1: the most-recent file (names are timestamp-sorted). Vote-ranked selection can refine this later.
 	Files.Sort();
-	const FString ChosenPath = Dir / Files.Last();
-
-	FString Json;
-	if (!FFileHelper::LoadFileToString(Json, *ChosenPath))
+	// Try newest → oldest and skip empty/unparseable files: a Play-only (or nobody-built) match records
+	// an EMPTY arena, and picking only the single newest file would let that degenerate record shadow
+	// every good community arena on disk. Return the first non-empty parseable one instead.
+	for (int32 Idx = Files.Num() - 1; Idx >= 0; --Idx)
 	{
-		return false;
+		FString Json;
+		if (!FFileHelper::LoadFileToString(Json, *(Dir / Files[Idx])))
+		{
+			continue;
+		}
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			continue;
+		}
+		int32 TeamSize = 0;
+		if (FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), OutPieces, TeamSize) && OutPieces.Num() > 0)
+		{
+			UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: loaded community arena %s (%d pieces)"),
+				*Files[Idx], OutPieces.Num());
+			return true;
+		}
 	}
-	TSharedPtr<FJsonObject> Root;
-	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
-	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
-	{
-		UE_LOG(PaintForgeLog, Warning, TEXT("RatingSubsystem: could not parse arena %s"), *ChosenPath);
-		return false;
-	}
-	int32 TeamSize = 0;
-	if (!FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), OutPieces, TeamSize))
-	{
-		return false;
-	}
-	UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: loaded community arena %s (%d pieces)"),
-		*Files.Last(), OutPieces.Num());
-	return true;
+	return false;
 }
 
 bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces) const
@@ -291,8 +294,16 @@ bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, ui
 		(Rec.Team == 0 ? CountA : CountB)++;
 	}
 	const uint8 SourceHalf = (CountA >= CountB) ? 0 : 1;
-	// Plot A = cells 1..6, Plot B = cells 9..14 → 8 cells apart = 32 sub-grid units in X (PFGrid).
-	const int16 PlotDeltaSub = 32;
+
+	// The field is MIRROR-symmetric about its X-centre (team A faces +X toward the neutral strip, team B
+	// faces -X). To move a source half to the other side FACING THE RIGHT WAY, reflect X about the centre
+	// AND flip the +X/-X orientation — a pure translation would leave the fort backwards (cover against
+	// its own spawn, open to the enemy). Reflection is X-only (the arena is symmetric in Y/Z). The X
+	// offset differs by footprint: structural min-corner pieces occupy [X, X+4] → mirror = 60-X; an
+	// E-edge wall's plane sits at X+4 → 56-X; props are centre-anchored → 64-X.
+	const int32 FieldSubX = PFGrid::CellsX * PFGrid::SubPerCell;   // 64
+	const int32 CellSub = PFGrid::SubPerCell;                      // 4
+	auto ReflectRotX = [](uint8 Rot) -> uint8 { return (Rot == 0) ? 2 : (Rot == 2) ? 0 : Rot; };
 
 	for (const FPFBuildPieceRec& Rec : All)
 	{
@@ -303,7 +314,24 @@ bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, ui
 		FPFBuildPieceRec Out = Rec;
 		if (SourceHalf != TargetTeam)
 		{
-			Out.X += (TargetTeam == 1) ? PlotDeltaSub : static_cast<int16>(-PlotDeltaSub);
+			switch (Out.Type)
+			{
+			case EPFPieceType::Wall:
+				// Thin edges: E-edge (Rot 1) sits one cell further in X; wall rotation is preserved.
+				Out.X = static_cast<int16>((Out.Rot == 1) ? (FieldSubX - 2 * CellSub - Out.X)
+				                                          : (FieldSubX - CellSub - Out.X));
+				break;
+			case EPFPieceType::Floor:
+			case EPFPieceType::Ramp:
+			case EPFPieceType::Roof:
+				Out.X = static_cast<int16>(FieldSubX - CellSub - Out.X);
+				Out.Rot = ReflectRotX(Out.Rot);   // ramp ascent +X <-> -X
+				break;
+			default:   // props are centre-anchored
+				Out.X = static_cast<int16>(FieldSubX - Out.X);
+				Out.Rot = ReflectRotX(Out.Rot);
+				break;
+			}
 		}
 		Out.Team = TargetTeam;
 		OutHalf.Add(Out);

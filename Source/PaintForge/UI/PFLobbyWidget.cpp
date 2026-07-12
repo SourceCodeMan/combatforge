@@ -44,8 +44,8 @@ namespace
 		switch (Type)
 		{
 		case EPFMatchType::Elimination: return TEXT("Elimination");
-		case EPFMatchType::FreeForAll:  return TEXT("Free-for-All");
-		case EPFMatchType::Skirmish:    return TEXT("Skirmish");
+		case EPFMatchType::FreeForAll:  return TEXT("Free-for-All  (soon)");
+		case EPFMatchType::Skirmish:    return TEXT("Skirmish  (soon)");
 		case EPFMatchType::CaptureFlag: return TEXT("Capture the Flag  (soon)");
 		case EPFMatchType::Domination:  return TEXT("Domination  (soon)");
 		case EPFMatchType::Hardpoint:   return TEXT("Hardpoint  (soon)");
@@ -382,6 +382,18 @@ void UPFLobbyWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		PollAccum = 0.f;
 		RefreshRoster();
 		RefreshConfig();
+	}
+
+	// The loadout overlay only makes sense while the Tab-hold cursor exists. Collapse it the moment the
+	// cursor goes away — releasing Tab, or a match cycle returning to the lobby — so a near-opaque
+	// full-screen panel can never strand the view with no cursor left to press BACK.
+	if (LoadoutOverlay && LoadoutOverlay->GetVisibility() != ESlateVisibility::Collapsed)
+	{
+		const APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer());
+		if (!PC || !PC->IsScoreboardHeld())
+		{
+			LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed);
+		}
 	}
 
 	// Lobby start countdown: PhaseEndServerTime == 0 means untimed lobby.

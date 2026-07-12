@@ -196,9 +196,14 @@ bool FPFArenaSerialization::ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
 		(*Obj)->TryGetNumberField(TEXT("own"), Own);
 		(*Obj)->TryGetNumberField(TEXT("team"), Team);
 
-		if (T < 0 || T >= static_cast<int32>(EPFPieceType::MAX_Count) || Team < 0 || Team > 1)
+		const int32 MaxRot = (T == static_cast<int32>(EPFPieceType::Wall)) ? 1 : 3;   // walls: N/E only
+		if (T < 0 || T >= static_cast<int32>(EPFPieceType::MAX_Count) || Team < 0 || Team > 1
+			|| R < 0 || R > MaxRot
+			|| X < -1000 || X > 1000 || Y < -1000 || Y > 1000 || Z < -1000 || Z > 1000)
 		{
-			continue;   // skip corrupt records (would index the 14-ISM array out of range)
+			// Reject corrupt records: a bad type/team would index the 14-ISM array out of range; a bad
+			// Rot aliases occupancy keys; wild coords would silently wrap the int16 cast below.
+			continue;
 		}
 		FPFBuildPieceRec Rec;
 		Rec.PieceId  = static_cast<uint16>(Id);   // re-minted by the injector; not trusted here
