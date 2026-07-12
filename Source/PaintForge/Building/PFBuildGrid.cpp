@@ -567,11 +567,14 @@ void APFBuildGrid::ServerInjectPieces(const TArray<FPFBuildPieceRec>& InPieces)
 			continue;   // never index the 14-ISM array out of range
 		}
 		// Same add sequence as TryPlacePiece: re-mint the id, dirty the FastArray, mirror locally.
+		// OwnerIdx 255 = community stock (no living builder → delete refunds nothing; team still owns it).
 		FPFBuildPieceRec Rec = In;
 		Rec.PieceId = ++NextPieceId;   // monotonic; never reuse the source file's id
+		Rec.OwnerIdx = 255;
 		FPFBuildPieceRec& Added = Pieces.Items.Add_GetRef(Rec);
 		Pieces.MarkItemDirty(Added);   // FastArray delta → clients
 		AddPieceLocal(Added);          // server-side ISM + occupancy (client path fires via PostReplicatedAdd)
+		// Do NOT stamp BuilderByPieceId — teammates may delete, but no budget is minted.
 		++Injected;
 	}
 	if (Injected > 0)

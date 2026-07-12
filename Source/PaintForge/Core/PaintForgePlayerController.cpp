@@ -574,6 +574,12 @@ void APaintForgePlayerController::PFType(int32 Type)
 	ServerHostSetMatchType(static_cast<uint8>(FMath::Clamp(Type, 0, 5)));
 }
 
+void APaintForgePlayerController::PFForceStart()
+{
+	// Host convenience / smoke: same as Enter force-start in the lobby.
+	ServerHostForceStart();
+}
+
 // ---------------------------------------------------------------------------
 // Death cam + spectate (T5)
 // ---------------------------------------------------------------------------

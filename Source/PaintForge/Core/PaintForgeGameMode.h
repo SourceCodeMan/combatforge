@@ -162,6 +162,11 @@ protected:
 	void ApplyServerMoveLocks();
 	void ResetPlayerMatchStats();
 
+#if !UE_BUILD_SHIPPING
+	/** -SmokeImprovement: seed-driven Lobby→Build inject check, then exit (playtest script). */
+	void TickSmokeImprovement();
+#endif
+
 	// ---- (intra) queries ----
 	APaintForgeGameState* GetPFGameState() const;
 	UPFRatingSubsystem* GetRatingSubsystem() const;
@@ -208,4 +213,10 @@ protected:
 	FPFMatchResult PendingMatchResult;
 
 	float MatchStartServerTime = 0.f;        // stamped at Lobby→Build (matchDurationSec source)
+
+#if !UE_BUILD_SHIPPING
+	FTimerHandle SmokeImprovementTimer;
+	int32 SmokeImprovementStep = 0;          // 0=wait player, 1=start countdown, 2=await Build, 3=done
+	float SmokeImprovementElapsed = 0.f;
+#endif
 };

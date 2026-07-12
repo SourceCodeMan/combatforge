@@ -41,6 +41,7 @@ public:
 	UFUNCTION(Exec) void PFFormat(int32 TeamSize);   // "PFFormat 6"
 	UFUNCTION(Exec) void PFMode(int32 Mode);         // "PFMode 2" (Play-only)
 	UFUNCTION(Exec) void PFType(int32 Type);         // "PFType 0" (Elimination)
+	UFUNCTION(Exec) void PFForceStart();             // host: force lobby → match (smoke / playtest)
 	UFUNCTION(Server, Reliable) void ServerSpectateNext(bool bForward); // dead-only; server retargets ViewTarget
 
 	// ---- Cross-package accessors ----

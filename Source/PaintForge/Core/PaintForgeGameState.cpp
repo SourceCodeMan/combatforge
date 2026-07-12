@@ -23,6 +23,7 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 
 	DOREPLIFETIME(APaintForgeGameState, Phase);
 	DOREPLIFETIME(APaintForgeGameState, PhaseEndServerTime);
+	DOREPLIFETIME(APaintForgeGameState, PhaseDuration);
 	DOREPLIFETIME(APaintForgeGameState, RoundState);
 	DOREPLIFETIME(APaintForgeGameState, RoundStateEndServerTime);
 	DOREPLIFETIME(APaintForgeGameState, RoundNumber);
@@ -37,6 +38,7 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APaintForgeGameState, BuildMode);
 	DOREPLIFETIME(APaintForgeGameState, MatchType);
 	DOREPLIFETIME(APaintForgeGameState, TeamScores);
+	DOREPLIFETIME(APaintForgeGameState, CommunityBasePieces);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +101,16 @@ void APaintForgeGameState::ServerSetPhase(EPFMatchPhase NewPhase, float EndServe
 	}
 	Phase = NewPhase;
 	PhaseEndServerTime = EndServerTime;
+	// Stamp full-scale duration at phase entry so UI rings (vote) normalize against the real
+	// GameMode config, not a hardcoded 20 s constant. Untimed phases (Lobby end=0) → 0.
+	if (EndServerTime > 0.f)
+	{
+		PhaseDuration = FMath::Max(0.f, EndServerTime - GetServerWorldTimeSeconds());
+	}
+	else
+	{
+		PhaseDuration = 0.f;
+	}
 	OnRep_Phase();
 	ForceNetUpdate();
 }
@@ -261,6 +273,16 @@ void APaintForgeGameState::ServerSetMatchType(EPFMatchType NewType)
 	ForceNetUpdate();
 }
 
+void APaintForgeGameState::ServerSetCommunityBasePieces(uint16 Count)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	CommunityBasePieces = Count;
+	ForceNetUpdate();
+}
+
 void APaintForgeGameState::ServerResetMatchState()
 {
 	if (!HasAuthority())
@@ -275,14 +297,20 @@ void APaintForgeGameState::ServerResetMatchState()
 	TeamScores[1] = 0;
 	AliveCounts[0] = 0;
 	AliveCounts[1] = 0;
+	CommunityBasePieces = 0;
 	ElimFeed.Reset();
 	VoteTally = FPFVoteTally();
+	const bool bRoundChanged = (RoundState != EPFRoundState::None);
 	RoundState = EPFRoundState::None;
 	RoundStateEndServerTime = 0.f;
 	OnRep_Score();
 	OnRep_AliveCounts();
 	OnRep_ElimFeed();
 	OnRep_VoteTally();
+	if (bRoundChanged)
+	{
+		OnRep_RoundState();   // listen-host broadcast (was missing — host-only UI/input edge)
+	}
 	ForceNetUpdate();
 }
 
