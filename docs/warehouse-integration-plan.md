@@ -1,6 +1,9 @@
 # Warehouse / environment art integration — plan & findings
 
-_Status: assets downloaded, NOT yet wired in. Written 2026‑07‑12 (Claude, branch `feat/kid-test-assets`)._
+_Status: STREAMED at runtime (2026‑07‑12). `UPFWarehouseStreamSubsystem` loads
+`/Game/Scene_Warehouse/Maps/Industrial_Warehouse` on host+clients when the package exists;
+`APFArenaShell` hides cube floor/walls/dressing but keeps collision + spawn/midline paint.
+Gameplay still boots from `L_Graybox`. VT must stay on (`r.VirtualTextures=True`)._
 
 ## What was downloaded (in `Content/`, currently untracked)
 - **`Scene_Warehouse/`** — a ~6.9 GB Megascans **Industrial Warehouse** scene: hero map `Maps/Industrial_Warehouse.umap`, PackedLevel prop actors (`Ind_War_Rack/BoxStack/Frame/HandTruck…`), storage shelves / pallets / crates / beams / cables / walls, plus its own materials, sequences, and `VisualFramework/DemoRoom`.

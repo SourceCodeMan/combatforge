@@ -588,6 +588,37 @@ void APFArenaShell::SetMidlineBarrierActive(bool bActive)
 	}
 }
 
+void APFArenaShell::SetMapBackdropActive(bool bActive)
+{
+	if (bMapBackdropActive == bActive)
+	{
+		return;
+	}
+	bMapBackdropActive = bActive;
+
+	// Hide cube shell structure + cosmetic dressing so the streamed warehouse map reads as the
+	// venue. Keep collision on solid parts; keep spawn strips + midline posts/stripe visible so
+	// kids still see team sides and the center line.
+	auto SetVis = [bActive](UStaticMeshComponent* Comp)
+	{
+		if (Comp)
+		{
+			Comp->SetVisibility(!bActive, /*bPropagateToChildren=*/true);
+			Comp->SetHiddenInGame(bActive);
+		}
+	};
+
+	SetVis(FieldFloor);
+	for (UStaticMeshComponent* Wall : PerimeterWalls) { SetVis(Wall); }
+	SetVis(PenFloor);
+	for (UStaticMeshComponent* Wall : PenWalls) { SetVis(Wall); }
+	for (UStaticMeshComponent* Part : DressingParts) { SetVis(Part); }
+
+	// Spawn strips + midline stay visible (gameplay landmarks).
+	UE_LOG(PaintForgeLog, Log, TEXT("ArenaShell: map backdrop %s (cube shell hidden, collision kept)"),
+		bActive ? TEXT("ON") : TEXT("OFF"));
+}
+
 void APFArenaShell::ApplyTint(UStaticMeshComponent* Comp, const FLinearColor& Color)
 {
 	// Spawn strips / hazard lines use MarkMaterial (Color → albedo + soft emissive).

@@ -41,6 +41,13 @@ public:
 	 */
 	void SetMidlineBarrierActive(bool bActive);
 
+	/**
+	 * When the Industrial_Warehouse map is streamed as the environment, hide cube floor/walls/
+	 * dressing (keep collision + spawn strips + midline paint for gameplay).
+	 */
+	void SetMapBackdropActive(bool bActive);
+	bool IsMapBackdropActive() const { return bMapBackdropActive; }
+
 	// ---- Spawn transform providers (GameMode consumes; deterministic, index-stable) ----
 	FTransform GetTeamSpawnTransform(uint8 TeamSide, int32 SlotIdx) const;   // TeamSide = physical side 0/1
 	FTransform GetBuildStartTransform(uint8 Team, int32 SlotIdx) const;      // own-plot placement at Build start
@@ -110,4 +117,5 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> TintMIDs;
 
 	FDelegateHandle GameStateSetHandle;
+	bool bMapBackdropActive = false;
 };
