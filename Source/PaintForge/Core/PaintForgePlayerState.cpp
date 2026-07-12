@@ -35,6 +35,9 @@ void APaintForgePlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 	DOREPLIFETIME(APaintForgePlayerState, TagCount);
 	DOREPLIFETIME(APaintForgePlayerState, MatchScore);
 	DOREPLIFETIME(APaintForgePlayerState, PlayerGuidHash);
+	DOREPLIFETIME(APaintForgePlayerState, bCarryingFlag);
+	DOREPLIFETIME(APaintForgePlayerState, CarriedFlagTeam);
+	DOREPLIFETIME(APaintForgePlayerState, StandingOnPoint);
 }
 
 void APaintForgePlayerState::ServerSetTeam(uint8 NewTeam, uint8 NewRosterIndex)
@@ -155,6 +158,33 @@ void APaintForgePlayerState::ServerAddTag()
 	}
 	++TagCount;
 	OnRep_Flags();   // HUD / scoreboard listeners
+	ForceNetUpdate();
+}
+
+void APaintForgePlayerState::ServerSetFlagCarry(bool bCarrying, uint8 FlagTeam)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	bCarryingFlag = bCarrying;
+	CarriedFlagTeam = bCarrying ? FlagTeam : 255;
+	OnRep_Flags();
+	ForceNetUpdate();
+}
+
+void APaintForgePlayerState::ServerSetStandingOnPoint(uint8 PointIndex)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (StandingOnPoint == PointIndex)
+	{
+		return;
+	}
+	StandingOnPoint = PointIndex;
+	OnRep_Flags();
 	ForceNetUpdate();
 }
 

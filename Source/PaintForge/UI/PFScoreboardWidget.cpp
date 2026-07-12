@@ -137,8 +137,11 @@ void UPFScoreboardWidget::RefreshRows()
 		return;
 	}
 
-	// Skirmish: team TAG counts. FreeForAll: solo leaderboard header. Elimination: round wins.
-	const bool bSkirmish = (GS->MatchType == EPFMatchType::Skirmish);
+	// TeamScores modes: Skirmish tags + CTF/Dom/HP objective points. FreeForAll: solo header. Else: round wins.
+	const bool bTeamScores = (GS->MatchType == EPFMatchType::Skirmish
+		|| GS->MatchType == EPFMatchType::CaptureFlag
+		|| GS->MatchType == EPFMatchType::Domination
+		|| GS->MatchType == EPFMatchType::Hardpoint);
 	const bool bFFA = (GS->MatchType == EPFMatchType::FreeForAll);
 	if (WinsAText)
 	{
@@ -149,7 +152,7 @@ void UPFScoreboardWidget::RefreshRows()
 		else
 		{
 			WinsAText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
-				bSkirmish ? static_cast<int32>(GS->TeamScores[0]) : static_cast<int32>(GS->TeamRoundWins[0]))));
+				bTeamScores ? static_cast<int32>(GS->TeamScores[0]) : static_cast<int32>(GS->TeamRoundWins[0]))));
 		}
 	}
 	if (WinsBText)
@@ -161,7 +164,7 @@ void UPFScoreboardWidget::RefreshRows()
 		else
 		{
 			WinsBText->SetText(FText::FromString(FString::Printf(TEXT("%d"),
-				bSkirmish ? static_cast<int32>(GS->TeamScores[1]) : static_cast<int32>(GS->TeamRoundWins[1]))));
+				bTeamScores ? static_cast<int32>(GS->TeamScores[1]) : static_cast<int32>(GS->TeamRoundWins[1]))));
 		}
 	}
 	if (RoundText)
@@ -171,9 +174,21 @@ void UPFScoreboardWidget::RefreshRows()
 		{
 			Round = TEXT("FREE-FOR-ALL");
 		}
-		else if (bSkirmish)
+		else if (GS->MatchType == EPFMatchType::Skirmish)
 		{
 			Round = TEXT("SKIRMISH");
+		}
+		else if (GS->MatchType == EPFMatchType::CaptureFlag)
+		{
+			Round = TEXT("CAPTURE THE FLAG");
+		}
+		else if (GS->MatchType == EPFMatchType::Domination)
+		{
+			Round = TEXT("DOMINATION");
+		}
+		else if (GS->MatchType == EPFMatchType::Hardpoint)
+		{
+			Round = TEXT("HARDPOINT");
 		}
 		else if (GS->RoundNumber > 0)
 		{

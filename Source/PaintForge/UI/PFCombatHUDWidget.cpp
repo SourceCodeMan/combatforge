@@ -334,11 +334,13 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 		return;
 	}
 
-	if (GS->MatchType == EPFMatchType::Skirmish)
+	if (GS->MatchType == EPFMatchType::Skirmish
+		|| GS->MatchType == EPFMatchType::CaptureFlag
+		|| GS->MatchType == EPFMatchType::Domination
+		|| GS->MatchType == EPFMatchType::Hardpoint)
 	{
-		// Skirmish repurposes the top block for TAGS: collapse the round pips, show "first to N" in the
-		// round-number slot, and the two team tag totals in the (otherwise unused) alive row. The timer
-		// row renders the match countdown automatically via GetRoundTimeRemaining().
+		// Continuous team-score modes: collapse round pips, show "first to N" + TeamScores in the
+		// alive row. Timer is the match countdown via GetRoundTimeRemaining().
 		UpdatePipVisibility(0);
 		for (int32 i = 0; i < MaxPips; ++i)
 		{
@@ -347,7 +349,12 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 		}
 		if (RoundNumberText)
 		{
-			RoundNumberText->SetText(FText::FromString(FString::Printf(TEXT("first to %d"), GS->RoundWinsToTake)));
+			const TCHAR* Prefix = TEXT("first to");
+			if (GS->MatchType == EPFMatchType::CaptureFlag) { Prefix = TEXT("CTF · first to"); }
+			else if (GS->MatchType == EPFMatchType::Domination) { Prefix = TEXT("DOM · first to"); }
+			else if (GS->MatchType == EPFMatchType::Hardpoint) { Prefix = TEXT("HP · first to"); }
+			RoundNumberText->SetText(FText::FromString(
+				FString::Printf(TEXT("%s %d"), Prefix, GS->RoundWinsToTake)));
 		}
 		if (AliveTextA) { AliveTextA->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamScores[0]))); }
 		if (AliveTextB) { AliveTextB->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamScores[1]))); }
@@ -443,9 +450,13 @@ void UPFCombatHUDWidget::HandleAliveCountsChanged()
 	{
 		return;
 	}
-	if (GS->MatchType == EPFMatchType::Skirmish || GS->MatchType == EPFMatchType::FreeForAll)
+	if (GS->MatchType == EPFMatchType::Skirmish
+		|| GS->MatchType == EPFMatchType::FreeForAll
+		|| GS->MatchType == EPFMatchType::CaptureFlag
+		|| GS->MatchType == EPFMatchType::Domination
+		|| GS->MatchType == EPFMatchType::Hardpoint)
 	{
-		return;   // tag / FFA leaderboard row is owned by HandleScoreChanged
+		return;   // tag / FFA / objective score row is owned by HandleScoreChanged
 	}
 	if (AliveTextA)
 	{

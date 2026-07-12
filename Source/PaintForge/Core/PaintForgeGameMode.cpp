@@ -12,6 +12,9 @@
 #include "Combat/PFTargetDummy.h"
 #include "Building/PFArenaShell.h"
 #include "Building/PFBuildGrid.h"
+#include "Objectives/PFControlPointActor.h"
+#include "Objectives/PFFlagActor.h"
+#include "Objectives/PFObjectiveLayout.h"
 #include "Voting/PFRatingSubsystem.h"
 
 #include "GameFramework/PawnMovementComponent.h"
@@ -180,6 +183,16 @@ void APaintForgeGameMode::Logout(AController* Exiting)
 		// The leaver's PlayerState may linger in PlayerArray briefly; take them out of the
 		// alive count NOW so the post-logout victory check below is correct.
 		ExitingPS->bAliveInRound = false;
+		// CTF: return any carried flag so the match doesn't soft-lock with a phantom carrier.
+		if (ExitingPS->bCarryingFlag)
+		{
+			if (APFFlagActor* Carried = GetFlagForTeam(ExitingPS->CarriedFlagTeam))
+			{
+				Carried->ServerReturnHome();
+			}
+			ExitingPS->ServerSetFlagCarry(false, 255);
+		}
+		ExitingPS->ServerSetStandingOnPoint(255);
 		if (TObjectPtr<APFTargetDummy>* Dummy = WarmupDummies.Find(ExitingPS))
 		{
 			if (*Dummy)
@@ -200,6 +213,9 @@ void APaintForgeGameMode::Logout(AController* Exiting)
 	CheckElimVictory();
 	CheckSkirmishAbandon();   // Skirmish: a whole team leaving ends the match (CheckElimVictory no-ops here)
 	CheckFreeForAllAbandon(); // FFA: last combatant standing wins
+	CheckCaptureFlagAbandon();
+	CheckDominationAbandon();
+	CheckHardpointAbandon();
 	NotifyReadyChangedInternal(ExitingPS);
 	CheckAllVotesIn(ExitingPS);
 }
@@ -540,6 +556,8 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 
 	case EPFMatchPhase::Vote:
 	{
+		// Objective actors live only during combat Live — tear them down on the way out.
+		DestroyObjectiveActors();
 		GS->ServerSetRoundState(EPFRoundState::None, 0.f);
 		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this,
 			&APaintForgeGameMode::FinalizeVotePhase, VotePhaseDuration, false);
@@ -1099,6 +1117,49 @@ void APaintForgeGameMode::BeginLiveRound()
 		return;
 	}
 
+	if (GS->MatchType == EPFMatchType::CaptureFlag)
+	{
+		SpawnObjectiveActors();
+		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
+		ApplyServerMoveLocks();
+		GetWorldTimerManager().SetTimer(RoundTimerHandle, this,
+			&APaintForgeGameMode::ResolveCaptureFlagOnTimer, SkirmishMatchDuration, false);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: CaptureFlag LIVE (%.0f s, first to %d captures)"),
+			SkirmishMatchDuration, CaptureFlagTarget);
+		return;
+	}
+
+	if (GS->MatchType == EPFMatchType::Domination)
+	{
+		SpawnObjectiveActors();
+		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
+		ApplyServerMoveLocks();
+		GetWorldTimerManager().SetTimer(RoundTimerHandle, this,
+			&APaintForgeGameMode::ResolveDominationOnTimer, SkirmishMatchDuration, false);
+		GetWorldTimerManager().SetTimer(ObjectiveScoreTimerHandle, this,
+			&APaintForgeGameMode::TickDominationScoring, ObjectiveScoreInterval, true);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Domination LIVE (%.0f s, first to %d)"),
+			SkirmishMatchDuration, SkirmishTagTarget);
+		return;
+	}
+
+	if (GS->MatchType == EPFMatchType::Hardpoint)
+	{
+		HardpointActiveSlot = 0;
+		SpawnObjectiveActors();
+		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
+		ApplyServerMoveLocks();
+		GetWorldTimerManager().SetTimer(RoundTimerHandle, this,
+			&APaintForgeGameMode::ResolveHardpointOnTimer, SkirmishMatchDuration, false);
+		GetWorldTimerManager().SetTimer(ObjectiveScoreTimerHandle, this,
+			&APaintForgeGameMode::TickHardpointScoring, ObjectiveScoreInterval, true);
+		GetWorldTimerManager().SetTimer(HardpointRotateTimerHandle, this,
+			&APaintForgeGameMode::RotateHardpoint, HardpointRotateInterval, true);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Hardpoint LIVE (%.0f s, first to %d, rotate %.0f s)"),
+			SkirmishMatchDuration, SkirmishTagTarget, HardpointRotateInterval);
+		return;
+	}
+
 	const float Duration = bSuddenDeathRoundActive ? SuddenDeathDuration : EffectiveRoundDuration;
 	GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + Duration);
 	ApplyServerMoveLocks();
@@ -1270,6 +1331,487 @@ void APaintForgeGameMode::CheckFreeForAllAbandon()
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Objective match types (CTF / Domination / Hardpoint)
+// ---------------------------------------------------------------------------
+
+bool APaintForgeGameMode::IsTeamScoreObjectiveMode(EPFMatchType Type) const
+{
+	return Type == EPFMatchType::CaptureFlag
+		|| Type == EPFMatchType::Domination
+		|| Type == EPFMatchType::Hardpoint;
+}
+
+void APaintForgeGameMode::EndTeamScoreObjective(uint8 WinnerTeam, const TCHAR* ModeName)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat)
+	{
+		return;   // timer + score-cap double-fire guard
+	}
+	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
+	GetWorldTimerManager().ClearTimer(ObjectiveScoreTimerHandle);
+	GetWorldTimerManager().ClearTimer(HardpointRotateTimerHandle);
+	ClearAllFlagCarriers();
+	DestroyObjectiveActors();
+	PendingMatchWinner = WinnerTeam;
+	PendingMatchResult = MakeMatchResult(WinnerTeam);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s over — winner team %d (%d-%d)"),
+		ModeName, WinnerTeam, GS->TeamScores[0], GS->TeamScores[1]);
+	SetPhase(EPFMatchPhase::Vote);
+}
+
+void APaintForgeGameMode::ResolveCaptureFlagOnTimer()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	uint8 Winner = TeamNone;
+	if (GS->TeamScores[0] > GS->TeamScores[1]) { Winner = 0; }
+	else if (GS->TeamScores[1] > GS->TeamScores[0]) { Winner = 1; }
+	EndCaptureFlag(Winner);
+}
+
+void APaintForgeGameMode::EndCaptureFlag(uint8 WinnerTeam)
+{
+	EndTeamScoreObjective(WinnerTeam, TEXT("CaptureFlag"));
+}
+
+void APaintForgeGameMode::CheckCaptureFlagAbandon()
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::CaptureFlag
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	const uint8 A = GS->AliveCounts[0];
+	const uint8 B = GS->AliveCounts[1];
+	if (A > 0 && B > 0) { return; }
+	uint8 Winner = TeamNone;
+	if (A == 0 && B > 0) { Winner = 1; }
+	else if (B == 0 && A > 0) { Winner = 0; }
+	EndCaptureFlag(Winner);
+}
+
+void APaintForgeGameMode::ResolveDominationOnTimer()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	uint8 Winner = TeamNone;
+	if (GS->TeamScores[0] > GS->TeamScores[1]) { Winner = 0; }
+	else if (GS->TeamScores[1] > GS->TeamScores[0]) { Winner = 1; }
+	EndDomination(Winner);
+}
+
+void APaintForgeGameMode::EndDomination(uint8 WinnerTeam)
+{
+	EndTeamScoreObjective(WinnerTeam, TEXT("Domination"));
+}
+
+void APaintForgeGameMode::CheckDominationAbandon()
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::Domination
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	const uint8 A = GS->AliveCounts[0];
+	const uint8 B = GS->AliveCounts[1];
+	if (A > 0 && B > 0) { return; }
+	uint8 Winner = TeamNone;
+	if (A == 0 && B > 0) { Winner = 1; }
+	else if (B == 0 && A > 0) { Winner = 0; }
+	EndDomination(Winner);
+}
+
+void APaintForgeGameMode::ResolveHardpointOnTimer()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	uint8 Winner = TeamNone;
+	if (GS->TeamScores[0] > GS->TeamScores[1]) { Winner = 0; }
+	else if (GS->TeamScores[1] > GS->TeamScores[0]) { Winner = 1; }
+	EndHardpoint(Winner);
+}
+
+void APaintForgeGameMode::EndHardpoint(uint8 WinnerTeam)
+{
+	EndTeamScoreObjective(WinnerTeam, TEXT("Hardpoint"));
+}
+
+void APaintForgeGameMode::CheckHardpointAbandon()
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::Hardpoint
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	const uint8 A = GS->AliveCounts[0];
+	const uint8 B = GS->AliveCounts[1];
+	if (A > 0 && B > 0) { return; }
+	uint8 Winner = TeamNone;
+	if (A == 0 && B > 0) { Winner = 1; }
+	else if (B == 0 && A > 0) { Winner = 0; }
+	EndHardpoint(Winner);
+}
+
+void APaintForgeGameMode::SpawnObjectiveActors()
+{
+	UWorld* World = GetWorld();
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!World || !GS || !HasAuthority())
+	{
+		return;
+	}
+	DestroyObjectiveActors();   // idempotent re-entry
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = this;
+
+	if (GS->MatchType == EPFMatchType::CaptureFlag)
+	{
+		for (uint8 Team = 0; Team <= 1; ++Team)
+		{
+			const FVector Home = PFObjectiveLayout::FlagHome(Team);
+			APFFlagActor* Flag = World->SpawnActor<APFFlagActor>(
+				APFFlagActor::StaticClass(), Home, FRotator::ZeroRotator, Params);
+			if (Flag)
+			{
+				Flag->ServerInit(Team, Home);
+				Flags[Team] = Flag;
+			}
+		}
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: CTF flags spawned at PFGrid homes"));
+		return;
+	}
+
+	if (GS->MatchType == EPFMatchType::Domination || GS->MatchType == EPFMatchType::Hardpoint)
+	{
+		const bool bHardpoint = (GS->MatchType == EPFMatchType::Hardpoint);
+		ControlPoints.Reset(PFObjectiveLayout::ControlPointCount);
+		for (int32 i = 0; i < PFObjectiveLayout::ControlPointCount; ++i)
+		{
+			const FVector Loc = PFObjectiveLayout::ControlPointLocation(i);
+			const bool bActive = !bHardpoint || (i == HardpointActiveSlot);
+			APFControlPointActor* CP = World->SpawnActor<APFControlPointActor>(
+				APFControlPointActor::StaticClass(), Loc, FRotator::ZeroRotator, Params);
+			if (CP)
+			{
+				CP->ServerInit(i, Loc, bActive);
+				ControlPoints.Add(CP);
+			}
+		}
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %d control points spawned (%s)"),
+			ControlPoints.Num(), bHardpoint ? TEXT("Hardpoint") : TEXT("Domination"));
+	}
+}
+
+void APaintForgeGameMode::DestroyObjectiveActors()
+{
+	GetWorldTimerManager().ClearTimer(ObjectiveScoreTimerHandle);
+	GetWorldTimerManager().ClearTimer(HardpointRotateTimerHandle);
+
+	for (int32 i = 0; i < 2; ++i)
+	{
+		if (Flags[i])
+		{
+			Flags[i]->Destroy();
+			Flags[i] = nullptr;
+		}
+	}
+	for (APFControlPointActor* CP : ControlPoints)
+	{
+		if (CP)
+		{
+			CP->Destroy();
+		}
+	}
+	ControlPoints.Reset();
+}
+
+void APaintForgeGameMode::ClearAllFlagCarriers()
+{
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return;
+	}
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		if (APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+		{
+			if (PS->bCarryingFlag || PS->StandingOnPoint != 255)
+			{
+				PS->ServerSetFlagCarry(false, 255);
+				PS->ServerSetStandingOnPoint(255);
+			}
+		}
+	}
+}
+
+APFFlagActor* APaintForgeGameMode::GetFlagForTeam(uint8 Team) const
+{
+	if (Team > 1)
+	{
+		return nullptr;
+	}
+	return Flags[Team];
+}
+
+void APaintForgeGameMode::NotifyFlagTouched(APFFlagActor* Flag, APaintForgePlayerState* Toucher)
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || !Flag || !Toucher || !HasAuthority())
+	{
+		return;
+	}
+	if (GS->MatchType != EPFMatchType::CaptureFlag
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	if (Toucher->TeamId > 1 || Flag->IsCarried())
+	{
+		return;
+	}
+
+	const uint8 FlagTeam = Flag->GetOwnerTeam();
+
+	// Own flag at home: if carrying the enemy flag → CAPTURE.
+	if (FlagTeam == Toucher->TeamId)
+	{
+		if (!Flag->IsAtHome())
+		{
+			return;   // own flag is away — no capture until it's back
+		}
+		if (!Toucher->bCarryingFlag || Toucher->CarriedFlagTeam == Toucher->TeamId)
+		{
+			return;
+		}
+		// Capture: score + return both flags + clear carrier.
+		APFFlagActor* EnemyFlag = GetFlagForTeam(Toucher->CarriedFlagTeam);
+		if (EnemyFlag)
+		{
+			EnemyFlag->ServerReturnHome();
+		}
+		Toucher->ServerSetFlagCarry(false, 255);
+		Toucher->ServerAddScore(ScoreRoundWin);   // reuse T18 capture bonus weight
+
+		uint16 ScoreA = GS->TeamScores[0];
+		uint16 ScoreB = GS->TeamScores[1];
+		if (Toucher->TeamId == 0) { ++ScoreA; } else { ++ScoreB; }
+		GS->ServerSetTeamScores(ScoreA, ScoreB);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: CTF capture by %s (team %d) → %d-%d"),
+			*Toucher->GetPlayerName(), Toucher->TeamId, ScoreA, ScoreB);
+
+		if ((Toucher->TeamId == 0 ? ScoreA : ScoreB) >= CaptureFlagTarget)
+		{
+			EndCaptureFlag(Toucher->TeamId);
+		}
+		return;
+	}
+
+	// Enemy flag (at home or dropped): pick up if not already carrying.
+	if (Toucher->bCarryingFlag)
+	{
+		return;
+	}
+	Flag->ServerGiveTo(Toucher);
+	Toucher->ServerSetFlagCarry(true, FlagTeam);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s picked up team %d flag"),
+		*Toucher->GetPlayerName(), FlagTeam);
+}
+
+void APaintForgeGameMode::TickDominationScoring()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::Domination
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+
+	// Clear standing-on-point stamps, then re-stamp from occupancy.
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		if (APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+		{
+			PS->ServerSetStandingOnPoint(255);
+		}
+	}
+
+	uint16 ScoreA = GS->TeamScores[0];
+	uint16 ScoreB = GS->TeamScores[1];
+	bool bScored = false;
+
+	for (APFControlPointActor* CP : ControlPoints)
+	{
+		if (!CP || !CP->IsPointActive())
+		{
+			continue;
+		}
+		int32 OutA = 0, OutB = 0;
+		const uint8 Sole = CP->ServerQueryOccupancy(OutA, OutB);
+		if (Sole <= 1)
+		{
+			CP->ServerSetControllingTeam(Sole);
+		}
+		// Contested / empty keeps prior owner (no flip without presence).
+
+		// Stamp PS for anyone currently on this pad (HUD).
+		if (OutA + OutB > 0)
+		{
+			// Occupancy re-query for PS stamp via sphere is already done; walk players near point.
+			// Lightweight: any living player whose pawn is within capture radius.
+			const FVector CPLoc = CP->GetActorLocation();
+			constexpr float RadiusSq = 350.f * 350.f;
+			for (APlayerState* PSBase : GS->PlayerArray)
+			{
+				APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+				if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
+				{
+					continue;
+				}
+				if (const APawn* Pawn = PS->GetPawn())
+				{
+					if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
+					{
+						PS->ServerSetStandingOnPoint(static_cast<uint8>(CP->GetPointIndex()));
+					}
+				}
+			}
+		}
+
+		const uint8 PointOwner = CP->GetControllingTeam();
+		if (PointOwner == 0) { ++ScoreA; bScored = true; }
+		else if (PointOwner == 1) { ++ScoreB; bScored = true; }
+	}
+
+	if (bScored)
+	{
+		GS->ServerSetTeamScores(ScoreA, ScoreB);
+		if (ScoreA >= SkirmishTagTarget)
+		{
+			EndDomination(0);
+			return;
+		}
+		if (ScoreB >= SkirmishTagTarget)
+		{
+			EndDomination(1);
+		}
+	}
+}
+
+void APaintForgeGameMode::TickHardpointScoring()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::Hardpoint
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		if (APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+		{
+			PS->ServerSetStandingOnPoint(255);
+		}
+	}
+
+	APFControlPointActor* Active = nullptr;
+	for (APFControlPointActor* CP : ControlPoints)
+	{
+		if (CP && CP->IsPointActive())
+		{
+			Active = CP;
+			break;
+		}
+	}
+	if (!Active)
+	{
+		return;
+	}
+
+	int32 OutA = 0, OutB = 0;
+	const uint8 Sole = Active->ServerQueryOccupancy(OutA, OutB);
+	if (Sole <= 1)
+	{
+		Active->ServerSetControllingTeam(Sole);
+	}
+
+	const FVector CPLoc = Active->GetActorLocation();
+	constexpr float RadiusSq = 350.f * 350.f;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
+		{
+			continue;
+		}
+		if (const APawn* Pawn = PS->GetPawn())
+		{
+			if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
+			{
+				PS->ServerSetStandingOnPoint(static_cast<uint8>(Active->GetPointIndex()));
+			}
+		}
+	}
+
+	const uint8 PointOwner = Active->GetControllingTeam();
+	if (PointOwner > 1)
+	{
+		return;
+	}
+	uint16 ScoreA = GS->TeamScores[0];
+	uint16 ScoreB = GS->TeamScores[1];
+	if (PointOwner == 0) { ++ScoreA; } else { ++ScoreB; }
+	GS->ServerSetTeamScores(ScoreA, ScoreB);
+	if ((PointOwner == 0 ? ScoreA : ScoreB) >= SkirmishTagTarget)
+	{
+		EndHardpoint(PointOwner);
+	}
+}
+
+void APaintForgeGameMode::RotateHardpoint()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::Hardpoint
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	if (ControlPoints.Num() == 0)
+	{
+		return;
+	}
+	HardpointActiveSlot = (HardpointActiveSlot + 1) % ControlPoints.Num();
+	for (int32 i = 0; i < ControlPoints.Num(); ++i)
+	{
+		if (APFControlPointActor* CP = ControlPoints[i])
+		{
+			CP->ServerSetActive(i == HardpointActiveSlot);
+			if (i == HardpointActiveSlot)
+			{
+				CP->ServerSetControllingTeam(255);   // fresh neutral on rotation
+			}
+		}
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Hardpoint rotated to slot %d"), HardpointActiveSlot);
+}
+
 void APaintForgeGameMode::CheckElimVictory()
 {
 	APaintForgeGameState* GS = GetPFGameState();
@@ -1279,9 +1821,12 @@ void APaintForgeGameMode::CheckElimVictory()
 	}
 	if (RespawnMode == EPFRespawnMode::Respawn
 		|| GS->MatchType == EPFMatchType::Skirmish
-		|| GS->MatchType == EPFMatchType::FreeForAll)
+		|| GS->MatchType == EPFMatchType::FreeForAll
+		|| GS->MatchType == EPFMatchType::CaptureFlag
+		|| GS->MatchType == EPFMatchType::Domination
+		|| GS->MatchType == EPFMatchType::Hardpoint)
 	{
-		return;   // respawn variant / Skirmish / FFA: resolve on the timer / tag-cap only
+		return;   // respawn variant / continuous modes: resolve on the timer / score-cap only
 	}
 
 	const uint8 AliveA = GS->AliveCounts[0];
@@ -1450,6 +1995,13 @@ FPFMatchResult APaintForgeGameMode::MakeMatchResult(uint8 MatchWinner) const
 			Result.RoundWinsB = static_cast<uint8>(FMath::Min<int32>(Second, 255));
 			Result.RoundsPlayed = 1;
 		}
+		else if (IsTeamScoreObjectiveMode(GS->MatchType))
+		{
+			// CTF / Dom / HP: TeamScores are captures or control points.
+			Result.RoundWinsA = static_cast<uint8>(FMath::Min<int32>(GS->TeamScores[0], 255));
+			Result.RoundWinsB = static_cast<uint8>(FMath::Min<int32>(GS->TeamScores[1], 255));
+			Result.RoundsPlayed = 1;
+		}
 		else
 		{
 			Result.RoundWinsA = GS->TeamRoundWins[0];
@@ -1562,6 +2114,29 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 				return;
 			}
 		}
+		RespawnVictimAtTeamSpawn(Victim);
+		return;
+	}
+
+	// CAPTURE THE FLAG: carrier death returns the flag home; no tag scoring; respawn like Skirmish.
+	if (GS->MatchType == EPFMatchType::CaptureFlag)
+	{
+		if (VictimPS->bCarryingFlag)
+		{
+			if (APFFlagActor* Carried = GetFlagForTeam(VictimPS->CarriedFlagTeam))
+			{
+				Carried->ServerReturnHome();
+			}
+			VictimPS->ServerSetFlagCarry(false, 255);
+		}
+		RespawnVictimAtTeamSpawn(Victim);
+		return;
+	}
+
+	// DOMINATION / HARDPOINT: elims for stats only; control-point scoring is the timer tick.
+	if (GS->MatchType == EPFMatchType::Domination || GS->MatchType == EPFMatchType::Hardpoint)
+	{
+		VictimPS->ServerSetStandingOnPoint(255);
 		RespawnVictimAtTeamSpawn(Victim);
 		return;
 	}
@@ -1814,6 +2389,8 @@ void APaintForgeGameMode::ResetPlayerMatchStats()
 			PS->TagCount = 0;
 			PS->MatchScore = 0;
 			PS->bHasVoted = false;
+			PS->ServerSetFlagCarry(false, 255);
+			PS->ServerSetStandingOnPoint(255);
 			PS->ForceNetUpdate();
 		}
 	}
@@ -1910,21 +2487,24 @@ uint8 APaintForgeGameMode::FindFreeRosterIndex() const
 
 void APaintForgeGameMode::ComputeEffectiveScaling()
 {
-	// Skirmish / FreeForAll: one continuous timed period, win by tag count — bypass all round scaling.
-	// RoundWinsToTake carries the tag TARGET for the HUD (clamped to uint8; real win-check uses full value).
+	// Continuous timed modes: bypass Elimination round scaling. RoundWinsToTake carries the score
+	// TARGET for the HUD (CTF uses CaptureFlagTarget; others use SkirmishTagTarget).
 	if (APaintForgeGameState* SkGS = GetPFGameState())
 	{
 		if (SkGS->MatchType == EPFMatchType::Skirmish
-			|| SkGS->MatchType == EPFMatchType::FreeForAll)
+			|| SkGS->MatchType == EPFMatchType::FreeForAll
+			|| IsTeamScoreObjectiveMode(SkGS->MatchType))
 		{
-			const uint8 TargetU8 = static_cast<uint8>(FMath::Min<int32>(SkirmishTagTarget, 255));
+			const int32 Target = (SkGS->MatchType == EPFMatchType::CaptureFlag)
+				? static_cast<int32>(CaptureFlagTarget)
+				: static_cast<int32>(SkirmishTagTarget);
+			const uint8 TargetU8 = static_cast<uint8>(FMath::Min(Target, 255));
 			EffectiveRoundWinsToTake = TargetU8;
 			EffectiveMaxRounds = 1;
 			EffectiveRoundDuration = SkirmishMatchDuration;
 			SkGS->ServerSetRoundWinsToTake(TargetU8);
-			UE_LOG(PaintForgeLog, Log, TEXT("GameMode: %s — first to %d tags, %.0f s"),
-				SkGS->MatchType == EPFMatchType::FreeForAll ? TEXT("FreeForAll") : TEXT("Skirmish"),
-				SkirmishTagTarget, SkirmishMatchDuration);
+			UE_LOG(PaintForgeLog, Log, TEXT("GameMode: match type %d — first to %d, %.0f s"),
+				static_cast<int32>(SkGS->MatchType), Target, SkirmishMatchDuration);
 			return;
 		}
 	}

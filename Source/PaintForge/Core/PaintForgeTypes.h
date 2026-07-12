@@ -66,9 +66,9 @@ enum class EPFMatchType : uint8
 	Elimination = 0,  // round-based, last team standing, first-to-N (v1)
 	FreeForAll = 1,   // solo, most tags (play-only by nature); per-player TagCount
 	Skirmish = 2,     // teams, most tags to a score (the non-lethal "TDM")
-	CaptureFlag = 3,  //                                                        [wiring pending]
-	Domination = 4,   //                                                        [wiring pending]
-	Hardpoint = 5,    //                                                        [wiring pending]
+	CaptureFlag = 3,  // teams, first to N flag captures (TeamScores)
+	Domination = 4,   // teams, hold 3 points — score over time (TeamScores)
+	Hardpoint = 5,    // teams, rotating single point — score over time (TeamScores)
 	MAX_Count = 6 UMETA(Hidden)
 };
 

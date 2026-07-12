@@ -14,6 +14,8 @@ class APaintForgePlayerState;
 class APFArenaShell;
 class APFBuildGrid;
 class APFBotController;
+class APFControlPointActor;
+class APFFlagActor;
 class APFTargetDummy;
 class UPFRatingSubsystem;
 
@@ -50,8 +52,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") bool  bFillWithBots        = true;    // top each team up to the format size
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFBuildMode DefaultBuildMode = EPFBuildMode::Creative;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFMatchType DefaultMatchType = EPFMatchType::Skirmish; // kids' default
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 SkirmishTagTarget = 50; // first team/player to N tags wins (≤255; shared by Skirmish + FFA)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period (Skirmish + FFA)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 SkirmishTagTarget = 50; // first team/player to N tags wins (≤255; shared by Skirmish + FFA + Dom/HP)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period (Skirmish + FFA + objectives)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 CaptureFlagTarget = 3; // CTF: first team to N captures
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  HardpointRotateInterval = 45.f; // Hardpoint: seconds per slot
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  ObjectiveScoreInterval = 1.f;   // Dom/HP: score tick period
 
 	// ---- The only phase mutator in the codebase ----
 	void SetPhase(EPFMatchPhase NewPhase);            // server; updates GameState, stamps timers, side effects
@@ -71,6 +76,9 @@ public:
 	void HostSetFormat(uint8 NewTeamSize);             // Lobby only: 4v4 / 6v6 (bots fill to it)
 	void HostSetBuildMode(EPFBuildMode NewMode);       // Lobby only: Creative / Improvement / Play-only
 	void HostSetMatchType(EPFMatchType NewType);       // Lobby only: Elimination / FFA / Skirmish / …
+
+	// Objective actors → GameMode (server). Carrier state is stamped on PlayerState.
+	void NotifyFlagTouched(class APFFlagActor* Flag, APaintForgePlayerState* Toucher);
 
 	// Spawn transform for a player in the current round (side swap: even rounds swapped — B1):
 	FTransform GetSpawnTransform(const APaintForgePlayerState* PS) const;
@@ -101,6 +109,26 @@ protected:
 	void ResolveFreeForAllOnTimer();                   // timer: most TagCount wins, tie = draw
 	void EndFreeForAll(uint8 WinnerRosterOrNone);      // roster index of winner, 255 = draw
 	void CheckFreeForAllAbandon();                     // one combatant left → they win
+
+	// ---- (intra) objective match types (CTF / Dom / HP — siblings; TeamScores win) ----
+	void ResolveCaptureFlagOnTimer();
+	void EndCaptureFlag(uint8 WinnerTeam);
+	void CheckCaptureFlagAbandon();
+	void ResolveDominationOnTimer();
+	void EndDomination(uint8 WinnerTeam);
+	void CheckDominationAbandon();
+	void ResolveHardpointOnTimer();
+	void EndHardpoint(uint8 WinnerTeam);
+	void CheckHardpointAbandon();
+	void TickDominationScoring();                      // 1 Hz: own points → TeamScores
+	void TickHardpointScoring();                       // 1 Hz: active point owner → TeamScores
+	void RotateHardpoint();                            // advance active control-point slot
+	void SpawnObjectiveActors();                       // flags / control points from PFGrid layout
+	void DestroyObjectiveActors();
+	void ClearAllFlagCarriers();
+	APFFlagActor* GetFlagForTeam(uint8 Team) const;
+	bool IsTeamScoreObjectiveMode(EPFMatchType Type) const;
+	void EndTeamScoreObjective(uint8 WinnerTeam, const TCHAR* ModeName); // shared Combat→Vote jump
 
 	// ---- (intra) lobby / build countdowns ----
 	void BeginLobbyStartCountdown(bool bForced);
@@ -150,9 +178,17 @@ protected:
 	UPROPERTY() TObjectPtr<APFBuildGrid>  BuildGrid;
 	UPROPERTY() TMap<TObjectPtr<APaintForgePlayerState>, TObjectPtr<APFTargetDummy>> WarmupDummies;
 
+	// Objective runtime (server-owned; actors replicate themselves).
+	UPROPERTY() TObjectPtr<APFFlagActor> Flags[2];
+	UPROPERTY() TArray<TObjectPtr<APFControlPointActor>> ControlPoints;
+	int32 HardpointActiveSlot = 0;
+
 	FTimerHandle PhaseTimerHandle;           // Build / Vote / Results phase ends
 	FTimerHandle RoundTimerHandle;           // Freeze / Live / Intermission steps
 	FTimerHandle LobbyCountdownHandle;       // all-ready / force-start 5 s countdown
+	FTimerHandle ObjectiveScoreTimerHandle;  // Dom/HP periodic scoring
+	FTimerHandle HardpointRotateTimerHandle; // Hardpoint slot rotation
+
 
 	// Effective match scaling (T15), computed at Lobby→Build from connected team sizes:
 	uint8 EffectiveRoundWinsToTake = 4;

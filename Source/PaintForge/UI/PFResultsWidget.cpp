@@ -291,9 +291,12 @@ void UPFResultsWidget::RefreshResult(const APaintForgeGameState& GS)
 		return;
 	}
 
-	const bool bSkirmish = (GS.MatchType == EPFMatchType::Skirmish);
-	const int32 WinsA = bSkirmish ? static_cast<int32>(GS.TeamScores[0]) : static_cast<int32>(GS.TeamRoundWins[0]);
-	const int32 WinsB = bSkirmish ? static_cast<int32>(GS.TeamScores[1]) : static_cast<int32>(GS.TeamRoundWins[1]);
+	const bool bTeamScores = (GS.MatchType == EPFMatchType::Skirmish
+		|| GS.MatchType == EPFMatchType::CaptureFlag
+		|| GS.MatchType == EPFMatchType::Domination
+		|| GS.MatchType == EPFMatchType::Hardpoint);
+	const int32 WinsA = bTeamScores ? static_cast<int32>(GS.TeamScores[0]) : static_cast<int32>(GS.TeamRoundWins[0]);
+	const int32 WinsB = bTeamScores ? static_cast<int32>(GS.TeamScores[1]) : static_cast<int32>(GS.TeamRoundWins[1]);
 
 	if (WinnerText)
 	{
@@ -313,9 +316,21 @@ void UPFResultsWidget::RefreshResult(const APaintForgeGameState& GS)
 	if (ScoreText)
 	{
 		FString Score = FString::Printf(TEXT("%d — %d"), WinsA, WinsB);
-		if (bSkirmish)
+		if (GS.MatchType == EPFMatchType::Skirmish)
 		{
 			Score += TEXT("  ·  tags");
+		}
+		else if (GS.MatchType == EPFMatchType::CaptureFlag)
+		{
+			Score += TEXT("  ·  captures");
+		}
+		else if (GS.MatchType == EPFMatchType::Domination)
+		{
+			Score += TEXT("  ·  domination");
+		}
+		else if (GS.MatchType == EPFMatchType::Hardpoint)
+		{
+			Score += TEXT("  ·  hardpoint");
 		}
 		else
 		{
