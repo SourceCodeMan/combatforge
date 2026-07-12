@@ -77,21 +77,28 @@ void APFBotController::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Refresh the target periodically (and immediately if the cached one died/despawned). Re-roll the
-	// aim error on each acquisition so bots miss believably instead of being perfect.
+	// Sticky targeting: keep the current enemy while it's still alive, in range and visible; only re-scan
+	// (throttled) when we have no engageable target. This stops the nearest-enemy rank from thrashing
+	// between two near-equidistant foes — which otherwise re-armed the reaction gap every 0.4s refresh and
+	// froze the trigger (fatal for Rookie, whose 0.6s notice gap exceeds the refresh). The aim error re-roll
+	// and the reaction "notice" gap are applied only on a genuine target change.
 	TargetRefreshTimer -= DeltaSeconds;
 	FireHoldTimer -= DeltaSeconds;
-	if (TargetRefreshTimer <= 0.f || !CurrentTarget.IsValid())
+	if (!IsTargetEngageable(CurrentTarget.Get()) && TargetRefreshTimer <= 0.f)
 	{
-		APaintForgeCharacter* PrevTarget = CurrentTarget.Get();
-		CurrentTarget = AcquireNearestEnemy();
 		TargetRefreshTimer = TargetRefreshInterval;
-		AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
-		AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
-		if (CurrentTarget.IsValid() && CurrentTarget.Get() != PrevTarget)
+		APaintForgeCharacter* PrevTarget = CurrentTarget.Get();
+		APaintForgeCharacter* NewTarget = AcquireNearestEnemy();   // nearest VISIBLE enemy (else nearest)
+		if (NewTarget != PrevTarget)
 		{
-			FireHoldTimer = ReactionDelay;   // a fresh target isn't shot at until the bot "notices" it
+			AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
+			AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
+			if (NewTarget != nullptr)
+			{
+				FireHoldTimer = ReactionDelay;   // notice gap only when we actually switch to a new target
+			}
 		}
+		CurrentTarget = NewTarget;
 	}
 
 	APaintForgeCharacter* Target = CurrentTarget.Get();
@@ -113,9 +120,10 @@ void APFBotController::Tick(float DeltaSeconds)
 	LookAt.Pitch = FMath::Clamp(LookAt.Pitch + AimJitterPitch, -80.f, 80.f);
 	SetControlRotation(LookAt);
 
-	// Movement: hold a stand-off band — close if too far, back up if too close, strafe in-band. Simple
-	// steering (no navmesh); the bot may bump built cover but keeps pressure. Navmesh pathing is a later
-	// upgrade that won't touch this brain.
+	// Movement: hold a stand-off band — close if too far, back up if too close, strafe in-band — then
+	// steer that desired direction around cover/walls (reactive whiskers) and break out if we get pinned.
+	// (Reactive nav suits the single open arena + sparse player-built cover; a runtime navmesh is the
+	// documented v2 for complex maps and precise objective routing.)
 	StrafeTimer -= DeltaSeconds;
 	if (StrafeTimer <= 0.f)
 	{
@@ -124,19 +132,31 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 	const FVector Flat = FVector(ToTarget.X, ToTarget.Y, 0.f).GetSafeNormal();
 	const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
-	if (Dist > PreferredRangeUU)
+	FVector DesiredDir;
+	if (Dist > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
+	else if (Dist < MinRangeUU)    { DesiredDir = -Flat; }
+	else                           { DesiredDir = Right * StrafeSign; }
+
+	// Unstick: if we wanted to move but barely have over the last sample window, peel off sideways a beat.
+	StuckSampleTimer -= DeltaSeconds;
+	if (EscapeTimer > 0.f)
 	{
-		Bot->AddMovementInput(Flat, 1.f);
-		Bot->AddMovementInput(Right * StrafeSign, 0.4f);
+		EscapeTimer -= DeltaSeconds;
+		DesiredDir = (Right * EscapeSign - Flat * 0.35f).GetSafeNormal();
 	}
-	else if (Dist < MinRangeUU)
+	else if (StuckSampleTimer <= 0.f)
 	{
-		Bot->AddMovementInput(-Flat, 1.f);
+		if (!StuckSamplePos.IsZero()
+			&& FVector::DistSquared2D(Bot->GetActorLocation(), StuckSamplePos) < FMath::Square(StuckMoveThresh))
+		{
+			EscapeTimer = 0.7f;
+			EscapeSign = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
+		}
+		StuckSamplePos = Bot->GetActorLocation();
+		StuckSampleTimer = 0.5f;
 	}
-	else
-	{
-		Bot->AddMovementInput(Right * StrafeSign, 1.f);
-	}
+
+	Bot->AddMovementInput(SteerAvoidingObstacles(DesiredDir), 1.f);
 
 	// Fire only in range, past the reaction gap, and with a clear line of sight (don't hose cover).
 	const bool bWantFire = (Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && HasLineOfSight(Target);
@@ -157,8 +177,10 @@ APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
 	// teammate/unassigned filter. (Reads MatchType only; the FFA rules themselves live in GameMode.)
 	const bool bFFA = (GS->MatchType == EPFMatchType::FreeForAll);
 
-	APaintForgeCharacter* Best = nullptr;
-	float BestDistSq = TNumericLimits<float>::Max();
+	// Track the nearest VISIBLE enemy and, separately, the nearest of any — so a bot prefers a foe it can
+	// actually shoot, but still advances toward the closest when none are currently in sight.
+	APaintForgeCharacter* BestVisible = nullptr;   float BestVisibleSq = TNumericLimits<float>::Max();
+	APaintForgeCharacter* BestAny = nullptr;       float BestAnySq = TNumericLimits<float>::Max();
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const APaintForgePlayerState* OtherPS = Cast<APaintForgePlayerState>(PSBase);
@@ -180,13 +202,41 @@ APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
 			continue;
 		}
 		const float DistSq = FVector::DistSquared(Bot->GetActorLocation(), OtherChar->GetActorLocation());
-		if (DistSq < BestDistSq)
+		if (DistSq < BestAnySq)
 		{
-			BestDistSq = DistSq;
-			Best = OtherChar;
+			BestAnySq = DistSq;
+			BestAny = OtherChar;
+		}
+		if (DistSq < BestVisibleSq && HasLineOfSight(OtherChar))
+		{
+			BestVisibleSq = DistSq;
+			BestVisible = OtherChar;
 		}
 	}
-	return Best;
+	return BestVisible != nullptr ? BestVisible : BestAny;
+}
+
+bool APFBotController::IsTargetEngageable(const APaintForgeCharacter* Target) const
+{
+	if (Target == nullptr)
+	{
+		return false;
+	}
+	const APaintForgePlayerState* TargetPS = Target->GetPlayerState<APaintForgePlayerState>();
+	if (TargetPS == nullptr || !TargetPS->bAliveInRound)
+	{
+		return false;   // dead / despawned → drop it and re-scan
+	}
+	const APaintForgeCharacter* Bot = GetBotCharacter();
+	if (Bot == nullptr)
+	{
+		return false;
+	}
+	if (FVector::DistSquared(Bot->GetActorLocation(), Target->GetActorLocation()) > FMath::Square(EngageRangeUU))
+	{
+		return false;   // drifted out of engage range → let it re-scan for a nearer foe
+	}
+	return HasLineOfSight(Target);   // hold the target only while we can still see it
 }
 
 bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target) const
@@ -205,6 +255,44 @@ bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target) const
 	// Trace ignores self + target: a blocking hit means cover/geometry is in the way → no line of sight.
 	const bool bBlocked = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
 	return !bBlocked;
+}
+
+FVector APFBotController::SteerAvoidingObstacles(const FVector& DesiredDir) const
+{
+	const APaintForgeCharacter* Bot = GetBotCharacter();
+	UWorld* World = GetWorld();
+	if (Bot == nullptr || World == nullptr || DesiredDir.IsNearlyZero())
+	{
+		return DesiredDir;
+	}
+	const FVector Origin = Bot->GetActorLocation() + FVector(0.f, 0.f, 30.f);
+	FCollisionQueryParams Params(FName(TEXT("BotAvoid")), /*bTraceComplex=*/false, Bot);
+	const FCollisionShape Probe = FCollisionShape::MakeSphere(AvoidProbeRadius);
+	// A heading is "clear" if a short forward sphere-sweep (≈ the pawn's width) hits no static geometry
+	// (cover, walls, perimeter). A sphere, not a thin line, so convex corners and low props are caught
+	// before the capsule bumps them.
+	auto PathClear = [&](const FVector& Dir) -> bool
+	{
+		FHitResult Hit;
+		return !World->SweepSingleByChannel(Hit, Origin, Origin + Dir * AvoidProbeUU,
+			FQuat::Identity, ECC_WorldStatic, Probe, Params);
+	};
+	if (PathClear(DesiredDir))
+	{
+		return DesiredDir;
+	}
+	// Blocked ahead: fan out to the nearest clear heading, alternating sides across the FULL arc (including
+	// behind), so a pinned bot actually finds the open direction instead of guessing a rear heading.
+	static const float Sweep[] = { 35.f, -35.f, 60.f, -60.f, 90.f, -90.f, 130.f, -130.f, 160.f, -160.f, 180.f };
+	for (const float Angle : Sweep)
+	{
+		const FVector Candidate = DesiredDir.RotateAngleAxis(Angle, FVector::UpVector);
+		if (PathClear(Candidate))
+		{
+			return Candidate;
+		}
+	}
+	return FVector::ZeroVector;   // fully boxed in — stop pushing into geometry; the unstick timer re-rolls
 }
 
 void APFBotController::SetFiring(bool bFire)

@@ -59,12 +59,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") EPFBotSkill Skill = EPFBotSkill::Rookie;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ReactionDelay = 0.6f;
 
+	// Reactive navigation (open arena, sparse player-built cover): whisker length + unstick threshold.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeUU = 320.f;    // forward look-ahead for cover avoidance
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeRadius = 30.f; // sweep radius (~pawn width) for the avoidance probe
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float StuckMoveThresh = 45.f;  // min 2D move per 0.5s before we count as stuck
+
 private:
 	APaintForgeCharacter* GetBotCharacter() const;
 	APaintForgeCharacter* AcquireNearestEnemy() const;
 	bool HasLineOfSight(const APaintForgeCharacter* Target) const;
 	void SetFiring(bool bFire);
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
+	FVector SteerAvoidingObstacles(const FVector& DesiredDir) const;   // whisker-steer a move dir around cover/walls
+	bool IsTargetEngageable(const APaintForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
 
 	TWeakObjectPtr<APaintForgeCharacter> CurrentTarget;
 	float TargetRefreshTimer = 0.f;
@@ -73,5 +80,10 @@ private:
 	float StrafeSign = 1.f;
 	float AimJitterYaw = 0.f;
 	float AimJitterPitch = 0.f;
+	// Reactive-avoidance / unstick state.
+	FVector StuckSamplePos = FVector::ZeroVector;
+	float StuckSampleTimer = 0.f;
+	float EscapeTimer = 0.f;
+	float EscapeSign = 1.f;
 	bool  bFiring = false;
 };
