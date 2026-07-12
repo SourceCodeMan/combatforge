@@ -1,9 +1,11 @@
-# PaintForge LAN / VPN playtest — **server piece**
+# PaintForge — LAN / VPN playtest
 
 Host a match on this PC. Friends join with `open <ip>:7777`.
 
-You do **not** need a full shipping client build to host. The scripts fall back to the
-**Unreal Editor** as a listen/dedicated-style host using project Content as-is.
+You do **not** need a full shipping client to host. Scripts fall back to the **Unreal Editor**
+using project Content as-is. A Development package also works if you have one.
+
+**Always use `main` (or the latest merge). No feature-branch checkout required.**
 
 ---
 
@@ -18,8 +20,8 @@ run-server.ps1  (headless)   ◄──── open 192.168.x.x:7777
 
 No EOS/Steam yet — raw IP net driver only.
 
-| Mode | Script | Host plays? | Needs packaged app? |
-|------|--------|-------------|---------------------|
+| Mode | Script | Host plays? | Needs package? |
+|------|--------|-------------|----------------|
 | **Listen** | `run-listen.ps1` / `start-host.bat` | Yes | No (editor works) |
 | **Headless server** | `run-server.ps1` / `start-server.bat` | No | No (editor works) |
 
@@ -30,15 +32,15 @@ Default map `/Game/Maps/L_Graybox` · port **7777**.
 ## Host right now (recommended)
 
 ```powershell
-cd D:\projects\paintforge
-git checkout feat/playtest-server
+cd D:\projects\paintforge   # or paintforge-grok
+git pull origin main
 
 # Option A — you play on this PC, friends join
 .\Deploy\playtest\run-listen.ps1
 
 # Option B — headless server; everyone (including you) joins as client
 .\Deploy\playtest\run-server.ps1
-# then on this PC: launch a normal game/editor client and:  open 127.0.0.1:7777
+# then launch editor/game client and console:  open 127.0.0.1:7777
 ```
 
 Share an address:
@@ -47,32 +49,79 @@ Share an address:
 .\Deploy\playtest\print-host-ips.ps1
 ```
 
-Friends (once they have *any* runnable client — PIE on another machine is awkward; prefer a
-packaged client when you have one):
+Friends (any runnable client — packaged preferred for remote):
 
 ```
 open <your-lan-or-vpn-ip>:7777
 ```
 
----
-
-## What the scripts try (in order)
-
-**`run-server.ps1` (headless)**  
-1. `PaintForgeServer.exe` if you ever have a source-engine server build  
-2. Packaged / staged / Dev `PaintForge.exe -server -nullrhi`  
-3. **`UnrealEditor.exe … -server -nullrhi`** ← works without packaging  
-
-**`run-listen.ps1` (host plays)**  
-1. Packaged / staged / Dev `PaintForge.exe Map?Listen`  
-2. **`UnrealEditor.exe … -game Map?Listen`** ← works without packaging  
-
-Force editor:
+Force editor host (ignore packaged exe):
 
 ```powershell
-.\Deploy\playtest\run-server.ps1 -PreferEditor
 .\Deploy\playtest\run-listen.ps1 -PreferEditor
+.\Deploy\playtest\run-server.ps1 -PreferEditor
 ```
+
+---
+
+## Lobby cheatsheet (host)
+
+Hold **Tab** for cursor / scoreboard in lobby.
+
+| Control | Action |
+|---------|--------|
+| Click **MODE** | Creative / Improvement / Play-Only |
+| Click **TYPE** | Elim / FFA / Skirmish / CTF / Dom / HP |
+| Click **FORMAT** | 4v4 ↔ 6v6 (bots fill) |
+| Click a player row | Cycle team (not FFA) |
+| **F** | Ready |
+| **Enter** | Force start (host) |
+
+### Console (host, `~`)
+
+| Command | Meaning |
+|---------|---------|
+| `PFMode 0/1/2` | Creative / Improvement / Play-Only |
+| `PFType 0..5` | Elim / FFA / Skirmish / CTF / Dom / HP |
+| `PFFormat 4` or `6` | Team size |
+| `PFForceStart` | Force lobby countdown |
+
+### First-session recommendations
+
+| Goal | Setup |
+|------|--------|
+| **Fast fight (kids)** | TYPE=Skirmish, MODE=Play-Only, FORMAT=4v4, bots on |
+| **Build + fight** | MODE=Creative, TYPE=Skirmish |
+| **Objectives** | CTF / Dom / HP (bots will try to play them) |
+| **Solo tags** | TYPE=FFA (forces Play-Only) |
+
+Defaults on boot: **Skirmish**, **Creative**, **4v4**, bots fill.
+
+---
+
+## Smoke tests (automated)
+
+```powershell
+# Improvement inject path (editor -game -nullrhi)
+.\Deploy\playtest\smoke-improvement.ps1
+
+# Full cook + packaged boot (Development)
+.\Deploy\playtest\smoke-package.ps1
+
+# Boot existing package only
+.\Deploy\playtest\smoke-package.ps1 -SkipCook
+```
+
+---
+
+## Package a client for friends
+
+```powershell
+.\Deploy\playtest\package-playtest.ps1
+# Output: Packaged\Playtest\Windows\PaintForge.exe
+```
+
+Zip the `Windows` folder + `connect.ps1` for friends.
 
 ---
 
@@ -82,41 +131,27 @@ Force editor:
 Server targets are not currently supported from this engine distribution.
 ```
 
-So a true `PaintForgeServer` binary is **not** available until you use a **source-built** engine.
-`Source/PaintForgeServer.Target.cs` is kept for that day. Playtest hosting does not depend on it.
+True `PaintForgeServer` needs a source-built engine. Hosting does **not** require it —
+use `run-listen` / `run-server` (game or editor + `-server -nullrhi`).
 
 ---
 
 ## Docker
 
 Docker Desktop Linux **cannot** run Win64 `PaintForge.exe`.  
-For LAN/VPN on this machine: **use the PowerShell scripts**, not Docker.
+For LAN/VPN on this machine: **PowerShell scripts**, not Docker.
 
-`docker/` is a stub for a future Linux VPS + Linux cook only.
-
----
-
-## Claude-safe
-
-This folder + `PaintForgeServer.Target.cs` only. No GameMode / UI / combat edits.
+`docker/` is a stub for a future Linux VPS cook only.
 
 ---
 
-## Later (when the app “looks and plays better”)
+## Asset dumps at project root
 
-1. `package-playtest.ps1` — cook a Windows client zip for friends  
-2. Copy zip + `connect.ps1` to their machines  
-3. Host with `run-server.ps1` or `run-listen.ps1` on the staged/packaged exe  
-
-Until then, editor-hosted listen/server is enough to validate join + phase loop on the network.
+Fab/Lyra/Megascans folders parked next to the `.uproject` are **staging only** — not cooked.
+Do not commit huge dumps. Import into `Content/` when wiring art (separate pass).
 
 ---
 
-## Troubleshooting
+## Checklist
 
-| Issue | Fix |
-|-------|-----|
-| Timeout | Wrong IP (use VPN IP over Tailscale/etc.); firewall 7777 |
-| Editor host black screen then exit | Map path wrong; confirm `Content/Maps/L_Graybox.umap` exists |
-| Game.exe fails, no window | Dev binary without cook — use `-PreferEditor` |
-| Friends on VPN can’t join | Share VPN IP from `print-host-ips.ps1`; allow inbound on VPN |
+See [`docs/playtest-checklist.md`](../../docs/playtest-checklist.md) for a short operator list.

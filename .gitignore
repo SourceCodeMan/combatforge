@@ -39,8 +39,15 @@ desktop.ini
 
 # --- Packaged playtest / server drops (local only) ---
 Packaged/
+Build/
 Deploy/playtest/docker/server-linux/**
 !Deploy/playtest/docker/server-linux/.gitkeep
+
+# --- Staged Fab / Megascans / Lyra dumps at project root (not game Content) ---
+LyraStarterGame/
+DerelictCorridorMegascans/
+MilitaryTrenchMegascansSa/
+**/Megascans*/
 
 # --- Crash dumps / local logs outside Saved/ ---
 *.dmp
