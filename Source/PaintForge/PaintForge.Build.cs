@@ -20,9 +20,10 @@ public class PaintForge : ModuleRules
 			"UMG", "Slate", "SlateCore",
 			"NetCore",                       // push-model / net serialization helpers
 			"EngineCameras",                 // UWaveOscillatorCameraShakePattern (PFCameraShakes)
+			"AIModule",                      // AAIController base for roster-filling bots (PFBotController)
 			"Json", "JsonUtilities"          // arena rating records
 		});
 		// No private-only deps in v1. NOT needed: OnlineSubsystem (02 D12),
-		// Niagara (post-v1 art), GameplayAbilities (overkill), AIModule.
+		// Niagara (post-v1 art), GameplayAbilities (overkill).
 	}
 }

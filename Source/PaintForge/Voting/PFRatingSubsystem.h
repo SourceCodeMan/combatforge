@@ -50,6 +50,20 @@ public:
 	/** SHA1-hex arena fingerprint of the active record; empty outside an active record. */
 	FString GetCurrentArenaId() const;
 
+	/**
+	 * Picks a saved community arena from Saved/Arenas/, takes its more-developed half, and remaps that
+	 * half into TargetTeam's plot (X translation between plots) so it can be injected for an all-bot
+	 * team. Server-only; returns false if no saved arena exists. (v1 picks the most-recent file; vote
+	 * ranking can refine the pick later.)
+	 */
+	bool PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, uint8 TargetTeam) const;
+
+	/**
+	 * Loads a whole saved community arena (both halves, unchanged) for Improvement mode — everyone
+	 * builds on top of it. Server-only; false if none saved. The injector re-mints piece ids.
+	 */
+	bool PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces) const;
+
 private:
 	/** One staged vote (AddVote input, held until CommitMatchRecord). Not a USTRUCT: no GC refs. */
 	struct FPFPendingVote
@@ -60,6 +74,9 @@ private:
 
 	/** True on listen server / standalone host; false on pure clients (no world = false). */
 	bool IsServerContext() const;
+
+	/** Loads + parses the most-recent Saved/Arenas/*.json into records. False if none/parse fail. */
+	bool LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces) const;
 
 	/** Serializes CurrentRecordJson to CurrentFilePath. Logs and returns false on failure. */
 	bool WriteRecordToDisk() const;

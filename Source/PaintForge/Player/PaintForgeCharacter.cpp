@@ -17,6 +17,10 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimInstance.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -97,6 +101,146 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 		GetMesh()->SetVisibility(false);
 	}
 
+	// ---- Art loadout components (M1): created empty; ApplyArtLoadout assigns meshes if set ----
+	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
+	FirstPersonArms->SetupAttachment(FirstPersonCamera);
+	FirstPersonArms->SetOnlyOwnerSee(true);          // FP arms: only the owning client sees them
+	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonArms->SetVisibility(false);
+
+	WeaponMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMeshComp"));
+	WeaponMeshComp->SetupAttachment(GetMesh());      // re-attached to the hand socket in ApplyArtLoadout
+	WeaponMeshComp->SetOwnerNoSee(true);             // slice: weapon rides the TP body only
+	WeaponMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMeshComp->SetVisibility(false);
+
+	// ---- First-person marker viewmodel: a rifle silhouette from engine primitives, owner-only-see.
+	// This is what the player stares at every second — the single biggest "it's an FPS" signal. A real
+	// weapon mesh drops in later by re-pointing the parts (or via the WeaponMesh art-loadout seam).
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FlashMatFinder(
+		TEXT("/Game/Materials/M_PF_Flash.M_PF_Flash"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SmokeMatFinder(
+		TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke"));
+	FlashMaterial = FlashMatFinder.Succeeded() ? FlashMatFinder.Object.Get()
+		: (MatFinder.Succeeded() ? MatFinder.Object.Get() : nullptr);
+	SmokeMaterial = SmokeMatFinder.Succeeded() ? SmokeMatFinder.Object.Get() : FlashMaterial.Get();
+	UStaticMesh* CubeMesh = CubeFinder.Succeeded() ? CubeFinder.Object : nullptr;
+	UStaticMesh* CylMesh = CylFinder.Succeeded() ? CylFinder.Object.Get() : CubeMesh;
+	UMaterialInterface* GunBaseMat = MatFinder.Succeeded() ? MatFinder.Object : nullptr;
+
+	ViewModelRoot = CreateDefaultSubobject<USceneComponent>(TEXT("ViewModelRoot"));
+	ViewModelRoot->SetupAttachment(FirstPersonCamera);
+	ViewModelHomeLoc = FVector(28.f, 10.f, -13.f);   // forward-right-down of the eye, classic viewmodel pose
+	ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc);
+
+	BuildMarker(ViewModelRoot, TEXT("VM_"), CubeMesh, CylMesh, MarkerPartsFP, MuzzleLocalFP);
+	for (TObjectPtr<UStaticMeshComponent>& Part : MarkerPartsFP)
+	{
+		if (Part != nullptr)
+		{
+			if (GunBaseMat != nullptr) { Part->SetMaterial(0, GunBaseMat); }
+			Part->SetOnlyOwnerSee(true);   // the marker is the owner's first-person viewmodel
+		}
+	}
+
+	// FP muzzle flash core (owner) — hot emissive sphere at the barrel tip.
+	MuzzleFlashFP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleFlashFP"));
+	MuzzleFlashFP->SetupAttachment(ViewModelRoot);
+	if (SphereFinder.Succeeded()) { MuzzleFlashFP->SetStaticMesh(SphereFinder.Object); }
+	if (FlashMaterial != nullptr) { MuzzleFlashFP->SetMaterial(0, FlashMaterial); }
+	MuzzleFlashFP->SetRelativeLocation(MuzzleLocalFP);
+	MuzzleFlashFP->SetRelativeScale3D(FVector(0.14f));
+	MuzzleFlashFP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleFlashFP->SetCastShadow(false);
+	MuzzleFlashFP->SetOnlyOwnerSee(true);
+	MuzzleFlashFP->SetVisibility(false);
+
+	// FP muzzle smoke wisp — short residual gray puff just past the flash (airsoft, not paint spray).
+	MuzzleSmokeFP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleSmokeFP"));
+	MuzzleSmokeFP->SetupAttachment(ViewModelRoot);
+	if (SphereFinder.Succeeded()) { MuzzleSmokeFP->SetStaticMesh(SphereFinder.Object); }
+	if (SmokeMaterial != nullptr) { MuzzleSmokeFP->SetMaterial(0, SmokeMaterial); }
+	MuzzleSmokeFP->SetRelativeLocation(MuzzleLocalFP + FVector(6.f, 0.f, 0.f));
+	MuzzleSmokeFP->SetRelativeScale3D(FVector(0.18f, 0.10f, 0.10f));
+	MuzzleSmokeFP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleSmokeFP->SetCastShadow(false);
+	MuzzleSmokeFP->SetOnlyOwnerSee(true);
+	MuzzleSmokeFP->SetVisibility(false);
+
+	// TP muzzle flash core (viewers) — world-placed at the shooter's marker each shot.
+	MuzzleFlashTP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleFlashTP"));
+	MuzzleFlashTP->SetupAttachment(Capsule);
+	MuzzleFlashTP->SetUsingAbsoluteLocation(true);
+	if (SphereFinder.Succeeded()) { MuzzleFlashTP->SetStaticMesh(SphereFinder.Object); }
+	if (FlashMaterial != nullptr) { MuzzleFlashTP->SetMaterial(0, FlashMaterial); }
+	MuzzleFlashTP->SetRelativeScale3D(FVector(0.22f));
+	MuzzleFlashTP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleFlashTP->SetCastShadow(false);
+	MuzzleFlashTP->SetOwnerNoSee(true);
+	MuzzleFlashTP->SetVisibility(false);
+
+	MuzzleSmokeTP = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MuzzleSmokeTP"));
+	MuzzleSmokeTP->SetupAttachment(Capsule);
+	MuzzleSmokeTP->SetUsingAbsoluteLocation(true);
+	if (SphereFinder.Succeeded()) { MuzzleSmokeTP->SetStaticMesh(SphereFinder.Object); }
+	if (SmokeMaterial != nullptr) { MuzzleSmokeTP->SetMaterial(0, SmokeMaterial); }
+	MuzzleSmokeTP->SetRelativeScale3D(FVector(0.28f, 0.16f, 0.16f));
+	MuzzleSmokeTP->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MuzzleSmokeTP->SetCastShadow(false);
+	MuzzleSmokeTP->SetOwnerNoSee(true);
+	MuzzleSmokeTP->SetVisibility(false);
+
+	// Shared muzzle light — tight bright pulse, no shadows (perf / multiplayer-friendly).
+	MuzzleLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("MuzzleLight"));
+	MuzzleLight->SetupAttachment(Capsule);
+	MuzzleLight->SetUsingAbsoluteLocation(true);
+	MuzzleLight->SetIntensity(0.f);
+	MuzzleLight->SetAttenuationRadius(MuzzleLightRadius);
+	MuzzleLight->SetLightColor(FLinearColor(1.0f, 0.70f, 0.32f));
+	MuzzleLight->SetCastShadows(false);
+	MuzzleLight->SetSpecularScale(0.2f);
+
+	// M1: default the art body to the imported UE Mannequin (Third Person content pack) so the
+	// graybox cubes become a real animated humanoid. .Succeeded() guards keep the graybox fallback
+	// if the pack isn't present. SKM_Manny_Simple is the non-Nanite variant (renders on SM5).
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinBodyFinder(
+		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> QuinnBodyFinder(
+		TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple"));
+	if (MannequinBodyFinder.Succeeded())
+	{
+		ThirdPersonBodyMesh = MannequinBodyFinder.Object;   // fallback body (also team 0)
+		Team0BodyMesh = MannequinBodyFinder.Object;         // team 0 = Manny
+	}
+	// Team 1 = Quinn if present, else fall back to Manny (still tinted distinctly).
+	Team1BodyMesh = QuinnBodyFinder.Succeeded() ? QuinnBodyFinder.Object.Get() : ThirdPersonBodyMesh.Get();
+	static ConstructorHelpers::FClassFinder<UAnimInstance> MannequinAnimFinder(
+		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
+	if (MannequinAnimFinder.Succeeded())
+	{
+		ThirdPersonAnimClass = MannequinAnimFinder.Class;   // same skeleton -> one anim BP for both teams
+	}
+	// Per-team body tint material (muted team color + subtle team-rim). Fallback: no tint (native mannequin mat).
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamBodyMatFinder(
+		TEXT("/Game/Materials/M_PF_TeamBody.M_PF_TeamBody"));
+	if (TeamBodyMatFinder.Succeeded())
+	{
+		TeamBodyMaterial = TeamBodyMatFinder.Object;
+	}
+
+	// Set the mesh's relative transform HERE (ctor), not just in BeginPlay: the Character Movement
+	// Component captures this as its network-smoothing baseline for SIMULATED PROXIES. If it's only
+	// set in BeginPlay, proxies smooth around a 0 baseline and the mannequin floats on other
+	// players' screens. Mannequin origin is at its feet (measured minZ = 0), so offset = -halfHeight.
+	if (ThirdPersonBodyMesh != nullptr && GetMesh() != nullptr)
+	{
+		GetMesh()->SetRelativeLocationAndRotation(
+			FVector(0.f, 0.f, -Capsule->GetUnscaledCapsuleHalfHeight()),
+			FRotator(0.f, -90.f, 0.f));
+	}
+
 	// ---- Cross-package components (own their replication flags in their ctors) ----
 	WeaponComponent      = CreateDefaultSubobject<UPFWeaponComponent>(TEXT("WeaponComponent"));
 	BuildComponent       = CreateDefaultSubobject<UPFBuildComponent>(TEXT("BuildComponent"));
@@ -134,6 +278,9 @@ void APaintForgeCharacter::BeginPlay()
 	}
 
 	FallStartPeakZ = GetActorLocation().Z;
+
+	ApplyArtLoadout();       // swaps in real body/arms/weapon if assigned; no-op (graybox) otherwise
+	SetupWeaponMaterials();  // dark gunmetal marker + emissive flash blobs
 }
 
 void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -144,6 +291,8 @@ void APaintForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	GetWorldTimerManager().ClearTimer(SprintOutTimerHandle);
 	GetWorldTimerManager().ClearTimer(BufferedJumpClearHandle);
+	GetWorldTimerManager().ClearTimer(MuzzleFlashTimerHandle);
+	GetWorldTimerManager().ClearTimer(MuzzleSmokeTimerHandle);
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -177,6 +326,15 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 			FVector Rel = FirstPersonCamera->GetRelativeLocation();
 			Rel.Z = FMath::FInterpConstantTo(Rel.Z, TargetZ, DeltaSeconds, CrouchCameraInterpSpeed);
 			FirstPersonCamera->SetRelativeLocation(Rel);
+		}
+
+		// Viewmodel recoil recovery: the per-shot kick springs back toward the resting pose.
+		if (ViewModelRoot != nullptr)
+		{
+			RecoilOffset = FMath::VInterpTo(RecoilOffset, FVector::ZeroVector, DeltaSeconds, RecoilRecoverSpeed);
+			RecoilPitch = FMath::FInterpTo(RecoilPitch, 0.f, DeltaSeconds, RecoilRecoverSpeed);
+			ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc + RecoilOffset);
+			ViewModelRoot->SetRelativeRotation(FRotator(RecoilPitch, 0.f, 0.f));
 		}
 	}
 }
@@ -515,10 +673,109 @@ void APaintForgeCharacter::ClearBufferedJump()
 // Team + elimination cosmetics
 // ---------------------------------------------------------------------------
 
+void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
+{
+	// Mounts the per-team skeletal body. Gated so the frequent SetTeamColor calls (ready/budget/roster
+	// flag replications all route here) don't re-mount the mesh every time.
+	if (GetMesh() == nullptr)
+	{
+		return;
+	}
+	USkeletalMesh* Chosen = (Team == 1)
+		? (Team1BodyMesh ? Team1BodyMesh : ThirdPersonBodyMesh)
+		: (Team0BodyMesh ? Team0BodyMesh : ThirdPersonBodyMesh);
+	if (Chosen == nullptr)
+	{
+		return;   // graybox fallback: keep the cubes (unconfigured character stays the validated graybox)
+	}
+	if (bUsingArtBody && CachedBodyTeamId == Team)
+	{
+		return;   // already the right body
+	}
+
+	GetMesh()->SetSkeletalMeshAsset(Chosen);
+	if (ThirdPersonAnimClass != nullptr)
+	{
+		GetMesh()->SetAnimInstanceClass(ThirdPersonAnimClass);
+	}
+	// Align: face +X (standard ACharacter -90 yaw), feet at the capsule bottom. Use the FEET-AT-ORIGIN
+	// convention (-halfHeight, matching the ctor smoothing baseline) rather than a per-mesh -MeshMinZ
+	// term: on simulated proxies the Character Movement Component's network smoothing forces the mesh
+	// relative Z back to the ctor baseline every tick, so a -MeshMinZ correction would be discarded and
+	// the body would float/sink on other players' screens. Assert the convention so a bad import fails
+	// loudly here instead of silently floating in networked play.
+	GetMesh()->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	if (const UCapsuleComponent* Cap = GetCapsuleComponent())
+	{
+		const float MeshMinZ = Chosen->GetBounds().GetBox().Min.Z;
+		ensureMsgf(FMath::IsNearlyZero(MeshMinZ, 2.f),
+			TEXT("Team body %s isn't feet-at-origin (minZ=%.1f); it will float on remote screens. Re-import with the origin at the feet."),
+			*Chosen->GetName(), MeshMinZ);
+		GetMesh()->SetRelativeLocation(FVector(0.f, 0.f, -Cap->GetUnscaledCapsuleHalfHeight()));
+	}
+	GetMesh()->SetVisibility(true);
+	GetMesh()->SetOwnerNoSee(true);           // first-person: owner doesn't see own TP body
+	if (BodyMesh != nullptr) { BodyMesh->SetVisibility(false); }
+	if (HeadMesh != nullptr) { HeadMesh->SetVisibility(false); }
+
+	CachedBodyTeamId = Team;
+	bUsingArtBody = true;
+}
+
+void APaintForgeCharacter::ApplyArtLoadout()
+{
+	// Optional M1 art. Every branch is a no-op when its property is unset, so an
+	// unconfigured character stays byte-identical to the validated graybox.
+	bUsingArtBody = false;
+	CachedBodyTeamId = 255;
+
+	// Provisional body from the (possibly not-yet-replicated) team; SetTeamColor re-drives it
+	// authoritatively when the real TeamId lands.
+	ApplyTeamBody(CachedTeamId);
+
+	if (FirstPersonArmsMesh != nullptr && FirstPersonArms != nullptr)
+	{
+		FirstPersonArms->SetSkeletalMeshAsset(FirstPersonArmsMesh);
+		FirstPersonArms->SetVisibility(true);
+	}
+
+	if (WeaponMesh != nullptr && WeaponMeshComp != nullptr)
+	{
+		WeaponMeshComp->SetStaticMesh(WeaponMesh);
+		WeaponMeshComp->SetVisibility(true);
+		if (bUsingArtBody && GetMesh() != nullptr && GetMesh()->DoesSocketExist(WeaponAttachSocket))
+		{
+			WeaponMeshComp->AttachToComponent(GetMesh(),
+				FAttachmentTransformRules::SnapToTargetIncludingScale, WeaponAttachSocket);
+		}
+	}
+
+	SetTeamColor(CachedTeamId);   // re-tint whatever body is now active (skeletal or cubes)
+}
+
 void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 {
+	// SetTeamColor is the one convergence point that runs on server, host, and pure clients once the real
+	// TeamId is known (in either replication order) and again on host team-cycle — so the per-team BODY
+	// swap lives here, not in BeginPlay (where a client often doesn't know its team yet).
+	const bool bTeamChanged = (TeamId != CachedTeamId) || !bTeamAppearanceApplied;
 	CachedTeamId = TeamId;
+
+	if (TeamId <= 1)
+	{
+		ApplyTeamBody(TeamId);   // gated: re-mounts Manny/Quinn only on an actual team change
+	}
+
+	if (!bTeamChanged)
+	{
+		return;   // appearance already applied for this team; don't rebuild MIDs on every flag replication
+	}
+	bTeamAppearanceApplied = true;
+
 	const FLinearColor TeamColor = PFColors::ForTeam(TeamId);
+	// Muted team tint for the soldier body — clearly team-colored but not neon speedball (splats/tracers
+	// keep the full vivid ForTeam color). Tune the 0.45 lerp toward gray to taste.
+	const FLinearColor BodyTint = FMath::Lerp(TeamColor, FLinearColor(0.22f, 0.22f, 0.24f, 1.f), 0.45f);
 
 	if (BodyMesh != nullptr && BodyMID == nullptr)
 	{
@@ -536,6 +793,20 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 	{
 		HeadMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
 	}
+
+	// Art body: apply the team-tint material to EVERY material slot (the mannequin can have more than one).
+	if (bUsingArtBody && GetMesh() != nullptr && TeamBodyMaterial != nullptr)
+	{
+		const int32 NumMats = GetMesh()->GetNumMaterials();
+		for (int32 Slot = 0; Slot < NumMats; ++Slot)
+		{
+			if (UMaterialInstanceDynamic* BodyArtMID =
+					GetMesh()->CreateAndSetMaterialInstanceDynamicFromMaterial(Slot, TeamBodyMaterial))
+			{
+				BodyArtMID->SetVectorParameterValue(TEXT("Color"), BodyTint);
+			}
+		}
+	}
 }
 
 void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
@@ -549,6 +820,18 @@ void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	if (HeadMesh != nullptr)
 	{
 		HeadMesh->SetHiddenInGame(bEliminated);
+	}
+	if (bUsingArtBody && GetMesh() != nullptr)
+	{
+		GetMesh()->SetHiddenInGame(bEliminated);
+	}
+	if (WeaponMeshComp != nullptr)
+	{
+		WeaponMeshComp->SetHiddenInGame(bEliminated);
+	}
+	if (ViewModelRoot != nullptr)
+	{
+		ViewModelRoot->SetVisibility(!bEliminated, /*bPropagateToChildren=*/true);
 	}
 }
 
@@ -567,4 +850,164 @@ FVector APaintForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 		+ AimBasis.GetUnitAxis(EAxis::X) * 30.f
 		+ AimBasis.GetUnitAxis(EAxis::Y) * 20.f
 		- AimBasis.GetUnitAxis(EAxis::Z) * 10.f;
+}
+
+// ---------------------------------------------------------------------------
+// Weapon viewmodel + muzzle-flash cosmetics (M1 art pass)
+// ---------------------------------------------------------------------------
+
+UStaticMeshComponent* APaintForgeCharacter::MakeGunPart(USceneComponent* Parent, const FString& CompName,
+	UStaticMesh* PartMesh, UMaterialInterface* Mat, const FVector& RelLoc, const FVector& RelScale,
+	const FRotator& RelRot)
+{
+	UStaticMeshComponent* Part = CreateDefaultSubobject<UStaticMeshComponent>(FName(*CompName));
+	if (Part != nullptr)
+	{
+		Part->SetupAttachment(Parent);
+		if (PartMesh != nullptr) { Part->SetStaticMesh(PartMesh); }
+		if (Mat != nullptr) { Part->SetMaterial(0, Mat); }
+		Part->SetRelativeLocation(RelLoc);
+		Part->SetRelativeScale3D(RelScale);
+		Part->SetRelativeRotation(RelRot);
+		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Part->SetCastShadow(false);
+	}
+	return Part;
+}
+
+void APaintForgeCharacter::BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube,
+	UStaticMesh* Cylinder, TArray<TObjectPtr<UStaticMeshComponent>>& OutParts, FVector& OutMuzzleLocal)
+{
+	// Silhouette in uu (barrel points +X). Engine Cube/Cylinder are 100 uu, so scale = size/100.
+	// Base material is assigned by the caller (owner-only-see for the FP viewmodel).
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Recv"), Cube, nullptr,      // receiver / upper
+		FVector(0.f, 0.f, 0.f), FVector(0.34f, 0.06f, 0.10f), FRotator::ZeroRotator));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Guard"), Cube, nullptr,     // handguard
+		FVector(24.f, 0.f, -1.f), FVector(0.22f, 0.05f, 0.055f), FRotator::ZeroRotator));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Barrel"), Cylinder, nullptr, // barrel (cyl +Z -> +X)
+		FVector(40.f, 0.f, 1.5f), FVector(0.024f, 0.024f, 0.28f), FRotator(90.f, 0.f, 0.f)));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Stock"), Cube, nullptr,     // stock
+		FVector(-20.f, 0.f, -1.5f), FVector(0.20f, 0.05f, 0.075f), FRotator::ZeroRotator));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Mag"), Cube, nullptr,       // magazine (angled)
+		FVector(6.f, 0.f, -11.f), FVector(0.05f, 0.035f, 0.16f), FRotator(0.f, 0.f, 18.f)));
+	OutParts.Add(MakeGunPart(Parent, Prefix + TEXT("Grip"), Cube, nullptr,      // pistol grip
+		FVector(-6.f, 0.f, -9.f), FVector(0.045f, 0.045f, 0.12f), FRotator(0.f, 0.f, -12.f)));
+	OutMuzzleLocal = FVector(54.f, 0.f, 1.5f);   // barrel tip
+}
+
+void APaintForgeCharacter::SetupWeaponMaterials()
+{
+	// Dark gunmetal on the marker: one MID shared across all parts (they all wrap BasicShapeMaterial).
+	if (MarkerPartsFP.Num() > 0 && MarkerPartsFP[0] != nullptr)
+	{
+		MarkerMID = MarkerPartsFP[0]->CreateAndSetMaterialInstanceDynamic(0);
+		if (MarkerMID != nullptr)
+		{
+			MarkerMID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.035f, 0.038f, 0.045f));
+			for (int32 Index = 1; Index < MarkerPartsFP.Num(); ++Index)
+			{
+				if (MarkerPartsFP[Index] != nullptr)
+				{
+					MarkerPartsFP[Index]->SetMaterial(0, MarkerMID);
+				}
+			}
+		}
+	}
+
+	// Emissive flash + smoke. Param names cover M_PF_Flash / M_PF_MuzzleSmoke and BasicShapeMaterial.
+	const FLinearColor FlashColor(8.f, 4.2f, 1.2f);
+	const FLinearColor SmokeColor(0.55f, 0.58f, 0.62f);
+	auto SetupEmissiveMID = [](UStaticMeshComponent* Comp, const FLinearColor& Color, float Strength)
+		-> UMaterialInstanceDynamic*
+	{
+		if (Comp == nullptr) { return nullptr; }
+		UMaterialInstanceDynamic* MID = Comp->CreateAndSetMaterialInstanceDynamic(0);
+		if (MID != nullptr)
+		{
+			MID->SetVectorParameterValue(TEXT("EmissiveColor"), Color);
+			MID->SetScalarParameterValue(TEXT("EmissiveStrength"), Strength);
+			MID->SetVectorParameterValue(TEXT("Color"), Color);
+		}
+		return MID;
+	};
+	FlashMIDFP = SetupEmissiveMID(MuzzleFlashFP, FlashColor, 1.6f);
+	FlashMIDTP = SetupEmissiveMID(MuzzleFlashTP, FlashColor, 1.6f);
+	SmokeMIDFP = SetupEmissiveMID(MuzzleSmokeFP, SmokeColor, 0.5f);
+	SmokeMIDTP = SetupEmissiveMID(MuzzleSmokeTP, SmokeColor, 0.5f);
+}
+
+void APaintForgeCharacter::OnFireCosmetic()
+{
+	// Owning client: recoil kick + punchy FP flash + smoke wisp + tight world light.
+	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f);
+	RecoilPitch += RecoilKickPitchDeg;
+
+	const float FlashS = FMath::FRandRange(0.12f, 0.20f);
+	// Slightly flattened "petal" flash with random roll so frames don't look identical.
+	if (MuzzleFlashFP != nullptr)
+	{
+		MuzzleFlashFP->SetRelativeScale3D(FVector(FlashS * 0.7f, FlashS * 1.15f, FlashS * 1.15f));
+		MuzzleFlashFP->SetRelativeRotation(FRotator(0.f, 0.f, FMath::FRandRange(0.f, 360.f)));
+		MuzzleFlashFP->SetVisibility(true);
+	}
+	if (MuzzleSmokeFP != nullptr)
+	{
+		const float SmokeS = FMath::FRandRange(0.16f, 0.24f);
+		MuzzleSmokeFP->SetRelativeScale3D(FVector(SmokeS * 1.6f, SmokeS * 0.85f, SmokeS * 0.85f));
+		MuzzleSmokeFP->SetVisibility(true);
+	}
+	if (MuzzleLight != nullptr)
+	{
+		MuzzleLight->SetWorldLocation(GetMuzzleLocation(/*bCosmetic=*/true));
+		MuzzleLight->SetAttenuationRadius(MuzzleLightRadius);
+		MuzzleLight->SetIntensity(MuzzleLightIntensity * FMath::FRandRange(0.85f, 1.1f));
+	}
+	GetWorldTimerManager().SetTimer(MuzzleFlashTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleFlash, MuzzleFlashTime, false);
+	GetWorldTimerManager().SetTimer(MuzzleSmokeTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleSmoke, MuzzleSmokeTime, false);
+}
+
+void APaintForgeCharacter::OnRemoteFireCosmetic()
+{
+	// Remote viewers: flash + smoke + light at the shooter's marker position.
+	const FVector Muzzle = GetMuzzleLocation(/*bCosmetic=*/false);
+	const FVector AimFwd = GetBaseAimRotation().Vector();
+	if (MuzzleFlashTP != nullptr)
+	{
+		const float FlashS = FMath::FRandRange(0.18f, 0.28f);
+		MuzzleFlashTP->SetWorldLocation(Muzzle);
+		MuzzleFlashTP->SetWorldScale3D(FVector(FlashS * 0.7f, FlashS * 1.15f, FlashS * 1.15f));
+		MuzzleFlashTP->SetVisibility(true);
+	}
+	if (MuzzleSmokeTP != nullptr)
+	{
+		const float SmokeS = FMath::FRandRange(0.22f, 0.32f);
+		MuzzleSmokeTP->SetWorldLocation(Muzzle + AimFwd * 12.f);
+		MuzzleSmokeTP->SetWorldScale3D(FVector(SmokeS * 1.5f, SmokeS * 0.9f, SmokeS * 0.9f));
+		MuzzleSmokeTP->SetVisibility(true);
+	}
+	if (MuzzleLight != nullptr)
+	{
+		MuzzleLight->SetWorldLocation(Muzzle);
+		MuzzleLight->SetAttenuationRadius(MuzzleLightRadius);
+		MuzzleLight->SetIntensity(MuzzleLightIntensity * FMath::FRandRange(0.85f, 1.1f));
+	}
+	GetWorldTimerManager().SetTimer(MuzzleFlashTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleFlash, MuzzleFlashTime, false);
+	GetWorldTimerManager().SetTimer(MuzzleSmokeTimerHandle, this,
+		&APaintForgeCharacter::ClearMuzzleSmoke, MuzzleSmokeTime, false);
+}
+
+void APaintForgeCharacter::ClearMuzzleFlash()
+{
+	if (MuzzleFlashFP != nullptr) { MuzzleFlashFP->SetVisibility(false); }
+	if (MuzzleFlashTP != nullptr) { MuzzleFlashTP->SetVisibility(false); }
+	if (MuzzleLight != nullptr) { MuzzleLight->SetIntensity(0.f); }
+}
+
+void APaintForgeCharacter::ClearMuzzleSmoke()
+{
+	if (MuzzleSmokeFP != nullptr) { MuzzleSmokeFP->SetVisibility(false); }
+	if (MuzzleSmokeTP != nullptr) { MuzzleSmokeTP->SetVisibility(false); }
 }

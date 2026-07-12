@@ -250,6 +250,7 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	{
 		Audio->PlayMuzzle();
 	}
+	Char->OnFireCosmetic();   // first-person muzzle flash + viewmodel recoil kick
 
 	FPFShotPacket Packet;
 	Packet.Origin = Char->GetMuzzleLocation(false);   // server-muzzle convention (04 §2.2)
@@ -440,12 +441,13 @@ void UPFWeaponComponent::MulticastShotFX_Implementation(FVector_NetQuantize100 O
 
 	SpawnCosmeticProjectile(FVector(Origin), SpreadedDir, GetOwnerTeam(), ShotIndex);
 
-	if (const APaintForgeCharacter* Char = GetPFCharacter())
+	if (APaintForgeCharacter* Char = GetPFCharacter())
 	{
 		if (UPFCombatAudio* Audio = Char->GetCombatAudio())
 		{
 			Audio->PlayMuzzle();
 		}
+		Char->OnRemoteFireCosmetic();   // third-person muzzle flash + world light at the shooter's marker
 	}
 }
 

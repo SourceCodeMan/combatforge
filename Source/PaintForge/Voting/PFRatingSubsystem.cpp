@@ -226,6 +226,121 @@ FString UPFRatingSubsystem::GetCurrentArenaId() const
 	return bRecordActive ? CurrentArenaId : FString();
 }
 
+bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces) const
+{
+	OutPieces.Reset();
+	if (!IsServerContext())
+	{
+		return false;
+	}
+	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
+	if (Files.Num() == 0)
+	{
+		return false;   // no community arenas saved yet
+	}
+	// v1: the most-recent file (names are timestamp-sorted). Vote-ranked selection can refine this later.
+	Files.Sort();
+	// Try newest → oldest and skip empty/unparseable files: a Play-only (or nobody-built) match records
+	// an EMPTY arena, and picking only the single newest file would let that degenerate record shadow
+	// every good community arena on disk. Return the first non-empty parseable one instead.
+	for (int32 Idx = Files.Num() - 1; Idx >= 0; --Idx)
+	{
+		FString Json;
+		if (!FFileHelper::LoadFileToString(Json, *(Dir / Files[Idx])))
+		{
+			continue;
+		}
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			continue;
+		}
+		int32 TeamSize = 0;
+		if (FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), OutPieces, TeamSize) && OutPieces.Num() > 0)
+		{
+			UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: loaded community arena %s (%d pieces)"),
+				*Files[Idx], OutPieces.Num());
+			return true;
+		}
+	}
+	return false;
+}
+
+bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces) const
+{
+	return LoadMostRecentArena(OutPieces);   // whole arena, both halves, unchanged
+}
+
+bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, uint8 TargetTeam) const
+{
+	OutHalf.Reset();
+	if (TargetTeam > 1)
+	{
+		return false;
+	}
+	TArray<FPFBuildPieceRec> All;
+	if (!LoadMostRecentArena(All))
+	{
+		return false;
+	}
+
+	// Take the more-developed side (more pieces) and translate it into TargetTeam's plot.
+	int32 CountA = 0, CountB = 0;
+	for (const FPFBuildPieceRec& Rec : All)
+	{
+		(Rec.Team == 0 ? CountA : CountB)++;
+	}
+	const uint8 SourceHalf = (CountA >= CountB) ? 0 : 1;
+
+	// The field is MIRROR-symmetric about its X-centre (team A faces +X toward the neutral strip, team B
+	// faces -X). To move a source half to the other side FACING THE RIGHT WAY, reflect X about the centre
+	// AND flip the +X/-X orientation — a pure translation would leave the fort backwards (cover against
+	// its own spawn, open to the enemy). Reflection is X-only (the arena is symmetric in Y/Z). The X
+	// offset differs by footprint: structural min-corner pieces occupy [X, X+4] → mirror = 60-X; an
+	// E-edge wall's plane sits at X+4 → 56-X; props are centre-anchored → 64-X.
+	const int32 FieldSubX = PFGrid::CellsX * PFGrid::SubPerCell;   // 64
+	const int32 CellSub = PFGrid::SubPerCell;                      // 4
+	auto ReflectRotX = [](uint8 Rot) -> uint8 { return (Rot == 0) ? 2 : (Rot == 2) ? 0 : Rot; };
+
+	for (const FPFBuildPieceRec& Rec : All)
+	{
+		if (Rec.Team != SourceHalf)
+		{
+			continue;
+		}
+		FPFBuildPieceRec Out = Rec;
+		if (SourceHalf != TargetTeam)
+		{
+			switch (Out.Type)
+			{
+			case EPFPieceType::Wall:
+				// Thin edges: E-edge (Rot 1) sits one cell further in X; wall rotation is preserved.
+				Out.X = static_cast<int16>((Out.Rot == 1) ? (FieldSubX - 2 * CellSub - Out.X)
+				                                          : (FieldSubX - CellSub - Out.X));
+				break;
+			case EPFPieceType::Floor:
+			case EPFPieceType::Ramp:
+			case EPFPieceType::Roof:
+				Out.X = static_cast<int16>(FieldSubX - CellSub - Out.X);
+				Out.Rot = ReflectRotX(Out.Rot);   // ramp ascent +X <-> -X
+				break;
+			default:   // props are centre-anchored
+				Out.X = static_cast<int16>(FieldSubX - Out.X);
+				Out.Rot = ReflectRotX(Out.Rot);
+				break;
+			}
+		}
+		Out.Team = TargetTeam;
+		OutHalf.Add(Out);
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: remapped %d community pieces → team %d half"),
+		OutHalf.Num(), TargetTeam);
+	return OutHalf.Num() > 0;
+}
+
 bool UPFRatingSubsystem::IsServerContext() const
 {
 	const UGameInstance* GameInstance = GetGameInstance();

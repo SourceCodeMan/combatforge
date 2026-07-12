@@ -30,11 +30,16 @@ public:
 	UPROPERTY(Replicated)                       float  RoundStateEndServerTime = 0.f;
 	UPROPERTY(Replicated)                       uint8  RoundNumber = 0;            // 1-based during Combat
 	UPROPERTY(ReplicatedUsing=OnRep_Score)      uint8  TeamRoundWins[2] = {0, 0};
+	UPROPERTY(ReplicatedUsing=OnRep_Score)      uint16 TeamScores[2]    = {0, 0};   // Skirmish tag counts (reuses OnRep_Score)
 	UPROPERTY(ReplicatedUsing=OnRep_AliveCounts)uint8  AliveCounts[2]   = {0, 0};
 	UPROPERTY(Replicated)                       bool   bSuddenDeath = false;
 	UPROPERTY(ReplicatedUsing=OnRep_ElimFeed)   TArray<FPFElimEntry> ElimFeed;     // capped at 50, oldest trimmed
 	UPROPERTY(ReplicatedUsing=OnRep_VoteTally)  FPFVoteTally VoteTally;
 	UPROPERTY(Replicated)                       FString MatchId;                   // GUID string, set at Lobby→Build
+	UPROPERTY(Replicated)                       uint8  TargetTeamSize = 4;         // match format: 4 (4v4) or 6 (6v6); bots fill to this
+	UPROPERTY(Replicated)                       uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count reads this
+	UPROPERTY(Replicated)                       EPFBuildMode BuildMode = EPFBuildMode::Creative;  // build style
+	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Elimination; // objective
 
 	// ---- Client-safe helpers ----
 	float GetPhaseTimeRemaining() const;   // PhaseEndServerTime - GetServerWorldTimeSeconds(), clamped ≥ 0
@@ -51,11 +56,16 @@ public:
 	void ServerSetPhaseEndTime(float EndServerTime);         // re-stamp within a phase (lobby/build countdowns)
 	void ServerSetRoundNumber(uint8 NewRoundNumber);
 	void ServerSetTeamRoundWins(uint8 WinsA, uint8 WinsB);
+	void ServerSetTeamScores(uint16 ScoreA, uint16 ScoreB);   // Skirmish tags; reuses OnRep_Score broadcast
 	void ServerSetAliveCounts(uint8 AliveA, uint8 AliveB);
 	void ServerAddElimEntry(const FPFElimEntry& Entry);
 	void ServerSetVoteTally(const FPFVoteTally& NewTally);
 	void ServerSetSuddenDeath(bool bNewSuddenDeath);
 	void ServerSetMatchId(const FString& NewMatchId);
+	void ServerSetTargetTeamSize(uint8 NewSize);             // 4 or 6; clamped [1,6]
+	void ServerSetRoundWinsToTake(uint8 NewWins);            // resolved at Lobby→Build from the format
+	void ServerSetBuildMode(EPFBuildMode NewMode);           // Lobby only (GameMode gates)
+	void ServerSetMatchType(EPFMatchType NewType);           // Lobby only (GameMode gates)
 	void ServerResetMatchState();                            // Lobby→Build: wins/feed/tally/round wiped
 
 	// ---- UI subscription points (broadcast from OnReps AND from server setters on host) ----

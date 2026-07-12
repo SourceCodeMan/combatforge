@@ -169,6 +169,19 @@ void UPFCombatHUDWidget::BuildTree()
 		VSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 
+	// Objective status (CTF carrier / Dom·HP on-point) sits under the score strip.
+	ObjectiveStatusText = WidgetTree->ConstructWidget<UTextBlock>();
+	ObjectiveStatusText->SetFont(PFCombatFont(15, true));
+	ObjectiveStatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.9f, 0.35f)));
+	ObjectiveStatusText->SetJustification(ETextJustify::Center);
+	ObjectiveStatusText->SetText(FText::GetEmpty());
+	ObjectiveStatusText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UVerticalBoxSlot* VSlot = TopBox->AddChildToVerticalBox(ObjectiveStatusText))
+	{
+		VSlot->SetHorizontalAlignment(HAlign_Center);
+		VSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+	}
+
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(TopBox))
 	{
 		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
@@ -334,10 +347,69 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 		return;
 	}
 
-	// Effective wins-to-take: <=2v2 formats play first-to-3 (T15). The GameMode config
-	// isn't replicated, so infer from the roster size; never show fewer pips than a team
-	// already has wins (guards a mid-match leaver dropping the roster to <=4).
-	int32 EffectivePips = (GS->PlayerArray.Num() <= SmallFormatMaxPlayers) ? SmallFormatPips : MaxPips;
+	if (GS->MatchType == EPFMatchType::Skirmish
+		|| GS->MatchType == EPFMatchType::CaptureFlag
+		|| GS->MatchType == EPFMatchType::Domination
+		|| GS->MatchType == EPFMatchType::Hardpoint)
+	{
+		// Continuous team-score modes: collapse round pips, show "first to N" + TeamScores in the
+		// alive row. Timer is the match countdown via GetRoundTimeRemaining().
+		UpdatePipVisibility(0);
+		for (int32 i = 0; i < MaxPips; ++i)
+		{
+			if (PipsA.IsValidIndex(i) && PipsA[i]) { PipsA[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+			if (PipsB.IsValidIndex(i) && PipsB[i]) { PipsB[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+		}
+		if (RoundNumberText)
+		{
+			const TCHAR* Prefix = TEXT("first to");
+			if (GS->MatchType == EPFMatchType::CaptureFlag) { Prefix = TEXT("CTF · first to"); }
+			else if (GS->MatchType == EPFMatchType::Domination) { Prefix = TEXT("DOM · first to"); }
+			else if (GS->MatchType == EPFMatchType::Hardpoint) { Prefix = TEXT("HP · first to"); }
+			RoundNumberText->SetText(FText::FromString(
+				FString::Printf(TEXT("%s %d"), Prefix, GS->RoundWinsToTake)));
+		}
+		if (AliveTextA) { AliveTextA->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamScores[0]))); }
+		if (AliveTextB) { AliveTextB->SetText(FText::FromString(FString::Printf(TEXT("%d"), GS->TeamScores[1]))); }
+		return;
+	}
+
+	if (GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		// Solo leaderboard strip: "YOU N" / "LEAD M" + first-to-N. Pips collapsed.
+		UpdatePipVisibility(0);
+		for (int32 i = 0; i < MaxPips; ++i)
+		{
+			if (PipsA.IsValidIndex(i) && PipsA[i]) { PipsA[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+			if (PipsB.IsValidIndex(i) && PipsB[i]) { PipsB[i]->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.12f)); }
+		}
+		if (RoundNumberText)
+		{
+			RoundNumberText->SetText(FText::FromString(FString::Printf(TEXT("FFA · first to %d"), GS->RoundWinsToTake)));
+		}
+		uint16 MyTags = 0;
+		uint16 LeadTags = 0;
+		if (const APaintForgePlayerState* LocalPS =
+			GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<APaintForgePlayerState>() : nullptr)
+		{
+			MyTags = LocalPS->TagCount;
+		}
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			if (const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+			{
+				LeadTags = FMath::Max(LeadTags, PS->TagCount);
+			}
+		}
+		if (AliveTextA) { AliveTextA->SetText(FText::FromString(FString::Printf(TEXT("YOU %d"), MyTags))); }
+		if (AliveTextB) { AliveTextB->SetText(FText::FromString(FString::Printf(TEXT("LEAD %d"), LeadTags))); }
+		return;
+	}
+
+	// Effective wins-to-take is resolved server-side from the format and replicated on GameState
+	// (RoundWinsToTake) — read it directly instead of inferring from the live (bot-padded /
+	// leaver-shrunk) roster size. Never show fewer pips than a team already has wins.
+	int32 EffectivePips = (GS->RoundWinsToTake > 0) ? GS->RoundWinsToTake : MaxPips;
 	EffectivePips = FMath::Max3(EffectivePips,
 		static_cast<int32>(GS->TeamRoundWins[0]), static_cast<int32>(GS->TeamRoundWins[1]));
 	UpdatePipVisibility(FMath::Min(EffectivePips, MaxPips));
@@ -390,6 +462,14 @@ void UPFCombatHUDWidget::HandleAliveCountsChanged()
 	if (!GS)
 	{
 		return;
+	}
+	if (GS->MatchType == EPFMatchType::Skirmish
+		|| GS->MatchType == EPFMatchType::FreeForAll
+		|| GS->MatchType == EPFMatchType::CaptureFlag
+		|| GS->MatchType == EPFMatchType::Domination
+		|| GS->MatchType == EPFMatchType::Hardpoint)
+	{
+		return;   // tag / FFA / objective score row is owned by HandleScoreChanged
 	}
 	if (AliveTextA)
 	{
@@ -584,6 +664,64 @@ void UPFCombatHUDWidget::UpdateBanner(float InDeltaTime)
 	BannerText->SetText(FText::FromString(Banner));
 }
 
+void UPFCombatHUDWidget::UpdateObjectiveStatus()
+{
+	if (!ObjectiveStatusText)
+	{
+		return;
+	}
+	const APaintForgeGameState* GS = BoundGameState.Get();
+	const APaintForgePlayerState* LocalPS =
+		GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<APaintForgePlayerState>() : nullptr;
+	if (!GS || !LocalPS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		ObjectiveStatusText->SetVisibility(ESlateVisibility::Collapsed);
+		ObjectiveStatusText->SetText(FText::GetEmpty());
+		return;
+	}
+
+	FString Status;
+	FLinearColor Color(1.f, 0.9f, 0.35f);
+
+	if (GS->MatchType == EPFMatchType::CaptureFlag)
+	{
+		if (LocalPS->bCarryingFlag && LocalPS->CarriedFlagTeam <= 1)
+		{
+			Status = TEXT("⚑ FLAG — return to your base");
+			Color = PFColors::ForTeam(LocalPS->CarriedFlagTeam);
+		}
+	}
+	else if (GS->MatchType == EPFMatchType::Domination || GS->MatchType == EPFMatchType::Hardpoint)
+	{
+		if (LocalPS->StandingOnPoint != 255)
+		{
+			static const TCHAR* PointNames[] = { TEXT("A"), TEXT("MID"), TEXT("B") };
+			const int32 Idx = FMath::Clamp(static_cast<int32>(LocalPS->StandingOnPoint), 0, 2);
+			if (GS->MatchType == EPFMatchType::Hardpoint)
+			{
+				Status = FString::Printf(TEXT("● HARDPOINT %s"), PointNames[Idx]);
+			}
+			else
+			{
+				Status = FString::Printf(TEXT("● POINT %s"), PointNames[Idx]);
+			}
+			Color = (LocalPS->TeamId <= 1)
+				? PFColors::ForTeam(LocalPS->TeamId)
+				: FLinearColor(1.f, 0.9f, 0.35f);
+		}
+	}
+
+	if (Status.IsEmpty())
+	{
+		ObjectiveStatusText->SetVisibility(ESlateVisibility::Collapsed);
+		ObjectiveStatusText->SetText(FText::GetEmpty());
+		return;
+	}
+	ObjectiveStatusText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ObjectiveStatusText->SetText(FText::FromString(Status));
+	ObjectiveStatusText->SetColorAndOpacity(FSlateColor(Color));
+}
+
 void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
@@ -592,6 +730,7 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 
 	UpdateCrosshair();
 	UpdateBanner(InDeltaTime);
+	UpdateObjectiveStatus();
 
 	if (const APaintForgeGameState* GS = BoundGameState.Get())
 	{
@@ -603,6 +742,16 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 				(GS->RoundState == EPFRoundState::Live && Secs <= 10)
 					? FLinearColor(0.95f, 0.15f, 0.1f)
 					: FLinearColor::White));
+		}
+		// FreeForAll TagCount rides PlayerState OnRep (no GameState score event) — refresh the
+		// YOU/LEAD strip here so clients stay live without a dedicated multicast.
+		// Objective PS flags (carrier / on-point) also lack a GS multicast — keep strip live.
+		if (GS->MatchType == EPFMatchType::FreeForAll
+			|| GS->MatchType == EPFMatchType::CaptureFlag
+			|| GS->MatchType == EPFMatchType::Domination
+			|| GS->MatchType == EPFMatchType::Hardpoint)
+		{
+			HandleScoreChanged();
 		}
 	}
 

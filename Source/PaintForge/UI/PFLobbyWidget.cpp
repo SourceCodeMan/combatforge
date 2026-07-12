@@ -27,6 +27,53 @@ namespace
 	{
 		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
 	}
+
+	FString BuildModeLabel(EPFBuildMode Mode)
+	{
+		switch (Mode)
+		{
+		case EPFBuildMode::Creative:    return TEXT("Creative");
+		case EPFBuildMode::Improvement: return TEXT("Improvement  (soon)");
+		case EPFBuildMode::PlayOnly:    return TEXT("Play-Only");
+		default:                        return TEXT("Creative");
+		}
+	}
+
+	FString MatchTypeLabel(EPFMatchType Type)
+	{
+		switch (Type)
+		{
+		case EPFMatchType::Elimination: return TEXT("Elimination");
+		case EPFMatchType::FreeForAll:  return TEXT("Free-for-All");
+		case EPFMatchType::Skirmish:    return TEXT("Skirmish");
+		case EPFMatchType::CaptureFlag: return TEXT("Capture the Flag");
+		case EPFMatchType::Domination:  return TEXT("Domination");
+		case EPFMatchType::Hardpoint:   return TEXT("Hardpoint");
+		default:                        return TEXT("Elimination");
+		}
+	}
+
+	/** One-line how-to for the match TYPE row (kids-friendly). */
+	FString MatchTypeBlurb(EPFMatchType Type)
+	{
+		switch (Type)
+		{
+		case EPFMatchType::Elimination:
+			return TEXT("Last team standing · first to N round wins");
+		case EPFMatchType::FreeForAll:
+			return TEXT("Solo · most tags · no teams · play-only");
+		case EPFMatchType::Skirmish:
+			return TEXT("Teams · most tags · everyone respawns");
+		case EPFMatchType::CaptureFlag:
+			return TEXT("Grab their flag · score at your base · first to 3");
+		case EPFMatchType::Domination:
+			return TEXT("Hold points A / MID / B · score over time");
+		case EPFMatchType::Hardpoint:
+			return TEXT("One rotating point · hold it · score over time");
+		default:
+			return TEXT("");
+		}
+	}
 }
 
 // ---------------------------------------------------------------- row button
@@ -122,6 +169,213 @@ void UPFLobbyWidget::BuildTree()
 		CSlot->SetPosition(FVector2D(0.f, -40.f));
 		CSlot->SetAutoSize(true);
 	}
+
+	BuildConfigPanel(RootCanvas);
+	BuildLoadoutOverlay(RootCanvas);   // added last -> drawn on top when shown
+}
+
+UButton* UPFLobbyWidget::MakeConfigButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText)
+{
+	UButton* Btn = WidgetTree->ConstructWidget<UButton>();
+	Btn->SetBackgroundColor(FLinearColor(0.10f, 0.11f, 0.13f, 0.9f));
+
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+
+	UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>();
+	LabelText->SetText(FText::FromString(Label));
+	LabelText->SetFont(PFLobbyFont(12, true));
+	LabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.68f, 0.85f)));
+	USizeBox* LabelSizer = WidgetTree->ConstructWidget<USizeBox>();
+	LabelSizer->SetWidthOverride(74.f);
+	LabelSizer->SetContent(LabelText);
+	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(LabelSizer))
+	{
+		HS->SetVerticalAlignment(VAlign_Center);
+		HS->SetPadding(FMargin(6.f, 6.f, 8.f, 6.f));
+	}
+
+	OutValueText = WidgetTree->ConstructWidget<UTextBlock>();
+	OutValueText->SetFont(PFLobbyFont(15, false));
+	OutValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(OutValueText))
+	{
+		HS->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		HS->SetVerticalAlignment(VAlign_Center);
+		HS->SetPadding(FMargin(0.f, 6.f, 6.f, 6.f));
+	}
+
+	Btn->SetContent(Row);
+	return Btn;
+}
+
+void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
+{
+	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>();
+	Panel->SetBrushColor(FLinearColor(0.02f, 0.02f, 0.03f, 0.7f));
+	Panel->SetPadding(FMargin(14.f));
+
+	UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>();
+	Panel->SetContent(Box);
+
+	UTextBlock* Header = WidgetTree->ConstructWidget<UTextBlock>();
+	Header->SetText(FText::FromString(TEXT("MATCH SETUP")));
+	Header->SetFont(PFLobbyFont(16, true));
+	Header->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Header)) { VS->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f)); }
+
+	UButton* ModeBtn = MakeConfigButton(TEXT("MODE"), ModeValueText);
+	ModeBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnModeClicked);
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(ModeBtn)) { VS->SetPadding(FMargin(0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+
+	UButton* TypeBtn = MakeConfigButton(TEXT("TYPE"), TypeValueText);
+	TypeBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnTypeClicked);
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(TypeBtn)) { VS->SetPadding(FMargin(0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+
+	UButton* FormatBtn = MakeConfigButton(TEXT("FORMAT"), FormatValueText);
+	FormatBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnFormatClicked);
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(FormatBtn)) { VS->SetPadding(FMargin(0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+
+	UButton* LoadoutBtn = WidgetTree->ConstructWidget<UButton>();
+	LoadoutBtn->SetBackgroundColor(FLinearColor(0.14f, 0.12f, 0.05f, 0.9f));
+	LoadoutBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnLoadoutClicked);
+	UTextBlock* LoadoutLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	LoadoutLabel->SetText(FText::FromString(TEXT("LOADOUT")));
+	LoadoutLabel->SetFont(PFLobbyFont(14, true));
+	LoadoutLabel->SetJustification(ETextJustify::Center);
+	LoadoutLabel->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.9f, 0.5f)));
+	LoadoutBtn->SetContent(LoadoutLabel);
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(LoadoutBtn)) { VS->SetPadding(FMargin(0.f, 10.f, 0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+
+	ConfigHintText = WidgetTree->ConstructWidget<UTextBlock>();
+	ConfigHintText->SetFont(PFLobbyFont(11, false));
+	ConfigHintText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(ConfigHintText)) { VS->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f)); }
+
+	USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
+	Sizer->SetWidthOverride(250.f);
+	Sizer->SetContent(Panel);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(Sizer))
+	{
+		CSlot->SetAnchors(FAnchors(0.f, 0.5f));
+		CSlot->SetAlignment(FVector2D(0.f, 0.5f));
+		CSlot->SetPosition(FVector2D(40.f, -20.f));
+		CSlot->SetAutoSize(true);
+	}
+}
+
+void UPFLobbyWidget::BuildLoadoutOverlay(UCanvasPanel* RootCanvas)
+{
+	LoadoutOverlay = WidgetTree->ConstructWidget<UBorder>();
+	LoadoutOverlay->SetBrushColor(FLinearColor(0.01f, 0.01f, 0.02f, 0.96f));
+	LoadoutOverlay->SetPadding(FMargin(24.f));
+	LoadoutOverlay->SetHorizontalAlignment(HAlign_Center);
+	LoadoutOverlay->SetVerticalAlignment(VAlign_Center);
+	LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed);
+
+	UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>();
+	LoadoutOverlay->SetContent(Box);
+
+	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>();
+	Title->SetText(FText::FromString(TEXT("LOADOUT")));
+	Title->SetFont(PFLobbyFont(34, true));
+	Title->SetJustification(ETextJustify::Center);
+	Title->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Title)) { VS->SetHorizontalAlignment(HAlign_Center); }
+
+	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
+	Sub->SetText(FText::FromString(TEXT("Weapons, markers and gear get equipped here.\nComing soon — nothing to customize yet.")));
+	Sub->SetFont(PFLobbyFont(16, false));
+	Sub->SetJustification(ETextJustify::Center);
+	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.7f)));
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Sub)) { VS->SetPadding(FMargin(0.f, 16.f, 0.f, 24.f)); VS->SetHorizontalAlignment(HAlign_Center); }
+
+	UButton* CloseBtn = WidgetTree->ConstructWidget<UButton>();
+	CloseBtn->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+	CloseBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnLoadoutClose);
+	UTextBlock* CloseLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	CloseLabel->SetText(FText::FromString(TEXT("BACK")));
+	CloseLabel->SetFont(PFLobbyFont(16, true));
+	CloseLabel->SetJustification(ETextJustify::Center);
+	CloseLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	CloseBtn->SetContent(CloseLabel);
+	USizeBox* CloseSizer = WidgetTree->ConstructWidget<USizeBox>();
+	CloseSizer->SetWidthOverride(160.f);
+	CloseSizer->SetContent(CloseBtn);
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(CloseSizer)) { VS->SetHorizontalAlignment(HAlign_Center); }
+
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(LoadoutOverlay))
+	{
+		CSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));   // fill the viewport
+		CSlot->SetOffsets(FMargin(0.f));
+	}
+}
+
+void UPFLobbyWidget::OnModeClicked()
+{
+	if (!IsLocalHost()) { return; }
+	const UWorld* World = GetWorld();
+	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
+	if (!GS) { return; }
+	const uint8 Next = static_cast<uint8>((static_cast<uint8>(GS->BuildMode) + 1) % static_cast<uint8>(EPFBuildMode::MAX_Count));
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->ServerHostSetBuildMode(Next);
+	}
+}
+
+void UPFLobbyWidget::OnTypeClicked()
+{
+	if (!IsLocalHost()) { return; }
+	const UWorld* World = GetWorld();
+	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
+	if (!GS) { return; }
+	const uint8 Next = static_cast<uint8>((static_cast<uint8>(GS->MatchType) + 1) % static_cast<uint8>(EPFMatchType::MAX_Count));
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->ServerHostSetMatchType(Next);
+	}
+}
+
+void UPFLobbyWidget::OnFormatClicked()
+{
+	if (!IsLocalHost()) { return; }
+	const UWorld* World = GetWorld();
+	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
+	if (!GS) { return; }
+	const uint8 Next = (GS->TargetTeamSize >= 6) ? 4 : 6;   // toggle 4v4 <-> 6v6
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->ServerHostSetFormat(Next);
+	}
+}
+
+void UPFLobbyWidget::OnLoadoutClicked()
+{
+	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Visible); }
+}
+
+void UPFLobbyWidget::OnLoadoutClose()
+{
+	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed); }
+}
+
+void UPFLobbyWidget::RefreshConfig()
+{
+	const UWorld* World = GetWorld();
+	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
+	if (!GS) { return; }
+	if (ModeValueText)   { ModeValueText->SetText(FText::FromString(BuildModeLabel(GS->BuildMode))); }
+	if (TypeValueText)   { TypeValueText->SetText(FText::FromString(MatchTypeLabel(GS->MatchType))); }
+	if (FormatValueText) { FormatValueText->SetText(FText::FromString(FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize))); }
+	if (ConfigHintText)
+	{
+		const FString HostLine = IsLocalHost()
+			? TEXT("Host: click a row to change")
+			: TEXT("Host controls the match setup");
+		const FString Blurb = MatchTypeBlurb(GS->MatchType);
+		ConfigHintText->SetText(FText::FromString(
+			Blurb.IsEmpty() ? HostLine : FString::Printf(TEXT("%s\n%s"), *Blurb, *HostLine)));
+	}
 }
 
 void UPFLobbyWidget::NativeConstruct()
@@ -138,6 +392,8 @@ void UPFLobbyWidget::NativeConstruct()
 		FooterText->SetText(FText::FromString(Hints));
 	}
 
+	RefreshConfig(); // mode blurb + host line (GS may already be valid)
+
 	PollAccum = PollInterval; // refresh on first tick
 	LastRosterSignature.Reset();
 }
@@ -151,6 +407,19 @@ void UPFLobbyWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	{
 		PollAccum = 0.f;
 		RefreshRoster();
+		RefreshConfig();
+	}
+
+	// The loadout overlay only makes sense while the Tab-hold cursor exists. Collapse it the moment the
+	// cursor goes away — releasing Tab, or a match cycle returning to the lobby — so a near-opaque
+	// full-screen panel can never strand the view with no cursor left to press BACK.
+	if (LoadoutOverlay && LoadoutOverlay->GetVisibility() != ESlateVisibility::Collapsed)
+	{
+		const APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer());
+		if (!PC || !PC->IsScoreboardHeld())
+		{
+			LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed);
+		}
 	}
 
 	// Lobby start countdown: PhaseEndServerTime == 0 means untimed lobby.

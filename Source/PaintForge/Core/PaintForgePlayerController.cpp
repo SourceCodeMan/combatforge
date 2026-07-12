@@ -520,6 +520,60 @@ void APaintForgePlayerController::ServerHostReturnToLobby_Implementation()
 	}
 }
 
+void APaintForgePlayerController::ServerHostSetFormat_Implementation(uint8 TeamSize)
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
+	{
+		GM->HostSetFormat(TeamSize);
+	}
+}
+
+void APaintForgePlayerController::ServerHostSetBuildMode_Implementation(uint8 Mode)
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
+	{
+		GM->HostSetBuildMode(static_cast<EPFBuildMode>(Mode));
+	}
+}
+
+void APaintForgePlayerController::ServerHostSetMatchType_Implementation(uint8 Type)
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
+	{
+		GM->HostSetMatchType(static_cast<EPFMatchType>(Type));
+	}
+}
+
+void APaintForgePlayerController::PFFormat(int32 TeamSize)
+{
+	// Console exec on the host's controller → server RPC. e.g. "PFFormat 6" for 6v6 in the lobby.
+	ServerHostSetFormat(static_cast<uint8>(FMath::Clamp(TeamSize, 1, 6)));
+}
+
+void APaintForgePlayerController::PFMode(int32 Mode)
+{
+	// "PFMode 0=Creative, 1=Improvement, 2=Play-only" — host, in the lobby.
+	ServerHostSetBuildMode(static_cast<uint8>(FMath::Clamp(Mode, 0, 2)));
+}
+
+void APaintForgePlayerController::PFType(int32 Type)
+{
+	// "PFType 0=Elimination, 1=FFA, 2=Skirmish, 3=CTF, 4=Domination, 5=Hardpoint" — host, in the lobby.
+	ServerHostSetMatchType(static_cast<uint8>(FMath::Clamp(Type, 0, 5)));
+}
+
 // ---------------------------------------------------------------------------
 // Death cam + spectate (T5)
 // ---------------------------------------------------------------------------

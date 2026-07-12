@@ -39,6 +39,19 @@ This is the v1 **graybox** milestone: the complete match loop with zero editor-a
 - **Persistence:** one JSON file per match in `Saved/Arenas/` — the frozen arena layout, SHA1
   fingerprints (whole arena + per-half), the match result, and every player's anonymized vote.
 
+## LAN / VPN playtest (friends on the network)
+
+Connect-by-IP (no EOS yet). Full guide: [`Deploy/playtest/README.md`](Deploy/playtest/README.md).
+
+```powershell
+.\Deploy\playtest\run-listen.ps1            # host + play on this PC (port 7777)
+.\Deploy\playtest\print-host-ips.ps1        # share LAN/VPN IP with friends
+# friends (packaged client):  open <ip>:7777  or  .\connect.ps1 -Server <ip>
+```
+
+Launcher UE cannot build a true `PaintForgeServer` target; playtest uses the game binary
+as listen or `-server -nullrhi`. Docker notes in the playtest README.
+
 ## Getting started (Windows)
 
 The first compile and first run happen on a Windows PC with Visual Studio 2022 and UE 5.6.

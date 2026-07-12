@@ -229,8 +229,74 @@ void UPFResultsWidget::RefreshAll()
 
 void UPFResultsWidget::RefreshResult(const APaintForgeGameState& GS)
 {
-	const uint8 WinsA = GS.TeamRoundWins[0];
-	const uint8 WinsB = GS.TeamRoundWins[1];
+	// FreeForAll: solo winner by TagCount. Skirmish: team tags. Elimination: round wins.
+	if (GS.MatchType == EPFMatchType::FreeForAll)
+	{
+		const APaintForgePlayerState* Best = nullptr;
+		uint16 BestTags = 0;
+		int32 Tied = 0;
+		for (APlayerState* PSBase : GS.PlayerArray)
+		{
+			const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+			if (!PS) { continue; }
+			if (PS->TagCount > BestTags)
+			{
+				BestTags = PS->TagCount;
+				Best = PS;
+				Tied = 1;
+			}
+			else if (PS->TagCount == BestTags && BestTags > 0)
+			{
+				++Tied;
+			}
+		}
+		if (WinnerText)
+		{
+			if (Tied != 1 || !Best)
+			{
+				WinnerText->SetText(FText::FromString(TEXT("MATCH DRAW")));
+				WinnerText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			}
+			else
+			{
+				WinnerText->SetText(FText::FromString(
+					FString::Printf(TEXT("%s WINS"), *Best->GetPlayerName().ToUpper())));
+				WinnerText->SetColorAndOpacity(FSlateColor(PFColors::ForTeam(Best->TeamId % 2)));
+			}
+		}
+		if (ScoreText)
+		{
+			// Solo leaderboard snippet: top 3 by tags.
+			TArray<const APaintForgePlayerState*> Ranked;
+			for (APlayerState* PSBase : GS.PlayerArray)
+			{
+				if (const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase))
+				{
+					Ranked.Add(PS);
+				}
+			}
+			Ranked.Sort([](const APaintForgePlayerState& A, const APaintForgePlayerState& B)
+			{
+				if (A.TagCount != B.TagCount) { return A.TagCount > B.TagCount; }
+				return A.GetPlayerName() < B.GetPlayerName();
+			});
+			FString Board = TEXT("FFA");
+			const int32 N = FMath::Min(3, Ranked.Num());
+			for (int32 i = 0; i < N; ++i)
+			{
+				Board += FString::Printf(TEXT("  ·  %s %d"), *Ranked[i]->GetPlayerName(), Ranked[i]->TagCount);
+			}
+			ScoreText->SetText(FText::FromString(Board));
+		}
+		return;
+	}
+
+	const bool bTeamScores = (GS.MatchType == EPFMatchType::Skirmish
+		|| GS.MatchType == EPFMatchType::CaptureFlag
+		|| GS.MatchType == EPFMatchType::Domination
+		|| GS.MatchType == EPFMatchType::Hardpoint);
+	const int32 WinsA = bTeamScores ? static_cast<int32>(GS.TeamScores[0]) : static_cast<int32>(GS.TeamRoundWins[0]);
+	const int32 WinsB = bTeamScores ? static_cast<int32>(GS.TeamScores[1]) : static_cast<int32>(GS.TeamRoundWins[1]);
 
 	if (WinnerText)
 	{
@@ -250,13 +316,32 @@ void UPFResultsWidget::RefreshResult(const APaintForgeGameState& GS)
 	if (ScoreText)
 	{
 		FString Score = FString::Printf(TEXT("%d — %d"), WinsA, WinsB);
-		if (GS.RoundNumber > 0)
+		if (GS.MatchType == EPFMatchType::Skirmish)
 		{
-			Score += FString::Printf(TEXT("  ·  %d rounds"), GS.RoundNumber);
+			Score += TEXT("  ·  tags");
 		}
-		if (GS.bSuddenDeath)
+		else if (GS.MatchType == EPFMatchType::CaptureFlag)
 		{
-			Score += TEXT("  ·  sudden death");
+			Score += TEXT("  ·  captures");
+		}
+		else if (GS.MatchType == EPFMatchType::Domination)
+		{
+			Score += TEXT("  ·  domination");
+		}
+		else if (GS.MatchType == EPFMatchType::Hardpoint)
+		{
+			Score += TEXT("  ·  hardpoint");
+		}
+		else
+		{
+			if (GS.RoundNumber > 0)
+			{
+				Score += FString::Printf(TEXT("  ·  %d rounds"), GS.RoundNumber);
+			}
+			if (GS.bSuddenDeath)
+			{
+				Score += TEXT("  ·  sudden death");
+			}
 		}
 		ScoreText->SetText(FText::FromString(Score));
 	}

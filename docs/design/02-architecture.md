@@ -1,8 +1,19 @@
 # PaintForge — Technical Architecture (v1 Graybox)
 
-**Doc:** 02-architecture.md · **Owner:** Lead engineering · **Engine:** Unreal Engine 5.6, C++-first · **Module:** `PaintForge` · **Target:** Win64 · **Status:** Locked for v1 build
+**Doc:** 02-architecture.md · **Owner:** Lead engineering · **Engine:** Unreal Engine 5.6, C++-first · **Module:** `PaintForge` · **Target:** Win64 · **Status:** ⚠️ Partly superseded by `05-code-contract.md` — see the precedence note below.
 
 This document is the coding spec for the v1 graybox milestone: server-authoritative multiplayer, zero editor-authored assets, single match loop `Lobby → BuildPhase → CombatPhase → VotePhase → Results`.
+
+> ⚠️ **PRECEDENCE — READ FIRST: `05-code-contract.md` is LAW and SUPERSEDES this document wherever the two conflict.**
+> This architecture doc predates the code contract, and several decisions below were overruled during
+> reconciliation (see `05` §1 "Reconciliations"). Known supersessions:
+> - **D3 "hitscan v1" → TRUE PROJECTILES** (05 §1 B3): 10,000 uu/s, gravity 0.35, fake-and-verify, deterministic spread seed.
+> - **Respawn-TDM / score-cap combat → ROUND-BASED 3-HP ELIMINATION** (05 §1 B1/B2): first to 4 round wins, no in-round respawn.
+> - **Per-piece `APFBuildPiece` actors → ONE replicated FastArray build grid** (`APFBuildGrid`, 05 §1 B8).
+> - The `APFTeamSpawnZone` and `APFCosmeticTracer` actors were **dropped** (spawns come from `APFArenaShell`; the cosmetic tracer is a pooled projectile).
+> - **D4 "mesh splats, not decals"** still describes what actually shipped in v1 — but a `UDecalComponent` upgrade is the planned follow-up (see the roadmap / memory).
+>
+> The "Status: Locked for v1 build" wording is historical. **When this doc and `05` disagree, follow `05`. Propose any amendment in `05` first — never edit a design here and expect code to follow it.** (`05` line 6 states the reciprocal: it supersedes docs 01–04.)
 
 ---
 

@@ -32,6 +32,11 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APaintForgeGameState, ElimFeed);
 	DOREPLIFETIME(APaintForgeGameState, VoteTally);
 	DOREPLIFETIME(APaintForgeGameState, MatchId);
+	DOREPLIFETIME(APaintForgeGameState, TargetTeamSize);
+	DOREPLIFETIME(APaintForgeGameState, RoundWinsToTake);
+	DOREPLIFETIME(APaintForgeGameState, BuildMode);
+	DOREPLIFETIME(APaintForgeGameState, MatchType);
+	DOREPLIFETIME(APaintForgeGameState, TeamScores);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +147,18 @@ void APaintForgeGameState::ServerSetTeamRoundWins(uint8 WinsA, uint8 WinsB)
 	ForceNetUpdate();
 }
 
+void APaintForgeGameState::ServerSetTeamScores(uint16 ScoreA, uint16 ScoreB)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	TeamScores[0] = ScoreA;
+	TeamScores[1] = ScoreB;
+	OnRep_Score();       // same broadcast the HUD already binds (OnMatchScoreChangedEvent)
+	ForceNetUpdate();
+}
+
 void APaintForgeGameState::ServerSetAliveCounts(uint8 AliveA, uint8 AliveB)
 {
 	if (!HasAuthority())
@@ -204,6 +221,46 @@ void APaintForgeGameState::ServerSetMatchId(const FString& NewMatchId)
 	ForceNetUpdate();
 }
 
+void APaintForgeGameState::ServerSetTargetTeamSize(uint8 NewSize)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	TargetTeamSize = static_cast<uint8>(FMath::Clamp<int32>(NewSize, 1, PFGrid::SpawnPointsPerTeam));
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetRoundWinsToTake(uint8 NewWins)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	RoundWinsToTake = NewWins;
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetBuildMode(EPFBuildMode NewMode)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	BuildMode = NewMode;
+	ForceNetUpdate();
+}
+
+void APaintForgeGameState::ServerSetMatchType(EPFMatchType NewType)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	MatchType = NewType;
+	ForceNetUpdate();
+}
+
 void APaintForgeGameState::ServerResetMatchState()
 {
 	if (!HasAuthority())
@@ -214,6 +271,8 @@ void APaintForgeGameState::ServerResetMatchState()
 	bSuddenDeath = false;
 	TeamRoundWins[0] = 0;
 	TeamRoundWins[1] = 0;
+	TeamScores[0] = 0;
+	TeamScores[1] = 0;
 	AliveCounts[0] = 0;
 	AliveCounts[1] = 0;
 	ElimFeed.Reset();

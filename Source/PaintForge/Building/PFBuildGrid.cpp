@@ -94,8 +94,13 @@ APFBuildGrid::APFBuildGrid()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
-	static ConstructorHelpers::FObjectFinder<UMaterial>   MaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	ShapeMaterial = MaterialFinder.Object;
+	// Art pass (M1): prefer the concrete build-piece master — team color lives on its "Color"
+	// vector param as an EMISSIVE trim (keeps team readability on a realistic surface). Fall back
+	// to the engine BasicShapeMaterial (full-surface "Color" tint) until M_PF_BuildPiece is
+	// authored, so pieces always render. Same "Color" call site works for both (BeginPlay).
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	ShapeMaterial = ArtMatFinder.Succeeded() ? ArtMatFinder.Object : BasicMatFinder.Object;
 
 	UStaticMesh* MeshPerType[7] =
 	{
@@ -546,6 +551,33 @@ void APFBuildGrid::ClearAll()
 	NextPieceId = 0;
 	bBuildFrozen = false;
 	UE_LOG(PaintForgeLog, Log, TEXT("BuildGrid: cleared"));
+}
+
+void APFBuildGrid::ServerInjectPieces(const TArray<FPFBuildPieceRec>& InPieces)
+{
+	if (!HasAuthority() || bBuildFrozen)
+	{
+		return;
+	}
+	int32 Injected = 0;
+	for (const FPFBuildPieceRec& In : InPieces)
+	{
+		if (In.Team > 1 || In.Type >= EPFPieceType::MAX_Count)
+		{
+			continue;   // never index the 14-ISM array out of range
+		}
+		// Same add sequence as TryPlacePiece: re-mint the id, dirty the FastArray, mirror locally.
+		FPFBuildPieceRec Rec = In;
+		Rec.PieceId = ++NextPieceId;   // monotonic; never reuse the source file's id
+		FPFBuildPieceRec& Added = Pieces.Items.Add_GetRef(Rec);
+		Pieces.MarkItemDirty(Added);   // FastArray delta → clients
+		AddPieceLocal(Added);          // server-side ISM + occupancy (client path fires via PostReplicatedAdd)
+		++Injected;
+	}
+	if (Injected > 0)
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("BuildGrid: injected %d community pieces"), Injected);
+	}
 }
 
 // ---------------------------------------------------------------------------

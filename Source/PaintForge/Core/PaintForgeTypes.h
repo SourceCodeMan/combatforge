@@ -49,6 +49,29 @@ enum class EPFBodyRegion : uint8 { Body = 0, Mask = 1, Legs = 2 };  // Mask ≡ 
 UENUM()
 enum class EPFRespawnMode : uint8 { RoundElimination = 0, Respawn = 1 };  // B1: RoundElimination is v1
 
+// Build Mode = what the BUILD phase does (independent of the match type below).
+UENUM(BlueprintType)
+enum class EPFBuildMode : uint8
+{
+	Creative = 0,     // build your half from empty (v1)
+	Improvement = 1,  // start from a community map, then a build pass on top   [wiring pending]
+	PlayOnly = 2,     // no build phase — straight to combat
+	MAX_Count = 3 UMETA(Hidden)
+};
+
+// Match Type = the objective / win condition of the combat (independent of the build mode).
+UENUM(BlueprintType)
+enum class EPFMatchType : uint8
+{
+	Elimination = 0,  // round-based, last team standing, first-to-N (v1)
+	FreeForAll = 1,   // solo, most tags (play-only by nature); per-player TagCount
+	Skirmish = 2,     // teams, most tags to a score (the non-lethal "TDM")
+	CaptureFlag = 3,  // teams, first to N flag captures (TeamScores)
+	Domination = 4,   // teams, hold 3 points — score over time (TeamScores)
+	Hardpoint = 5,    // teams, rotating single point — score over time (TeamScores)
+	MAX_Count = 6 UMETA(Hidden)
+};
+
 UENUM()
 enum class EPFThumbVote : uint8 { Abstained = 0, Up = 1, Down = 2 };
 

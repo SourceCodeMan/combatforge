@@ -29,8 +29,16 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  PropBudget = 6;
 	UPROPERTY(Replicated)                  uint16 Eliminations = 0;
 	UPROPERTY(Replicated)                  uint16 TimesEliminated = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint16 TagCount = 0;         // FreeForAll per-player tags (also useful HUD)
 	UPROPERTY(Replicated)                  int32  MatchScore = 0;         // T18 scoring
 	UPROPERTY(Replicated)                  FString PlayerGuidHash;        // set via PC on join (T24)
+
+	// Objective carrier / capture state lives on PlayerState (NOT the Character) so elim/respawn
+	// and UI can read it without Character changes. CTF uses the flag fields; Dom/HP HUD can read
+	// StandingOnPoint when the GameMode stamps it.
+	UPROPERTY(ReplicatedUsing=OnRep_Flags) bool  bCarryingFlag = false;
+	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8 CarriedFlagTeam = 255;  // which team's flag (0/1), 255 = none
+	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8 StandingOnPoint = 255;  // control-point index, 255 = none
 
 	FPFOnPlayerStateFlagsChanged OnFlagsChangedEvent;  // broadcast from OnRep_Flags + server setters
 
@@ -41,6 +49,9 @@ public:
 	bool ServerTrySpendBudget(EPFPieceType Type);      // false if empty; decrements correct pool
 	void ServerRefundBudget(EPFPieceType Type);        // T19: called with the ORIGINAL builder's PS
 	void ServerAddScore(int32 Delta);
+	void ServerAddTag();                               // FreeForAll: ++TagCount + flags refresh
+	void ServerSetFlagCarry(bool bCarrying, uint8 FlagTeam); // CTF: set/clear carrier
+	void ServerSetStandingOnPoint(uint8 PointIndex);         // Dom/HP: 255 = off point
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void PostInitializeComponents() override;

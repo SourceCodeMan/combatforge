@@ -5,6 +5,7 @@
 #include "PaintForge.h"
 #include "Combat/PFPaintballProjectile.h"
 #include "Core/PaintForgeGameState.h"
+#include "Components/DecalComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -15,16 +16,29 @@
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/SoftObjectPtr.h"
 
 namespace
 {
 	constexpr float PendingBrightness = 0.6f;      // 60% variant (contract §3.4)
 	constexpr float PendingLifetimeSec = 0.6f;     // unconfirmed window (04 §5.2)
-	constexpr float SplatDiscScale = 0.4f;         // (0.4, 0.4, 0.02) disc (02 §3.4)
-	constexpr float SplatDiscThickness = 0.02f;
-	constexpr float SplatNormalOffsetUU = 1.f;
-	constexpr float JitterMin = 0.8f;
-	constexpr float JitterMax = 1.3f;
+	constexpr float PendingFadeOutSec = 0.2f;      // 04 §5.2 fade (closes prior CONTRACT-GAP)
+	// Airsoft BB impact scuff — small pockmark, not a paint disc. DecalSize X = projection depth.
+	constexpr float SplatSizeUU = 14.f;
+	constexpr float SplatProjectionDepthUU = 8.f;
+	constexpr float SplatNormalOffsetUU = 0.5f;
+	constexpr float JitterMin = 0.75f;
+	constexpr float JitterMax = 1.35f;
+	constexpr float AspectMin = 0.72f;             // slight stretch → ricochet / scrape variety
+	constexpr float AspectMax = 1.28f;
+	constexpr float PuffSizeUU = 0.09f;            // sphere scale (~9 uu) for dust puff
+	constexpr float PuffNormalOffsetUU = 4.f;
+
+	// Soft paths — CDO FObjectFinder is only reliable for /Engine content (playbook §2).
+	TSoftObjectPtr<UMaterialInterface> SplatDecalMatRef(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ImpactMark.M_PF_ImpactMark")));
+	TSoftObjectPtr<UMaterialInterface> ImpactDustMatRef(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ImpactDust.M_PF_ImpactDust")));
 
 	int32 TeamIndex(uint8 Team)
 	{
@@ -34,18 +48,12 @@ namespace
 
 UPFSplatSubsystem::UPFSplatSubsystem()
 {
-	// CDO-time engine-asset references (02 D10) so the cooker packages them.
+	// Engine sphere for impact puffs (CDO-safe /Engine path). Materials soft-load in EnsureInfrastructure.
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(
 		TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereFinder.Succeeded())
 	{
-		SplatMesh = SphereFinder.Object;
-	}
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
-		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (MaterialFinder.Succeeded())
-	{
-		BaseMaterial = MaterialFinder.Object;
+		PuffMesh = SphereFinder.Object;
 	}
 }
 
@@ -107,11 +115,17 @@ void UPFSplatSubsystem::SpawnConfirmedSplat(const FVector& Loc, const FVector& N
 			break;
 		}
 	}
+	const bool bReconciledPending = (Slot != INDEX_NONE);
 	if (Slot == INDEX_NONE)
 	{
 		Slot = TakeNextSlot();
 	}
 	PlaceSplat(Slot, Loc, Normal, Team, /*bPending=*/false, /*ShotIndex=*/0);
+	// Dust puff only when this is a new remote/world hit — owning client already puffed on pending.
+	if (!bReconciledPending)
+	{
+		SpawnImpactPuff(Loc, Normal, Team);
+	}
 }
 
 void UPFSplatSubsystem::SpawnPendingSplat(uint32 ShotIndex, const FVector& Loc,
@@ -123,14 +137,17 @@ void UPFSplatSubsystem::SpawnPendingSplat(uint32 ShotIndex, const FVector& Loc,
 	}
 	EnsureInfrastructure();
 	PlaceSplat(TakeNextSlot(), Loc, Normal, Team, /*bPending=*/true, ShotIndex);
+	SpawnImpactPuff(Loc, Normal, Team);   // immediate owning-client hit juice
 }
 
 void UPFSplatSubsystem::ResetPool()
 {
 	for (int32 i = 0; i < SplatComps.Num(); ++i)
 	{
-		if (UStaticMeshComponent* Comp = SplatComps[i])
+		if (UDecalComponent* Comp = SplatComps[i])
 		{
+			// Cancel any in-flight fade/lifespan so the pooled component is not destroyed.
+			Comp->SetFadeOut(0.f, 0.f, /*DestroyOwnerAfterFade=*/false);
 			Comp->SetVisibility(false);
 		}
 	}
@@ -139,6 +156,20 @@ void UPFSplatSubsystem::ResetPool()
 		M = FSplatMeta();
 	}
 	NextSlot = 0;
+
+	for (int32 i = 0; i < PuffComps.Num(); ++i)
+	{
+		if (UStaticMeshComponent* Comp = PuffComps[i])
+		{
+			Comp->SetVisibility(false);
+		}
+	}
+	for (FPuffMeta& P : PuffMeta)
+	{
+		P = FPuffMeta();
+	}
+	NextPuffSlot = 0;
+
 	UE_LOG(PaintForgeLog, Log, TEXT("Splat pool reset (BuildPhase entry, T20)"));
 }
 
@@ -199,6 +230,11 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 		SplatMeta.SetNum(PoolSize);
 		SplatComps.SetNum(PoolSize);
 	}
+	if (PuffMeta.Num() != PuffPoolSize)
+	{
+		PuffMeta.SetNum(PuffPoolSize);
+		PuffComps.SetNum(PuffPoolSize);
+	}
 
 	if (SplatHolder == nullptr)
 	{
@@ -215,6 +251,22 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 		}
 	}
 
+	// Load /Game materials on demand (never touch render packages on dedicated servers —
+	// EnsureInfrastructure is only called from rendering spawn paths).
+	if (BaseMaterial == nullptr)
+	{
+		BaseMaterial = SplatDecalMatRef.LoadSynchronous();
+		if (BaseMaterial == nullptr)
+		{
+			UE_LOG(PaintForgeLog, Warning,
+				TEXT("Impact decal material missing — run Scripts/gen_splat_decal_material.py"));
+		}
+	}
+	if (DustMaterial == nullptr)
+	{
+		DustMaterial = ImpactDustMatRef.LoadSynchronous();
+	}
+
 	if (ConfirmedMIDs.Num() == 0 && BaseMaterial != nullptr)
 	{
 		ConfirmedMIDs.SetNum(2);
@@ -228,6 +280,25 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 			PendingMIDs[T]->SetVectorParameterValue(TEXT("Color"), TeamColor * PendingBrightness);
 		}
 	}
+
+	// Team-tinted dust puffs: warm dust * slight team color (airsoft scuff, not paint).
+	if (PuffMIDs.Num() == 0 && DustMaterial != nullptr)
+	{
+		PuffMIDs.SetNum(2);
+		for (int32 T = 0; T < 2; ++T)
+		{
+			const FLinearColor Team = PFColors::ForTeam(static_cast<uint8>(T));
+			const FLinearColor Dust(
+				0.45f + Team.R * 0.25f,
+				0.40f + Team.G * 0.20f,
+				0.32f + Team.B * 0.15f,
+				1.f);
+			PuffMIDs[T] = UMaterialInstanceDynamic::Create(DustMaterial, this);
+			PuffMIDs[T]->SetVectorParameterValue(TEXT("EmissiveColor"), Dust);
+			PuffMIDs[T]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.85f);
+			PuffMIDs[T]->SetVectorParameterValue(TEXT("Color"), Dust);
+		}
+	}
 }
 
 int32 UPFSplatSubsystem::TakeNextSlot()
@@ -238,22 +309,20 @@ int32 UPFSplatSubsystem::TakeNextSlot()
 	return Slot;
 }
 
-UStaticMeshComponent* UPFSplatSubsystem::GetOrCreateSplatComp(int32 Index)
+UDecalComponent* UPFSplatSubsystem::GetOrCreateSplatComp(int32 Index)
 {
 	if (!SplatComps.IsValidIndex(Index) || SplatHolder == nullptr)
 	{
 		return nullptr;
 	}
-	UStaticMeshComponent* Comp = SplatComps[Index];
-	if (Comp == nullptr)
+	// SetFadeOut schedules DestroyComponent after the fade — recreate if the slot was reclaimed.
+	UDecalComponent* Comp = SplatComps[Index];
+	if (!IsValid(Comp))
 	{
-		Comp = NewObject<UStaticMeshComponent>(SplatHolder);
-		Comp->SetStaticMesh(SplatMesh);
-		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Comp->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
-		Comp->SetCastShadow(false);
+		Comp = NewObject<UDecalComponent>(SplatHolder);
+		Comp->bDestroyOwnerAfterFade = false;
 		Comp->SetVisibility(false);
-		Comp->SetComponentTickEnabled(false);
+		Comp->SetUsingAbsoluteScale(true);
 		Comp->RegisterComponent();
 		Comp->AttachToComponent(SplatHolder->GetRootComponent(),
 			FAttachmentTransformRules::KeepWorldTransform);
@@ -265,7 +334,7 @@ UStaticMeshComponent* UPFSplatSubsystem::GetOrCreateSplatComp(int32 Index)
 void UPFSplatSubsystem::PlaceSplat(int32 Index, const FVector& Loc, const FVector& Normal,
 	uint8 Team, bool bPending, uint32 ShotIndex)
 {
-	UStaticMeshComponent* Comp = GetOrCreateSplatComp(Index);
+	UDecalComponent* Comp = GetOrCreateSplatComp(Index);
 	const UWorld* World = GetWorld();
 	if (Comp == nullptr || World == nullptr)
 	{
@@ -275,23 +344,29 @@ void UPFSplatSubsystem::PlaceSplat(int32 Index, const FVector& Loc, const FVecto
 	const int32 TIdx = TeamIndex(Team);
 	if (ConfirmedMIDs.IsValidIndex(TIdx) && PendingMIDs.IsValidIndex(TIdx))
 	{
-		Comp->SetMaterial(0, bPending ? PendingMIDs[TIdx].Get() : ConfirmedMIDs[TIdx].Get());
+		Comp->SetDecalMaterial(bPending ? PendingMIDs[TIdx].Get() : ConfirmedMIDs[TIdx].Get());
 	}
 
-	// Disc aligned Z-to-normal, +1 uu offset, random yaw + 0.8–1.3× jitter (02 §3.4).
+	// Decals project along local X (engine DeferredDecal.usf swizzle). Align X to the surface
+	// normal, then random-spin around the normal for variety (mesh era used MakeFromZ + yaw).
 	FVector SafeNormal = Normal.GetSafeNormal();
 	if (SafeNormal.IsNearlyZero())
 	{
 		SafeNormal = FVector::UpVector;
 	}
-	const FQuat Align = FRotationMatrix::MakeFromZ(SafeNormal).ToQuat();
-	const FQuat RandomYaw(FVector::UpVector, FMath::FRandRange(0.f, 2.f * UE_PI));
+	const FQuat Align = FRotationMatrix::MakeFromX(SafeNormal).ToQuat();
+	const FQuat RandomYaw(SafeNormal, FMath::FRandRange(0.f, 2.f * UE_PI));
 	const float Jitter = FMath::FRandRange(JitterMin, JitterMax);
-	const FVector Scale(SplatDiscScale * Jitter, SplatDiscScale * Jitter, SplatDiscThickness);
+	const float Size = SplatSizeUU * Jitter;
+	const float Aspect = FMath::FRandRange(AspectMin, AspectMax);
+	// DecalSize = (projection half-extent along X, half-width Y, half-height Z)
+	Comp->DecalSize = FVector(SplatProjectionDepthUU, Size * Aspect, Size / Aspect);
 
-	Comp->SetWorldTransform(
-		FTransform(Align * RandomYaw, Loc + SafeNormal * SplatNormalOffsetUU, Scale));
+	// Cancel any prior fade/lifespan so a recycled slot is fully opaque and not destroyed.
+	Comp->SetFadeOut(0.f, 0.f, /*DestroyOwnerAfterFade=*/false);
+	Comp->SetWorldLocationAndRotation(Loc + SafeNormal * SplatNormalOffsetUU, (Align * RandomYaw).Rotator());
 	Comp->SetVisibility(true);
+	Comp->MarkRenderStateDirty();
 
 	FSplatMeta& M = SplatMeta[Index];
 	M.bActive = true;
@@ -300,6 +375,78 @@ void UPFSplatSubsystem::PlaceSplat(int32 Index, const FVector& Loc, const FVecto
 	M.SpawnTime = World->GetTimeSeconds();
 	M.Loc = Loc;
 	M.Team = Team;
+}
+
+UStaticMeshComponent* UPFSplatSubsystem::GetOrCreatePuffComp(int32 Index)
+{
+	if (!PuffComps.IsValidIndex(Index) || SplatHolder == nullptr)
+	{
+		return nullptr;
+	}
+	UStaticMeshComponent* Comp = PuffComps[Index];
+	if (!IsValid(Comp))
+	{
+		Comp = NewObject<UStaticMeshComponent>(SplatHolder);
+		if (PuffMesh != nullptr)
+		{
+			Comp->SetStaticMesh(PuffMesh);
+		}
+		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Comp->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
+		Comp->SetCastShadow(false);
+		Comp->SetVisibility(false);
+		Comp->SetUsingAbsoluteScale(true);
+		Comp->RegisterComponent();
+		Comp->AttachToComponent(SplatHolder->GetRootComponent(),
+			FAttachmentTransformRules::KeepWorldTransform);
+		PuffComps[Index] = Comp;
+	}
+	return Comp;
+}
+
+void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Normal, uint8 Team)
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || DustMaterial == nullptr)
+	{
+		return;
+	}
+	if (PuffMeta.Num() != PuffPoolSize)
+	{
+		PuffMeta.SetNum(PuffPoolSize);
+		PuffComps.SetNum(PuffPoolSize);
+	}
+
+	const int32 Slot = NextPuffSlot;
+	NextPuffSlot = (NextPuffSlot + 1) % PuffPoolSize;
+
+	UStaticMeshComponent* Comp = GetOrCreatePuffComp(Slot);
+	if (Comp == nullptr)
+	{
+		return;
+	}
+
+	const int32 TIdx = TeamIndex(Team);
+	if (PuffMIDs.IsValidIndex(TIdx) && PuffMIDs[TIdx] != nullptr)
+	{
+		Comp->SetMaterial(0, PuffMIDs[TIdx]);
+	}
+
+	FVector SafeNormal = Normal.GetSafeNormal();
+	if (SafeNormal.IsNearlyZero())
+	{
+		SafeNormal = FVector::UpVector;
+	}
+	const float Size = PuffSizeUU * FMath::FRandRange(0.75f, 1.35f);
+	// Flatten slightly along the surface normal so it reads as a dust burst, not a ball.
+	const FQuat Align = FRotationMatrix::MakeFromZ(SafeNormal).ToQuat();
+	Comp->SetWorldLocationAndRotation(Loc + SafeNormal * PuffNormalOffsetUU, Align.Rotator());
+	Comp->SetWorldScale3D(FVector(Size * 1.4f, Size * 1.4f, Size * 0.55f));
+	Comp->SetVisibility(true);
+
+	FPuffMeta& P = PuffMeta[Slot];
+	P.bActive = true;
+	P.HideAt = World->GetTimeSeconds() + PuffLifetimeSec;
 }
 
 void UPFSplatSubsystem::TickPendingExpiry()
@@ -316,14 +463,34 @@ void UPFSplatSubsystem::TickPendingExpiry()
 		FSplatMeta& M = SplatMeta[i];
 		if (M.bActive && M.bPending && Now - M.SpawnTime > PendingLifetimeSec)
 		{
-			// CONTRACT-GAP: 04 §5.2 asks for a 0.2 s fade-out, but the opaque
-			// BasicShapeMaterial cannot alpha-fade (same graybox concession as T7);
-			// unconfirmed pendings hide instantly at the 0.6 s deadline instead.
-			if (UStaticMeshComponent* Comp = SplatComps.IsValidIndex(i) ? SplatComps[i].Get() : nullptr)
+			// 0.2 s alpha fade (04 §5.2). DestroyOwnerAfterFade MUST stay false — the
+			// component is pooled on a shared holder actor. After the fade, LifeSpanCallback
+			// DestroyComponent's the decal; GetOrCreateSplatComp recreates on next use.
+			if (UDecalComponent* Comp = SplatComps.IsValidIndex(i) ? SplatComps[i].Get() : nullptr)
 			{
-				Comp->SetVisibility(false);
+				if (IsValid(Comp))
+				{
+					Comp->SetFadeOut(0.f, PendingFadeOutSec, /*DestroyOwnerAfterFade=*/false);
+				}
 			}
 			M = FSplatMeta();
+		}
+	}
+
+	// Hide expired dust puffs (mesh pool, no fade needed — already a short flash).
+	for (int32 i = 0; i < PuffMeta.Num(); ++i)
+	{
+		FPuffMeta& P = PuffMeta[i];
+		if (P.bActive && Now >= P.HideAt)
+		{
+			if (UStaticMeshComponent* Comp = PuffComps.IsValidIndex(i) ? PuffComps[i].Get() : nullptr)
+			{
+				if (IsValid(Comp))
+				{
+					Comp->SetVisibility(false);
+				}
+			}
+			P = FPuffMeta();
 		}
 	}
 }
