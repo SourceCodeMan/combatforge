@@ -186,6 +186,7 @@ void APaintForgeGameMode::Logout(AController* Exiting)
 	// take it as an explicit exclusion.
 	RecountAlive();
 	CheckElimVictory();
+	CheckSkirmishAbandon();   // Skirmish: a whole team leaving ends the match (CheckElimVictory no-ops here)
 	NotifyReadyChangedInternal(ExitingPS);
 	CheckAllVotesIn(ExitingPS);
 }
@@ -1058,6 +1059,29 @@ void APaintForgeGameMode::EndSkirmish(uint8 WinnerTeam)
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Skirmish over — winner team %d (%d-%d)"),
 		WinnerTeam, GS->TeamScores[0], GS->TeamScores[1]);
 	SetPhase(EPFMatchPhase::Vote);   // same Combat→Vote jump EndRound uses for a decided match
+}
+
+void APaintForgeGameMode::CheckSkirmishAbandon()
+{
+	// Disconnect path: Skirmish never resolves by team-wipe (tagged players respawn), but a whole team
+	// LEAVING has no respawn — end promptly instead of running the full clock with no opponents. In
+	// Skirmish, bAliveInRound is never cleared by a tag, so AliveCounts == connected teamed players.
+	const APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::Skirmish
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+	{
+		return;
+	}
+	const uint8 A = GS->AliveCounts[0];
+	const uint8 B = GS->AliveCounts[1];
+	if (A > 0 && B > 0)
+	{
+		return;   // both sides still present
+	}
+	uint8 Winner = TeamNone;   // both empty → draw
+	if (A == 0 && B > 0) { Winner = 1; }
+	else if (B == 0 && A > 0) { Winner = 0; }
+	EndSkirmish(Winner);   // clears the round timer + jumps Combat→Vote (double-fire guarded)
 }
 
 void APaintForgeGameMode::CheckElimVictory()

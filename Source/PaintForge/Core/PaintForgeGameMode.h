@@ -50,7 +50,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") bool  bFillWithBots        = true;    // top each team up to the format size
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFBuildMode DefaultBuildMode = EPFBuildMode::Creative;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFMatchType DefaultMatchType = EPFMatchType::Elimination;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") uint16 SkirmishTagTarget    = 50;      // first team to N tags wins
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 SkirmishTagTarget = 50; // first team to N tags wins (≤255 keeps HUD/record fields consistent)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period
 
 	// ---- The only phase mutator in the codebase ----
@@ -95,6 +95,7 @@ protected:
 	// ---- (intra) Skirmish match type (team frag-count; siblings, never touch the Elimination path) ----
 	void ResolveSkirmishOnTimer();                     // timer expiry: higher tags wins, tie = draw
 	void EndSkirmish(uint8 WinnerTeam);                // 0/1 winner, 255 = draw → Combat→Vote jump
+	void CheckSkirmishAbandon();                       // disconnect: end promptly if a whole team leaves
 
 	// ---- (intra) lobby / build countdowns ----
 	void BeginLobbyStartCountdown(bool bForced);
