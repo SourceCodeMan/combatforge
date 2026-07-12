@@ -31,7 +31,8 @@ namespace
 		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
 	}
 
-	FString BuildModeLabel(EPFBuildMode Mode)
+	// Prefixed names avoid unity-build ODR clashes with PFLoadingMenuWidget.cpp helpers.
+	FString LobbyBuildModeLabel(EPFBuildMode Mode)
 	{
 		switch (Mode)
 		{
@@ -42,7 +43,7 @@ namespace
 		}
 	}
 
-	FString BuildModeBlurb(EPFBuildMode Mode)
+	FString LobbyBuildModeBlurb(EPFBuildMode Mode)
 	{
 		switch (Mode)
 		{
@@ -57,7 +58,7 @@ namespace
 		}
 	}
 
-	FString MatchTypeLabel(EPFMatchType Type)
+	FString LobbyMatchTypeLabel(EPFMatchType Type)
 	{
 		switch (Type)
 		{
@@ -72,7 +73,7 @@ namespace
 	}
 
 	/** One-line how-to for the match TYPE row (kids-friendly). */
-	FString MatchTypeBlurb(EPFMatchType Type)
+	FString LobbyMatchTypeBlurb(EPFMatchType Type)
 	{
 		switch (Type)
 		{
@@ -562,8 +563,8 @@ void UPFLobbyWidget::RefreshConfig()
 	const UWorld* World = GetWorld();
 	const APaintForgeGameState* GS = World ? World->GetGameState<APaintForgeGameState>() : nullptr;
 	if (!GS) { return; }
-	if (ModeValueText)   { ModeValueText->SetText(FText::FromString(BuildModeLabel(GS->BuildMode))); }
-	if (TypeValueText)   { TypeValueText->SetText(FText::FromString(MatchTypeLabel(GS->MatchType))); }
+	if (ModeValueText)   { ModeValueText->SetText(FText::FromString(LobbyBuildModeLabel(GS->BuildMode))); }
+	if (TypeValueText)   { TypeValueText->SetText(FText::FromString(LobbyMatchTypeLabel(GS->MatchType))); }
 	if (FormatValueText)
 	{
 		FormatValueText->SetText(FText::FromString(
@@ -596,8 +597,8 @@ void UPFLobbyWidget::RefreshConfig()
 	}
 	if (ConfigHintText)
 	{
-		const FString ModeBlurb = BuildModeBlurb(GS->BuildMode);
-		const FString TypeBlurb = MatchTypeBlurb(GS->MatchType);
+		const FString ModeBlurb = LobbyBuildModeBlurb(GS->BuildMode);
+		const FString TypeBlurb = LobbyMatchTypeBlurb(GS->MatchType);
 		FString Hint;
 		if (!ModeBlurb.IsEmpty()) { Hint += ModeBlurb; }
 		if (!TypeBlurb.IsEmpty())

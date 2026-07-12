@@ -6,6 +6,8 @@
 #include "Building/PFGridMath.h"
 
 #include "Engine/StaticMesh.h"
+#include "Engine/Texture.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/SoftObjectPath.h"
 
 namespace PFBuildPieceVisuals
@@ -25,6 +27,23 @@ namespace
 		bool bWarehouse = false;
 	};
 
+	/** Per structural type: soft texture set + MID knobs for M_PF_BuildPiece. */
+	struct FSurfaceProfile
+	{
+		const TCHAR* Label = TEXT("concrete");
+		/** Diffuse / base color candidates (warehouse first, ambientCG fallback). */
+		const TCHAR* BaseColorPaths[3] = { nullptr, nullptr, nullptr };
+		const TCHAR* NormalPaths[3] = { nullptr, nullptr, nullptr };
+		/** ORD or grayscale rough (G=rough or R=rough depending on pack). */
+		const TCHAR* OrdPaths[3] = { nullptr, nullptr, nullptr };
+		float WorldTileSize = 256.f;
+		float AccentBoost = 2.0f;
+		UTexture* BaseColor = nullptr;
+		UTexture* Normal = nullptr;
+		UTexture* ORD = nullptr;
+		bool bLoaded = false;
+	};
+
 	bool GLoaded = false;
 	FPropSlot GBarrel;   // PropCan
 	FPropSlot GCrate;    // PropDorito
@@ -32,6 +51,12 @@ namespace
 	UStaticMesh* GCube = nullptr;
 	UStaticMesh* GCylinder = nullptr;
 	UStaticMesh* GCone = nullptr;
+
+	FSurfaceProfile GSurfWall;
+	FSurfaceProfile GSurfFloor;
+	FSurfaceProfile GSurfRamp;
+	FSurfaceProfile GSurfRoof;
+	FSurfaceProfile GSurfFallback; // Concrete034 / flat
 
 	UStaticMesh* SoftLoadMesh(const TCHAR* Path)
 	{
@@ -41,6 +66,28 @@ namespace
 		}
 		const FSoftObjectPath Soft(Path);
 		return Cast<UStaticMesh>(Soft.TryLoad());
+	}
+
+	UTexture* SoftLoadTexture(const TCHAR* Path)
+	{
+		if (!Path || !*Path)
+		{
+			return nullptr;
+		}
+		const FSoftObjectPath Soft(Path);
+		return Cast<UTexture>(Soft.TryLoad());
+	}
+
+	UTexture* SoftLoadFirstTexture(const TCHAR* const Paths[3])
+	{
+		for (int32 i = 0; i < 3; ++i)
+		{
+			if (UTexture* T = SoftLoadTexture(Paths[i]))
+			{
+				return T;
+			}
+		}
+		return nullptr;
 	}
 
 	void FitSlot(FPropSlot& Slot, UStaticMesh* Fallback)
@@ -103,6 +150,97 @@ namespace
 		{
 			// Engine basic-shape fallbacks use the legacy baked scales in PieceLocalTransform.
 			Slot.FitScale = FVector::OneVector;
+		}
+	}
+
+	void LoadSurface(FSurfaceProfile& S)
+	{
+		S.BaseColor = SoftLoadFirstTexture(S.BaseColorPaths);
+		S.Normal = SoftLoadFirstTexture(S.NormalPaths);
+		S.ORD = SoftLoadFirstTexture(S.OrdPaths);
+		S.bLoaded = (S.BaseColor != nullptr);
+	}
+
+	void InitSurfaceProfiles()
+	{
+		// AmbientCG Concrete034 (always preferred as last path — ships with project).
+		static const TCHAR* CC0_BC = TEXT("/Game/Textures/Concrete/T_Concrete034_Color.T_Concrete034_Color");
+		static const TCHAR* CC0_N  = TEXT("/Game/Textures/Concrete/T_Concrete034_Normal.T_Concrete034_Normal");
+		static const TCHAR* CC0_R  = TEXT("/Game/Textures/Concrete/T_Concrete034_Rough.T_Concrete034_Rough");
+
+		// Wall — facade concrete (warehouse) → CC0
+		GSurfWall.Label = TEXT("wall-concrete");
+		GSurfWall.WorldTileSize = 200.f;
+		GSurfWall.AccentBoost = 2.4f;
+		GSurfWall.BaseColorPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Wall_Facade_Concrete_New_01/T_Ind_War_Wall_Facade_Concrete_New_01_D.T_Ind_War_Wall_Facade_Concrete_New_01_D");
+		GSurfWall.BaseColorPaths[1] = CC0_BC;
+		GSurfWall.NormalPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Wall_Facade_Concrete_New_01/T_Ind_War_Wall_Facade_Concrete_New_01_N.T_Ind_War_Wall_Facade_Concrete_New_01_N");
+		GSurfWall.NormalPaths[1] = CC0_N;
+		GSurfWall.OrdPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Wall_Facade_Concrete_New_01/T_Ind_War_Wall_Facade_Concrete_New_01_ORDp.T_Ind_War_Wall_Facade_Concrete_New_01_ORDp");
+		GSurfWall.OrdPaths[1] = CC0_R;
+		LoadSurface(GSurfWall);
+
+		// Floor — smooth warehouse concrete, larger tiles, softer team glow
+		GSurfFloor.Label = TEXT("floor-concrete");
+		GSurfFloor.WorldTileSize = 360.f;
+		GSurfFloor.AccentBoost = 1.35f;
+		GSurfFloor.BaseColorPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Floor_Concrete_Smooth_01/T_Ind_War_Floor_Concrete_Smooth_01_D.T_Ind_War_Floor_Concrete_Smooth_01_D");
+		GSurfFloor.BaseColorPaths[1] = CC0_BC;
+		GSurfFloor.NormalPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Floor_Concrete_Smooth_01/T_Ind_War_Floor_Concrete_Smooth_01_N.T_Ind_War_Floor_Concrete_Smooth_01_N");
+		GSurfFloor.NormalPaths[1] = CC0_N;
+		GSurfFloor.OrdPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Floor_Concrete_Smooth_01/T_Ind_War_Floor_Concrete_Smooth_01_ORDp.T_Ind_War_Floor_Concrete_Smooth_01_ORDp");
+		GSurfFloor.OrdPaths[1] = CC0_R;
+		LoadSurface(GSurfFloor);
+
+		// Ramp — rusty sheet metal (airsoft bunker plank)
+		GSurfRamp.Label = TEXT("ramp-metal");
+		GSurfRamp.WorldTileSize = 180.f;
+		GSurfRamp.AccentBoost = 2.2f;
+		GSurfRamp.BaseColorPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_D.T_Ind_War_Sheet_Metal_Rusty_01_D");
+		GSurfRamp.BaseColorPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Garage_Door_Metal_Worn_01/T_Ind_War_Garage_Door_Metal_Worn_01_D.T_Ind_War_Garage_Door_Metal_Worn_01_D");
+		GSurfRamp.BaseColorPaths[2] = CC0_BC;
+		GSurfRamp.NormalPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_N.T_Ind_War_Sheet_Metal_Rusty_01_N");
+		GSurfRamp.NormalPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Garage_Door_Metal_Worn_01/T_Ind_War_Garage_Door_Metal_Worn_01_N.T_Ind_War_Garage_Door_Metal_Worn_01_N");
+		GSurfRamp.NormalPaths[2] = CC0_N;
+		GSurfRamp.OrdPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_ORDp.T_Ind_War_Sheet_Metal_Rusty_01_ORDp");
+		GSurfRamp.OrdPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Garage_Door_Metal_Worn_01/T_Ind_War_Garage_Door_Metal_Worn_01_ORDp.T_Ind_War_Garage_Door_Metal_Worn_01_ORDp");
+		GSurfRamp.OrdPaths[2] = CC0_R;
+		LoadSurface(GSurfRamp);
+
+		// Roof — painted metal / corrugated roofing
+		GSurfRoof.Label = TEXT("roof-metal");
+		GSurfRoof.WorldTileSize = 220.f;
+		GSurfRoof.AccentBoost = 2.0f;
+		GSurfRoof.BaseColorPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_D.T_Ind_War_Roof_Painted_01_D");
+		GSurfRoof.BaseColorPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_D.T_Ind_War_Sheet_Metal_Rusty_01_D");
+		GSurfRoof.BaseColorPaths[2] = CC0_BC;
+		GSurfRoof.NormalPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_N.T_Ind_War_Roof_Painted_01_N");
+		GSurfRoof.NormalPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_N.T_Ind_War_Sheet_Metal_Rusty_01_N");
+		GSurfRoof.NormalPaths[2] = CC0_N;
+		GSurfRoof.OrdPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_ORDp.T_Ind_War_Roof_Painted_01_ORDp");
+		GSurfRoof.OrdPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_ORDp.T_Ind_War_Sheet_Metal_Rusty_01_ORDp");
+		GSurfRoof.OrdPaths[2] = CC0_R;
+		LoadSurface(GSurfRoof);
+
+		// Shared fallback for unknown types / ghost default
+		GSurfFallback.Label = TEXT("fallback-concrete");
+		GSurfFallback.WorldTileSize = 256.f;
+		GSurfFallback.AccentBoost = 1.8f;
+		GSurfFallback.BaseColorPaths[0] = CC0_BC;
+		GSurfFallback.NormalPaths[0] = CC0_N;
+		GSurfFallback.OrdPaths[0] = CC0_R;
+		LoadSurface(GSurfFallback);
+	}
+
+	const FSurfaceProfile& SurfaceForType(EPFPieceType Type)
+	{
+		switch (Type)
+		{
+		case EPFPieceType::Wall:  return GSurfWall;
+		case EPFPieceType::Floor: return GSurfFloor;
+		case EPFPieceType::Ramp:  return GSurfRamp;
+		case EPFPieceType::Roof:  return GSurfRoof;
+		default:                  return GSurfFallback;
 		}
 	}
 
@@ -186,6 +324,9 @@ void EnsureLoaded()
 	GCylinder = SoftLoadMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	GCone = SoftLoadMesh(TEXT("/Engine/BasicShapes/Cone.Cone"));
 
+	// ---- Structural surface profiles (materials; geometry stays basic shapes) ----
+	InitSurfaceProfiles();
+
 	// PropCan → metal / plastic barrel (upright cover).
 	GBarrel.TargetSize = FVector(120.f, 120.f, 220.f);
 	GBarrel.Paths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Aba_Storage_Barrel_Metal_Blue_01/SM_Ind_Aba_Storage_Barrel_Metal_Blue_01.SM_Ind_Aba_Storage_Barrel_Metal_Blue_01");
@@ -208,11 +349,14 @@ void EnsureLoaded()
 	FitSlot(GBoxes, GCube);
 
 	UE_LOG(PaintForgeLog, Log,
-		TEXT("BuildPieceVisuals: Barrel=%s Crate=%s Boxes=%s (warehouse=%d/%d/%d)"),
+		TEXT("BuildPieceVisuals: props Barrel=%s Crate=%s Boxes=%s (wh=%d/%d/%d) | surfaces Wall=%s Floor=%s Ramp=%s Roof=%s (tex=%d/%d/%d/%d)"),
 		GBarrel.Mesh ? *GBarrel.Mesh->GetName() : TEXT("null"),
 		GCrate.Mesh ? *GCrate.Mesh->GetName() : TEXT("null"),
 		GBoxes.Mesh ? *GBoxes.Mesh->GetName() : TEXT("null"),
-		GBarrel.bWarehouse ? 1 : 0, GCrate.bWarehouse ? 1 : 0, GBoxes.bWarehouse ? 1 : 0);
+		GBarrel.bWarehouse ? 1 : 0, GCrate.bWarehouse ? 1 : 0, GBoxes.bWarehouse ? 1 : 0,
+		GSurfWall.Label, GSurfFloor.Label, GSurfRamp.Label, GSurfRoof.Label,
+		GSurfWall.BaseColor ? 1 : 0, GSurfFloor.BaseColor ? 1 : 0,
+		GSurfRamp.BaseColor ? 1 : 0, GSurfRoof.BaseColor ? 1 : 0);
 }
 
 UStaticMesh* MeshForType(EPFPieceType Type)
@@ -238,7 +382,50 @@ bool UsesNativeMaterials(EPFPieceType Type)
 	{
 		return Slot->bWarehouse && Slot->Mesh != nullptr;
 	}
+	// Structural always uses M_PF_BuildPiece MIDs (team Color + surface profiles).
 	return false;
+}
+
+void ApplyStructuralSurface(UMaterialInstanceDynamic* MID, EPFPieceType Type)
+{
+	if (!MID)
+	{
+		return;
+	}
+	EnsureLoaded();
+
+	// Props keep native mats when warehouse-loaded; only structural (+ ghost) use this.
+	if (PFIsProp(Type))
+	{
+		return;
+	}
+
+	const FSurfaceProfile& S = SurfaceForType(Type);
+
+	// TextureObjectParameter names from Scripts/create_build_material.py.
+	// Soft-fail if the master material is the BasicShape fallback (no params) — Color still works.
+	if (S.BaseColor)
+	{
+		MID->SetTextureParameterValue(TEXT("BaseColorTex"), S.BaseColor);
+	}
+	if (S.Normal)
+	{
+		MID->SetTextureParameterValue(TEXT("NormalTex"), S.Normal);
+	}
+	if (S.ORD)
+	{
+		// Master material samples ORDTex (G=rough); also set RoughTex if arena-style masters ever share the MID.
+		MID->SetTextureParameterValue(TEXT("ORDTex"), S.ORD);
+		MID->SetTextureParameterValue(TEXT("RoughTex"), S.ORD);
+	}
+	MID->SetScalarParameterValue(TEXT("WorldTileSize"), S.WorldTileSize);
+	MID->SetScalarParameterValue(TEXT("AccentBoost"), S.AccentBoost);
+}
+
+const TCHAR* StructuralSurfaceName(EPFPieceType Type)
+{
+	EnsureLoaded();
+	return SurfaceForType(Type).Label;
 }
 
 FTransform PieceWorldTransform(EPFPieceType Type, int16 X, int16 Y, int16 Z, uint8 Rot)

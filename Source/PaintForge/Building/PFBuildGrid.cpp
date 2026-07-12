@@ -140,7 +140,7 @@ void APFBuildGrid::BeginPlay()
 
 	Pieces.OwnerGrid = this;   // belt+braces: ctor set it, keep it correct post-init on both sides
 
-	// Soft-load warehouse prop meshes (barrel / crate / boxes) after CDO so first compile doesn't freeze PIE.
+	// Soft-load warehouse prop meshes + structural surface textures after CDO so first compile doesn't freeze PIE.
 	PFBuildPieceVisuals::EnsureLoaded();
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
 	{
@@ -167,8 +167,8 @@ void APFBuildGrid::BeginPlay()
 		}
 	}
 
-	// Team-tinted MIDs (T8) for structural / fallback shapes only.
-	// Warehouse props keep native Megascans materials.
+	// Structural: per-type warehouse surfaces (wall concrete / floor / metal ramp / painted roof)
+	// + team Color emissive trim on M_PF_BuildPiece. Props with native mats skip.
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
 	{
 		const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
@@ -183,11 +183,19 @@ void APFBuildGrid::BeginPlay()
 			{
 				UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(ShapeMaterial, this);
 				MID->SetVectorParameterValue(TEXT("Color"), PFColors::ForTeam(Team));
+				PFBuildPieceVisuals::ApplyStructuralSurface(MID, Type);
 				PieceISMCs[K]->SetMaterial(0, MID);
 				TeamMIDs[K] = MID;
 			}
 		}
 	}
+
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("BuildGrid: structural surfaces Wall=%s Floor=%s Ramp=%s Roof=%s"),
+		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Wall),
+		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Floor),
+		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Ramp),
+		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Roof));
 }
 
 void APFBuildGrid::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

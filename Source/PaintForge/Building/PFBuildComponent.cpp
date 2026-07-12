@@ -26,6 +26,7 @@
 #include "InputActionValue.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -46,11 +47,14 @@ UPFBuildComponent::UPFBuildComponent()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
-	static ConstructorHelpers::FObjectFinder<UMaterial>   MaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	// Prefer the concrete build-piece master so the ghost matches placed structural art
+	// (triplanar + Color param). Fall back to BasicShapeMaterial if the asset is missing.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	CubeMesh      = CubeFinder.Object;
 	CylinderMesh  = CylinderFinder.Object;
 	ConeMesh      = ConeFinder.Object;
-	ShapeMaterial = MaterialFinder.Object;
+	ShapeMaterial = ArtMatFinder.Succeeded() ? ArtMatFinder.Object : BasicMatFinder.Object;
 }
 
 void UPFBuildComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -559,6 +563,11 @@ void UPFBuildComponent::SetGhostMeshForType(EPFPieceType Type)
 	GhostMesh->SetStaticMesh(MeshForType(Type));
 	if (GhostMID)
 	{
+		// Structural ghost: same warehouse surface as placed pieces (validity Color still wins).
+		if (!PFIsProp(Type))
+		{
+			PFBuildPieceVisuals::ApplyStructuralSurface(GhostMID, Type);
+		}
 		// Warehouse props can have many material slots — tint every one for validity color.
 		const int32 NumMats = FMath::Max(1, GhostMesh->GetNumMaterials());
 		for (int32 i = 0; i < NumMats; ++i)
