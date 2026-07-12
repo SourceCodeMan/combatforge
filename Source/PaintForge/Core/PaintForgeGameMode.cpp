@@ -427,15 +427,27 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		{
 			if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
 			{
-				for (uint8 BotTeam = 0; BotTeam <= 1; ++BotTeam)
+				if (GS->BuildMode == EPFBuildMode::Improvement)
 				{
-					const int32 Total = GetTeamCountByKind(BotTeam, /*bBotsOnly=*/false);
-					if (Total > 0 && Total == GetTeamCountByKind(BotTeam, /*bBotsOnly=*/true))
+					// Improvement: load the WHOLE community map; everyone builds on top of it.
+					TArray<FPFBuildPieceRec> Whole;
+					if (Rating->PickCommunityArena(Whole))
 					{
-						TArray<FPFBuildPieceRec> Half;
-						if (Rating->PickCommunityHalf(Half, BotTeam))
+						BuildGrid->ServerInjectPieces(Whole);
+					}
+				}
+				else   // Creative: only an all-bot team's half needs filling
+				{
+					for (uint8 BotTeam = 0; BotTeam <= 1; ++BotTeam)
+					{
+						const int32 Total = GetTeamCountByKind(BotTeam, /*bBotsOnly=*/false);
+						if (Total > 0 && Total == GetTeamCountByKind(BotTeam, /*bBotsOnly=*/true))
 						{
-							BuildGrid->ServerInjectPieces(Half);
+							TArray<FPFBuildPieceRec> Half;
+							if (Rating->PickCommunityHalf(Half, BotTeam))
+							{
+								BuildGrid->ServerInjectPieces(Half);
+							}
 						}
 					}
 				}

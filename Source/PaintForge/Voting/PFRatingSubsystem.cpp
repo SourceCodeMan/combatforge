@@ -226,14 +226,13 @@ FString UPFRatingSubsystem::GetCurrentArenaId() const
 	return bRecordActive ? CurrentArenaId : FString();
 }
 
-bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, uint8 TargetTeam) const
+bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces) const
 {
-	OutHalf.Reset();
-	if (!IsServerContext() || TargetTeam > 1)
+	OutPieces.Reset();
+	if (!IsServerContext())
 	{
 		return false;
 	}
-
 	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
 	TArray<FString> Files;
 	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
@@ -257,10 +256,30 @@ bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, ui
 		UE_LOG(PaintForgeLog, Warning, TEXT("RatingSubsystem: could not parse arena %s"), *ChosenPath);
 		return false;
 	}
-
-	TArray<FPFBuildPieceRec> All;
 	int32 TeamSize = 0;
-	if (!FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), All, TeamSize))
+	if (!FPFArenaSerialization::ParseLayoutJson(Root.ToSharedRef(), OutPieces, TeamSize))
+	{
+		return false;
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: loaded community arena %s (%d pieces)"),
+		*Files.Last(), OutPieces.Num());
+	return true;
+}
+
+bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces) const
+{
+	return LoadMostRecentArena(OutPieces);   // whole arena, both halves, unchanged
+}
+
+bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, uint8 TargetTeam) const
+{
+	OutHalf.Reset();
+	if (TargetTeam > 1)
+	{
+		return false;
+	}
+	TArray<FPFBuildPieceRec> All;
+	if (!LoadMostRecentArena(All))
 	{
 		return false;
 	}
@@ -289,8 +308,8 @@ bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, ui
 		Out.Team = TargetTeam;
 		OutHalf.Add(Out);
 	}
-	UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: picked community half from %s (%d pieces → team %d)"),
-		*Files.Last(), OutHalf.Num(), TargetTeam);
+	UE_LOG(PaintForgeLog, Log, TEXT("RatingSubsystem: remapped %d community pieces → team %d half"),
+		OutHalf.Num(), TargetTeam);
 	return OutHalf.Num() > 0;
 }
 
