@@ -40,9 +40,36 @@ CRASH_BC phase=… humans=… bots=… ghosts=… scores=… [names]
 
 After a kid disappears, open host `Saved/Logs/PaintForge.log` and search `CRASH_BC` for the last line before they vanished.
 
+## Client → host log ship (preferred)
+
+Remote kids automatically **stream their log lines to the host** over the game connection
+(~1 s cadence). After a crash, the host still has almost everything:
+
+```
+Saved/ClientLogs/<PlayerName>_<timestamp>.log
+```
+
+On the host after a bad session:
+
+```powershell
+# open the latest files
+explorer D:\projects\paintforge\Saved\ClientLogs
+```
+
+Or:
+
+```powershell
+.\Deploy\playtest\collect-crash-evidence.ps1
+```
+
+(now also copies `Saved/ClientLogs/`)
+
+**Limits:** last ~1–2 s before a hard kill may be missing (buffer not flushed).  
+Listen-host’s own log stays in `Saved/Logs/` (not re-shipped).
+
 ## Collect evidence (next session)
 
-### On each kid PC that crashed
+### On each kid PC that crashed (optional if ClientLogs exist on host)
 
 1. Unzip the game folder they used.
 2. Run (copy script next to the zip or from the project):
@@ -65,7 +92,7 @@ cd D:\projects\paintforge
 .\Deploy\playtest\collect-crash-evidence.ps1
 ```
 
-Send **one zip per machine**.
+Send **one zip per machine** (host zip should include ClientLogs).
 
 ## Repro matrix (controlled)
 

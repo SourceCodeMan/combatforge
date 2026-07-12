@@ -37,6 +37,7 @@ Write-Host "    Out:     $Dest"
 
 # Project Saved logs
 Copy-IfExists (Join-Path $ProjectRoot "Saved\Logs") "ProjectLogs"
+Copy-IfExists (Join-Path $ProjectRoot "Saved\ClientLogs") "ClientLogsShipped"
 Copy-IfExists (Join-Path $ProjectRoot "Saved\Crashes") "ProjectCrashes"
 Copy-IfExists (Join-Path $ProjectRoot "Saved\Config\CrashReportClient") "ProjectCRC"
 
