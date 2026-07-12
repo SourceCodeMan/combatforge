@@ -33,9 +33,24 @@ namespace
 		switch (Mode)
 		{
 		case EPFBuildMode::Creative:    return TEXT("Creative");
-		case EPFBuildMode::Improvement: return TEXT("Improvement  (soon)");
+		case EPFBuildMode::Improvement: return TEXT("Improvement");
 		case EPFBuildMode::PlayOnly:    return TEXT("Play-Only");
 		default:                        return TEXT("Creative");
+		}
+	}
+
+	FString BuildModeBlurb(EPFBuildMode Mode)
+	{
+		switch (Mode)
+		{
+		case EPFBuildMode::Creative:
+			return TEXT("Empty plots · build your fort from scratch");
+		case EPFBuildMode::Improvement:
+			return TEXT("Load a saved arena · both teams improve it");
+		case EPFBuildMode::PlayOnly:
+			return TEXT("Skip build · straight into combat");
+		default:
+			return TEXT("");
 		}
 	}
 
@@ -372,9 +387,19 @@ void UPFLobbyWidget::RefreshConfig()
 		const FString HostLine = IsLocalHost()
 			? TEXT("Host: click a row to change")
 			: TEXT("Host controls the match setup");
-		const FString Blurb = MatchTypeBlurb(GS->MatchType);
-		ConfigHintText->SetText(FText::FromString(
-			Blurb.IsEmpty() ? HostLine : FString::Printf(TEXT("%s\n%s"), *Blurb, *HostLine)));
+		const FString ModeBlurb = BuildModeBlurb(GS->BuildMode);
+		const FString TypeBlurb = MatchTypeBlurb(GS->MatchType);
+		// MODE blurb first (build style), then TYPE (win condition), then host gate line.
+		FString Hint;
+		if (!ModeBlurb.IsEmpty()) { Hint += ModeBlurb; }
+		if (!TypeBlurb.IsEmpty())
+		{
+			if (!Hint.IsEmpty()) { Hint += TEXT("\n"); }
+			Hint += TypeBlurb;
+		}
+		if (!Hint.IsEmpty()) { Hint += TEXT("\n"); }
+		Hint += HostLine;
+		ConfigHintText->SetText(FText::FromString(Hint));
 	}
 }
 

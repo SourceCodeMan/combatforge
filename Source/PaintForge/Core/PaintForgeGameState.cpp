@@ -37,6 +37,7 @@ void APaintForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APaintForgeGameState, BuildMode);
 	DOREPLIFETIME(APaintForgeGameState, MatchType);
 	DOREPLIFETIME(APaintForgeGameState, TeamScores);
+	DOREPLIFETIME(APaintForgeGameState, CommunityBasePieces);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +262,16 @@ void APaintForgeGameState::ServerSetMatchType(EPFMatchType NewType)
 	ForceNetUpdate();
 }
 
+void APaintForgeGameState::ServerSetCommunityBasePieces(uint16 Count)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	CommunityBasePieces = Count;
+	ForceNetUpdate();
+}
+
 void APaintForgeGameState::ServerResetMatchState()
 {
 	if (!HasAuthority())
@@ -275,6 +286,7 @@ void APaintForgeGameState::ServerResetMatchState()
 	TeamScores[1] = 0;
 	AliveCounts[0] = 0;
 	AliveCounts[1] = 0;
+	CommunityBasePieces = 0;
 	ElimFeed.Reset();
 	VoteTally = FPFVoteTally();
 	RoundState = EPFRoundState::None;

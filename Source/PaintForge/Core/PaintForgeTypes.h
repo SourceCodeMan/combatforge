@@ -54,7 +54,7 @@ UENUM(BlueprintType)
 enum class EPFBuildMode : uint8
 {
 	Creative = 0,     // build your half from empty (v1)
-	Improvement = 1,  // start from a community map, then a build pass on top   [wiring pending]
+	Improvement = 1,  // load a saved community arena, then a full build pass on top
 	PlayOnly = 2,     // no build phase — straight to combat
 	MAX_Count = 3 UMETA(Hidden)
 };

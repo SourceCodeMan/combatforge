@@ -483,21 +483,28 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		}
 		RecountAlive();
 
-		// All-bot team → auto-fill THAT team's half from a community-favorite arena (nobody is there to
-		// build it). Injected here (after bots exist, grid cleared, before FreezeBuild) so it replicates
-		// through the build window and is captured by BeginMatchRecord at Combat. Skipped in Play-only
-		// (which flashes past the build phase).
+		// Community inject (after bots exist, grid cleared, before FreezeBuild) so it replicates
+		// through the build window and is captured by BeginMatchRecord at Combat. Skipped in Play-only.
+		//   Improvement → whole saved arena; both teams improve their half.
+		//   Creative    → only an all-bot team's half is filled (nobody is there to build it).
 		if (BuildGrid && GS->BuildMode != EPFBuildMode::PlayOnly)
 		{
 			if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
 			{
 				if (GS->BuildMode == EPFBuildMode::Improvement)
 				{
-					// Improvement: load the WHOLE community map; everyone builds on top of it.
 					TArray<FPFBuildPieceRec> Whole;
 					if (Rating->PickCommunityArena(Whole))
 					{
 						BuildGrid->ServerInjectPieces(Whole);
+						UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Improvement loaded %d community pieces"),
+							Whole.Num());
+					}
+					else
+					{
+						// No Saved/Arenas/*.json with geometry yet — fall back to empty field (Creative-like).
+						UE_LOG(PaintForgeLog, Warning,
+							TEXT("GameMode: Improvement — no community arena on disk; starting empty"));
 					}
 				}
 				else   // Creative: only an all-bot team's half needs filling
@@ -516,6 +523,13 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 					}
 				}
 			}
+			// Actual injected count after validation skips (invalid team/type filtered in inject).
+			const int32 N = BuildGrid->GetPieces().Num();
+			GS->ServerSetCommunityBasePieces(static_cast<uint16>(FMath::Clamp(N, 0, 65535)));
+		}
+		else
+		{
+			GS->ServerSetCommunityBasePieces(0);
 		}
 
 		// Play-only mode runs all the Build-phase SETUP above (match reset, bots, spawns) but skips the
@@ -743,6 +757,12 @@ void APaintForgeGameMode::HostSetBuildMode(EPFBuildMode NewMode)
 	if (!GS || GS->Phase != EPFMatchPhase::Lobby || NewMode >= EPFBuildMode::MAX_Count)
 	{
 		return;
+	}
+	// FreeForAll is play-only by design — Creative/Improvement would flash past or confuse the lobby.
+	if (GS->MatchType == EPFMatchType::FreeForAll && NewMode != EPFBuildMode::PlayOnly)
+	{
+		NewMode = EPFBuildMode::PlayOnly;
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: FreeForAll forces PlayOnly build mode"));
 	}
 	GS->ServerSetBuildMode(NewMode);
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host set build mode %d"), static_cast<int32>(NewMode));
