@@ -13,6 +13,7 @@
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFCombatAudio.h"
 #include "Building/PFBuildComponent.h"
+#include "Core/PFUserPrefs.h"
 
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -335,6 +336,7 @@ void APaintForgeCharacter::BeginPlay()
 	// Soft wind/arena bed for the local player only (SFX volume scaled).
 	if (IsLocallyControlled())
 	{
+		BaseFOV = FPFUserPrefs::GetFieldOfView();
 		if (UPFCombatAudio* Audio = GetCombatAudio())
 		{
 			Audio->StartAmbientBed();
@@ -640,6 +642,11 @@ bool APaintForgeCharacter::IsADS() const
 float APaintForgeCharacter::GetADSAlpha() const
 {
 	return ADSAlpha;
+}
+
+void APaintForgeCharacter::SetPreferredBaseFOV(float Fov)
+{
+	BaseFOV = FMath::Clamp(Fov, 80.f, 110.f);
 }
 
 void APaintForgeCharacter::UpdateMovementIntents()

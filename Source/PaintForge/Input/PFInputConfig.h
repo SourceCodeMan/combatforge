@@ -9,6 +9,7 @@
 class APaintForgePlayerController;
 class UInputAction;
 class UInputMappingContext;
+class UInputModifierNegate;
 class UInputModifierScalar;
 
 /**
@@ -32,6 +33,9 @@ public:
 
 	/** Update mouse look scale (1.0 = default). Safe anytime after Build(). */
 	void SetLookSensitivity(float Sens);
+
+	/** Invert vertical look (true = mouse-up looks down). Safe after Build(). */
+	void SetLookInvertY(bool bInvert);
 
 	// ---- Common (IMC_Common, priority 0) ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Move;        // Axis2D, WASD swizzle
@@ -68,4 +72,6 @@ public:
 
 	/** Live look-sensitivity scalar; Options menu updates this. */
 	UPROPERTY() TObjectPtr<UInputModifierScalar> LookSensitivityScalar;
+	/** Vertical look negate; Options Invert Y flips bY. */
+	UPROPERTY() TObjectPtr<UInputModifierNegate> LookNegateY;
 };

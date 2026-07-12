@@ -2,6 +2,8 @@
 
 #include "UI/PFCombatHUDWidget.h"
 
+#include "Core/PFUserPrefs.h"
+
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Core/PaintForgeGameState.h"
@@ -617,16 +619,26 @@ void UPFCombatHUDWidget::UpdateCrosshair()
 		if (CenterDot)       { CenterDot->SetVisibility(Hidden); }
 		return;
 	}
-	if (CenterDot) { CenterDot->SetVisibility(ESlateVisibility::HitTestInvisible); }
+	// Loadout crosshair: 0=cross+dot, 1=dot only, 2=cross only.
+	const int32 CrossStyle = FPFUserPrefs::GetCrosshairStyle();
+	const bool bShowDot = (CrossStyle != 2);
+	const bool bShowLines = (CrossStyle != 1);
+
+	if (CenterDot)
+	{
+		CenterDot->SetVisibility(bShowDot ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+	}
 
 	const bool bADS = Pawn->IsADS();
-	const ESlateVisibility LinesVis = bADS ? ESlateVisibility::Hidden : ESlateVisibility::HitTestInvisible;
+	const ESlateVisibility LinesVis = (bADS || !bShowLines)
+		? ESlateVisibility::Hidden
+		: ESlateVisibility::HitTestInvisible;
 	if (CrossLineTop)    { CrossLineTop->SetVisibility(LinesVis); }
 	if (CrossLineBottom) { CrossLineBottom->SetVisibility(LinesVis); }
 	if (CrossLineLeft)   { CrossLineLeft->SetVisibility(LinesVis); }
 	if (CrossLineRight)  { CrossLineRight->SetVisibility(LinesVis); }
 
-	if (CenterDot)
+	if (CenterDot && bShowDot)
 	{
 		if (UCanvasPanelSlot* DotSlot = Cast<UCanvasPanelSlot>(CenterDot->Slot))
 		{
@@ -634,7 +646,7 @@ void UPFCombatHUDWidget::UpdateCrosshair()
 			DotSlot->SetSize(bADS ? FVector2D(2.f, 2.f) : FVector2D(3.f, 3.f));
 		}
 	}
-	if (bADS)
+	if (bADS || !bShowLines)
 	{
 		return;
 	}

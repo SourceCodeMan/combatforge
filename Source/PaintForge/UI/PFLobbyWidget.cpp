@@ -2,9 +2,12 @@
 
 #include "UI/PFLobbyWidget.h"
 
+#include "Combat/PFWeaponComponent.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerController.h"
 #include "Core/PaintForgePlayerState.h"
+#include "Core/PFUserPrefs.h"
+#include "Player/PaintForgeCharacter.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -338,41 +341,212 @@ void UPFLobbyWidget::BuildLoadoutOverlay(UCanvasPanel* RootCanvas)
 	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Title)) { VS->SetHorizontalAlignment(HAlign_Center); }
 
 	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
-	Sub->SetText(FText::FromString(TEXT("Weapons, markers and gear get equipped here.\nComing soon — nothing to customize yet.")));
-	Sub->SetFont(PFLobbyFont(16, false));
+	Sub->SetText(FText::FromString(TEXT("Local preferences — saved to this PC.")));
+	Sub->SetFont(PFLobbyFont(14, false));
 	Sub->SetJustification(ETextJustify::Center);
-	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.7f)));
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Sub)) { VS->SetPadding(FMargin(0.f, 16.f, 0.f, 24.f)); VS->SetHorizontalAlignment(HAlign_Center); }
+	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Sub)) { VS->SetPadding(FMargin(0.f, 8.f, 0.f, 18.f)); VS->SetHorizontalAlignment(HAlign_Center); }
+
+	// Marker preset
+	UHorizontalBox* MRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	UTextBlock* MLab = WidgetTree->ConstructWidget<UTextBlock>();
+	MLab->SetText(FText::FromString(TEXT("MARKER")));
+	MLab->SetFont(PFLobbyFont(14, true));
+	MLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+	USizeBox* MSizer = WidgetTree->ConstructWidget<USizeBox>();
+	MSizer->SetWidthOverride(100.f);
+	MSizer->SetContent(MLab);
+	MRow->AddChildToHorizontalBox(MSizer);
+	MarkerButton = WidgetTree->ConstructWidget<UButton>();
+	MarkerButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+	MarkerButton->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnMarkerCycle);
+	MarkerValueText = WidgetTree->ConstructWidget<UTextBlock>();
+	MarkerValueText->SetFont(PFLobbyFont(15, true));
+	MarkerValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	MarkerButton->AddChild(MarkerValueText);
+	if (UHorizontalBoxSlot* HS = MRow->AddChildToHorizontalBox(MarkerButton))
+	{
+		HS->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		HS->SetPadding(FMargin(8.f, 0.f));
+	}
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(MRow)) { VS->SetPadding(FMargin(40.f, 6.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+
+	// Crosshair
+	UHorizontalBox* CRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	UTextBlock* CLab = WidgetTree->ConstructWidget<UTextBlock>();
+	CLab->SetText(FText::FromString(TEXT("CROSSHAIR")));
+	CLab->SetFont(PFLobbyFont(14, true));
+	CLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+	USizeBox* CSizer = WidgetTree->ConstructWidget<USizeBox>();
+	CSizer->SetWidthOverride(100.f);
+	CSizer->SetContent(CLab);
+	CRow->AddChildToHorizontalBox(CSizer);
+	CrosshairButton = WidgetTree->ConstructWidget<UButton>();
+	CrosshairButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+	CrosshairButton->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnCrosshairCycle);
+	CrosshairValueText = WidgetTree->ConstructWidget<UTextBlock>();
+	CrosshairValueText->SetFont(PFLobbyFont(15, true));
+	CrosshairValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	CrosshairButton->AddChild(CrosshairValueText);
+	if (UHorizontalBoxSlot* HS = CRow->AddChildToHorizontalBox(CrosshairButton))
+	{
+		HS->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		HS->SetPadding(FMargin(8.f, 0.f));
+	}
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(CRow)) { VS->SetPadding(FMargin(40.f, 6.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+
+	LoadoutSummaryText = WidgetTree->ConstructWidget<UTextBlock>();
+	LoadoutSummaryText->SetFont(PFLobbyFont(13, false));
+	LoadoutSummaryText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.78f, 0.85f)));
+	LoadoutSummaryText->SetJustification(ETextJustify::Center);
+	LoadoutSummaryText->SetAutoWrapText(true);
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(LoadoutSummaryText))
+	{
+		VS->SetPadding(FMargin(24.f, 14.f, 24.f, 8.f));
+		VS->SetHorizontalAlignment(HAlign_Fill);
+	}
+
+	LoadoutHintText = WidgetTree->ConstructWidget<UTextBlock>();
+	LoadoutHintText->SetText(FText::FromString(TEXT("Click a row to cycle · APPLY saves · team paint color is fixed")));
+	LoadoutHintText->SetFont(PFLobbyFont(12, false));
+	LoadoutHintText->SetJustification(ETextJustify::Center);
+	LoadoutHintText->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(LoadoutHintText))
+	{
+		VS->SetPadding(FMargin(0.f, 4.f, 0.f, 16.f));
+		VS->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>();
+	UButton* ApplyBtn = WidgetTree->ConstructWidget<UButton>();
+	ApplyBtn->SetBackgroundColor(FLinearColor(0.2f, 0.45f, 0.25f, 1.f));
+	ApplyBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnLoadoutApply);
+	UTextBlock* ApplyLab = WidgetTree->ConstructWidget<UTextBlock>();
+	ApplyLab->SetText(FText::FromString(TEXT("  APPLY  ")));
+	ApplyLab->SetFont(PFLobbyFont(16, true));
+	ApplyLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	ApplyBtn->AddChild(ApplyLab);
+	if (UHorizontalBoxSlot* HS = Footer->AddChildToHorizontalBox(ApplyBtn)) { HS->SetPadding(FMargin(8.f)); }
 
 	UButton* CloseBtn = WidgetTree->ConstructWidget<UButton>();
 	CloseBtn->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
 	CloseBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnLoadoutClose);
 	UTextBlock* CloseLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	CloseLabel->SetText(FText::FromString(TEXT("BACK")));
+	CloseLabel->SetText(FText::FromString(TEXT("  BACK  ")));
 	CloseLabel->SetFont(PFLobbyFont(16, true));
-	CloseLabel->SetJustification(ETextJustify::Center);
 	CloseLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	CloseBtn->SetContent(CloseLabel);
-	USizeBox* CloseSizer = WidgetTree->ConstructWidget<USizeBox>();
-	CloseSizer->SetWidthOverride(160.f);
-	CloseSizer->SetContent(CloseBtn);
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(CloseSizer)) { VS->SetHorizontalAlignment(HAlign_Center); }
+	CloseBtn->AddChild(CloseLabel);
+	if (UHorizontalBoxSlot* HS = Footer->AddChildToHorizontalBox(CloseBtn)) { HS->SetPadding(FMargin(8.f)); }
+
+	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Footer)) { VS->SetHorizontalAlignment(HAlign_Center); }
 
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(LoadoutOverlay))
 	{
-		CSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));   // fill the viewport
+		CSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		CSlot->SetOffsets(FMargin(0.f));
+	}
+}
+
+const TCHAR* UPFLobbyWidget::MarkerPresetName(int32 Idx)
+{
+	switch (Idx)
+	{
+	case 1: return TEXT("  Rapid — 14 bps · 80 balls  ");
+	case 2: return TEXT("  Tournament — 10 bps · 140 balls  ");
+	default: return TEXT("  Standard — 12 bps · 100 balls  ");
+	}
+}
+
+const TCHAR* UPFLobbyWidget::CrosshairStyleName(int32 Idx)
+{
+	switch (Idx)
+	{
+	case 1: return TEXT("  Dot only  ");
+	case 2: return TEXT("  Cross only  ");
+	default: return TEXT("  Cross + dot  ");
+	}
+}
+
+void UPFLobbyWidget::RefreshLoadoutLabels()
+{
+	if (MarkerValueText)
+	{
+		MarkerValueText->SetText(FText::FromString(MarkerPresetName(WorkingMarkerPreset)));
+	}
+	if (CrosshairValueText)
+	{
+		CrosshairValueText->SetText(FText::FromString(CrosshairStyleName(WorkingCrosshairStyle)));
+	}
+	if (LoadoutSummaryText)
+	{
+		FString Sum;
+		switch (WorkingMarkerPreset)
+		{
+		case 1: Sum = TEXT("Faster fire, smaller hopper — aggressive duel style."); break;
+		case 2: Sum = TEXT("Slower fire, huge hopper — control and volume."); break;
+		default: Sum = TEXT("Balanced marker — the default playtest setup."); break;
+		}
+		Sum += TEXT("\nTeam paint color is set by your team, not loadout.");
+		LoadoutSummaryText->SetText(FText::FromString(Sum));
+	}
+}
+
+void UPFLobbyWidget::ApplyLoadoutPrefs()
+{
+	FPFUserPrefs::SetMarkerPreset(WorkingMarkerPreset);
+	FPFUserPrefs::SetCrosshairStyle(WorkingCrosshairStyle);
+	FPFUserPrefs::Flush();
+
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(PC->GetPawn()))
+		{
+			if (UPFWeaponComponent* W = Char->GetWeapon())
+			{
+				FPFUserPrefs::ApplyMarkerPresetToWeapon(W);
+				// Top up hopper when applying in lobby so the new capacity is usable.
+				if (W->HopperCount < W->HopperCapacity)
+				{
+					W->HopperCount = W->HopperCapacity;
+					W->OnHopperChangedEvent.Broadcast(W->HopperCount);
+				}
+			}
+		}
+	}
+	if (LoadoutHintText)
+	{
+		LoadoutHintText->SetText(FText::FromString(TEXT("Saved. Marker & crosshair apply next match / immediately.")));
 	}
 }
 
 void UPFLobbyWidget::OnLoadoutClicked()
 {
+	WorkingMarkerPreset = FPFUserPrefs::GetMarkerPreset();
+	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
+	RefreshLoadoutLabels();
 	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Visible); }
 }
 
 void UPFLobbyWidget::OnLoadoutClose()
 {
 	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed); }
+}
+
+void UPFLobbyWidget::OnLoadoutApply()
+{
+	ApplyLoadoutPrefs();
+}
+
+void UPFLobbyWidget::OnMarkerCycle()
+{
+	WorkingMarkerPreset = (WorkingMarkerPreset + 1) % 3;
+	RefreshLoadoutLabels();
+}
+
+void UPFLobbyWidget::OnCrosshairCycle()
+{
+	WorkingCrosshairStyle = (WorkingCrosshairStyle + 1) % 3;
+	RefreshLoadoutLabels();
 }
 
 void UPFLobbyWidget::OnOptionsClicked()

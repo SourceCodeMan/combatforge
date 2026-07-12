@@ -4,6 +4,7 @@
 
 #include "PaintForge.h"
 #include "Combat/PFCombatAudio.h"
+#include "Core/PFUserPrefs.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFPaintballProjectile.h"
 #include "Combat/PFSplatSubsystem.h"
@@ -26,7 +27,6 @@ namespace
 	constexpr float ServerOriginToleranceUU = 200.f;   // 04 §5.1 anti-teleport-fire
 	constexpr float ServerDirToleranceDeg = 5.5f;      // 04 §5.1 — ADS micro-desync + jitter
 	constexpr float FireTokenCap = 3.f;                // 04 §2.1 token bucket
-	constexpr float FireTokenRefillPerSec = 12.f;
 }
 
 UPFWeaponComponent::UPFWeaponComponent()
@@ -46,6 +46,9 @@ void UPFWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 void UPFWeaponComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Local loadout marker preset (rate + hopper) before first fill.
+	FPFUserPrefs::ApplyMarkerPresetToWeapon(this);
 
 	// Keep the live count honest against a data-only-BP-tuned capacity (§4.1 tunables).
 	if (GetOwnerRole() == ROLE_Authority)
@@ -311,8 +314,9 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 	}
 
 	// Token bucket: cap 3, refill 12/s — tolerates jitter bursts, rejects macros (04 §2.1).
+	const float RefillRate = FMath::Max(1.f, FireRateBps);
 	FireTokens = FMath::Min(FireTokenCap,
-		FireTokens + static_cast<float>(Now - LastTokenRefillTime) * FireTokenRefillPerSec);
+		FireTokens + static_cast<float>(Now - LastTokenRefillTime) * RefillRate);
 	LastTokenRefillTime = Now;
 	if (FireTokens < 1.f)
 	{

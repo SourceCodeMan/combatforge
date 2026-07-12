@@ -51,6 +51,7 @@ public:
 	void  SetADS(bool bWantsADS);          // input entry; respects slide rule (queue during slide — 04 §1.2)
 	bool  IsADS() const;                   // target state
 	float GetADSAlpha() const;             // 0..1 transition alpha (0.18 in / 0.14 out) — weapon spread lerp input
+	void  SetPreferredBaseFOV(float Fov);  // options menu hip FOV (80..110)
 
 	// ---- Team + elimination cosmetics (pkg-weapons calls these) ----
 	void  SetTeamColor(uint8 TeamId);      // MID tint on the graybox mesh
@@ -243,7 +244,7 @@ private:
 	bool    bSequenceLocoActive = false;              // Quantum single-node path
 	FName   CachedWeaponAttachBone = NAME_None;       // resolved once per body
 
-	// ---- Config (04 §1) ----
+	// ---- Config (04 §1) — BaseFOV also set from options (PFUserPrefs) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float ADSFOV = 70.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float ADSInTime = 0.18f;

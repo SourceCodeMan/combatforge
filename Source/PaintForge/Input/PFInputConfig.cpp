@@ -9,6 +9,7 @@
 #include "InputModifiers.h"
 #include "InputTriggers.h"
 #include "InputCoreTypes.h"
+#include "Core/PFUserPrefs.h"
 #include "Misc/ConfigCacheIni.h"
 
 namespace
@@ -33,6 +34,18 @@ void UPFInputConfig::SetLookSensitivity(float Sens)
 	}
 	const float Scale = BaseDegreesPerMouseUnit * FMath::Clamp(Sens, 0.2f, 3.f);
 	LookSensitivityScalar->Scalar = FVector(Scale, Scale, 1.0);
+}
+
+void UPFInputConfig::SetLookInvertY(bool bInvert)
+{
+	if (LookNegateY == nullptr)
+	{
+		return;
+	}
+	// Default FPS: negate mouse Y so mouse-up looks up. Invert Y = natural mouse (no Y negate).
+	LookNegateY->bX = false;
+	LookNegateY->bY = !bInvert;
+	LookNegateY->bZ = false;
 }
 
 void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
@@ -117,11 +130,11 @@ void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 		LookSensitivityScalar->Scalar = FVector(Scale, Scale, 1.0);
 		Look.Modifiers.Add(LookSensitivityScalar);
 
-		UInputModifierNegate* NegY = NewObject<UInputModifierNegate>(IMC_Common);
-		NegY->bX = false;
-		NegY->bY = true;
-		NegY->bZ = false;
-		Look.Modifiers.Add(NegY);
+		LookNegateY = NewObject<UInputModifierNegate>(IMC_Common);
+		LookNegateY->bX = false;
+		LookNegateY->bY = !FPFUserPrefs::GetInvertY(); // true = normal FPS look
+		LookNegateY->bZ = false;
+		Look.Modifiers.Add(LookNegateY);
 	}
 
 	IMC_Common->MapKey(IA_Jump,        EKeys::SpaceBar);

@@ -38,11 +38,7 @@ private:
 };
 
 /**
- * Lobby panel (contract §3.6): roster rows from GameState->PlayerArray
- * (polled at 0.5 s — PlayerArray has no delegate); per row: name, team color
- * chip, ready check. Host rows clickable -> PC->ServerHostCycleTeam (T22).
- * Footer hints: "F = Ready", host: "Enter = Start". Tab-hold cursor is the
- * PlayerController's job (input mode); this widget just keeps rows clickable.
+ * Lobby panel (contract §3.6): roster + match setup display + loadout / options.
  */
 UCLASS()
 class PAINTFORGE_API UPFLobbyWidget : public UUserWidget
@@ -58,9 +54,11 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
-	// Loadout / options only in lobby — mode/type/format/bots chosen on the boot menu.
 	UFUNCTION() void OnLoadoutClicked();
 	UFUNCTION() void OnLoadoutClose();
+	UFUNCTION() void OnLoadoutApply();
+	UFUNCTION() void OnMarkerCycle();
+	UFUNCTION() void OnCrosshairCycle();
 	UFUNCTION() void OnOptionsClicked();
 
 private:
@@ -71,24 +69,37 @@ private:
 	void AddReadOnlyRow(UVerticalBox* Box, const FString& Label, TObjectPtr<UTextBlock>& OutValueText);
 	void RefreshRoster();
 	void RefreshConfig();
+	void RefreshLoadoutLabels();
+	void ApplyLoadoutPrefs();
 	bool IsLocalHost() const;
+
+	static const TCHAR* MarkerPresetName(int32 Idx);
+	static const TCHAR* CrosshairStyleName(int32 Idx);
 
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> CountdownText;
 	UPROPERTY() TObjectPtr<UTextBlock> FooterText;
 	UPROPERTY() TObjectPtr<UVerticalBox> RosterBox;
 
-	// Match-setup panel: all match config is read-only (set on boot menu).
 	UPROPERTY() TObjectPtr<UTextBlock> ModeValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> TypeValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> FormatValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> BotsValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> MapValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> ConfigHintText;
-	UPROPERTY() TObjectPtr<UBorder> LoadoutOverlay;   // stub screen (nothing to equip yet)
+	UPROPERTY() TObjectPtr<UBorder> LoadoutOverlay;
+
+	UPROPERTY() TObjectPtr<UButton> MarkerButton;
+	UPROPERTY() TObjectPtr<UTextBlock> MarkerValueText;
+	UPROPERTY() TObjectPtr<UButton> CrosshairButton;
+	UPROPERTY() TObjectPtr<UTextBlock> CrosshairValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> LoadoutHintText;
+	UPROPERTY() TObjectPtr<UTextBlock> LoadoutSummaryText;
+
+	int32 WorkingMarkerPreset = 0;
+	int32 WorkingCrosshairStyle = 0;
 
 	float PollAccum = 0.f;
-	/** Cheap change detection so rows are only rebuilt when the roster actually changed. */
 	FString LastRosterSignature;
 
 	static constexpr float PollInterval = 0.5f;

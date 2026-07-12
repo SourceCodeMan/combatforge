@@ -4,7 +4,10 @@
 
 #include "PaintForge.h"
 #include "Core/PaintForgePlayerController.h"
+#include "Core/PFUserPrefs.h"
 #include "Input/PFInputConfig.h"
+#include "Player/PaintForgeCharacter.h"
+#include "Combat/PFCombatAudio.h"
 
 #include "AudioDevice.h"
 #include "Blueprint/WidgetTree.h"
@@ -184,7 +187,37 @@ void UPFOptionsWidget::BuildVideoPage(UWidget* ParentBox)
 {
 	UVerticalBox* Box = CastChecked<UVerticalBox>(ParentBox);
 
-	// Fullscreen
+	// Window mode
+	UHorizontalBox* WmRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	WmRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Window mode"), 15, false));
+	WindowModeButton = MakeTabButton(TEXT("  Fullscreen  "), TEXT("WinModeBtn"));
+	WindowModeValueText = Cast<UTextBlock>(WindowModeButton->GetChildAt(0));
+	WindowModeButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnWindowModeClicked);
+	if (UHorizontalBoxSlot* H = WmRow->AddChildToHorizontalBox(WindowModeButton))
+	{
+		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(WmRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
+	// Resolution
+	UHorizontalBox* ResRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	ResRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Resolution"), 15, false));
+	ResolutionButton = MakeTabButton(TEXT("  1920x1080  "), TEXT("ResBtn"));
+	ResolutionValueText = Cast<UTextBlock>(ResolutionButton->GetChildAt(0));
+	ResolutionButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnResolutionClicked);
+	if (UHorizontalBoxSlot* H = ResRow->AddChildToHorizontalBox(ResolutionButton))
+	{
+		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(ResRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
+	// Legacy fullscreen check still maps to window mode 0
 	UHorizontalBox* FsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	FsRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Fullscreen"), 15, false));
 	FullscreenCheck = WidgetTree->ConstructWidget<UCheckBox>();
@@ -199,7 +232,6 @@ void UPFOptionsWidget::BuildVideoPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 6.f));
 	}
 
-	// VSync
 	UHorizontalBox* VsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	VsRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("VSync"), 15, false));
 	VSyncCheck = WidgetTree->ConstructWidget<UCheckBox>();
@@ -214,7 +246,6 @@ void UPFOptionsWidget::BuildVideoPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 6.f));
 	}
 
-	// Quality preset
 	UHorizontalBox* QRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	QRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Quality"), 15, false));
 	QualityButton = MakeTabButton(TEXT("  Medium  "), TEXT("QualityBtn"));
@@ -229,7 +260,6 @@ void UPFOptionsWidget::BuildVideoPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 6.f));
 	}
 
-	// Resolution scale
 	UHorizontalBox* RsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	RsRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Resolution scale"), 15, false));
 	ResScaleSlider = WidgetTree->ConstructWidget<USlider>();
@@ -279,9 +309,10 @@ void UPFOptionsWidget::BuildAudioPage(UWidget* ParentBox)
 
 	MakeVolRow(TEXT("Master volume"), MasterVolSlider, MasterVolValueText, &UPFOptionsWidget::OnMasterVolChanged);
 	MakeVolRow(TEXT("SFX volume"), SfxVolSlider, SfxVolValueText, &UPFOptionsWidget::OnSfxVolChanged);
+	MakeVolRow(TEXT("Ambient bed"), AmbientVolSlider, AmbientVolValueText, &UPFOptionsWidget::OnAmbientVolChanged);
 
 	UTextBlock* Note = MakeLabel(WidgetTree,
-		TEXT("SFX scales combat / UI one-shots relative to master."), 12, false);
+		TEXT("SFX = combat/UI one-shots. Ambient = soft arena wind bed."), 12, false);
 	Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
 	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Note))
 	{
@@ -312,8 +343,41 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 10.f));
 	}
 
+	UHorizontalBox* InvRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	InvRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Invert Y"), 15, false));
+	InvertYCheck = WidgetTree->ConstructWidget<UCheckBox>();
+	InvertYCheck->OnCheckStateChanged.AddDynamic(this, &UPFOptionsWidget::OnInvertYChanged);
+	if (UHorizontalBoxSlot* H = InvRow->AddChildToHorizontalBox(InvertYCheck))
+	{
+		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(InvRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
+	UHorizontalBox* FovRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	FovRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Field of view"), 15, false));
+	FovSlider = WidgetTree->ConstructWidget<USlider>();
+	FovSlider->SetMinValue(80.f);
+	FovSlider->SetMaxValue(110.f);
+	FovSlider->SetStepSize(1.f);
+	FovSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnFovChanged);
+	if (UHorizontalBoxSlot* H = FovRow->AddChildToHorizontalBox(FovSlider))
+	{
+		H->SetPadding(FMargin(16.f, 0.f));
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+	FovValueText = MakeLabel(WidgetTree, TEXT("105"), 14, true);
+	FovRow->AddChildToHorizontalBox(FovValueText);
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(FovRow))
+	{
+		V->SetPadding(FMargin(0.f, 10.f));
+	}
+
 	UTextBlock* Note = MakeLabel(WidgetTree,
-		TEXT("1.0 is default. Higher = faster look. Applied immediately on Apply."), 12, false);
+		TEXT("Sensitivity & Invert apply on Apply. FOV is hip FOV (ADS still zooms)."), 12, false);
 	Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
 	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Note))
 	{
@@ -457,6 +521,19 @@ void UPFOptionsWidget::OnQualityClicked()
 	RefreshLabels();
 }
 
+void UPFOptionsWidget::OnWindowModeClicked()
+{
+	WorkingWindowMode = (WorkingWindowMode + 1) % 3;
+	bWorkingFullscreen = (WorkingWindowMode == 0);
+	RefreshLabels();
+}
+
+void UPFOptionsWidget::OnResolutionClicked()
+{
+	WorkingResIndex = (WorkingResIndex + 1) % NumResolutions;
+	RefreshLabels();
+}
+
 void UPFOptionsWidget::OnResScaleChanged(float Value)
 {
 	WorkingResScale = FMath::Clamp(Value, 50.f, 100.f);
@@ -477,10 +554,27 @@ void UPFOptionsWidget::OnSfxVolChanged(float Value)
 	RefreshLabels();
 }
 
+void UPFOptionsWidget::OnAmbientVolChanged(float Value)
+{
+	WorkingAmbientVol = FMath::Clamp(Value, 0.f, 1.f);
+	RefreshLabels();
+}
+
 void UPFOptionsWidget::OnSensChanged(float Value)
 {
 	WorkingSens = FMath::Clamp(Value, 0.2f, 3.f);
 	RefreshLabels();
+}
+
+void UPFOptionsWidget::OnFovChanged(float Value)
+{
+	WorkingFov = FMath::Clamp(Value, 80.f, 110.f);
+	RefreshLabels();
+}
+
+void UPFOptionsWidget::OnInvertYChanged(bool bIsChecked)
+{
+	bWorkingInvertY = bIsChecked;
 }
 
 const TCHAR* UPFOptionsWidget::QualityName(int32 Level)
@@ -495,11 +589,37 @@ const TCHAR* UPFOptionsWidget::QualityName(int32 Level)
 	}
 }
 
+const TCHAR* UPFOptionsWidget::WindowModeName(int32 Idx)
+{
+	switch (Idx)
+	{
+	case 1: return TEXT("Borderless");
+	case 2: return TEXT("Windowed");
+	default: return TEXT("Fullscreen");
+	}
+}
+
+FString UPFOptionsWidget::ResolutionLabel() const
+{
+	static const int32 W[] = { 1280, 1366, 1600, 1920, 2560, 3840 };
+	static const int32 H[] = { 720,  768,  900,  1080, 1440, 2160 };
+	const int32 i = FMath::Clamp(WorkingResIndex, 0, NumResolutions - 1);
+	return FString::Printf(TEXT("%dx%d"), W[i], H[i]);
+}
+
 void UPFOptionsWidget::RefreshLabels()
 {
 	if (QualityValueText)
 	{
 		QualityValueText->SetText(FText::FromString(FString::Printf(TEXT("  %s  "), QualityName(WorkingQuality))));
+	}
+	if (WindowModeValueText)
+	{
+		WindowModeValueText->SetText(FText::FromString(FString::Printf(TEXT("  %s  "), WindowModeName(WorkingWindowMode))));
+	}
+	if (ResolutionValueText)
+	{
+		ResolutionValueText->SetText(FText::FromString(FString::Printf(TEXT("  %s  "), *ResolutionLabel())));
 	}
 	if (ResScaleValueText)
 	{
@@ -513,34 +633,36 @@ void UPFOptionsWidget::RefreshLabels()
 	{
 		SfxVolValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(WorkingSfxVol * 100.f))));
 	}
+	if (AmbientVolValueText)
+	{
+		AmbientVolValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(WorkingAmbientVol * 100.f))));
+	}
 	if (SensValueText)
 	{
 		SensValueText->SetText(FText::FromString(FString::Printf(TEXT("%.2f"), WorkingSens)));
 	}
+	if (FovValueText)
+	{
+		FovValueText->SetText(FText::FromString(FString::Printf(TEXT("%d"), FMath::RoundToInt(WorkingFov))));
+	}
 	if (FullscreenCheck)
 	{
-		FullscreenCheck->SetIsChecked(bWorkingFullscreen);
+		FullscreenCheck->SetIsChecked(bWorkingFullscreen || WorkingWindowMode == 0);
 	}
 	if (VSyncCheck)
 	{
 		VSyncCheck->SetIsChecked(bWorkingVSync);
 	}
-	if (ResScaleSlider)
+	if (InvertYCheck)
 	{
-		ResScaleSlider->SetValue(WorkingResScale);
+		InvertYCheck->SetIsChecked(bWorkingInvertY);
 	}
-	if (MasterVolSlider)
-	{
-		MasterVolSlider->SetValue(WorkingMasterVol);
-	}
-	if (SfxVolSlider)
-	{
-		SfxVolSlider->SetValue(WorkingSfxVol);
-	}
-	if (SensSlider)
-	{
-		SensSlider->SetValue(WorkingSens);
-	}
+	if (ResScaleSlider) { ResScaleSlider->SetValue(WorkingResScale); }
+	if (MasterVolSlider) { MasterVolSlider->SetValue(WorkingMasterVol); }
+	if (SfxVolSlider) { SfxVolSlider->SetValue(WorkingSfxVol); }
+	if (AmbientVolSlider) { AmbientVolSlider->SetValue(WorkingAmbientVol); }
+	if (SensSlider) { SensSlider->SetValue(WorkingSens); }
+	if (FovSlider) { FovSlider->SetValue(WorkingFov); }
 }
 
 void UPFOptionsWidget::PullFromSettings()
@@ -548,12 +670,23 @@ void UPFOptionsWidget::PullFromSettings()
 	if (UGameUserSettings* S = GEngine ? GEngine->GetGameUserSettings() : nullptr)
 	{
 		const EWindowMode::Type Mode = S->GetFullscreenMode();
-		bWorkingFullscreen = (Mode == EWindowMode::Fullscreen || Mode == EWindowMode::WindowedFullscreen);
+		if (Mode == EWindowMode::Fullscreen) { WorkingWindowMode = 0; }
+		else if (Mode == EWindowMode::WindowedFullscreen) { WorkingWindowMode = 1; }
+		else { WorkingWindowMode = 2; }
+		bWorkingFullscreen = (WorkingWindowMode == 0);
 		bWorkingVSync = S->IsVSyncEnabled();
 		WorkingQuality = FMath::Clamp(S->GetOverallScalabilityLevel(), 0, 3);
-		// Resolution scale is 0..100 in some APIs, 0..1 in others — normalize to 50..100 display.
-		float ScaleNorm = S->GetResolutionScaleNormalized(); // 0..1
+		float ScaleNorm = S->GetResolutionScaleNormalized();
 		WorkingResScale = FMath::Clamp(ScaleNorm * 100.f, 50.f, 100.f);
+
+		const FIntPoint Res = S->GetScreenResolution();
+		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560, 3840 };
+		static const int32 H[] = { 720,  768,  900,  1080, 1440, 2160 };
+		WorkingResIndex = 3;
+		for (int32 i = 0; i < NumResolutions; ++i)
+		{
+			if (Res.X == W[i] && Res.Y == H[i]) { WorkingResIndex = i; break; }
+		}
 	}
 
 	if (GConfig)
@@ -565,20 +698,37 @@ void UPFOptionsWidget::PullFromSettings()
 	WorkingMasterVol = FMath::Clamp(WorkingMasterVol, 0.f, 1.f);
 	WorkingSfxVol = FMath::Clamp(WorkingSfxVol, 0.f, 1.f);
 	WorkingSens = FMath::Clamp(WorkingSens, 0.2f, 3.f);
+	WorkingAmbientVol = FPFUserPrefs::GetAmbientVolume();
+	bWorkingInvertY = FPFUserPrefs::GetInvertY();
+	WorkingFov = FPFUserPrefs::GetFieldOfView();
+	WorkingWindowMode = FPFUserPrefs::GetWindowModeIndex();
 
-	// Live-apply audio so opening options doesn't leave silence from a previous session.
 	ApplyMasterVolume(WorkingMasterVol);
 	ApplySfxVolume(WorkingSfxVol);
 }
 
 void UPFOptionsWidget::PushToSettings(bool bSave)
 {
+	FPFUserPrefs::SetInvertY(bWorkingInvertY);
+	FPFUserPrefs::SetFieldOfView(WorkingFov);
+	FPFUserPrefs::SetAmbientVolume(WorkingAmbientVol);
+	FPFUserPrefs::SetWindowModeIndex(WorkingWindowMode);
+
 	if (UGameUserSettings* S = GEngine ? GEngine->GetGameUserSettings() : nullptr)
 	{
-		S->SetFullscreenMode(bWorkingFullscreen ? EWindowMode::Fullscreen : EWindowMode::Windowed);
+		EWindowMode::Type Mode = EWindowMode::Fullscreen;
+		if (WorkingWindowMode == 1) { Mode = EWindowMode::WindowedFullscreen; }
+		else if (WorkingWindowMode == 2) { Mode = EWindowMode::Windowed; }
+		if (bWorkingFullscreen && WorkingWindowMode != 1) { Mode = EWindowMode::Fullscreen; }
+		S->SetFullscreenMode(Mode);
 		S->SetVSyncEnabled(bWorkingVSync);
 		S->SetOverallScalabilityLevel(WorkingQuality);
 		S->SetResolutionScaleNormalized(FMath::Clamp(WorkingResScale / 100.f, 0.5f, 1.f));
+
+		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560, 3840 };
+		static const int32 H[] = { 720,  768,  900,  1080, 1440, 2160 };
+		const int32 i = FMath::Clamp(WorkingResIndex, 0, NumResolutions - 1);
+		S->SetScreenResolution(FIntPoint(W[i], H[i]));
 		S->ApplySettings(false);
 		if (bSave)
 		{
@@ -589,12 +739,28 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	ApplyMasterVolume(WorkingMasterVol);
 	ApplySfxVolume(WorkingSfxVol);
 	ApplyLookSensitivity(WorkingSens);
+	ApplyInvertY(bWorkingInvertY);
+	ApplyFieldOfView(WorkingFov);
+
+	// Restart ambient at new volume if playing.
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(PC->GetPawn()))
+		{
+			if (UPFCombatAudio* Audio = Char->GetCombatAudio())
+			{
+				Audio->StopAmbientBed();
+				Audio->StartAmbientBed();
+			}
+		}
+	}
 
 	if (bSave && GConfig)
 	{
 		GConfig->SetFloat(TEXT("PaintForge"), TEXT("MasterVolume"), WorkingMasterVol, GGameUserSettingsIni);
 		GConfig->SetFloat(TEXT("PaintForge"), TEXT("SfxVolume"), WorkingSfxVol, GGameUserSettingsIni);
 		GConfig->SetFloat(TEXT("PaintForge"), TEXT("PFSensitivity"), WorkingSens, GGameUserSettingsIni);
+		FPFUserPrefs::Flush();
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 
@@ -641,4 +807,31 @@ void UPFOptionsWidget::ApplyLookSensitivity(float Sens)
 			Cfg->SetLookSensitivity(Sens);
 		}
 	}
+}
+
+void UPFOptionsWidget::ApplyInvertY(bool bInvert)
+{
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		if (UPFInputConfig* Cfg = PC->GetInputConfig())
+		{
+			Cfg->SetLookInvertY(bInvert);
+		}
+	}
+}
+
+void UPFOptionsWidget::ApplyFieldOfView(float Fov)
+{
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(PC->GetPawn()))
+		{
+			Char->SetPreferredBaseFOV(Fov);
+		}
+	}
+}
+
+void UPFOptionsWidget::ApplyWindowAndResolution()
+{
+	// Handled inside PushToSettings via UGameUserSettings.
 }

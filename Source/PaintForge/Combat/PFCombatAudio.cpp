@@ -3,6 +3,7 @@
 #include "Combat/PFCombatAudio.h"
 
 #include "PaintForge.h"
+#include "Core/PFUserPrefs.h"
 #include "Player/PaintForgeCharacter.h"
 
 #include "Engine/World.h"
@@ -495,7 +496,7 @@ void UPFCombatAudio::StartAmbientBed()
 	{
 		return;   // no loop without pack — skip silent proc spam
 	}
-	const float Vol = 0.22f * ReadSfxVolumeScale();
+	const float Vol = FPFUserPrefs::GetAmbientVolume() * ReadSfxVolumeScale();
 	AmbientComp = UGameplayStatics::SpawnSound2D(this, CueAmbient, Vol, 1.f, 0.f, nullptr, true, false);
 	if (AmbientComp)
 	{
