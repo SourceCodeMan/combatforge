@@ -45,7 +45,7 @@ namespace
 		{
 		case EPFMatchType::Elimination: return TEXT("Elimination");
 		case EPFMatchType::FreeForAll:  return TEXT("Free-for-All  (soon)");
-		case EPFMatchType::Skirmish:    return TEXT("Skirmish  (soon)");
+		case EPFMatchType::Skirmish:    return TEXT("Skirmish");
 		case EPFMatchType::CaptureFlag: return TEXT("Capture the Flag  (soon)");
 		case EPFMatchType::Domination:  return TEXT("Domination  (soon)");
 		case EPFMatchType::Hardpoint:   return TEXT("Hardpoint  (soon)");
