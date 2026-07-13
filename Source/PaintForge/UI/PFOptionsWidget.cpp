@@ -741,6 +741,22 @@ void UPFOptionsWidget::OpenHowToPlay()
 	Open();
 }
 
+void UPFOptionsWidget::EnterEmbeddedMode()
+{
+	// Force the tree to build, then strip the overlay chrome so only the settings card shows in the tab.
+	TakeWidget();
+	if (Dimmer)            { Dimmer->SetVisibility(ESlateVisibility::Collapsed); }
+	if (TitleText)         { TitleText->SetVisibility(ESlateVisibility::Collapsed); }
+	if (BackButton)        { BackButton->SetVisibility(ESlateVisibility::Collapsed); }
+	if (QuitMenuButton)    { QuitMenuButton->SetVisibility(ESlateVisibility::Collapsed); }
+	if (QuitDesktopButton) { QuitDesktopButton->SetVisibility(ESlateVisibility::Collapsed); }
+	PullFromSettings();
+	RefreshLabels();
+	SelectTab(0);
+	SetVisibility(ESlateVisibility::Visible);
+	bOpen = true;   // treat as active so its own logic (rebind capture, etc.) runs, but DON'T grab input mode
+}
+
 void UPFOptionsWidget::Close()
 {
 	SetVisibility(ESlateVisibility::Collapsed);

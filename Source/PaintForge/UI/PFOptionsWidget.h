@@ -29,6 +29,9 @@ public:
 	void Close();
 	bool IsOpen() const { return bOpen; }
 	void OpenHowToPlay();
+	/** Render inline as a menu tab instead of a full-screen overlay: drop the dimmer, title, and
+	 *  Back/Quit chrome, seed the settings, and stay visible without touching input mode. */
+	void EnterEmbeddedMode();
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;

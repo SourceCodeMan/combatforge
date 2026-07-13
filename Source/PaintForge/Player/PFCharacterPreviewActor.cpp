@@ -85,9 +85,9 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	// Pin exposure (min == max) so it's stable. The level sun is bright, so we expose DOWN hard to avoid the
 	// blow-out / washed-out look — HIGHER value = darker image. Tune this one number if it's off.
 	Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
-	Capture->PostProcessSettings.AutoExposureMinBrightness = 12.f;
+	Capture->PostProcessSettings.AutoExposureMinBrightness = 15.f;
 	Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
-	Capture->PostProcessSettings.AutoExposureMaxBrightness = 12.f;
+	Capture->PostProcessSettings.AutoExposureMaxBrightness = 15.f;
 
 	auto MakeLight = [this](const FString& LightName, const FVector& Loc, float Lumens) -> UPointLightComponent*
 	{

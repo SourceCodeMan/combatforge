@@ -997,9 +997,12 @@ void APaintForgeCharacter::AssembleBanditCharacter()
 	}
 
 	// Modular parts assembled from the player's saved character (SKM_Bandit_Skeleton -> Leader Pose).
+	// Only the LOCAL human player wears the saved custom character; bots and other players get the standard
+	// default look. (Per-player replicated configs are a later phase — the local config is per-machine for now.)
 	if (ActiveCharConfig.Slots.Num() == 0)
 	{
-		ActiveCharConfig = PFChar::LoadConfig();
+		const bool bLocalHuman = (GetController() != nullptr) && GetController()->IsLocalPlayerController();
+		ActiveCharConfig = bLocalHuman ? PFChar::LoadConfig() : PFChar::DefaultConfig();
 	}
 	ApplyCharacterConfig();
 

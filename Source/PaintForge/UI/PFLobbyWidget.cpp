@@ -130,7 +130,7 @@ void UPFLobbyWidget::BuildTree()
 
 	// Title.
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>();
-	TitleText->SetText(FText::FromString(TEXT("PAINTFORGE — LOBBY")));
+	TitleText->SetText(FText::FromString(TEXT("COMBAT FORGE — LOBBY")));
 	TitleText->SetFont(PFLobbyFont(28, true));
 	TitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	TitleText->SetJustification(ETextJustify::Center);

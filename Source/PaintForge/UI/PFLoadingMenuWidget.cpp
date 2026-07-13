@@ -18,6 +18,7 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/ProgressBar.h"
+#include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -380,7 +381,7 @@ UTexture2D* UPFLoadingMenuWidget::GetMapPreview(const FString& JsonFileName)
 
 void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 {
-	ActiveMenuTab = FMath::Clamp(Index, 0, 3);
+	ActiveMenuTab = FMath::Clamp(Index, 0, 4);
 	if (MenuSwitcher)
 	{
 		MenuSwitcher->SetActiveWidgetIndex(ActiveMenuTab);
@@ -388,10 +389,11 @@ void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 	// Highlight active tab with a brighter plate.
 	const FLinearColor Hot(1.f, 0.92f, 0.35f, 0.95f);
 	const FLinearColor Cold(0.14f, 0.15f, 0.18f, 0.95f);
-	if (TabSetup)     { TabSetup->SetBackgroundColor(ActiveMenuTab == 0 ? Hot : Cold); }
-	if (TabHowTo)     { TabHowTo->SetBackgroundColor(ActiveMenuTab == 1 ? Hot : Cold); }
-	if (TabLoadout)   { TabLoadout->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
-	if (TabCharacter) { TabCharacter->SetBackgroundColor(ActiveMenuTab == 3 ? Hot : Cold); }
+	if (TabSetup)         { TabSetup->SetBackgroundColor(ActiveMenuTab == 0 ? Hot : Cold); }
+	if (TabHowTo)         { TabHowTo->SetBackgroundColor(ActiveMenuTab == 1 ? Hot : Cold); }
+	if (TabLoadout)       { TabLoadout->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
+	if (TabCharacter)     { TabCharacter->SetBackgroundColor(ActiveMenuTab == 3 ? Hot : Cold); }
+	if (OptionsTabButton) { OptionsTabButton->SetBackgroundColor(ActiveMenuTab == 4 ? Hot : Cold); }
 
 	// Only run the render-target capture while the CHARACTER tab is visible.
 	if (ActiveMenuTab == 3)
@@ -413,22 +415,7 @@ void UPFLoadingMenuWidget::OnTabHowTo() { SelectMenuTab(1); }
 void UPFLoadingMenuWidget::OnTabLoadout() { SelectMenuTab(2); }
 void UPFLoadingMenuWidget::OnTabCharacter() { SelectMenuTab(3); }
 
-void UPFLoadingMenuWidget::OnOptionsClicked()
-{
-	// Reuse the in-game options widget as an overlay above the boot menu (Z=200 > the menu's 100).
-	if (BootOptions == nullptr)
-	{
-		BootOptions = CreateWidget<UPFOptionsWidget>(GetOwningPlayer(), UPFOptionsWidget::StaticClass());
-		if (BootOptions != nullptr)
-		{
-			BootOptions->AddToViewport(200);
-		}
-	}
-	if (BootOptions != nullptr)
-	{
-		BootOptions->Open();
-	}
-}
+void UPFLoadingMenuWidget::OnOptionsClicked() { SelectMenuTab(4); }
 
 const TCHAR* UPFLoadingMenuWidget::MarkerPresetName(int32 Idx)
 {
@@ -883,7 +870,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	UVerticalBox* Col = WidgetTree->ConstructWidget<UVerticalBox>();
 
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>();
-	TitleText->SetText(FText::FromString(TEXT("PAINTFORGE")));
+	TitleText->SetText(FText::FromString(TEXT("COMBAT FORGE")));
 	TitleText->SetFont(PFLoadFont(48, true));
 	TitleText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
 	TitleText->SetJustification(ETextJustify::Center);
@@ -969,7 +956,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	}
 
 	USizeBox* MenuSizer = WidgetTree->ConstructWidget<USizeBox>();
-	MenuSizer->SetWidthOverride(520.f);
+	MenuSizer->SetWidthOverride(600.f);   // wide enough to host the embedded OPTIONS card
 	MenuSwitcher = WidgetTree->ConstructWidget<UWidgetSwitcher>();
 	MenuSizer->SetContent(MenuSwitcher);
 
@@ -1071,10 +1058,30 @@ void UPFLoadingMenuWidget::BuildTree()
 	UVerticalBox* CharacterCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	BuildCharacterPage(CharacterCol);
 
+	// Page 4 — full options embedded inline as a tab (not a pop-up overlay).
+	UVerticalBox* OptionsCol = WidgetTree->ConstructWidget<UVerticalBox>();
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		BootOptions = CreateWidget<UPFOptionsWidget>(PC, UPFOptionsWidget::StaticClass());
+		if (BootOptions != nullptr)
+		{
+			BootOptions->EnterEmbeddedMode();
+			USizeBox* OptSizer = WidgetTree->ConstructWidget<USizeBox>();
+			OptSizer->SetWidthOverride(580.f);
+			OptSizer->SetHeightOverride(560.f);
+			OptSizer->SetContent(BootOptions);
+			if (UVerticalBoxSlot* V = OptionsCol->AddChildToVerticalBox(OptSizer))
+			{
+				V->SetHorizontalAlignment(HAlign_Center);
+			}
+		}
+	}
+
 	MenuSwitcher->AddChild(SetupCol);
 	MenuSwitcher->AddChild(HowToCol);
 	MenuSwitcher->AddChild(LoadoutCol);      // index 2
 	MenuSwitcher->AddChild(CharacterCol);    // index 3
+	MenuSwitcher->AddChild(OptionsCol);      // index 4
 
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MenuSizer))
 	{
@@ -1137,11 +1144,15 @@ void UPFLoadingMenuWidget::BuildTree()
 		V->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
 	}
 
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Col))
+	// Wrap the whole menu in a full-viewport scroll box: content stays top-anchored (so clicking tabs never
+	// shifts the layout — the old "jumping" bug) and long pages (e.g. Play-Only + community map picker) scroll
+	// so the ENTER LOBBY button is always reachable instead of falling off the bottom.
+	UScrollBox* MenuScroll = WidgetTree->ConstructWidget<UScrollBox>();
+	MenuScroll->AddChild(Col);
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(MenuScroll))
 	{
-		S->SetAnchors(FAnchors(0.5f, 0.5f));
-		S->SetAlignment(FVector2D(0.5f, 0.5f));
-		S->SetAutoSize(true);
+		S->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		S->SetOffsets(FMargin(0.f, 24.f, 0.f, 24.f));
 		S->SetZOrder(1);
 	}
 }
@@ -1213,11 +1224,6 @@ void UPFLoadingMenuWidget::NativeDestruct()
 		CharPreviewActor->Destroy();
 		CharPreviewActor = nullptr;
 	}
-	if (BootOptions != nullptr)
-	{
-		BootOptions->RemoveFromParent();
-		BootOptions = nullptr;
-	}
 	Super::NativeDestruct();
 }
 
@@ -1267,21 +1273,6 @@ void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 	if (bDismissed)
 	{
 		return;
-	}
-
-	// The boot-menu options overlay closes itself (Back) via its own Close(); tear it down + restore our focus.
-	if (BootOptions != nullptr && !BootOptions->IsOpen())
-	{
-		BootOptions->RemoveFromParent();
-		BootOptions = nullptr;
-		if (APlayerController* PC = GetOwningPlayer())
-		{
-			FInputModeUIOnly Mode;
-			Mode.SetWidgetToFocus(TakeWidget());
-			Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			PC->SetInputMode(Mode);
-			PC->bShowMouseCursor = true;
-		}
 	}
 
 	// Keep labels honest if GS replicates in late (client join).

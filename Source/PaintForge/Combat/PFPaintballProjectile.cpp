@@ -22,10 +22,10 @@
 
 namespace
 {
-	// Elongated tracer along velocity (+X with bRotationFollowsVelocity).
-	// Sized for ~1/3 original BB (radius ~2.33 uu → mesh scale ~1/3 of the old trail).
-	constexpr float TracerLenScale = 0.10f;    // ~10 uu long
-	constexpr float TracerRadScale = 0.037f;   // ~3.7 uu diameter
+	// Elongated tracer along velocity (+X with bRotationFollowsVelocity). Dropped another ~1/3 for an
+	// airsoft-BB read (was 0.10 / 0.037) — collision radius stays forgiving for hit registration.
+	constexpr float TracerLenScale = 0.067f;   // ~6.7 uu long
+	constexpr float TracerRadScale = 0.025f;   // ~2.5 uu diameter
 	constexpr float EmissiveBoost = 5.5f;      // hot team tracer read (04 §2.2)
 	constexpr float DefaultRadiusUU = 2.33f;
 }

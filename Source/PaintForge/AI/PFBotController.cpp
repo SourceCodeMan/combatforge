@@ -204,10 +204,12 @@ void APFBotController::Tick(float DeltaSeconds)
 
 	// Unstick: if we wanted to move but barely have over the last sample window, peel off sideways a beat.
 	StuckSampleTimer -= DeltaSeconds;
+	bool bEscaping = false;
 	if (EscapeTimer > 0.f)
 	{
 		EscapeTimer -= DeltaSeconds;
 		DesiredDir = (FVector::CrossProduct(FVector::UpVector, Flat) * EscapeSign - Flat * 0.35f).GetSafeNormal();
+		bEscaping = true;
 	}
 	else if (StuckSampleTimer <= 0.f)
 	{
@@ -221,7 +223,10 @@ void APFBotController::Tick(float DeltaSeconds)
 		StuckSampleTimer = 0.5f;
 	}
 
-	Bot->AddMovementInput(SteerAvoidingObstacles(DesiredDir), 1.f);
+	// During an active unstick, drive the escape heading straight — piping it through the avoidance filter would
+	// let the same wall-contact that boxed us in null the escape too.
+	const FVector MoveDir = bEscaping ? DesiredDir : SteerAvoidingObstacles(DesiredDir);
+	Bot->AddMovementInput(MoveDir, 1.f);
 }
 
 APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
@@ -435,6 +440,10 @@ FVector APFBotController::SteerAvoidingObstacles(const FVector& DesiredDir) cons
 	}
 	const FVector Origin = Bot->GetActorLocation() + FVector(0.f, 0.f, 30.f);
 	FCollisionQueryParams Params(FName(TEXT("BotAvoid")), /*bTraceComplex=*/false, Bot);
+	// CRITICAL: the probe sphere is wider than the pawn capsule, so touching any wall would start the sweep
+	// already penetrating -> a blocking hit for EVERY heading -> ZeroVector -> the bot freezes flush to the wall.
+	// Skipping initial overlaps means a wall we're already against no longer nulls every direction.
+	Params.bFindInitialOverlaps = false;
 	const FCollisionShape Probe = FCollisionShape::MakeSphere(AvoidProbeRadius);
 	// A heading is "clear" if a short forward sphere-sweep (≈ the pawn's width) hits no static geometry
 	// (cover, walls, perimeter). A sphere, not a thin line, so convex corners and low props are caught
@@ -460,7 +469,8 @@ FVector APFBotController::SteerAvoidingObstacles(const FVector& DesiredDir) cons
 			return Candidate;
 		}
 	}
-	return FVector::ZeroVector;   // fully boxed in — stop pushing into geometry; the unstick timer re-rolls
+	return DesiredDir;   // boxed in on all probes — keep pushing the desired heading so the capsule slides off a
+	                     // corner instead of freezing (returning zero was the permanent-stuck bug)
 }
 
 void APFBotController::SetFiring(bool bFire)

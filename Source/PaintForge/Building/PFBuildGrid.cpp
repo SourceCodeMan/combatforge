@@ -176,10 +176,10 @@ void APFBuildGrid::BeginPlay()
 	// if the warehouse pack is absent. Props with native mats skip.
 	auto LoadSurfaceMI = [](EPFPieceType T) -> UMaterialInterface*
 	{
+		// Wall's own facade-concrete MI renders near-black; reuse the (lighter, verified-good) smooth floor
+		// concrete for walls too so they read as gray concrete instead of black.
 		const TCHAR* Path =
-			(T == EPFPieceType::Wall)
-				? TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Wall_Facade_Concrete_New_01/MI_Ind_War_Wall_Facade_Concrete_New_01_A.MI_Ind_War_Wall_Facade_Concrete_New_01_A")
-			: (T == EPFPieceType::Floor)
+			(T == EPFPieceType::Wall || T == EPFPieceType::Floor)
 				? TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Floor_Concrete_Smooth_01/MI_Ind_War_Floor_Concrete_Smooth_01_A.MI_Ind_War_Floor_Concrete_Smooth_01_A")
 				: TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/MI_Ind_War_Sheet_Metal_Rusty_01_A.MI_Ind_War_Sheet_Metal_Rusty_01_A");
 		return Cast<UMaterialInterface>(FSoftObjectPath(Path).TryLoad());
