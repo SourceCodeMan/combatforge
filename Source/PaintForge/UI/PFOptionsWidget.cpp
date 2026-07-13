@@ -6,6 +6,10 @@
 #include "Core/PaintForgePlayerController.h"
 #include "Core/PFUserPrefs.h"
 #include "Input/PFInputConfig.h"
+#include "Core/PFUserPrefs.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
+#include "InputCoreTypes.h"
 #include "Player/PaintForgeCharacter.h"
 #include "Combat/PFCombatAudio.h"
 
@@ -20,6 +24,7 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/SizeBox.h"
+#include "Components/ScrollBox.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -127,10 +132,14 @@ void UPFOptionsWidget::BuildTree()
 	PageSwitcher->AddChild(AudioPage);
 	PageSwitcher->AddChild(ControlsPage);
 	PageSwitcher->AddChild(HowToPage);
-	// Constrain width so How to Play lines wrap cleanly on smaller viewports.
+	// Fixed page viewport: pin BOTH width and height so switching tabs can't grow/re-center the whole card.
+	// Overflow (the tall How to Play page) scrolls inside a UScrollBox instead of resizing the menu frame.
 	USizeBox* PageSizer = WidgetTree->ConstructWidget<USizeBox>();
 	PageSizer->SetWidthOverride(560.f);
-	PageSizer->SetContent(PageSwitcher);
+	PageSizer->SetHeightOverride(430.f);
+	UScrollBox* PageScroll = WidgetTree->ConstructWidget<UScrollBox>();
+	PageScroll->AddChild(PageSwitcher);
+	PageSizer->SetContent(PageScroll);
 	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(PageSizer))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
@@ -438,6 +447,213 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 	{
 		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 	}
+
+	BuildKeyBindRows(Box);
+}
+
+namespace
+{
+	struct FRebindDef { const TCHAR* Id; const TCHAR* Label; };
+	// MUST match UPFInputConfig::BuildRebindRegistry ids/order.
+	const FRebindDef GRebindDefs[] = {
+		{ TEXT("Jump"),       TEXT("Jump") },
+		{ TEXT("Sprint"),     TEXT("Sprint") },
+		{ TEXT("Reload"),     TEXT("Reload") },
+		{ TEXT("Interact"),   TEXT("Use / Refill") },
+		{ TEXT("FireSelect"), TEXT("Fire Mode") },
+		{ TEXT("ThrowFrag"),  TEXT("Throw Frag") },
+		{ TEXT("ThrowSmoke"), TEXT("Throw Smoke") },
+	};
+}
+
+void UPFOptionsWidget::BuildKeyBindRows(UVerticalBox* Box)
+{
+	static_assert(UE_ARRAY_COUNT(GRebindDefs) == NumRebinds, "rebind table size must match NumRebinds");
+
+	UTextBlock* Header = MakeLabel(WidgetTree, TEXT("KEY BINDINGS"), 15, true);
+	Header->SetColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.85f, 1.f)));
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Header))
+	{
+		V->SetPadding(FMargin(0.f, 18.f, 0.f, 4.f));
+	}
+
+	RebindButtons.Reset();
+	RebindKeyLabels.Reset();
+	RebindIds.Reset();
+
+	for (int32 i = 0; i < NumRebinds; ++i)
+	{
+		RebindIds.Add(FName(GRebindDefs[i].Id));
+
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, GRebindDefs[i].Label, 15, false));
+
+		UButton* Btn = WidgetTree->ConstructWidget<UButton>();
+		UTextBlock* KeyLbl = MakeLabel(WidgetTree, TEXT("--"), 14, true);
+		Btn->SetContent(KeyLbl);
+		// AddDynamic needs a literal &UClass::UFunction, so one explicit case per row.
+		switch (i)
+		{
+		case 0: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind0); break;
+		case 1: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind1); break;
+		case 2: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind2); break;
+		case 3: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind3); break;
+		case 4: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind4); break;
+		case 5: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind5); break;
+		case 6: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind6); break;
+		default: break;
+		}
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(Btn))
+		{
+			H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+			H->SetHorizontalAlignment(HAlign_Right);
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+		RebindButtons.Add(Btn);
+		RebindKeyLabels.Add(KeyLbl);
+
+		if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(0.f, 4.f));
+		}
+	}
+
+	ResetBindsButton = MakeTabButton(TEXT("  RESET KEYS  "), TEXT("ResetBindsBtn"));
+	ResetBindsButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnResetBinds);
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(ResetBindsButton))
+	{
+		V->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
+		V->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	UTextBlock* Hint = MakeLabel(WidgetTree, TEXT("Click a key, then press a new key. Esc cancels."), 12, false);
+	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Hint))
+	{
+		V->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+	}
+}
+
+void UPFOptionsWidget::OnRebind0() { BeginListen(0); }
+void UPFOptionsWidget::OnRebind1() { BeginListen(1); }
+void UPFOptionsWidget::OnRebind2() { BeginListen(2); }
+void UPFOptionsWidget::OnRebind3() { BeginListen(3); }
+void UPFOptionsWidget::OnRebind4() { BeginListen(4); }
+void UPFOptionsWidget::OnRebind5() { BeginListen(5); }
+void UPFOptionsWidget::OnRebind6() { BeginListen(6); }
+
+void UPFOptionsWidget::BeginListen(int32 Index)
+{
+	if (Index < 0 || Index >= RebindKeyLabels.Num())
+	{
+		return;
+	}
+	bListeningForKey = true;
+	ListeningIndex = Index;
+	if (RebindKeyLabels[Index])
+	{
+		RebindKeyLabels[Index]->SetText(FText::FromString(TEXT("press key...")));
+	}
+	SetKeyboardFocus();
+}
+
+FReply UPFOptionsWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (bListeningForKey && RebindIds.IsValidIndex(ListeningIndex))
+	{
+		const FKey K = InKeyEvent.GetKey();
+		if (K == EKeys::Escape)
+		{
+			bListeningForKey = false;
+			ListeningIndex = -1;
+			RefreshRebindLabels();
+			return FReply::Handled();
+		}
+		if (K.IsValid() && !K.IsMouseButton() && K != EKeys::AnyKey)
+		{
+			WorkingBinds.Add(RebindIds[ListeningIndex], K);
+			bListeningForKey = false;
+			ListeningIndex = -1;
+			RefreshRebindLabels();
+			return FReply::Handled();
+		}
+		return FReply::Handled();   // swallow anything else while capturing
+	}
+	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+void UPFOptionsWidget::RefreshRebindLabels()
+{
+	for (int32 i = 0; i < RebindKeyLabels.Num() && i < RebindIds.Num(); ++i)
+	{
+		if (!RebindKeyLabels[i])
+		{
+			continue;
+		}
+		if (bListeningForKey && i == ListeningIndex)
+		{
+			RebindKeyLabels[i]->SetText(FText::FromString(TEXT("press key...")));
+			continue;
+		}
+		const FKey* K = WorkingBinds.Find(RebindIds[i]);
+		RebindKeyLabels[i]->SetText((K && K->IsValid()) ? K->GetDisplayName() : FText::FromString(TEXT("--")));
+	}
+}
+
+void UPFOptionsWidget::ApplyKeyBinds()
+{
+	APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer());
+	UPFInputConfig* Cfg = PC ? PC->GetInputConfig() : nullptr;
+	if (!Cfg)
+	{
+		return;
+	}
+	bool bAnyChanged = false;
+	for (const FName& Id : RebindIds)
+	{
+		const FKey* Want = WorkingBinds.Find(Id);
+		if (!Want || !Want->IsValid() || Cfg->GetActionKey(Id) == *Want)
+		{
+			continue;
+		}
+		if (Cfg->SetActionKey(Id, *Want))
+		{
+			bAnyChanged = true;
+			const FKey* Def = DefaultBinds.Find(Id);
+			if (Def && *Def == *Want)
+			{
+				FPFUserPrefs::ClearKeyOverride(Id);   // back to default -> no override entry
+			}
+			else
+			{
+				FPFUserPrefs::SetKeyOverride(Id, *Want);
+			}
+		}
+	}
+	if (bAnyChanged)
+	{
+		if (ULocalPlayer* LP = GetOwningLocalPlayer())
+		{
+			if (UEnhancedInputLocalPlayerSubsystem* Sub = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+			{
+				Sub->RequestRebuildControlMappings();
+			}
+		}
+	}
+}
+
+void UPFOptionsWidget::OnResetBinds()
+{
+	bListeningForKey = false;
+	ListeningIndex = -1;
+	for (const FName& Id : RebindIds)
+	{
+		if (const FKey* Def = DefaultBinds.Find(Id))
+		{
+			WorkingBinds.Add(Id, *Def);
+		}
+	}
+	RefreshRebindLabels();
 }
 
 void UPFOptionsWidget::AddHowToLine(UVerticalBox* Box, const FString& Text, int32 Size, bool bBold,
@@ -491,6 +707,7 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 void UPFOptionsWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	SetIsFocusable(true);   // required so key-rebind capture (NativeOnKeyDown) receives input
 	SetVisibility(ESlateVisibility::Collapsed);
 	bOpen = false;
 	PullFromSettings();
@@ -774,6 +991,22 @@ void UPFOptionsWidget::PullFromSettings()
 	WorkingFov = FPFUserPrefs::GetFieldOfView();
 	WorkingWindowMode = FPFUserPrefs::GetWindowModeIndex();
 
+	// Key binds (current live keys + shipped defaults) from the input config.
+	WorkingBinds.Empty();
+	DefaultBinds.Empty();
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		if (UPFInputConfig* Cfg = PC->GetInputConfig())
+		{
+			for (const FName& Id : RebindIds)
+			{
+				WorkingBinds.Add(Id, Cfg->GetActionKey(Id));
+				DefaultBinds.Add(Id, Cfg->GetActionDefaultKey(Id));
+			}
+		}
+	}
+	RefreshRebindLabels();
+
 	ApplyMasterVolume(WorkingMasterVol);
 	ApplySfxVolume(WorkingSfxVol);
 }
@@ -812,6 +1045,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	ApplyLookSensitivity(WorkingSens);
 	ApplyInvertY(bWorkingInvertY);
 	ApplyFieldOfView(WorkingFov);
+	ApplyKeyBinds();
 
 	// Restart ambient at new volume if playing.
 	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))

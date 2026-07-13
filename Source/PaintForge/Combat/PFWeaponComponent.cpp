@@ -7,6 +7,7 @@
 #include "Core/PFUserPrefs.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFPaintballProjectile.h"
+#include "Combat/PFGrenadeProjectile.h"
 #include "Combat/PFSplatSubsystem.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerState.h"
@@ -42,6 +43,8 @@ void UPFWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME_CONDITION(UPFWeaponComponent, HopperCount, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(UPFWeaponComponent, ReserveAmmo, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(UPFWeaponComponent, bReloading, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(UPFWeaponComponent, FragCount, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(UPFWeaponComponent, SmokeCount, COND_OwnerOnly);
 }
 
 void UPFWeaponComponent::BeginPlay()
@@ -51,12 +54,15 @@ void UPFWeaponComponent::BeginPlay()
 	// Local loadout marker preset (rate; mag size stays 30 / total 150).
 	FPFUserPrefs::ApplyMarkerPresetToWeapon(this);
 
-	// Start with a full mag + full reserve on authority (clients get COND_OwnerOnly rep).
+	// Start with a full mag + full reserve + grenade loadout on authority (clients get COND_OwnerOnly rep).
 	if (GetOwnerRole() == ROLE_Authority)
 	{
 		HopperCount = HopperCapacity;
 		ReserveAmmo = MaxReserveAmmo;
+		FragCount  = MaxFrag;
+		SmokeCount = MaxSmoke;
 		OnHopperChangedEvent.Broadcast(HopperCount);
+		OnGrenadeCountChangedEvent.Broadcast(FragCount, SmokeCount);
 	}
 }
 
@@ -65,6 +71,7 @@ void UPFWeaponComponent::BeginPlay()
 void UPFWeaponComponent::StartFire()
 {
 	bWantsFire = true;
+	ShotsThisPull = 0;   // new trigger pull re-arms Single/Burst caps
 	// First shot fires on press instantly — no spin-up (04 §2.1).
 	if (const UWorld* World = GetWorld())
 	{
@@ -172,6 +179,16 @@ void UPFWeaponComponent::TryFire(double Now)
 		return;
 	}
 
+	// Fire selector (client-local feel): cap shots per trigger pull. Single = 1, Burst = BurstCount,
+	// Auto = unlimited. Latched until the trigger is released and pulled again (StartFire resets the count).
+	const uint8 PullCap = (CurrentFireMode == EPFFireMode::Single) ? 1
+	                    : (CurrentFireMode == EPFFireMode::Burst)  ? BurstCount
+	                    : TNumericLimits<uint8>::Max();
+	if (ShotsThisPull >= PullCap)
+	{
+		return;
+	}
+
 	// Sprint blocks fire: the fire input cancels sprint and starts the 0.18 s raise;
 	// the (still held) fire buffers and releases when the raise ends (04 §1.1).
 	UPFCharacterMovementComponent* CMC = Char->GetPFMovement();
@@ -188,6 +205,12 @@ void UPFWeaponComponent::TryFire(double Now)
 
 	if (HopperCount == 0)
 	{
+		// A Single/Burst pull interrupted by an empty mag does NOT resume after the auto-reload — one pull
+		// is one shot/burst. Latch it closed so a held trigger doesn't fire again when the reload finishes.
+		if (CurrentFireMode != EPFFireMode::Auto && ShotsThisPull > 0)
+		{
+			ShotsThisPull = PullCap;
+		}
 		// Auto-reload on empty with buffered fire (04 §3).
 		BeginReload(Now);
 		if (!Char->HasAuthority())
@@ -198,6 +221,10 @@ void UPFWeaponComponent::TryFire(double Now)
 	}
 
 	FireOneShot(Now);
+	if (CurrentFireMode != EPFFireMode::Auto)
+	{
+		++ShotsThisPull;   // Auto never counts, so it can't reach the uint8 cap and stall mid-hold
+	}
 
 	// 12 bps accumulator with remainder carry — no frame-quantized ROF, no catch-up
 	// bursts after a pause (04 §2.1).
@@ -696,6 +723,11 @@ void UPFWeaponComponent::OnRep_Reload()
 	OnReloadStateChangedEvent.Broadcast(bReloading);
 }
 
+void UPFWeaponComponent::OnRep_Grenades()
+{
+	OnGrenadeCountChangedEvent.Broadcast(FragCount, SmokeCount);
+}
+
 bool UPFWeaponComponent::ServerRefillFromPickup()
 {
 	APaintForgeCharacter* Char = GetPFCharacter();
@@ -703,16 +735,139 @@ bool UPFWeaponComponent::ServerRefillFromPickup()
 	{
 		return false;
 	}
-	const bool bMagNeed = HopperCount < HopperCapacity;
-	const bool bResNeed = ReserveAmmo < MaxReserveAmmo;
-	if (!bMagNeed && !bResNeed)
+	const bool bMagNeed  = HopperCount < HopperCapacity;
+	const bool bResNeed  = ReserveAmmo < MaxReserveAmmo;
+	const bool bNadeNeed = (FragCount < MaxFrag) || (SmokeCount < MaxSmoke);
+	if (!bMagNeed && !bResNeed && !bNadeNeed)
 	{
 		return false;
 	}
 	HopperCount = HopperCapacity;
 	ReserveAmmo = MaxReserveAmmo;
 	OnHopperChangedEvent.Broadcast(HopperCount);
+	if (bNadeNeed)
+	{
+		FragCount  = MaxFrag;
+		SmokeCount = MaxSmoke;
+		OnGrenadeCountChangedEvent.Broadcast(FragCount, SmokeCount);
+	}
 	return true;
+}
+
+// ---------------------------------------------------------------- fire selector + grenades
+
+void UPFWeaponComponent::CycleFireMode()
+{
+	switch (CurrentFireMode)
+	{
+	case EPFFireMode::Auto:   CurrentFireMode = EPFFireMode::Single; break;
+	case EPFFireMode::Single: CurrentFireMode = EPFFireMode::Burst;  break;
+	case EPFFireMode::Burst:
+	default:                  CurrentFireMode = EPFFireMode::Auto;   break;
+	}
+	OnFireModeChangedEvent.Broadcast(CurrentFireMode);
+	if (APaintForgeCharacter* Char = GetPFCharacter())
+	{
+		if (Char->IsLocallyControlled())
+		{
+			if (UPFCombatAudio* Audio = Char->GetCombatAudio())
+			{
+				Audio->PlayFireSelect();
+			}
+		}
+	}
+}
+
+void UPFWeaponComponent::StartThrow(EPFGrenadeType Type)
+{
+	APaintForgeCharacter* Char = GetPFCharacter();
+	if (Char == nullptr || !Char->IsLocallyControlled())
+	{
+		return;
+	}
+	// Local supply gate (server re-validates as law): don't spam the RPC when out.
+	const uint8 Have = (Type == EPFGrenadeType::Frag) ? FragCount : SmokeCount;
+	if (Have == 0)
+	{
+		return;
+	}
+	if (const APaintForgeGameState* GS = GetPFGameState())
+	{
+		if (!GS->IsFireAllowed())
+		{
+			return;
+		}
+	}
+	if (const UPFHealthComponent* Health = Char->GetHealth(); Health != nullptr && Health->bEliminated)
+	{
+		return;
+	}
+	const FVector Origin = Char->GetMuzzleLocation(false);
+	const FVector AimDir = Char->GetControlRotation().Vector();
+	if (UPFCombatAudio* Audio = Char->GetCombatAudio())
+	{
+		Audio->PlayGrenadeThrow();   // instant local feel; world detonation FX comes from the grenade
+	}
+	ServerThrowGrenade(Origin, AimDir, static_cast<uint8>(Type));
+}
+
+void UPFWeaponComponent::ServerThrowGrenade_Implementation(FVector_NetQuantize100 Origin,
+	FVector_NetQuantizeNormal AimDir, uint8 Type)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+	const EPFGrenadeType Kind = (static_cast<EPFGrenadeType>(Type) == EPFGrenadeType::Smoke)
+		? EPFGrenadeType::Smoke : EPFGrenadeType::Frag;
+	uint8& Count = (Kind == EPFGrenadeType::Frag) ? FragCount : SmokeCount;
+	if (Count == 0)
+	{
+		return;
+	}
+	APaintForgeCharacter* Char = GetPFCharacter();
+	UWorld* World = GetWorld();
+	if (Char == nullptr || World == nullptr)
+	{
+		return;
+	}
+	if (const APaintForgeGameState* GS = GetPFGameState())
+	{
+		if (!GS->IsFireAllowed())
+		{
+			return;
+		}
+	}
+	if (const UPFHealthComponent* Health = Char->GetHealth(); Health != nullptr && Health->bEliminated)
+	{
+		return;
+	}
+	// Origin anti-spoof: must be near the pawn, else fall back to the server muzzle (mirrors ServerFire).
+	FVector SpawnOrigin = Origin;
+	if (FVector::DistSquared(SpawnOrigin, Char->GetActorLocation()) > FMath::Square(250.f))
+	{
+		SpawnOrigin = Char->GetMuzzleLocation(false);
+	}
+	FVector Dir = FVector(AimDir);
+	if (!Dir.Normalize())
+	{
+		Dir = Char->GetActorForwardVector();
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = Char;
+	Params.Instigator = Char;
+	APFGrenadeProjectile* Nade = World->SpawnActor<APFGrenadeProjectile>(
+		APFGrenadeProjectile::StaticClass(), SpawnOrigin, Dir.Rotation(), Params);
+	if (Nade == nullptr)
+	{
+		return;
+	}
+	Nade->ServerInit(Dir, GetOwnerTeam(), Kind, this);
+
+	--Count;
+	OnGrenadeCountChangedEvent.Broadcast(FragCount, SmokeCount);   // host HUD; owning client via OnRep
 }
 
 APaintForgeCharacter* UPFWeaponComponent::GetPFCharacter() const

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "InputCoreTypes.h"   // FKey
 #include "PFOptionsWidget.generated.h"
 
 class UButton;
@@ -32,6 +33,17 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+
+	// One click handler per rebind row (UButton::OnClicked takes no payload). Each begins key capture.
+	UFUNCTION() void OnRebind0();
+	UFUNCTION() void OnRebind1();
+	UFUNCTION() void OnRebind2();
+	UFUNCTION() void OnRebind3();
+	UFUNCTION() void OnRebind4();
+	UFUNCTION() void OnRebind5();
+	UFUNCTION() void OnRebind6();
+	UFUNCTION() void OnResetBinds();
 
 	UFUNCTION() void OnTabVideo();
 	UFUNCTION() void OnTabAudio();
@@ -66,6 +78,11 @@ private:
 	void PullFromSettings();
 	void PushToSettings(bool bSave);
 	void RefreshLabels();
+	void BuildKeyBindRows(UVerticalBox* Box);
+	void BeginListen(int32 Index);
+	void RefreshRebindLabels();
+	void ApplyKeyBinds();
+	static constexpr int32 NumRebinds = 7;
 	void ApplyMasterVolume(float Linear01);
 	void ApplySfxVolume(float Linear01);
 	void ApplyLookSensitivity(float Sens);
@@ -126,6 +143,16 @@ private:
 
 	bool bOpen = false;
 	int32 ActiveTab = 0;
+
+	// ---- Key rebinding ----
+	UPROPERTY() TArray<TObjectPtr<UButton>> RebindButtons;
+	UPROPERTY() TObjectPtr<UButton> ResetBindsButton;
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> RebindKeyLabels;
+	TArray<FName> RebindIds;                 // parallel to the rows, filled in BuildKeyBindRows
+	TMap<FName, FKey> WorkingBinds;           // pending (unapplied) key per action
+	TMap<FName, FKey> DefaultBinds;           // shipped defaults, for reset + clearing overrides
+	bool bListeningForKey = false;
+	int32 ListeningIndex = -1;
 
 	static constexpr int32 NumResolutions = 6;
 };

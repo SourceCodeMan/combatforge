@@ -19,6 +19,14 @@ enum class EPFMatchPhase : uint8 { Lobby = 0, Build = 1, Combat = 2, Vote = 3, R
 UENUM(BlueprintType)
 enum class EPFRoundState : uint8 { None = 0, Freeze = 1, Live = 2, Intermission = 3 };
 
+// Fire selector on the marker. Client-local feel only — the server validates cadence (token bucket), not mode.
+UENUM(BlueprintType)
+enum class EPFFireMode : uint8 { Single = 0, Burst = 1, Auto = 2 };
+
+// Throwables. Frag = non-lethal BB burst; Smoke = visual concealment.
+UENUM(BlueprintType)
+enum class EPFGrenadeType : uint8 { Frag = 0, Smoke = 1 };
+
 UENUM(BlueprintType)
 enum class EPFPieceType : uint8
 {
@@ -208,6 +216,8 @@ DECLARE_MULTICAST_DELEGATE(FPFOnPlayerStateFlagsChanged);          // team/ready
 DECLARE_MULTICAST_DELEGATE_TwoParams(FPFOnHitConfirmed, uint32 /*ShotIndex*/, bool /*bElim*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnHopperChanged, int32 /*Count*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnReloadStateChanged, bool /*bReloading*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnFireModeChanged, EPFFireMode /*Mode*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FPFOnGrenadeCountChanged, uint8 /*Frag*/, uint8 /*Smoke*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FPFOnLocalPaintHitTaken, FVector /*ShooterLoc*/, uint8 /*ShooterTeam*/, uint8 /*NewHP*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FPFOnEliminated, class UPFHealthComponent*, const FPFPaintHitInfo&); // server-side
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnHPChanged, uint8 /*NewHP*/);

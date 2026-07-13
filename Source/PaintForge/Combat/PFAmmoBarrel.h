@@ -33,7 +33,6 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION() void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
@@ -48,6 +47,8 @@ protected:
 	void SoftLoadMesh();
 	void UpdatePromptVisibility();
 	void ApplyAvailableVisuals();
+	/** Fixed (non-billboarding) label facing toward the near team's half, set once at spawn. */
+	void OrientLabels();
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Root;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Mesh;

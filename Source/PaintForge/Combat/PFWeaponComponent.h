@@ -39,11 +39,22 @@ public:
 	void StopFire();
 	void StartReload();     // manual; also auto-fires on empty (04 §3)
 
+	/** Fire selector: cycle Single -> Burst -> Auto -> Single. Client-local feel only (no replication). */
+	void CycleFireMode();
+	EPFFireMode GetFireMode() const { return CurrentFireMode; }
+
+	/** Throw a grenade of the given type (owner-predicts -> ServerThrowGrenade validates + spawns). */
+	void StartThrow(EPFGrenadeType Type);
+	uint8 GetFragCount()  const { return FragCount; }
+	uint8 GetSmokeCount() const { return SmokeCount; }
+
 	/** True while the fire button / bot trigger is held (not replicated; local/authority only). */
 	bool WantsFire() const { return bWantsFire; }
 
 	// ---- RPC surface (binding) ----
 	UFUNCTION(Server, Reliable)          void ServerFire(const FPFShotPacket& Shot);
+	UFUNCTION(Server, Reliable)          void ServerThrowGrenade(FVector_NetQuantize100 Origin,
+	                                          FVector_NetQuantizeNormal AimDir, uint8 Type);
 	UFUNCTION(NetMulticast, Unreliable)  void MulticastShotFX(FVector_NetQuantize100 Origin,
 	                                          FVector_NetQuantizeNormal Dir, uint32 ShotIndex);
 		// remote clients spawn a Cosmetic projectile; owning client skips (already fired)
@@ -59,6 +70,9 @@ public:
 	/** Spare balls carried (not in mag). Mag + reserve ≤ MaxTotalAmmo. */
 	UPROPERTY(ReplicatedUsing=OnRep_Reserve) int32 ReserveAmmo = 120; // COND_OwnerOnly
 	UPROPERTY(ReplicatedUsing=OnRep_Reload) bool  bReloading  = false; // COND_OwnerOnly
+	/** Grenades carried this life (COND_OwnerOnly). Reset on spawn, topped up at ammo barrels. */
+	UPROPERTY(ReplicatedUsing=OnRep_Grenades) uint8 FragCount  = 2;
+	UPROPERTY(ReplicatedUsing=OnRep_Grenades) uint8 SmokeCount = 2;
 
 	// ---- Cross-package reads ----
 	float GetCurrentSpreadHalfAngleDeg() const;  // live cone incl. bloom + movement state; crosshair polls per tick
@@ -76,9 +90,11 @@ public:
 	bool ServerRefillFromPickup();
 
 	// ---- UI subscription points ----
-	FPFOnHitConfirmed       OnHitConfirmedEvent;
-	FPFOnHopperChanged      OnHopperChangedEvent;
-	FPFOnReloadStateChanged OnReloadStateChangedEvent;
+	FPFOnHitConfirmed        OnHitConfirmedEvent;
+	FPFOnHopperChanged       OnHopperChangedEvent;
+	FPFOnReloadStateChanged  OnReloadStateChangedEvent;
+	FPFOnFireModeChanged     OnFireModeChangedEvent;
+	FPFOnGrenadeCountChanged OnGrenadeCountChangedEvent;
 
 	// ---- Config (defaults: 30-round mag, 150 total carry) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float FireRateBps = 12.f;
@@ -87,6 +103,11 @@ public:
 	/** Max spare balls outside the mag (default 120 → 150 total with full mag). */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") int32 MaxReserveAmmo = 120;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ReloadTime = 1.f;
+	/** Fire selector: rounds emitted per trigger pull in Burst mode. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 BurstCount = 3;
+	/** Grenade loadout granted per life (also the ammo-barrel refill cap). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") uint8 MaxFrag  = 2;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") uint8 MaxSmoke = 2;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float MuzzleSpeedUU = 10000.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjGravityScale = 0.35f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjLifetime = 2.f;
@@ -116,6 +137,7 @@ protected:
 	UFUNCTION() void OnRep_Hopper();
 	UFUNCTION() void OnRep_Reserve();
 	UFUNCTION() void OnRep_Reload();
+	UFUNCTION() void OnRep_Grenades();
 
 	// Intra RPC: server must learn about manual reloads (auto-reload triggers independently
 	// on both sides when the hopper empties).
@@ -149,6 +171,8 @@ private:
 	double NextFireTime = 0.0;
 	double SprintOutReadyTime = 0.0;
 	uint32 ShotIndexCounter = 0;        // owning-client monotonic (per weapon, per match)
+	EPFFireMode CurrentFireMode = EPFFireMode::Auto;   // client-local fire selector (not replicated)
+	uint8  ShotsThisPull = 0;           // shots emitted since the current trigger press (Single/Burst latch)
 
 	// Bloom state (updated on every observed shot: local fire / server fire / remote multicast)
 	float  BloomAccumDeg = 0.f;

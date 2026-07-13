@@ -102,6 +102,33 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetSize(FVector2D(160.f, 8.f));
 	}
 
+	// Fire-mode + grenade indicators, stacked above the hopper (bottom-right).
+	FireModeText = WidgetTree->ConstructWidget<UTextBlock>();
+	FireModeText->SetText(FText::FromString(TEXT("AUTO")));
+	FireModeText->SetFont(PFCombatFont(15, true));
+	FireModeText->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.9f, 1.f)));
+	FireModeText->SetJustification(ETextJustify::Right);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(FireModeText))
+	{
+		CSlot->SetAnchors(FAnchors(1.f, 1.f));
+		CSlot->SetAlignment(FVector2D(1.f, 1.f));
+		CSlot->SetPosition(FVector2D(-32.f, -84.f));
+		CSlot->SetAutoSize(true);
+	}
+
+	GrenadeText = WidgetTree->ConstructWidget<UTextBlock>();
+	GrenadeText->SetText(FText::FromString(TEXT("FRAG 2   SMOKE 2")));
+	GrenadeText->SetFont(PFCombatFont(15, true));
+	GrenadeText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.82f, 0.35f)));
+	GrenadeText->SetJustification(ETextJustify::Right);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(GrenadeText))
+	{
+		CSlot->SetAnchors(FAnchors(1.f, 1.f));
+		CSlot->SetAlignment(FVector2D(1.f, 1.f));
+		CSlot->SetPosition(FVector2D(-32.f, -106.f));
+		CSlot->SetAutoSize(true);
+	}
+
 	// ---- Top center block: pips / round number / timer / alive counts ----
 	UVerticalBox* TopBox = WidgetTree->ConstructWidget<UVerticalBox>();
 
@@ -353,8 +380,12 @@ void UPFCombatHUDWidget::BindToPawn(APaintForgeCharacter* NewPawn)
 			BoundWeapon = Weapon;
 			Weapon->OnHopperChangedEvent.AddUObject(this, &UPFCombatHUDWidget::HandleHopperChanged);
 			Weapon->OnReloadStateChangedEvent.AddUObject(this, &UPFCombatHUDWidget::HandleReloadStateChanged);
+			Weapon->OnFireModeChangedEvent.AddUObject(this, &UPFCombatHUDWidget::HandleFireModeChanged);
+			Weapon->OnGrenadeCountChangedEvent.AddUObject(this, &UPFCombatHUDWidget::HandleGrenadeCountChanged);
 			HandleHopperChanged(Weapon->HopperCount);
 			HandleReloadStateChanged(Weapon->bReloading);
+			HandleFireModeChanged(Weapon->GetFireMode());
+			HandleGrenadeCountChanged(Weapon->GetFragCount(), Weapon->GetSmokeCount());
 		}
 		if (UPFHealthComponent* Health = NewPawn->GetHealth())
 		{
@@ -371,6 +402,8 @@ void UPFCombatHUDWidget::UnbindPawn()
 	{
 		BoundWeapon->OnHopperChangedEvent.RemoveAll(this);
 		BoundWeapon->OnReloadStateChangedEvent.RemoveAll(this);
+		BoundWeapon->OnFireModeChangedEvent.RemoveAll(this);
+		BoundWeapon->OnGrenadeCountChangedEvent.RemoveAll(this);
 	}
 	if (BoundHealth.IsValid())
 	{
@@ -587,6 +620,27 @@ void UPFCombatHUDWidget::HandleReloadStateChanged(bool bNowReloading)
 		ReloadBar->SetPercent(0.f);
 		ReloadBar->SetVisibility(bNowReloading ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
 	}
+}
+
+void UPFCombatHUDWidget::HandleFireModeChanged(EPFFireMode NewMode)
+{
+	if (!FireModeText)
+	{
+		return;
+	}
+	const TCHAR* Name =
+		(NewMode == EPFFireMode::Single) ? TEXT("SINGLE") :
+		(NewMode == EPFFireMode::Burst)  ? TEXT("BURST")  : TEXT("AUTO");
+	FireModeText->SetText(FText::FromString(Name));
+}
+
+void UPFCombatHUDWidget::HandleGrenadeCountChanged(uint8 Frag, uint8 Smoke)
+{
+	if (!GrenadeText)
+	{
+		return;
+	}
+	GrenadeText->SetText(FText::FromString(FString::Printf(TEXT("FRAG %d   SMOKE %d"), Frag, Smoke)));
 }
 
 void UPFCombatHUDWidget::HandleHPChanged(uint8 NewHP)

@@ -88,7 +88,10 @@ protected:
 	void OnADSPressed();
 	void OnADSReleased();
 	void OnReloadPressed();
-	void OnInteractPressed();   // E — nearest ammo barrel
+	void OnInteractPressed();      // F — nearest ammo barrel
+	void OnFireSelectPressed();    // V — cycle fire mode
+	void OnThrowFragPressed();     // E — throw frag
+	void OnThrowSmokePressed();    // Q — throw smoke
 
 	/** Sprint-out raise timer elapsed — release the buffered fire (04 §1.1). */
 	void OnSprintOutFinished();

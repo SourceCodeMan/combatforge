@@ -77,6 +77,14 @@ void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 	IA_ADS         = MakeAction(Outer, TEXT("IA_ADS"),         EInputActionValueType::Boolean);
 	IA_Reload      = MakeAction(Outer, TEXT("IA_Reload"),      EInputActionValueType::Boolean);
 	IA_Interact    = MakeAction(Outer, TEXT("IA_Interact"),    EInputActionValueType::Boolean);
+	IA_FireSelect  = MakeAction(Outer, TEXT("IA_FireSelect"),  EInputActionValueType::Boolean);
+	IA_ThrowFrag   = MakeAction(Outer, TEXT("IA_ThrowFrag"),   EInputActionValueType::Boolean);
+	IA_ThrowSmoke  = MakeAction(Outer, TEXT("IA_ThrowSmoke"),  EInputActionValueType::Boolean);
+
+	// Interact shares F with IA_Ready (IMC_Common). Don't consume the key, so the priority-1 Combat mapping
+	// lets the priority-0 Ready mapping also fire — the two handlers are phase-disjoint (Ready only acts in
+	// Lobby/Build, Interact only finds barrels in Combat), so both firing on F is harmless.
+	IA_Interact->bConsumeInput = false;
 
 	IA_Place       = MakeAction(Outer, TEXT("IA_Place"),       EInputActionValueType::Boolean);
 	IA_DeleteTool  = MakeAction(Outer, TEXT("IA_DeleteTool"),  EInputActionValueType::Boolean);
@@ -150,10 +158,13 @@ void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 	// ================= IMC_Combat =================
 
 	// No InputTriggerPulse on Fire — the weapon runs its own 12 bps gate (§3.3).
-	IMC_Combat->MapKey(IA_Fire,     EKeys::LeftMouseButton);
-	IMC_Combat->MapKey(IA_ADS,      EKeys::RightMouseButton);
-	IMC_Combat->MapKey(IA_Reload,   EKeys::R); // T26: same key as RotatePiece, contexts never coexist
-	IMC_Combat->MapKey(IA_Interact, EKeys::E); // ammo barrels
+	IMC_Combat->MapKey(IA_Fire,       EKeys::LeftMouseButton);
+	IMC_Combat->MapKey(IA_ADS,        EKeys::RightMouseButton);
+	IMC_Combat->MapKey(IA_Reload,     EKeys::R); // T26: same key as RotatePiece, contexts never coexist
+	IMC_Combat->MapKey(IA_Interact,   EKeys::F); // ammo barrels — shares F with Ready (non-consuming, phase-disjoint)
+	IMC_Combat->MapKey(IA_FireSelect, EKeys::V); // cycle fire mode
+	IMC_Combat->MapKey(IA_ThrowFrag,  EKeys::E); // frag grenade (E freed by interact->F)
+	IMC_Combat->MapKey(IA_ThrowSmoke, EKeys::Q); // smoke grenade (Q also IMC_Build QuickEquip; Combat/Build never coexist)
 
 	// ================= IMC_Build =================
 
@@ -181,5 +192,112 @@ void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 		Hold.Triggers.Add(HoldTrigger);
 	}
 
-	UE_LOG(PaintForgeLog, Log, TEXT("UPFInputConfig built: 22 actions, 3 mapping contexts"));
+	// Rebindable-action registry, then apply any saved key overrides. Must run INSIDE Build() (which is
+	// idempotent-guarded) after the default MapKey calls, not via a re-run.
+	BuildRebindRegistry();
+	ApplySavedKeyOverrides();
+
+	UE_LOG(PaintForgeLog, Log, TEXT("UPFInputConfig built: 25 actions, 3 mapping contexts"));
+}
+
+// ---------------------------------------------------------------- key rebinding
+
+void UPFInputConfig::BuildRebindRegistry()
+{
+	RebindEntries.Reset();
+	auto Add = [this](FName Id, const FString& Label, UInputAction* Action, UInputMappingContext* Ctx, FKey DefaultKey)
+	{
+		if (Action == nullptr || Ctx == nullptr)
+		{
+			return;
+		}
+		FRebindEntry E;
+		E.Id = Id;
+		E.Label = Label;
+		E.Action = Action;
+		E.Context = Ctx;
+		E.DefaultKey = DefaultKey;
+		E.CurrentKey = DefaultKey;
+		RebindEntries.Add(E);
+	};
+	// Keyboard, single-key, no-modifier boolean actions. Move/Look are excluded (they carry Swizzle/Negate/
+	// Scalar modifiers a naive remap would drop); CrouchSlide is excluded (dual-mapped LCtrl + C).
+	Add(FName(TEXT("Jump")),       TEXT("Jump"),         IA_Jump,       IMC_Common, EKeys::SpaceBar);
+	Add(FName(TEXT("Sprint")),     TEXT("Sprint"),       IA_Sprint,     IMC_Common, EKeys::LeftShift);
+	Add(FName(TEXT("Reload")),     TEXT("Reload"),       IA_Reload,     IMC_Combat, EKeys::R);
+	Add(FName(TEXT("Interact")),   TEXT("Use / Refill"), IA_Interact,   IMC_Combat, EKeys::F);
+	Add(FName(TEXT("FireSelect")), TEXT("Fire Mode"),    IA_FireSelect, IMC_Combat, EKeys::V);
+	Add(FName(TEXT("ThrowFrag")),  TEXT("Throw Frag"),   IA_ThrowFrag,  IMC_Combat, EKeys::E);
+	Add(FName(TEXT("ThrowSmoke")), TEXT("Throw Smoke"),  IA_ThrowSmoke, IMC_Combat, EKeys::Q);
+}
+
+void UPFInputConfig::ApplySavedKeyOverrides()
+{
+	for (FRebindEntry& E : RebindEntries)
+	{
+		const FKey Saved = FPFUserPrefs::GetKeyOverride(E.Id);
+		if (Saved.IsValid() && Saved != E.CurrentKey && E.Context && E.Action)
+		{
+			E.Context->UnmapKey(E.Action, E.CurrentKey);
+			E.Context->MapKey(E.Action, Saved);
+			E.CurrentKey = Saved;
+		}
+	}
+}
+
+UPFInputConfig::FRebindEntry* UPFInputConfig::FindRebind(FName Id)
+{
+	return RebindEntries.FindByPredicate([Id](const FRebindEntry& E) { return E.Id == Id; });
+}
+
+const UPFInputConfig::FRebindEntry* UPFInputConfig::FindRebind(FName Id) const
+{
+	return RebindEntries.FindByPredicate([Id](const FRebindEntry& E) { return E.Id == Id; });
+}
+
+void UPFInputConfig::GetRebindables(TArray<FRebindInfo>& Out) const
+{
+	Out.Reset();
+	for (const FRebindEntry& E : RebindEntries)
+	{
+		Out.Add(FRebindInfo{ E.Id, E.Label, E.CurrentKey });
+	}
+}
+
+FKey UPFInputConfig::GetActionKey(FName Id) const
+{
+	const FRebindEntry* E = FindRebind(Id);
+	return E ? E->CurrentKey : FKey();
+}
+
+FKey UPFInputConfig::GetActionDefaultKey(FName Id) const
+{
+	const FRebindEntry* E = FindRebind(Id);
+	return E ? E->DefaultKey : FKey();
+}
+
+bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
+{
+	FRebindEntry* E = FindRebind(Id);
+	if (E == nullptr || E->Action == nullptr || E->Context == nullptr || !NewKey.IsValid())
+	{
+		return false;
+	}
+	E->Context->UnmapKey(E->Action, E->CurrentKey);
+	E->Context->MapKey(E->Action, NewKey);
+	E->CurrentKey = NewKey;
+	return true;
+}
+
+void UPFInputConfig::ResetActionKeysToDefaults()
+{
+	for (FRebindEntry& E : RebindEntries)
+	{
+		if (E.Context && E.Action)
+		{
+			E.Context->UnmapKey(E.Action, E.CurrentKey);
+			E.Context->MapKey(E.Action, E.DefaultKey);
+			E.CurrentKey = E.DefaultKey;
+		}
+	}
 }

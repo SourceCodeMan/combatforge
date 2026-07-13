@@ -1,0 +1,328 @@
+// Copyright (c) 2026 Tom Chapman. All rights reserved.
+
+#include "Combat/PFGrenadeProjectile.h"
+
+#include "PaintForge.h"
+#include "Combat/PFPaintballProjectile.h"
+#include "Combat/PFWeaponComponent.h"
+#include "Combat/PFSplatSubsystem.h"
+#include "Combat/PFCombatAudio.h"
+#include "Player/PaintForgeCharacter.h"
+
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "GameFramework/ProjectileMovementComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
+#include "UObject/ConstructorHelpers.h"
+#include "UObject/SoftObjectPath.h"
+
+APFGrenadeProjectile::APFGrenadeProjectile()
+{
+	PrimaryActorTick.bCanEverTick = false;
+	bReplicates = true;
+	SetReplicateMovement(true);
+	bAlwaysRelevant = true;   // small arena + short-lived; guarantees OnRep for cosmetics/smoke
+
+	// Collision sphere is the movement root. Bounces off world geometry, passes through pawns and
+	// (critically) the PF_ECC_Paintball channel so its own frag BBs don't self-hit the fading grenade.
+	Collision = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
+	Collision->InitSphereRadius(10.f);
+	Collision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Collision->SetCollisionObjectType(ECC_WorldDynamic);
+	Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	Collision->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+	Collision->SetCanEverAffectNavigation(false);
+	SetRootComponent(Collision);
+
+	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
+	Mesh->SetupAttachment(Collision);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCastShadow(false);
+	Mesh->SetRelativeScale3D(FVector(0.15f));   // ~15 uu engine sphere ball
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereFinder(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereFinder.Succeeded())
+	{
+		Mesh->SetStaticMesh(SphereFinder.Object);
+	}
+
+	Movement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Movement"));
+	Movement->UpdatedComponent = Collision;
+	Movement->InitialSpeed = 0.f;                 // set in ServerInit
+	Movement->MaxSpeed = 4000.f;
+	Movement->ProjectileGravityScale = 1.0f;      // real lob (heavier than the flat-shooting BB)
+	Movement->bShouldBounce = true;
+	Movement->Bounciness = 0.35f;
+	Movement->Friction = 0.35f;
+	Movement->bRotationFollowsVelocity = false;
+	Movement->bAutoActivate = false;
+}
+
+void APFGrenadeProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(APFGrenadeProjectile, bDetonated);
+	DOREPLIFETIME(APFGrenadeProjectile, KindRep);
+	DOREPLIFETIME(APFGrenadeProjectile, BurstSeed);
+	DOREPLIFETIME(APFGrenadeProjectile, DetonatePoint);
+}
+
+void APFGrenadeProjectile::ServerInit(const FVector& AimDir, uint8 Team, EPFGrenadeType Type,
+	UPFWeaponComponent* Thrower)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	TeamId = Team;
+	Kind = Type;
+	KindRep = static_cast<uint8>(Type);
+	ThrowerWeak = Thrower;
+
+	FVector Launch = (AimDir + FVector(0.f, 0.f, 0.35f)).GetSafeNormal();   // toss with an upward arc
+	if (Launch.IsNearlyZero())
+	{
+		Launch = FVector(1.f, 0.f, 0.35f).GetSafeNormal();
+	}
+	if (Movement)
+	{
+		Movement->SetUpdatedComponent(Collision);
+		Movement->Velocity = Launch * ThrowSpeed;
+		Movement->SetActive(true);
+	}
+
+	GetWorldTimerManager().SetTimer(FuseTimer, this, &APFGrenadeProjectile::ServerDetonate,
+		FMath::Max(0.1f, FuseSeconds), false);
+}
+
+void APFGrenadeProjectile::ServerDetonate()
+{
+	if (!HasAuthority() || bDetonated)
+	{
+		return;
+	}
+	const FVector At = GetActorLocation();
+	DetonatePoint = At;
+	BurstSeed = static_cast<uint32>(FMath::Rand()) ^ (GetUniqueID() * 2654435761u);
+	KindRep = static_cast<uint8>(Kind);
+	bDetonated = true;   // replicates -> OnRep_Detonated on clients
+	ForceNetUpdate();
+
+	if (Movement)
+	{
+		Movement->StopMovementImmediately();
+	}
+
+	// Authoritative gameplay: frag spawns the real BB burst on the server (damage + host visuals).
+	if (Kind == EPFGrenadeType::Frag)
+	{
+		SpawnFragBurst(At, BurstSeed);
+	}
+
+	// Host-local cosmetics/audio (OnRep never fires on the authority).
+	HandleDetonateVisualsLocal();
+
+	// Frag: keep the actor alive briefly so bDetonated reliably replicates for client cosmetics, then go.
+	// Smoke: the actor IS the cloud host for its whole lifetime.
+	const float Life = (Kind == EPFGrenadeType::Frag) ? 0.5f : FMath::Max(0.5f, SmokeDuration);
+	GetWorldTimerManager().SetTimer(DestroyTimer, this, &APFGrenadeProjectile::OnDestroyTimer, Life, false);
+}
+
+void APFGrenadeProjectile::OnRep_Detonated()
+{
+	if (!bDetonated)
+	{
+		return;
+	}
+	if (Movement)
+	{
+		Movement->StopMovementImmediately();
+	}
+	HandleDetonateVisualsLocal();
+}
+
+void APFGrenadeProjectile::HandleDetonateVisualsLocal()
+{
+	const FVector At = DetonatePoint;
+	const EPFGrenadeType K = (static_cast<EPFGrenadeType>(KindRep) == EPFGrenadeType::Smoke)
+		? EPFGrenadeType::Smoke : EPFGrenadeType::Frag;
+
+	if (Mesh)
+	{
+		Mesh->SetVisibility(false);   // hide the thrown ball at the moment it pops
+	}
+
+	if (K == EPFGrenadeType::Frag)
+	{
+		// The host already has the authoritative BBs as its visual; only remote clients need cosmetics.
+		if (!HasAuthority())
+		{
+			SpawnCosmeticFragBurst(At, BurstSeed);
+		}
+		PlayDetonAudio(At, /*bFrag=*/true);
+	}
+	else
+	{
+		StartSmokeVisual(At);
+		PlayDetonAudio(At, /*bFrag=*/false);
+	}
+}
+
+void APFGrenadeProjectile::SpawnFragBurst(const FVector& At, uint32 Seed)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	UPFWeaponComponent* SrcWeapon = ThrowerWeak.Get();   // required for damage/splat routing
+	APawn* ThrowerPawn = Cast<APawn>(GetOwner());
+	FRandomStream Stream(Seed);
+
+	for (int32 i = 0; i < FragBBCount; ++i)
+	{
+		FVector Dir = Stream.VRand();
+		if (Dir.Z < 0.f)
+		{
+			Dir.Z = -Dir.Z * 0.5f;   // bias the lower hemisphere upward so BBs spray out, not into the floor
+		}
+		Dir = Dir.GetSafeNormal();
+
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Params.Owner = GetOwner();
+		Params.Instigator = ThrowerPawn;
+		APFPaintballProjectile* BB = World->SpawnActor<APFPaintballProjectile>(
+			APFPaintballProjectile::StaticClass(), At, Dir.Rotation(), Params);
+		if (BB != nullptr)
+		{
+			// Distinct high ShotIndex space so frag hitmarkers don't collide with live-fire indices.
+			BB->InitProjectile(At, Dir, TeamId, /*bAuthoritative=*/true, SrcWeapon, Seed + static_cast<uint32>(i) + 1u);
+		}
+	}
+}
+
+void APFGrenadeProjectile::SpawnCosmeticFragBurst(const FVector& At, uint32 Seed)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	UPFSplatSubsystem* Splats = World->GetSubsystem<UPFSplatSubsystem>();
+	if (Splats == nullptr)
+	{
+		return;   // dedicated/non-rendering world
+	}
+	// SAME seed + SAME bias as SpawnFragBurst so cosmetic tracers line up with the authoritative BBs.
+	FRandomStream Stream(Seed);
+	for (int32 i = 0; i < FragBBCount; ++i)
+	{
+		FVector Dir = Stream.VRand();
+		if (Dir.Z < 0.f)
+		{
+			Dir.Z = -Dir.Z * 0.5f;
+		}
+		Dir = Dir.GetSafeNormal();
+		if (APFPaintballProjectile* Ball = Splats->AcquireCosmeticProjectile())
+		{
+			// SourceWeapon null on remote clients -> InitProjectile falls back to default BB ballistics (fine
+			// for a cosmetic tracer); Team is passed explicitly for tint.
+			Ball->InitProjectile(At, Dir, TeamId, /*bAuthoritative=*/false, ThrowerWeak.Get(),
+				Seed + static_cast<uint32>(i) + 1u);
+		}
+	}
+}
+
+void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
+{
+	UStaticMesh* Sphere = Cast<UStaticMesh>(FSoftObjectPath(TEXT("/Engine/BasicShapes/Sphere.Sphere")).TryLoad());
+	if (Sphere == nullptr || Collision == nullptr)
+	{
+		return;
+	}
+	UMaterialInterface* SmokeMat = Cast<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke")).TryLoad());
+
+	// Engine sphere is 50 uu radius; scale so the main puff radius ~= SmokeRadius. A small overlapping cluster
+	// reads denser/puffier and conceals better than one translucent sphere.
+	const float BaseScale = SmokeRadius / 50.f;
+	const FVector Offsets[5] = {
+		FVector(0.f, 0.f, SmokeRadius * 0.35f),
+		FVector(SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.1f),
+		FVector(-SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.15f),
+		FVector(0.f, SmokeRadius * 0.5f, SmokeRadius * 0.2f),
+		FVector(0.f, -SmokeRadius * 0.5f, SmokeRadius * 0.1f),
+	};
+	const float Scales[5] = { 1.0f, 0.72f, 0.75f, 0.7f, 0.72f };
+
+	for (int32 i = 0; i < 5; ++i)
+	{
+		UStaticMeshComponent* Puff = NewObject<UStaticMeshComponent>(this);
+		if (Puff == nullptr)
+		{
+			continue;
+		}
+		Puff->SetupAttachment(Collision);
+		Puff->SetStaticMesh(Sphere);
+		Puff->SetRelativeLocation(Offsets[i]);
+		Puff->SetRelativeScale3D(FVector(BaseScale * Scales[i]));
+		Puff->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Puff->SetCastShadow(false);
+		Puff->SetCanEverAffectNavigation(false);
+		Puff->RegisterComponent();
+		if (SmokeMat != nullptr)
+		{
+			if (UMaterialInstanceDynamic* MID = Puff->CreateDynamicMaterialInstance(0, SmokeMat))
+			{
+				// Grey the muzzle smoke into a battlefield concealment cloud (no-ops if params are absent).
+				const FLinearColor Grey(0.62f, 0.62f, 0.64f, 1.f);
+				MID->SetVectorParameterValue(TEXT("Color"), Grey);
+				MID->SetVectorParameterValue(TEXT("Tint"), Grey);
+				MID->SetVectorParameterValue(TEXT("BaseColor"), Grey);
+			}
+		}
+		SmokePuffs.Add(Puff);
+	}
+}
+
+void APFGrenadeProjectile::PlayDetonAudio(const FVector& At, bool bFrag)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (PC == nullptr)
+	{
+		return;
+	}
+	APaintForgeCharacter* LocalChar = Cast<APaintForgeCharacter>(PC->GetPawn());
+	if (LocalChar == nullptr)
+	{
+		return;
+	}
+	if (UPFCombatAudio* Audio = LocalChar->GetCombatAudio())
+	{
+		if (bFrag)
+		{
+			Audio->PlayFragBurstAt(At);
+		}
+		else
+		{
+			Audio->PlaySmokeHissAt(At);
+		}
+	}
+}
+
+void APFGrenadeProjectile::OnDestroyTimer()
+{
+	Destroy();
+}

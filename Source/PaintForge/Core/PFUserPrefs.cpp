@@ -113,6 +113,38 @@ void FPFUserPrefs::SetWindowModeIndex(int32 Idx)
 	WriteInt(TEXT("WindowModeIndex"), FMath::Clamp(Idx, 0, 2));
 }
 
+FKey FPFUserPrefs::GetKeyOverride(FName ActionId)
+{
+	if (GConfig)
+	{
+		FString KeyName;
+		const FString CfgKey = FString::Printf(TEXT("Bind_%s"), *ActionId.ToString());
+		if (GConfig->GetString(TEXT("PaintForge"), *CfgKey, KeyName, GGameUserSettingsIni) && !KeyName.IsEmpty())
+		{
+			return FKey(FName(*KeyName));
+		}
+	}
+	return FKey();   // EKeys::Invalid
+}
+
+void FPFUserPrefs::SetKeyOverride(FName ActionId, FKey Key)
+{
+	if (GConfig && Key.IsValid())
+	{
+		const FString CfgKey = FString::Printf(TEXT("Bind_%s"), *ActionId.ToString());
+		GConfig->SetString(TEXT("PaintForge"), *CfgKey, *Key.GetFName().ToString(), GGameUserSettingsIni);
+	}
+}
+
+void FPFUserPrefs::ClearKeyOverride(FName ActionId)
+{
+	if (GConfig)
+	{
+		const FString CfgKey = FString::Printf(TEXT("Bind_%s"), *ActionId.ToString());
+		GConfig->RemoveKey(TEXT("PaintForge"), *CfgKey, GGameUserSettingsIni);
+	}
+}
+
 void FPFUserPrefs::Flush()
 {
 	if (GConfig)

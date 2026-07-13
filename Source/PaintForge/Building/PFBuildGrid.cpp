@@ -14,6 +14,8 @@
 #include "Engine/World.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/SoftObjectPath.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -167,8 +169,21 @@ void APFBuildGrid::BeginPlay()
 		}
 	}
 
-	// Structural: per-type warehouse surfaces (wall concrete / floor / metal ramp / painted roof)
-	// + team Color emissive trim on M_PF_BuildPiece. Props with native mats skip.
+	// Structural committed pieces: M_PF_BuildPiece compiles to the engine checker on INSTANCED meshes, so use
+	// the self-contained warehouse concrete/metal Surface MIs the arena already renders (wall concrete / floor
+	// concrete / metal for ramp+roof). These MIs have no team "Color" param, so pieces are no longer team-tinted
+	// — an accepted tradeoff for real textures over the checker. Falls back to the old M_PF_BuildPiece MID only
+	// if the warehouse pack is absent. Props with native mats skip.
+	auto LoadSurfaceMI = [](EPFPieceType T) -> UMaterialInterface*
+	{
+		const TCHAR* Path =
+			(T == EPFPieceType::Wall)
+				? TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Wall_Facade_Concrete_New_01/MI_Ind_War_Wall_Facade_Concrete_New_01_A.MI_Ind_War_Wall_Facade_Concrete_New_01_A")
+			: (T == EPFPieceType::Floor)
+				? TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Floor_Concrete_Smooth_01/MI_Ind_War_Floor_Concrete_Smooth_01_A.MI_Ind_War_Floor_Concrete_Smooth_01_A")
+				: TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/MI_Ind_War_Sheet_Metal_Rusty_01_A.MI_Ind_War_Sheet_Metal_Rusty_01_A");
+		return Cast<UMaterialInterface>(FSoftObjectPath(Path).TryLoad());
+	};
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
 	{
 		const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
@@ -176,10 +191,19 @@ void APFBuildGrid::BeginPlay()
 		{
 			continue;
 		}
+		UMaterialInterface* SurfaceMat = LoadSurfaceMI(Type);
 		for (uint8 Team = 0; Team < 2; ++Team)
 		{
 			const int32 K = ISMCIndexFor(Type, Team);
-			if (PieceISMCs[K] && ShapeMaterial)
+			if (!PieceISMCs[K])
+			{
+				continue;
+			}
+			if (SurfaceMat != nullptr)
+			{
+				PieceISMCs[K]->SetMaterial(0, SurfaceMat);
+			}
+			else if (ShapeMaterial != nullptr)
 			{
 				UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(ShapeMaterial, this);
 				MID->SetVectorParameterValue(TEXT("Color"), PFColors::ForTeam(Team));

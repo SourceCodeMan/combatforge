@@ -692,11 +692,14 @@ void APaintForgePlayerController::QuitToMenu()
 	}
 	if (IsHostController())
 	{
-		// Listen host: soft-reset match to Lobby without killing the process.
+		// Listen host: soft-reset the match to Lobby, then re-show the landing/boot menu — the screen you load
+		// into — so "Quit to Menu" actually returns there instead of dropping onto the in-match Lobby panel.
 		ServerHostForceReturnToLobby();
+		LoadingMenu = nullptr;          // the dismissed instance was only RemoveFromParent'd, never nulled
+		CreateLoadingMenuIfNeeded();    // rebuild the boot overlay (Z=100); reuses the startup path + UI input
 		return;
 	}
-	// Remote client / standalone guest: leave the session.
+	// Remote client / standalone guest: leave the session (default-map reload lands on a fresh boot menu).
 	ConsoleCommand(TEXT("disconnect"));
 }
 

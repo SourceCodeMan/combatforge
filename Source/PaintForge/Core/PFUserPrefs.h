@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "InputCoreTypes.h"   // FKey
 
 /**
  * Local player prefs (GameUserSettings.ini [PaintForge]).
@@ -31,6 +32,13 @@ struct PAINTFORGE_API FPFUserPrefs
 
 	static int32 GetWindowModeIndex();      // 0=Fullscreen 1=Borderless 2=Windowed
 	static void SetWindowModeIndex(int32 Idx);
+
+	// ---- Key rebinding (stored as "Bind_<ActionId>" = key name) ----
+	/** Saved override key for a rebindable action, or an invalid FKey if none is saved. */
+	static FKey GetKeyOverride(FName ActionId);
+	static void SetKeyOverride(FName ActionId, FKey Key);
+	/** Remove a saved override (revert that action to its default at next Build). */
+	static void ClearKeyOverride(FName ActionId);
 
 	static void Flush();
 

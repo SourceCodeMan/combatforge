@@ -48,6 +48,10 @@ public:
 	void PlayDelete();
 	void PlayReady();
 	void PlayFootstep(bool bSprint);
+	void PlayFireSelect();                          // fire-selector cycle click (2D)
+	void PlayGrenadeThrow();                         // throw whoosh (world, at thrower)
+	void PlayFragBurstAt(const FVector& Loc);        // frag detonation boom (world, at blast)
+	void PlaySmokeHissAt(const FVector& Loc);        // smoke pop hiss (world, at cloud)
 	/** Soft arena bed (local only). Idempotent start; stop on end play. */
 	void StartAmbientBed();
 	void StopAmbientBed();
@@ -60,6 +64,9 @@ private:
 	void PlayUI(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch);
 	void PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch,
 		USoundConcurrency* Concurrency);
+	/** Like PlayWorld but at an explicit world location (detonations happen away from the owner). */
+	void PlayWorldAt(USoundBase* Preferred, const TArray<uint8>& Pcm, const FVector& Loc, float Volume,
+		float Pitch, USoundConcurrency* Concurrency);
 
 	static void QueuePcm(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm);
 
@@ -76,6 +83,10 @@ private:
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueReady;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueFootstep;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueAmbient;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueFireSelect;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueGrenadeThrow;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueFragBurst;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueSmokeHiss;
 
 	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> CombatAttenuation;
 	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> FootstepAttenuation;
@@ -93,6 +104,10 @@ private:
 	TArray<uint8> PcmDelete;
 	TArray<uint8> PcmReady;
 	TArray<uint8> PcmFootstep;
+	TArray<uint8> PcmFireSelect;
+	TArray<uint8> PcmGrenadeThrow;
+	TArray<uint8> PcmFragBurst;
+	TArray<uint8> PcmSmokeHiss;
 
 	bool bSoundsReady = false;
 };

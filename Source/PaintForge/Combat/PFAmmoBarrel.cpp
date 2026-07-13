@@ -21,7 +21,7 @@
 
 APFAmmoBarrel::APFAmmoBarrel()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetReplicateMovement(true);
 	bAlwaysRelevant = true;
@@ -62,7 +62,7 @@ APFAmmoBarrel::APFAmmoBarrel()
 	PromptText->SetVerticalAlignment(EVRTA_TextCenter);
 	PromptText->SetWorldSize(28.f);
 	PromptText->SetTextRenderColor(FColor(255, 220, 80));
-	PromptText->SetText(FText::FromString(TEXT("[E]  REFILL")));
+	PromptText->SetText(FText::FromString(TEXT("[F]  REFILL")));
 	PromptText->SetVisibility(false);
 	PromptText->SetHiddenInGame(true);
 
@@ -96,41 +96,25 @@ void APFAmmoBarrel::BeginPlay()
 		InteractSphere->OnComponentEndOverlap.AddDynamic(this, &APFAmmoBarrel::OnOverlapEnd);
 	}
 	ApplyAvailableVisuals();
+	OrientLabels();   // fixed facing once the (replicated) spawn position is known
 }
 
-void APFAmmoBarrel::Tick(float DeltaSeconds)
+void APFAmmoBarrel::OrientLabels()
 {
-	Super::Tick(DeltaSeconds);
-	// Billboard the prompt + always-on sign toward the local view.
-	const bool bPrompt = PromptText && PromptText->IsVisible();
-	const bool bSign = SignText && SignText->IsVisible();
-	if (bPrompt || bSign)
+	// Fixed, non-billboarding facing so the text never flips/mirrors as the player moves. Face the readable
+	// side toward the near team's spawn (the field half this barrel sits in): that team can read it, the far
+	// side is reversed (acceptable per design). UTextRenderComponent's readable face is -X, so we point +X
+	// AWAY from the reader. If it reads backwards in-game, swap the two yaw values (one 180° flip).
+	constexpr float HalfFieldX = 3200.f;   // FieldX / 2 (arena is 6400 uu wide)
+	const float Yaw = (GetActorLocation().X < HalfFieldX) ? 0.f : 180.f;
+	const FRotator Face(0.f, Yaw, 0.f);
+	if (SignText)
 	{
-		if (const UWorld* World = GetWorld())
-		{
-			if (APlayerController* PC = World->GetFirstPlayerController())
-			{
-				FVector CamLoc;
-				FRotator CamRot;
-				PC->GetPlayerViewPoint(CamLoc, CamRot);
-				if (bPrompt)
-				{
-					const FVector ToCam = (CamLoc - PromptText->GetComponentLocation()).GetSafeNormal2D();
-					if (!ToCam.IsNearlyZero())
-					{
-						PromptText->SetWorldRotation(ToCam.Rotation() + FRotator(0.f, 180.f, 0.f));
-					}
-				}
-				if (bSign)
-				{
-					const FVector ToCam = (CamLoc - SignText->GetComponentLocation()).GetSafeNormal2D();
-					if (!ToCam.IsNearlyZero())
-					{
-						SignText->SetWorldRotation(ToCam.Rotation() + FRotator(0.f, 180.f, 0.f));
-					}
-				}
-			}
-		}
+		SignText->SetWorldRotation(Face);
+	}
+	if (PromptText)
+	{
+		PromptText->SetWorldRotation(Face);
 	}
 }
 
@@ -173,6 +157,7 @@ void APFAmmoBarrel::ServerActivateAt(const FVector& WorldLoc)
 	SetActorLocation(WorldLoc);
 	bAvailable = true;
 	ApplyAvailableVisuals();
+	OrientLabels();   // re-face after the authoritative placement
 	ForceNetUpdate();
 }
 

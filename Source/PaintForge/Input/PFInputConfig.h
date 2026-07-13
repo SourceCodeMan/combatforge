@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "InputCoreTypes.h"   // FKey
 #include "PFInputConfig.generated.h"
 
 class APaintForgePlayerController;
@@ -13,7 +14,7 @@ class UInputModifierNegate;
 class UInputModifierScalar;
 
 /**
- * Owns every native-constructed Enhanced Input object (22 UInputActions + 3
+ * Owns every native-constructed Enhanced Input object (25 UInputActions + 3
  * UInputMappingContexts). All objects are reachable from UPROPERTY members so
  * GC never collects them mid-match (02 R1). Built once by
  * APaintForgePlayerController::SetupInputComponent with the PC as outer.
@@ -37,6 +38,19 @@ public:
 	/** Invert vertical look (true = mouse-up looks down). Safe after Build(). */
 	void SetLookInvertY(bool bInvert);
 
+	// ---- Key rebinding (boolean, single-key, no-modifier actions only) ----
+	struct FRebindInfo { FName Id; FString Label; FKey Key; };
+	/** Enumerate the rebindable actions (id, display label, current key) for the options UI. */
+	void GetRebindables(TArray<FRebindInfo>& Out) const;
+	/** Current key bound to a rebindable action (invalid FKey if the id is unknown). */
+	FKey GetActionKey(FName Id) const;
+	/** The default (shipped) key for a rebindable action. */
+	FKey GetActionDefaultKey(FName Id) const;
+	/** Remap a rebindable action to NewKey on its live mapping context. False if id unknown / key invalid. */
+	bool SetActionKey(FName Id, FKey NewKey);
+	/** Restore every rebindable action to its default key (does not touch saved prefs). */
+	void ResetActionKeysToDefaults();
+
 	// ---- Common (IMC_Common, priority 0) ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Move;        // Axis2D, WASD swizzle
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Look;        // Axis2D, Mouse2D, negate Y, sensitivity scalar
@@ -52,7 +66,10 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Fire;        // LMB, hold (weapon runs its own 12 bps gate)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_ADS;         // RMB, hold
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Reload;      // R (T26)
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Interact;    // E — ammo barrels / future interact
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Interact;    // F — ammo barrels (bConsumeInput=false, shares F with Ready)
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_FireSelect;  // V, tap — cycle single/burst/auto
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_ThrowFrag;   // E, tap — throw frag
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_ThrowSmoke;  // Q, tap — throw smoke (safe: Q also IMC_Build, contexts never coexist)
 
 	// ---- Build (IMC_Build, priority 1) ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Place;       // LMB, hold (turbo in component)
@@ -75,4 +92,22 @@ public:
 	UPROPERTY() TObjectPtr<UInputModifierScalar> LookSensitivityScalar;
 	/** Vertical look negate; Options Invert Y flips bY. */
 	UPROPERTY() TObjectPtr<UInputModifierNegate> LookNegateY;
+
+private:
+	// One rebindable action. Not a UPROPERTY: Action/Context are already GC-rooted by the IA_*/IMC_* members.
+	struct FRebindEntry
+	{
+		FName Id;
+		FString Label;
+		UInputAction* Action = nullptr;
+		UInputMappingContext* Context = nullptr;
+		FKey DefaultKey;
+		FKey CurrentKey;
+	};
+	void BuildRebindRegistry();       // populate from the IA_*/IMC_* after the default MapKey calls
+	void ApplySavedKeyOverrides();    // read FPFUserPrefs::GetKeyOverride and remap
+	FRebindEntry* FindRebind(FName Id);
+	const FRebindEntry* FindRebind(FName Id) const;
+
+	TArray<FRebindEntry> RebindEntries;
 };

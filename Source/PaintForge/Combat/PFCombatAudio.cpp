@@ -160,6 +160,33 @@ namespace
 			SynthSineBlip(95.f, 0.04f, 0.22f, 0.001f, 0.025f), 0.7f);
 	}
 
+	TArray<int16> SynthFireSelect()
+	{
+		// Crisp mechanical selector click.
+		return MixAdd(SynthNoiseBurst(0.012f, 0.28f, 0.5f),
+			SynthSineBlip(950.f, 0.018f, 0.22f, 0.001f, 0.012f), 0.8f);
+	}
+
+	TArray<int16> SynthGrenadeThrow()
+	{
+		// Airy whoosh with a falling body.
+		return MixAdd(SynthNoiseBurst(0.20f, 0.30f, 0.6f),
+			SynthSineBlip(300.f, 0.16f, 0.16f, 0.02f, 0.11f), 0.7f);
+	}
+
+	TArray<int16> SynthFragBurst()
+	{
+		// Deep concussive boom: low body + broadband crack.
+		return MixAdd(SynthSineBlip(72.f, 0.36f, 0.62f, 0.002f, 0.22f),
+			SynthNoiseBurst(0.30f, 0.55f, 0.5f), 0.85f);
+	}
+
+	TArray<int16> SynthSmokeHiss()
+	{
+		// Sustained low-amplitude release hiss.
+		return SynthNoiseBurst(0.7f, 0.22f, 0.75f);
+	}
+
 	USoundWaveProcedural* MakeWaveShell(UObject* Outer, float DurationSec)
 	{
 		USoundWaveProcedural* Wave = NewObject<USoundWaveProcedural>(Outer, NAME_None, RF_Transient);
@@ -266,6 +293,12 @@ void UPFCombatAudio::EnsureSounds()
 		CueAmbient = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Ambient_Birds_Loop_04_Cue.Ambient_Birds_Loop_04_Cue"));
 	}
 
+	// Fire selector + grenades — best-effort cues, procedural fallback covers a pack-less checkout.
+	CueFireSelect = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_3-1_Cue.Interface_3-1_Cue"));
+	CueGrenadeThrow = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Whoosh_4-1_Cue.Whoosh_4-1_Cue"));
+	CueFragBurst = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Explosion_1-1_Cue.Explosion_1-1_Cue"));
+	// CueSmokeHiss intentionally procedural-only (no matching pack cue).
+
 	PcmHitmarker = PackPcm(SynthHitmarker());
 	PcmElim = PackPcm(SynthElim());
 	PcmMuzzle = PackPcm(SynthMuzzle());
@@ -277,6 +310,10 @@ void UPFCombatAudio::EnsureSounds()
 	PcmDelete = PackPcm(SynthDelete());
 	PcmReady = PackPcm(SynthReady());
 	PcmFootstep = PackPcm(SynthFootstep());
+	PcmFireSelect = PackPcm(SynthFireSelect());
+	PcmGrenadeThrow = PackPcm(SynthGrenadeThrow());
+	PcmFragBurst = PackPcm(SynthFragBurst());
+	PcmSmokeHiss = PackPcm(SynthSmokeHiss());
 
 	CombatAttenuation = NewObject<USoundAttenuation>(this);
 	{
@@ -382,6 +419,61 @@ void UPFCombatAudio::PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, 
 	{
 		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
 	}
+}
+
+void UPFCombatAudio::PlayWorldAt(USoundBase* Preferred, const TArray<uint8>& Pcm, const FVector& Loc,
+	float Volume, float Pitch, USoundConcurrency* Concurrency)
+{
+	if (!CanPlay())
+	{
+		return;
+	}
+	USoundBase* ToPlay = Preferred;
+	if (ToPlay == nullptr)
+	{
+		if (Pcm.Num() == 0)
+		{
+			return;
+		}
+		const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
+		USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
+		QueuePcm(Wave, Pcm);
+		ToPlay = Wave;
+	}
+	const float Vol = Volume * ReadSfxVolumeScale();
+	if (CombatAttenuation)
+	{
+		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
+			Vol, Pitch, 0.f, CombatAttenuation, Concurrency);
+	}
+	else
+	{
+		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
+	}
+}
+
+void UPFCombatAudio::PlayFireSelect()
+{
+	EnsureSounds();
+	PlayUI(CueFireSelect, PcmFireSelect, 0.7f, FMath::FRandRange(0.98f, 1.04f));
+}
+
+void UPFCombatAudio::PlayGrenadeThrow()
+{
+	EnsureSounds();
+	PlayWorld(CueGrenadeThrow, PcmGrenadeThrow, 0.8f, FMath::FRandRange(0.96f, 1.06f), nullptr);
+}
+
+void UPFCombatAudio::PlayFragBurstAt(const FVector& Loc)
+{
+	EnsureSounds();
+	PlayWorldAt(CueFragBurst, PcmFragBurst, Loc, 1.2f, FMath::FRandRange(0.94f, 1.02f), nullptr);
+}
+
+void UPFCombatAudio::PlaySmokeHissAt(const FVector& Loc)
+{
+	EnsureSounds();
+	PlayWorldAt(CueSmokeHiss, PcmSmokeHiss, Loc, 0.8f, FMath::FRandRange(0.98f, 1.04f), nullptr);
 }
 
 void UPFCombatAudio::PlayHitmarker()

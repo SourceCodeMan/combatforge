@@ -56,6 +56,8 @@ private:
 	void HandleHopperChanged(int32 NewCount);
 	void HandleReloadStateChanged(bool bNowReloading);
 	void HandleHPChanged(uint8 NewHP);
+	void HandleFireModeChanged(EPFFireMode NewMode);
+	void HandleGrenadeCountChanged(uint8 Frag, uint8 Smoke);
 
 	void UpdateCrosshair();
 	void UpdateBanner(float InDeltaTime);
@@ -75,6 +77,8 @@ private:
 
 	UPROPERTY() TObjectPtr<UTextBlock> HopperText;
 	UPROPERTY() TObjectPtr<UProgressBar> ReloadBar;
+	UPROPERTY() TObjectPtr<UTextBlock> FireModeText;
+	UPROPERTY() TObjectPtr<UTextBlock> GrenadeText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundTimerText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundNumberText;
 	UPROPERTY() TObjectPtr<UTextBlock> AliveTextA;

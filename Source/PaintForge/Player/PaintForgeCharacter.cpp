@@ -485,6 +485,18 @@ void APaintForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	{
 		EIC->BindAction(Cfg->IA_Interact, ETriggerEvent::Started, this, &APaintForgeCharacter::OnInteractPressed);
 	}
+	if (Cfg->IA_FireSelect)
+	{
+		EIC->BindAction(Cfg->IA_FireSelect, ETriggerEvent::Started, this, &APaintForgeCharacter::OnFireSelectPressed);
+	}
+	if (Cfg->IA_ThrowFrag)
+	{
+		EIC->BindAction(Cfg->IA_ThrowFrag, ETriggerEvent::Started, this, &APaintForgeCharacter::OnThrowFragPressed);
+	}
+	if (Cfg->IA_ThrowSmoke)
+	{
+		EIC->BindAction(Cfg->IA_ThrowSmoke, ETriggerEvent::Started, this, &APaintForgeCharacter::OnThrowSmokePressed);
+	}
 
 	// pkg-building owns every IMC_Build action (§3.3 / §3.5).
 	if (BuildComponent != nullptr)
@@ -654,6 +666,30 @@ void APaintForgeCharacter::OnInteractPressed()
 	if (Best)
 	{
 		Best->LocalRequestInteract();
+	}
+}
+
+void APaintForgeCharacter::OnFireSelectPressed()
+{
+	if (WeaponComponent != nullptr)
+	{
+		WeaponComponent->CycleFireMode();
+	}
+}
+
+void APaintForgeCharacter::OnThrowFragPressed()
+{
+	if (WeaponComponent != nullptr)
+	{
+		WeaponComponent->StartThrow(EPFGrenadeType::Frag);
+	}
+}
+
+void APaintForgeCharacter::OnThrowSmokePressed()
+{
+	if (WeaponComponent != nullptr)
+	{
+		WeaponComponent->StartThrow(EPFGrenadeType::Smoke);
 	}
 }
 
