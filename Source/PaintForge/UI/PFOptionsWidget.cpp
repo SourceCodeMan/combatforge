@@ -284,32 +284,75 @@ void UPFOptionsWidget::BuildAudioPage(UWidget* ParentBox)
 {
 	UVerticalBox* Box = CastChecked<UVerticalBox>(ParentBox);
 
-	auto MakeVolRow = [this, Box](const FString& Name, TObjectPtr<USlider>& OutSlider,
-		TObjectPtr<UTextBlock>& OutVal, void (UPFOptionsWidget::*Handler)(float))
+	// NOTE: AddDynamic is a macro that stringifies the member path — it MUST be a
+	// literal &UClass::UFunction, never a member-function-pointer variable (that
+	// asserts: "'Handler' does not look like a member function").
+
+	// Master
 	{
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
-		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, Name, 15, false));
-		OutSlider = WidgetTree->ConstructWidget<USlider>();
-		OutSlider->SetMinValue(0.f);
-		OutSlider->SetMaxValue(1.f);
-		OutSlider->SetStepSize(0.05f);
-		OutSlider->OnValueChanged.AddDynamic(this, Handler);
-		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(OutSlider))
+		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Master volume"), 15, false));
+		MasterVolSlider = WidgetTree->ConstructWidget<USlider>();
+		MasterVolSlider->SetMinValue(0.f);
+		MasterVolSlider->SetMaxValue(1.f);
+		MasterVolSlider->SetStepSize(0.05f);
+		MasterVolSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnMasterVolChanged);
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(MasterVolSlider))
 		{
 			H->SetPadding(FMargin(16.f, 0.f));
 			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		}
-		OutVal = MakeLabel(WidgetTree, TEXT("100%"), 14, true);
-		Row->AddChildToHorizontalBox(OutVal);
+		MasterVolValueText = MakeLabel(WidgetTree, TEXT("100%"), 14, true);
+		Row->AddChildToHorizontalBox(MasterVolValueText);
 		if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Row))
 		{
 			V->SetPadding(FMargin(0.f, 10.f));
 		}
-	};
+	}
 
-	MakeVolRow(TEXT("Master volume"), MasterVolSlider, MasterVolValueText, &UPFOptionsWidget::OnMasterVolChanged);
-	MakeVolRow(TEXT("SFX volume"), SfxVolSlider, SfxVolValueText, &UPFOptionsWidget::OnSfxVolChanged);
-	MakeVolRow(TEXT("Ambient bed"), AmbientVolSlider, AmbientVolValueText, &UPFOptionsWidget::OnAmbientVolChanged);
+	// SFX
+	{
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("SFX volume"), 15, false));
+		SfxVolSlider = WidgetTree->ConstructWidget<USlider>();
+		SfxVolSlider->SetMinValue(0.f);
+		SfxVolSlider->SetMaxValue(1.f);
+		SfxVolSlider->SetStepSize(0.05f);
+		SfxVolSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnSfxVolChanged);
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(SfxVolSlider))
+		{
+			H->SetPadding(FMargin(16.f, 0.f));
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+		SfxVolValueText = MakeLabel(WidgetTree, TEXT("100%"), 14, true);
+		Row->AddChildToHorizontalBox(SfxVolValueText);
+		if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(0.f, 10.f));
+		}
+	}
+
+	// Ambient bed
+	{
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Ambient bed"), 15, false));
+		AmbientVolSlider = WidgetTree->ConstructWidget<USlider>();
+		AmbientVolSlider->SetMinValue(0.f);
+		AmbientVolSlider->SetMaxValue(1.f);
+		AmbientVolSlider->SetStepSize(0.05f);
+		AmbientVolSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnAmbientVolChanged);
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(AmbientVolSlider))
+		{
+			H->SetPadding(FMargin(16.f, 0.f));
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+		AmbientVolValueText = MakeLabel(WidgetTree, TEXT("100%"), 14, true);
+		Row->AddChildToHorizontalBox(AmbientVolValueText);
+		if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(0.f, 10.f));
+		}
+	}
 
 	UTextBlock* Note = MakeLabel(WidgetTree,
 		TEXT("SFX = combat/UI one-shots. Ambient = soft arena wind bed."), 12, false);
