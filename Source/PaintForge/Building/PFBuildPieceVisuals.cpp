@@ -348,6 +348,23 @@ void EnsureLoaded()
 	GBoxes.Paths[2] = TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Box_Cardboard_Worn_02/SM_Ind_War_Storage_Box_Cardboard_Worn_02.SM_Ind_War_Storage_Box_Cardboard_Worn_02");
 	FitSlot(GBoxes, GCube);
 
+	// These globals are plain file-static structs — invisible to the garbage collector. Without rooting, a GC
+	// pass mid-session frees the loaded textures/meshes and the raw pointers dangle, so the next ghost update
+	// hands a freed UTexture to SetTextureParameterValue and crashes in CoreUObject. Root them for the session.
+	auto Keep = [](UObject* Obj)
+	{
+		if (Obj != nullptr && !Obj->IsRooted())
+		{
+			Obj->AddToRoot();
+		}
+	};
+	Keep(GCube); Keep(GCylinder); Keep(GCone);
+	Keep(GBarrel.Mesh); Keep(GCrate.Mesh); Keep(GBoxes.Mesh);
+	for (FSurfaceProfile* P : { &GSurfWall, &GSurfFloor, &GSurfRamp, &GSurfRoof, &GSurfFallback })
+	{
+		Keep(P->BaseColor); Keep(P->Normal); Keep(P->ORD);
+	}
+
 	UE_LOG(PaintForgeLog, Log,
 		TEXT("BuildPieceVisuals: props Barrel=%s Crate=%s Boxes=%s (wh=%d/%d/%d) | surfaces Wall=%s Floor=%s Ramp=%s Roof=%s (tex=%d/%d/%d/%d)"),
 		GBarrel.Mesh ? *GBarrel.Mesh->GetName() : TEXT("null"),

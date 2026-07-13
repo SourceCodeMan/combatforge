@@ -25,7 +25,10 @@
 #include "Components/WidgetSwitcher.h"
 #include "Core/PFUserPrefs.h"
 #include "Player/PaintForgeCharacter.h"
+#include "Player/PFCharacterPreviewActor.h"
 #include "Engine/Texture2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Engine/World.h"
 #include "ImageUtils.h"
 #include "Misc/Paths.h"
 #include "GameFramework/PlayerController.h"
@@ -387,6 +390,20 @@ void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 	if (TabHowTo)     { TabHowTo->SetBackgroundColor(ActiveMenuTab == 1 ? Hot : Cold); }
 	if (TabLoadout)   { TabLoadout->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
 	if (TabCharacter) { TabCharacter->SetBackgroundColor(ActiveMenuTab == 3 ? Hot : Cold); }
+
+	// Only run the render-target capture while the CHARACTER tab is visible.
+	if (ActiveMenuTab == 3)
+	{
+		EnsureCharPreview();
+		if (CharPreviewActor != nullptr)
+		{
+			CharPreviewActor->SetPreviewActive(true);
+		}
+	}
+	else if (CharPreviewActor != nullptr)
+	{
+		CharPreviewActor->SetPreviewActive(false);
+	}
 }
 
 void UPFLoadingMenuWidget::OnTabSetup() { SelectMenuTab(0); }
@@ -541,6 +558,28 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 	CharConfig = PFChar::LoadConfig();
 	CharSlotValueTexts.Reset();
 
+	// Left: live rotating 3D preview (render target bound in EnsureCharPreview). Right: per-slot steppers.
+	UHorizontalBox* Body = WidgetTree->ConstructWidget<UHorizontalBox>();
+
+	CharPreviewImage = WidgetTree->ConstructWidget<UImage>();
+	CharPreviewImage->SetColorAndOpacity(FLinearColor::White);
+	USizeBox* PreviewSizer = WidgetTree->ConstructWidget<USizeBox>();
+	PreviewSizer->SetWidthOverride(300.f);
+	PreviewSizer->SetHeightOverride(400.f);
+	PreviewSizer->SetContent(CharPreviewImage);
+	if (UHorizontalBoxSlot* H = Body->AddChildToHorizontalBox(PreviewSizer))
+	{
+		H->SetPadding(FMargin(8.f, 0.f, 18.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+
+	UVerticalBox* Rows = WidgetTree->ConstructWidget<UVerticalBox>();
+	if (UHorizontalBoxSlot* H = Body->AddChildToHorizontalBox(Rows))
+	{
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+
 	for (int32 s = 0; s < PFChar::SlotCount(); ++s)
 	{
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -587,11 +626,17 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		Next->SetContent(NextLab);
 		Row->AddChildToHorizontalBox(Next);
 
-		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
+		if (UVerticalBoxSlot* V = Rows->AddChildToVerticalBox(Row))
 		{
 			V->SetPadding(FMargin(24.f, 3.f));
 			V->SetHorizontalAlignment(HAlign_Fill);
 		}
+	}
+
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Body))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 6.f));
 	}
 
 	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
@@ -628,6 +673,38 @@ void UPFLoadingMenuWidget::RefreshCharacterLabels()
 	}
 }
 
+void UPFLoadingMenuWidget::EnsureCharPreview()
+{
+	if (CharPreviewActor != nullptr)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	// Spawn the studio far from the arena so its lights never leak into the level.
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	CharPreviewActor = World->SpawnActor<APFCharacterPreviewActor>(
+		APFCharacterPreviewActor::StaticClass(),
+		FVector(50000.f, 50000.f, 5000.f), FRotator::ZeroRotator, Params);
+	if (CharPreviewActor == nullptr)
+	{
+		return;
+	}
+	CharPreviewActor->ApplyConfig(CharConfig);
+	if (CharPreviewImage != nullptr && CharPreviewActor->GetRenderTarget() != nullptr)
+	{
+		FSlateBrush Brush;
+		Brush.SetResourceObject(CharPreviewActor->GetRenderTarget());
+		Brush.ImageSize = FVector2D(300.f, 400.f);
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		CharPreviewImage->SetBrush(Brush);
+	}
+}
+
 void UPFLoadingMenuWidget::NotifyCharSlotStep(int32 SlotIdx, int32 Dir)
 {
 	if (SlotIdx < 0 || SlotIdx >= PFChar::SlotCount())
@@ -653,6 +730,11 @@ void UPFLoadingMenuWidget::NotifyCharSlotStep(int32 SlotIdx, int32 Dir)
 	if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetOwningPlayerPawn()))
 	{
 		Char->ReapplyCharacterConfig();
+	}
+	// Live-update the tab's 3D preview to match.
+	if (CharPreviewActor != nullptr)
+	{
+		CharPreviewActor->ApplyConfig(CharConfig);
 	}
 	RefreshCharacterLabels();
 }
@@ -1006,6 +1088,17 @@ void UPFLoadingMenuWidget::NativeConstruct()
 	}
 	SetStatus(TEXT("Preparing… · first time? try QUICK START"));
 	UE_LOG(PaintForgeLog, Log, TEXT("LoadingMenu: boot menu up — warmup starting"));
+}
+
+void UPFLoadingMenuWidget::NativeDestruct()
+{
+	// Tear down the off-screen preview studio with the menu.
+	if (CharPreviewActor != nullptr)
+	{
+		CharPreviewActor->Destroy();
+		CharPreviewActor = nullptr;
+	}
+	Super::NativeDestruct();
 }
 
 void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)

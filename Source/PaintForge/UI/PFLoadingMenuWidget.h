@@ -19,6 +19,7 @@ class UTextBlock;
 class UVerticalBox;
 class UWidgetSwitcher;
 class UPFLoadingMenuWidget;
+class APFCharacterPreviewActor;
 
 /** Row button for one community map slot (0..9 on the current page). */
 UCLASS()
@@ -81,6 +82,7 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
@@ -90,6 +92,8 @@ private:
 	void RefreshLoadoutLabels();
 	void BuildCharacterPage(UVerticalBox* Col);
 	void RefreshCharacterLabels();
+	/** Lazily spawn the off-screen preview studio and bind its render target to the tab image. */
+	void EnsureCharPreview();
 	static const TCHAR* MarkerPresetName(int32 Idx);
 	static const TCHAR* CrosshairStyleName(int32 Idx);
 	void BuildMapPicker(UVerticalBox* Parent);
@@ -152,6 +156,8 @@ private:
 
 	// Character customization tab (per-slot part selection; saved to config, applied on spawn).
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> CharSlotValueTexts;
+	UPROPERTY() TObjectPtr<UImage> CharPreviewImage;                       // shows the live 3D render target
+	UPROPERTY() TObjectPtr<APFCharacterPreviewActor> CharPreviewActor;     // off-screen studio (lazy-spawned)
 	FPFCharacterConfig CharConfig;
 
 	// Loadout tab (local prefs: marker fire-rate preset + crosshair style).
