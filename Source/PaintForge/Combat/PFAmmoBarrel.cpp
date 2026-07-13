@@ -8,6 +8,7 @@
 #include "Core/PaintForgeTypes.h"
 #include "Player/PaintForgeCharacter.h"
 
+#include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -31,14 +32,22 @@ APFAmmoBarrel::APFAmmoBarrel()
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(Root);
-	// Solid to BBs (splat) and to pawns (light cover). QueryOnly — no physics sim. The projectile sweeps on
-	// PF_ECC_Paintball, so the mesh must Block that channel for a hit/splat to register.
-	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	Mesh->SetCollisionObjectType(ECC_WorldStatic);
-	Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
-	Mesh->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
-	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);   // visual only — CollisionBody does the blocking
 	Mesh->SetCastShadow(true);
+
+	// Dedicated blocking primitive: the soft-loaded Megascans barrel mesh has no reliable simple collision, so
+	// BBs pass straight through it. This box (a ~76x76x140 barrel) is what BBs splat on and pawns take cover
+	// behind — guaranteed geometry regardless of the mesh. QueryOnly (no physics), blocks the BB sweep channel.
+	CollisionBody = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionBody"));
+	CollisionBody->SetupAttachment(Root);
+	CollisionBody->SetBoxExtent(FVector(38.f, 38.f, 70.f));
+	CollisionBody->SetRelativeLocation(FVector(0.f, 0.f, 70.f));   // grounded barrel spans Z 0..140
+	CollisionBody->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CollisionBody->SetCollisionObjectType(ECC_WorldStatic);
+	CollisionBody->SetCollisionResponseToAllChannels(ECR_Ignore);
+	CollisionBody->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
+	CollisionBody->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	CollisionBody->SetCanEverAffectNavigation(false);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (CylFinder.Succeeded())
@@ -106,7 +115,8 @@ void APFAmmoBarrel::OrientLabels()
 	// side is reversed (acceptable per design). UTextRenderComponent's readable face is -X, so we point +X
 	// AWAY from the reader. If it reads backwards in-game, swap the two yaw values (one 180° flip).
 	constexpr float HalfFieldX = 3200.f;   // FieldX / 2 (arena is 6400 uu wide)
-	const float Yaw = (GetActorLocation().X < HalfFieldX) ? 0.f : 180.f;
+	// TextRender's readable face pointed the wrong way in playtest — flipped so it reads toward the near spawn.
+	const float Yaw = (GetActorLocation().X < HalfFieldX) ? 180.f : 0.f;
 	const FRotator Face(0.f, Yaw, 0.f);
 	if (SignText)
 	{

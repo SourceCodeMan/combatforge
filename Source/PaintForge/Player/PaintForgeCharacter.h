@@ -240,6 +240,12 @@ private:
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
+
+	// Procedural reload dip — FP viewmodel lowers + tilts while reloading (no skeletal reload anim).
+	bool  bReloadDipActive = false;
+	bool  bWasReloading = false;
+	float ReloadDipElapsed = 0.f;
+	float ReloadDipDuration = 1.f;
 	FVector RecoilOffset = FVector::ZeroVector;       // decays to zero each tick (owner)
 	float   RecoilPitch = 0.f;                        // deg, decays to zero
 	float   WeaponRaiseHoldSec = 0.f;                 // countdown while briefly raised after shot

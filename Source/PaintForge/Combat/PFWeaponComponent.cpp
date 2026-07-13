@@ -754,6 +754,22 @@ bool UPFWeaponComponent::ServerRefillFromPickup()
 	return true;
 }
 
+void UPFWeaponComponent::ServerResetLoadout()
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+	HopperCount = HopperCapacity;
+	ReserveAmmo = MaxReserveAmmo;
+	FragCount   = MaxFrag;
+	SmokeCount  = MaxSmoke;
+	bReloading  = false;
+	OnHopperChangedEvent.Broadcast(HopperCount);
+	OnGrenadeCountChangedEvent.Broadcast(FragCount, SmokeCount);
+	OnReloadStateChangedEvent.Broadcast(false);
+}
+
 // ---------------------------------------------------------------- fire selector + grenades
 
 void UPFWeaponComponent::CycleFireMode()

@@ -9,6 +9,7 @@
 #include "Player/PaintForgeCharacter.h"
 #include "AI/PFBotController.h"
 #include "Combat/PFHealthComponent.h"
+#include "Combat/PFWeaponComponent.h"
 #include "Combat/PFTargetDummy.h"
 #include "Combat/PFAmmoBarrel.h"
 #include "Building/PFArenaShell.h"
@@ -1182,6 +1183,10 @@ void APaintForgeGameMode::RespawnCombatant(APaintForgePlayerState* PS, uint8 Rou
 		{
 			Health->ResetForRound(RoundHP);   // restores HP, collision, appearance
 		}
+		if (UPFWeaponComponent* Weapon = Pawn->GetWeapon())
+		{
+			Weapon->ServerResetLoadout();     // corpse-reused pawn: refill mag + reserve + grenades
+		}
 		TeleportPawnTo(Pawn, GetSpawnTransform(PS));
 	}
 	else if (AController* Ctrl = PS->GetOwningController())
@@ -1192,6 +1197,10 @@ void APaintForgeGameMode::RespawnCombatant(APaintForgePlayerState* PS, uint8 Rou
 			if (UPFHealthComponent* Health = NewPawn->GetHealth())
 			{
 				Health->ResetForRound(RoundHP);
+			}
+			if (UPFWeaponComponent* Weapon = NewPawn->GetWeapon())
+			{
+				Weapon->ServerResetLoadout();
 			}
 		}
 	}

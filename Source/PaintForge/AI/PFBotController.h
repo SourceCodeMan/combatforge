@@ -64,8 +64,8 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimJitterInterval = 0.6f;// how often the random aim error is re-rolled
 
 	// Reactive navigation (open arena, sparse player-built cover): whisker length + unstick threshold.
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeUU = 320.f;    // forward look-ahead for cover avoidance
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeRadius = 30.f; // sweep radius (~pawn width) for the avoidance probe
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeUU = 420.f;    // forward look-ahead (earlier turn = fewer wall bumps)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeRadius = 46.f; // >= pawn capsule radius so "clear" paths don't scrape walls
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float StuckMoveThresh = 45.f;  // min 2D move per 0.5s before we count as stuck
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
 

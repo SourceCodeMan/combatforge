@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "PFAmmoBarrel.generated.h"
 
+class UBoxComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
@@ -52,6 +53,8 @@ protected:
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Root;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Mesh;
+	/** Guaranteed blocking geometry (the soft-loaded barrel mesh has no reliable simple collision). */
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> CollisionBody;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USphereComponent> InteractSphere;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UTextRenderComponent> PromptText;
 	/** Always-visible floating beacon ("AMMO") so the station is obvious from a distance. */

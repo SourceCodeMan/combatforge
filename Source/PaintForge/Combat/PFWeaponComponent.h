@@ -89,6 +89,10 @@ public:
 	 */
 	bool ServerRefillFromPickup();
 
+	/** Authority: full loadout reset (mag + reserve + grenades) — called on (re)spawn so a corpse-reused pawn
+	 *  starts fresh, since the weapon's BeginPlay does not re-run when the pawn is reused. */
+	void ServerResetLoadout();
+
 	// ---- UI subscription points ----
 	FPFOnHitConfirmed        OnHitConfirmedEvent;
 	FPFOnHopperChanged       OnHopperChangedEvent;

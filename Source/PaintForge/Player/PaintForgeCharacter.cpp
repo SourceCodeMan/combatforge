@@ -411,11 +411,39 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 		{
 			RecoilOffset = FMath::VInterpTo(RecoilOffset, FVector::ZeroVector, DeltaSeconds, RecoilRecoverSpeed);
 			RecoilPitch = FMath::FInterpTo(RecoilPitch, 0.f, DeltaSeconds, RecoilRecoverSpeed);
+
+			// Procedural reload animation: dip the marker down + tilt the muzzle for the reload's duration so a
+			// reload reads visually (there is no skeletal reload anim on the FP mesh). Start on the reload edge.
+			const bool bNowReloading = (WeaponComponent != nullptr) && WeaponComponent->bReloading;
+			if (bNowReloading && !bWasReloading)
+			{
+				bReloadDipActive = true;
+				ReloadDipElapsed = 0.f;
+				ReloadDipDuration = (WeaponComponent != nullptr) ? FMath::Max(0.2f, WeaponComponent->ReloadTime) : 1.f;
+			}
+			bWasReloading = bNowReloading;
+
+			FVector ReloadLoc = FVector::ZeroVector;
+			float ReloadPitch = 0.f;
+			if (bReloadDipActive)
+			{
+				ReloadDipElapsed += DeltaSeconds;
+				const float A = FMath::Clamp(ReloadDipElapsed / FMath::Max(ReloadDipDuration, 0.01f), 0.f, 1.f);
+				const float Dip = FMath::Sin(A * PI);   // 0 -> 1 -> 0 across the reload
+				ReloadLoc = FVector(-4.f * Dip, 0.f, -10.f * Dip);   // pull in + down
+				ReloadPitch = 20.f * Dip;                            // muzzle tilts down
+				if (A >= 1.f)
+				{
+					bReloadDipActive = false;
+				}
+			}
+
 			const float Ads = FMath::Clamp(ADSAlpha, 0.f, 1.f);
 			const FVector Home = FMath::Lerp(ViewModelHomeLoc, ViewModelAdsLoc, Ads);
 			const FRotator HomeRot = FMath::Lerp(FRotator::ZeroRotator, ViewModelAdsRot, Ads);
-			ViewModelRoot->SetRelativeLocation(Home + RecoilOffset);
-			ViewModelRoot->SetRelativeRotation(FRotator(RecoilPitch + HomeRot.Pitch, HomeRot.Yaw, HomeRot.Roll));
+			ViewModelRoot->SetRelativeLocation(Home + RecoilOffset + ReloadLoc);
+			ViewModelRoot->SetRelativeRotation(
+				FRotator(RecoilPitch + HomeRot.Pitch + ReloadPitch, HomeRot.Yaw, HomeRot.Roll));
 		}
 
 		// Footsteps — local only, grounded movement.
