@@ -5,6 +5,7 @@
 #include "PaintForge.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Core/PaintForgeGameState.h"
+#include "Core/PaintForgeTypes.h"
 #include "Player/PaintForgeCharacter.h"
 
 #include "Components/SphereComponent.h"
@@ -30,7 +31,13 @@ APFAmmoBarrel::APFAmmoBarrel()
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(Root);
-	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Solid to BBs (splat) and to pawns (light cover). QueryOnly — no physics sim. The projectile sweeps on
+	// PF_ECC_Paintball, so the mesh must Block that channel for a hit/splat to register.
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Mesh->SetCollisionObjectType(ECC_WorldStatic);
+	Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Mesh->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
+	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	Mesh->SetCastShadow(true);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
@@ -55,9 +62,21 @@ APFAmmoBarrel::APFAmmoBarrel()
 	PromptText->SetVerticalAlignment(EVRTA_TextCenter);
 	PromptText->SetWorldSize(28.f);
 	PromptText->SetTextRenderColor(FColor(255, 220, 80));
-	PromptText->SetText(FText::FromString(TEXT("AMMO  [E]")));
+	PromptText->SetText(FText::FromString(TEXT("[E]  REFILL")));
 	PromptText->SetVisibility(false);
 	PromptText->SetHiddenInGame(true);
+
+	// Always-on floating beacon so the station is obvious from across the arena (not just on overlap).
+	SignText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Sign"));
+	SignText->SetupAttachment(Root);
+	SignText->SetRelativeLocation(FVector(0.f, 0.f, 235.f));
+	SignText->SetHorizontalAlignment(EHTA_Center);
+	SignText->SetVerticalAlignment(EVRTA_TextCenter);
+	SignText->SetWorldSize(52.f);
+	SignText->SetTextRenderColor(FColor(255, 210, 40));
+	SignText->SetText(FText::FromString(TEXT("AMMO")));
+	SignText->SetVisibility(true);
+	SignText->SetHiddenInGame(false);
 }
 
 void APFAmmoBarrel::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -82,8 +101,10 @@ void APFAmmoBarrel::BeginPlay()
 void APFAmmoBarrel::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	// Billboard the prompt toward the local view.
-	if (PromptText && PromptText->IsVisible())
+	// Billboard the prompt + always-on sign toward the local view.
+	const bool bPrompt = PromptText && PromptText->IsVisible();
+	const bool bSign = SignText && SignText->IsVisible();
+	if (bPrompt || bSign)
 	{
 		if (const UWorld* World = GetWorld())
 		{
@@ -92,10 +113,21 @@ void APFAmmoBarrel::Tick(float DeltaSeconds)
 				FVector CamLoc;
 				FRotator CamRot;
 				PC->GetPlayerViewPoint(CamLoc, CamRot);
-				const FVector ToCam = (CamLoc - PromptText->GetComponentLocation()).GetSafeNormal2D();
-				if (!ToCam.IsNearlyZero())
+				if (bPrompt)
 				{
-					PromptText->SetWorldRotation(ToCam.Rotation() + FRotator(0.f, 180.f, 0.f));
+					const FVector ToCam = (CamLoc - PromptText->GetComponentLocation()).GetSafeNormal2D();
+					if (!ToCam.IsNearlyZero())
+					{
+						PromptText->SetWorldRotation(ToCam.Rotation() + FRotator(0.f, 180.f, 0.f));
+					}
+				}
+				if (bSign)
+				{
+					const FVector ToCam = (CamLoc - SignText->GetComponentLocation()).GetSafeNormal2D();
+					if (!ToCam.IsNearlyZero())
+					{
+						SignText->SetWorldRotation(ToCam.Rotation() + FRotator(0.f, 180.f, 0.f));
+					}
 				}
 			}
 		}
@@ -243,8 +275,8 @@ void APFAmmoBarrel::ServerInteract_Implementation(APawn* Interactor)
 		return; // already full
 	}
 
-	bAvailable = false;
-	ApplyAvailableVisuals();
-	ForceNetUpdate();
+	// Permanent resupply station: do NOT consume the barrel. It stays available so any player can top up as
+	// often as they need for the whole combat phase. (ServerRefillFromPickup already no-ops when full, so
+	// spamming [E] against a full mag does nothing.)
 	UE_LOG(PaintForgeLog, Log, TEXT("AmmoBarrel: refilled %s"), *Char->GetName());
 }

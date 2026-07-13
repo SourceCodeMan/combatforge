@@ -1903,7 +1903,9 @@ void APaintForgeGameMode::SpawnAmmoBarrels()
 		const FTransform T = ArenaShell->GetRandomFieldSpawnTransform(
 			0xBEEF + Attempt * 17 + Spots.Num() * 91
 			+ static_cast<int32>(World->GetTimeSeconds() * 10.f));
-		const FVector Loc = T.GetLocation();
+		FVector Loc = T.GetLocation();
+		Loc.Z = 0.f;   // barrels sit on the Z=0 floor (mesh is grounded relative to the actor root); the
+		               // spawn transform's SpawnZ=100 is for pawns and would float the barrel.
 		bool bFar = true;
 		for (const FVector& Existing : Spots)
 		{
@@ -1923,10 +1925,10 @@ void APaintForgeGameMode::SpawnAmmoBarrels()
 	{
 		const float Fx = 6400.f, Fy = 4000.f;
 		const FVector Corners[4] = {
-			FVector(Fx * 0.25f, Fy * 0.25f, 100.f),
-			FVector(Fx * 0.75f, Fy * 0.25f, 100.f),
-			FVector(Fx * 0.25f, Fy * 0.75f, 100.f),
-			FVector(Fx * 0.75f, Fy * 0.75f, 100.f),
+			FVector(Fx * 0.25f, Fy * 0.25f, 0.f),
+			FVector(Fx * 0.75f, Fy * 0.25f, 0.f),
+			FVector(Fx * 0.25f, Fy * 0.75f, 0.f),
+			FVector(Fx * 0.75f, Fy * 0.75f, 0.f),
 		};
 		Spots.Add(Corners[Spots.Num() % 4]);
 	}

@@ -197,8 +197,11 @@ APFArenaShell::APFArenaShell()
 	const float MidX = FieldX * 0.5f;   // 3200, center of the neutral strip (cells 7..8)
 	for (int32 PostIdx = 0; PostIdx <= PFGrid::CellsY; ++PostIdx)
 	{
+		// Z-scale tied to PerimeterH (like the walls) so the base stays on the floor. A hardcoded 12 was the
+		// old height-cap value; when the cap rose the posts kept their height but their center tracked
+		// PerimeterH, floating them 300 uu off the ground.
 		MidlinePosts.Add(MakeShapePart(FString::Printf(TEXT("MidlinePost%d"), PostIdx),
-			FVector(MidX, PostIdx * PFGrid::CellUU, PerimeterH * 0.5f), FVector(0.4f, 0.4f, 12.f),
+			FVector(MidX, PostIdx * PFGrid::CellUU, PerimeterH * 0.5f), FVector(0.4f, 0.4f, WallScaleZ),
 			EPFShellCollision::Solid, MetalMaterial));
 	}
 	MidlineStripe = MakeShapePart(TEXT("MidlineStripe"),

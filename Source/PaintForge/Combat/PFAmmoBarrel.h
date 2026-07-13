@@ -12,7 +12,8 @@ class UTextRenderComponent;
 
 /**
  * Interactable ammo refill (Combat only). Soft-loads a warehouse barrel mesh when present.
- * Server grants full mag + full reserve; single-use until the next combat spawn set.
+ * Server grants full mag + full reserve. Permanent station for the whole combat phase — refill as often as
+ * you like. A floating "AMMO" sign is always visible so it reads as a resupply point from across the arena.
  */
 UCLASS()
 class PAINTFORGE_API APFAmmoBarrel : public AActor
@@ -52,6 +53,8 @@ protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Mesh;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USphereComponent> InteractSphere;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UTextRenderComponent> PromptText;
+	/** Always-visible floating beacon ("AMMO") so the station is obvious from a distance. */
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UTextRenderComponent> SignText;
 
 	UPROPERTY(ReplicatedUsing=OnRep_Available) bool bAvailable = true;
 

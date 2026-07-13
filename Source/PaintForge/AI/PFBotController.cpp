@@ -95,6 +95,18 @@ void APFBotController::Tick(float DeltaSeconds)
 		return;
 	}
 
+	// Bots can't walk to the [E] ammo barrels, so once their 150-ball supply ran dry they'd roam the rest of
+	// the match without firing (BeginReload no-ops at ReserveAmmo==0). Give AI effectively infinite ammo: top
+	// the weapon back to full whenever total ammo dips to a mag or less. Authority-only (bot Tick = host) and
+	// ServerRefillFromPickup no-ops when already full, so this is cheap.
+	if (UPFWeaponComponent* Weapon = Bot->GetWeapon())
+	{
+		if (Weapon->GetTotalAmmo() <= static_cast<int32>(Weapon->HopperCapacity))
+		{
+			Weapon->ServerRefillFromPickup();
+		}
+	}
+
 	// Sticky targeting: keep the current enemy while it's still alive, in range and visible; only re-scan
 	// (throttled) when we have no engageable target. This stops the nearest-enemy rank from thrashing
 	// between two near-equidistant foes — which otherwise re-armed the reaction gap every 0.4s refresh and
