@@ -27,8 +27,8 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	// SKM_Body carries the skeleton + single-node idle anim; parts leader-pose to it (shared skeleton).
 	BaseMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PreviewBody"));
 	BaseMesh->SetupAttachment(Turntable);
-	// SKM_Body's native forward is +X; the capture sits on the +X side, so no yaw = the character faces it head-on.
-	BaseMesh->SetRelativeRotation(FRotator(0.f, 0.f, 0.f));
+	// Same -90 yaw the pawn uses to face its forward; the capture sits on that +X side, so this faces it head-on.
+	BaseMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
 	BaseMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyFinder(
@@ -82,12 +82,12 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	HideFlag(TEXT("Fog"));
 	HideFlag(TEXT("VolumetricFog"));
 	HideFlag(TEXT("Cloud"));
-	// Pin exposure (min == max) so it doesn't pump as the character spins. The level sun is bright, so we expose
-	// DOWN hard to avoid the blow-out — HIGHER value = darker image. Tune this one number if it's off.
+	// Pin exposure (min == max) so it's stable. The level sun is bright, so we expose DOWN hard to avoid the
+	// blow-out / washed-out look — HIGHER value = darker image. Tune this one number if it's off.
 	Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
-	Capture->PostProcessSettings.AutoExposureMinBrightness = 6.f;
+	Capture->PostProcessSettings.AutoExposureMinBrightness = 10.f;
 	Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
-	Capture->PostProcessSettings.AutoExposureMaxBrightness = 6.f;
+	Capture->PostProcessSettings.AutoExposureMaxBrightness = 10.f;
 
 	auto MakeLight = [this](const FString& LightName, const FVector& Loc, float Lumens) -> UPointLightComponent*
 	{
@@ -103,10 +103,10 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 		}
 		return L;
 	};
-	// Gentle fill only — the level's directional sun is the key light. Keep these low so they don't compound it.
+	// Gentle fill only — the level's directional sun is the key light. Keep these low so they don't wash it out.
 	KeyLight  = MakeLight(TEXT("KeyLight"),  FVector(260.f, -180.f, 240.f), 8000.f);
-	FillLight = MakeLight(TEXT("FillLight"), FVector(240.f,  200.f, 120.f), 3000.f);
-	RimLight  = MakeLight(TEXT("RimLight"),  FVector(-160.f,  40.f, 260.f), 5000.f);
+	FillLight = MakeLight(TEXT("FillLight"), FVector(240.f,  200.f, 120.f), 2000.f);
+	RimLight  = MakeLight(TEXT("RimLight"),  FVector(-160.f,  40.f, 260.f), 4000.f);
 }
 
 void APFCharacterPreviewActor::BeginPlay()
@@ -195,6 +195,15 @@ void APFCharacterPreviewActor::SetPreviewActive(bool bActive)
 	bPreviewActive = bActive;
 }
 
+void APFCharacterPreviewActor::AddYaw(float DeltaDeg)
+{
+	SpinYaw += DeltaDeg;
+	if (Turntable != nullptr)
+	{
+		Turntable->SetRelativeRotation(FRotator(0.f, SpinYaw, 0.f));
+	}
+}
+
 void APFCharacterPreviewActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -202,15 +211,8 @@ void APFCharacterPreviewActor::Tick(float DeltaSeconds)
 	{
 		return;
 	}
-	SpinYaw += DeltaSeconds * 28.f;   // gentle turntable, ~28 deg/sec
-	if (SpinYaw >= 360.f)
-	{
-		SpinYaw -= 360.f;
-	}
-	if (Turntable != nullptr)
-	{
-		Turntable->SetRelativeRotation(FRotator(0.f, SpinYaw, 0.f));
-	}
+	// No auto-rotation — the character stands facing the camera (subtle idle only). Rotation is user-driven via
+	// AddYaw (click-drag on the tab). We still capture every frame so the idle + any drag stays live.
 	if (Capture != nullptr)
 	{
 		Capture->CaptureScene();

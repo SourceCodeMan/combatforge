@@ -84,6 +84,9 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
 	void BuildTree();
@@ -159,6 +162,8 @@ private:
 	UPROPERTY() TObjectPtr<UImage> CharPreviewImage;                       // shows the live 3D render target
 	UPROPERTY() TObjectPtr<APFCharacterPreviewActor> CharPreviewActor;     // off-screen studio (lazy-spawned)
 	FPFCharacterConfig CharConfig;
+	bool bPreviewDragging = false;   // left-drag on the preview rotates the character
+	float PreviewDragLastX = 0.f;
 
 	// Loadout tab (local prefs: marker fire-rate preset + crosshair style).
 	UPROPERTY() TObjectPtr<UButton> LoadoutMarkerButton;

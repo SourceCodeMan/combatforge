@@ -26,6 +26,7 @@
 #include "Core/PFUserPrefs.h"
 #include "Player/PaintForgeCharacter.h"
 #include "Player/PFCharacterPreviewActor.h"
+#include "InputCoreTypes.h"
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
@@ -563,6 +564,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 
 	CharPreviewImage = WidgetTree->ConstructWidget<UImage>();
 	CharPreviewImage->SetColorAndOpacity(FLinearColor::White);
+	CharPreviewImage->SetVisibility(ESlateVisibility::Visible);   // hit-testable so drag reaches the menu handler
 	USizeBox* PreviewSizer = WidgetTree->ConstructWidget<USizeBox>();
 	PreviewSizer->SetWidthOverride(300.f);
 	PreviewSizer->SetHeightOverride(400.f);
@@ -1099,6 +1101,46 @@ void UPFLoadingMenuWidget::NativeDestruct()
 		CharPreviewActor = nullptr;
 	}
 	Super::NativeDestruct();
+}
+
+FReply UPFLoadingMenuWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	// Start a rotate-drag only if the press lands on the character preview.
+	if (ActiveMenuTab == 3 && CharPreviewActor != nullptr && CharPreviewImage != nullptr
+		&& InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		const FGeometry& ImgGeo = CharPreviewImage->GetCachedGeometry();
+		if (ImgGeo.IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+		{
+			bPreviewDragging = true;
+			PreviewDragLastX = InMouseEvent.GetScreenSpacePosition().X;
+			return FReply::Handled().CaptureMouse(TakeWidget());
+		}
+	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+FReply UPFLoadingMenuWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bPreviewDragging && CharPreviewActor != nullptr)
+	{
+		const float X = InMouseEvent.GetScreenSpacePosition().X;
+		const float Dx = X - PreviewDragLastX;
+		PreviewDragLastX = X;
+		CharPreviewActor->AddYaw(Dx * 0.5f);   // ~0.5 deg per pixel; flip the sign to reverse drag direction
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
+}
+
+FReply UPFLoadingMenuWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bPreviewDragging && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bPreviewDragging = false;
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
 void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)

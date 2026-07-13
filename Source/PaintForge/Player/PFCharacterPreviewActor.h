@@ -34,8 +34,11 @@ public:
 	/** Mount base + per-slot parts from a config (mirrors the pawn's ApplyCharacterConfig). */
 	void ApplyConfig(const FPFCharacterConfig& Config);
 
-	/** Enable/disable the turntable spin + per-frame capture (off when the tab isn't showing). */
+	/** Enable/disable per-frame capture (off when the tab isn't showing). */
 	void SetPreviewActive(bool bActive);
+
+	/** Rotate the turntable by a delta (degrees) — driven by click-drag on the tab. */
+	void AddYaw(float DeltaDeg);
 
 	/** The render target the UMG image samples (valid after BeginPlay). */
 	UTextureRenderTarget2D* GetRenderTarget() const { return RenderTarget; }
