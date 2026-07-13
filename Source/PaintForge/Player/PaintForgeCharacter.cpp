@@ -1160,6 +1160,18 @@ void APaintForgeCharacter::ApplyWeaponLoadout()
 	ViewModelAdsLoc = Def.AdsLoc;   // per-weapon aim pose (each weapon's sight sits differently)
 	ViewModelAdsRot = Def.AdsRot;
 
+	// Per-class fire behaviour + ballistics onto the weapon component (public EditDefaultsOnly — direct write OK;
+	// projectiles read MuzzleSpeedUU/ProjLifetime from here, so range flows automatically).
+	if (WeaponComponent != nullptr)
+	{
+		WeaponComponent->SpreadHip     = Def.SpreadHipDeg;
+		WeaponComponent->SpreadADS     = Def.SpreadADSDeg;
+		WeaponComponent->MuzzleSpeedUU = Def.MuzzleSpeedUU;
+		WeaponComponent->ProjLifetime  = Def.ProjLifetimeSec;
+		WeaponComponent->BurstCount    = Def.ClassBurstCount;
+		WeaponComponent->SetAllowedFireModes(Def.AllowedFireModes, Def.DefaultFireMode);
+	}
+
 	// Third-person weapon (seen by other players) — swap + re-seat on the hand.
 	WeaponMesh = WpnMesh;
 	AttachWeaponToHand();
@@ -1954,11 +1966,11 @@ void APaintForgeCharacter::SetupWeaponMaterials()
 	}
 }
 
-void APaintForgeCharacter::OnFireCosmetic()
+void APaintForgeCharacter::OnFireCosmetic(float RecoilScale)
 {
-	// Airsoft marker: viewmodel recoil only — no muzzle flash.
-	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f);
-	RecoilPitch += RecoilKickPitchDeg;
+	// Airsoft marker: viewmodel recoil only — no muzzle flash. Kick scaled by ADS + mag-ramp (see FireOneShot).
+	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f) * RecoilScale;
+	RecoilPitch += RecoilKickPitchDeg * RecoilScale;
 	// Keep TP gun raised through the shot cadence so muzzle/balls aren't hip-height.
 	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
 	if (bUsingArtBody)

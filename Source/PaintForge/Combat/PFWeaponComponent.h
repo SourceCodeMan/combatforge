@@ -42,6 +42,10 @@ public:
 	/** Fire selector: cycle Single -> Burst -> Auto -> Single. Client-local feel only (no replication). */
 	void CycleFireMode();
 	EPFFireMode GetFireMode() const { return CurrentFireMode; }
+	/** Restrict the fire selector to a weapon's allowed modes (bitmask 1<<EPFFireMode) + set its default. */
+	void SetAllowedFireModes(uint8 Mask, EPFFireMode Default);
+	void SetFireMode(EPFFireMode Mode);   // clamps to the allowed mask
+	bool IsFireModeAllowed(EPFFireMode Mode) const { return (AllowedFireModeMask & (1u << static_cast<uint8>(Mode))) != 0; }
 
 	/** Throw a grenade of the given type (owner-predicts -> ServerThrowGrenade validates + spawns). */
 	void StartThrow(EPFGrenadeType Type);
@@ -131,6 +135,12 @@ public:
 	/** Bloom retained while ADS (0 = none). Low value = ADS feels much more accurate. */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomADSMult = 0.12f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SprintOutTime = 0.18f;
+	// Recoil-kick feel (camera view-punch + viewmodel kick only; not the spread cone).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ADSRecoilMult    = 0.4f;   // kick x this when fully aimed
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 RecoilRampFreeShots = 5;   // first N shots of a mag stay low
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float RecoilRampLowMult = 0.5f;  // kick x during the free window
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float RecoilRampHighMult = 1.0f; // kick x at full ramp
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 RecoilRampShots   = 10;    // shots to lerp low->high after free
 
 protected:
 	virtual void BeginPlay() override;
@@ -176,7 +186,9 @@ private:
 	double SprintOutReadyTime = 0.0;
 	uint32 ShotIndexCounter = 0;        // owning-client monotonic (per weapon, per match)
 	EPFFireMode CurrentFireMode = EPFFireMode::Auto;   // client-local fire selector (not replicated)
+	uint8 AllowedFireModeMask = (1 << 0) | (1 << 1) | (1 << 2);   // which modes the selector may cycle (per weapon)
 	uint8  ShotsThisPull = 0;           // shots emitted since the current trigger press (Single/Burst latch)
+	uint8  ShotsThisMag = 0;            // shots since the mag was last filled (recoil ramp; client-local feel)
 
 	// Bloom state (updated on every observed shot: local fire / server fire / remote multicast)
 	float  BloomAccumDeg = 0.f;

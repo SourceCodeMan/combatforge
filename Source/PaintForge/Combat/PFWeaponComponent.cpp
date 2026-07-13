@@ -254,9 +254,29 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	FRandomStream Stream = MakeShotStream(PS->GetPlayerId(), ShotIndexCounter);
 	const FVector SpreadedDir = Stream.VRandCone(BaseDir, FMath::DegreesToRadians(HalfAngleDeg));
 
+	// Recoil kick multiplier: softer while aimed (ADSRecoilMult), and low for the first RecoilRampFreeShots of the
+	// mag then ramping up. Pure client-local FEEL (camera shake + viewmodel kick) — never touches the authoritative
+	// spread cone or the deterministic VRandCone stream, so no netcode risk.
+	const float ADSA = FMath::Clamp(Char->GetADSAlpha(), 0.f, 1.f);
+	const float ADSMult = FMath::Lerp(1.f, ADSRecoilMult, ADSA);
+	float MagMult;
+	if (ShotsThisMag < RecoilRampFreeShots)
+	{
+		MagMult = RecoilRampLowMult;
+	}
+	else
+	{
+		const float A = FMath::Clamp(
+			static_cast<float>(ShotsThisMag - RecoilRampFreeShots) / FMath::Max(1.f, static_cast<float>(RecoilRampShots)),
+			0.f, 1.f);
+		MagMult = FMath::Lerp(RecoilRampLowMult, RecoilRampHighMult, A);
+	}
+	const float RecoilMult = ADSMult * MagMult;
+	++ShotsThisMag;
+
 	// Raise TP gun + FP recoil BEFORE sampling muzzle so balls leave the aim-line barrel,
 	// not the hip-carry tip.
-	Char->OnFireCosmetic();
+	Char->OnFireCosmetic(RecoilMult);
 
 	if (!Char->HasAuthority())
 	{
@@ -282,7 +302,7 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	// Muzzle feel (04 §4): fire shake doubles as recoil (feel-only; bloom is the spray cost).
 	if (APlayerController* PC = Cast<APlayerController>(Char->GetController()))
 	{
-		PC->ClientStartCameraShake(UPFFireShake::StaticClass());
+		PC->ClientStartCameraShake(UPFFireShake::StaticClass(), RecoilMult);   // scale the view-punch (ADS + ramp)
 	}
 	if (UPFCombatAudio* Audio = Char->GetCombatAudio())
 	{
@@ -574,6 +594,7 @@ void UPFWeaponComponent::FinishReload()
 		HopperCount = static_cast<uint8>(HopperCount + Take);
 		ReserveAmmo -= Take;
 	}
+	ShotsThisMag = 0;   // fresh mag re-arms the low-recoil window
 	bReloading = false;
 	OnHopperChangedEvent.Broadcast(HopperCount);
 	OnReloadStateChangedEvent.Broadcast(false);
@@ -772,14 +793,36 @@ void UPFWeaponComponent::ServerResetLoadout()
 
 // ---------------------------------------------------------------- fire selector + grenades
 
+void UPFWeaponComponent::SetAllowedFireModes(uint8 Mask, EPFFireMode Default)
+{
+	AllowedFireModeMask = (Mask == 0) ? static_cast<uint8>(1 << 2) : Mask;   // never leave zero (would strand the selector)
+	SetFireMode(Default);
+}
+
+void UPFWeaponComponent::SetFireMode(EPFFireMode Mode)
+{
+	if (!IsFireModeAllowed(Mode))
+	{
+		for (uint8 m = 0; m < 3; ++m)   // fall back to the lowest allowed mode
+		{
+			if (AllowedFireModeMask & (1u << m)) { Mode = static_cast<EPFFireMode>(m); break; }
+		}
+	}
+	CurrentFireMode = Mode;
+	OnFireModeChangedEvent.Broadcast(CurrentFireMode);
+}
+
 void UPFWeaponComponent::CycleFireMode()
 {
-	switch (CurrentFireMode)
+	// Advance to the next ALLOWED mode in Single->Burst->Auto->(wrap) order, skipping ones this weapon can't use.
+	for (int32 i = 1; i <= 3; ++i)
 	{
-	case EPFFireMode::Auto:   CurrentFireMode = EPFFireMode::Single; break;
-	case EPFFireMode::Single: CurrentFireMode = EPFFireMode::Burst;  break;
-	case EPFFireMode::Burst:
-	default:                  CurrentFireMode = EPFFireMode::Auto;   break;
+		const uint8 Next = (static_cast<uint8>(CurrentFireMode) + i) % 3;
+		if (AllowedFireModeMask & (1u << Next))
+		{
+			CurrentFireMode = static_cast<EPFFireMode>(Next);
+			break;
+		}
 	}
 	OnFireModeChangedEvent.Broadcast(CurrentFireMode);
 	if (APaintForgeCharacter* Char = GetPFCharacter())

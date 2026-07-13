@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Core/PaintForgeTypes.h"   // EPFFireMode
 
 class UStaticMesh;
 class UMaterialInterface;
@@ -25,6 +26,15 @@ struct FPFWeaponDef
 	// so ADS alignment is per-weapon. Defaults to the verified SM_Rifle ADS; tune others with pf.WeaponADS.
 	FVector  AdsLoc  = FVector(15.f, -5.5f, -1.5f);
 	FRotator AdsRot  = FRotator(1.5f, 0.f, -1.5f);
+
+	// ---- Per-class fire behaviour + ballistics (defaults = Assault Rifle; SMG/pistol rows override) ----
+	uint8       AllowedFireModes = (1 << 0) | (1 << 1) | (1 << 2);   // bit (1<<EPFFireMode); rifle = all three
+	EPFFireMode DefaultFireMode  = EPFFireMode::Auto;
+	float       SpreadHipDeg     = 1.2f;      // tighter = more accurate
+	float       SpreadADSDeg     = 0.05f;     // near-laser aimed
+	float       MuzzleSpeedUU    = 12000.f;   // speed x lifetime ~= effective range
+	float       ProjLifetimeSec  = 2.2f;
+	uint8       ClassBurstCount  = 3;
 };
 
 /** A player's chosen weapon: category + index into that category. */

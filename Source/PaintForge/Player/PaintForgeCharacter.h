@@ -64,7 +64,7 @@ public:
 	FVector GetEyeWorldLocation() const;
 
 	// ---- Weapon-fire cosmetics (pkg-weapons calls these per shot) ----
-	void  OnFireCosmetic();        // owning client: viewmodel recoil kick only (airsoft — no flash)
+	void  OnFireCosmetic(float RecoilScale = 1.f);   // owning client: viewmodel recoil kick (scaled by ADS + mag ramp)
 	void  OnRemoteFireCosmetic();  // remote viewers: no flash (airsoft); reserved for future feel
 
 	/** Hide FP viewmodel + TP rifle during BuildPhase (marker away while placing). */

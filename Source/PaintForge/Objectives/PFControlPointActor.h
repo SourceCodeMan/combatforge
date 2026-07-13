@@ -51,9 +51,13 @@ protected:
 private:
 	void ApplyVisualState();
 
+	UPROPERTY() TObjectPtr<USceneComponent> SceneRoot;   // uniform-scale root so the sphere isn't squashed by the pad
 	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<UStaticMeshComponent> PadMesh;
 	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<USphereComponent> CaptureSphere;
+	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<UStaticMeshComponent> PoleMesh;   // flag pole
+	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<UStaticMeshComponent> FlagMesh;   // flag (team-colored)
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> PadMID;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> FlagMID;
 
 	UPROPERTY(ReplicatedUsing=OnRep_VisualState) int32 PointIndex = 0;
 	UPROPERTY(ReplicatedUsing=OnRep_VisualState) uint8 ControllingTeam = 255; // 255 = neutral

@@ -97,4 +97,5 @@ private:
 	TArray<TWeakObjectPtr<APFControlPointActor>> ControlPointsCache;
 	TArray<TWeakObjectPtr<APFFlagActor>> FlagsCache;
 	bool  bFiring = false;
+	bool  bFireModeAssigned = false;   // one-shot per spawn: pick a fire mode from the weapon's allowed set
 };

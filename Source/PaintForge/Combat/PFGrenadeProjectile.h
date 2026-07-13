@@ -38,6 +38,9 @@ public:
 	/** Authority only: launch along AimDir, remember team/type/thrower, arm the fuse. */
 	void ServerInit(const FVector& AimDir, uint8 Team, EPFGrenadeType Type, UPFWeaponComponent* Thrower);
 
+public:
+	virtual void Tick(float DeltaSeconds) override;   // animates the smoke cloud (billow-in + staggered dissolve)
+
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -55,6 +58,14 @@ protected:
 	UPROPERTY() TObjectPtr<UStaticMeshComponent>         Mesh;
 	UPROPERTY() TObjectPtr<UProjectileMovementComponent> Movement;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SmokePuffs;
+	// Per-puff smoke animation state (billow-in over SmokeAppearDur, then each fades on its own window).
+	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> SmokeMIDs;
+	TArray<FVector> PuffTargetScale;
+	TArray<float>   PuffMaxDensity;
+	TArray<float>   PuffDissolveWindow;   // seconds-before-end at which this puff starts fading
+	float SmokeStartTime = -1.f;
+	float SmokeAppearDur = 0.6f;
+	bool  bSmokeVolumetric = false;       // true when M_PF_SmokeVolume is in use (drives the Density param)
 
 	UPROPERTY(ReplicatedUsing=OnRep_Detonated) bool bDetonated = false;
 	UPROPERTY(Replicated) uint8  KindRep = 0;      // EPFGrenadeType, so clients build the right FX

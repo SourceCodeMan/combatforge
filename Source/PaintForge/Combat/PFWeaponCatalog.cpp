@@ -31,17 +31,23 @@ namespace PFWeapon
 			{ TEXT("AK (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
 			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(40.f, 3.5f, -3.5f) },
 		};
+		// SMG = burst or automatic (NO single); looser accuracy + shorter range than a rifle.
 		const FPFWeaponDef GSMGs[] = {
 			{ TEXT("AKSU (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black"),
-			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(33.f, 3.5f, -3.5f) },
+			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(33.f, 3.5f, -3.5f),
+			  FVector(15.f, -5.5f, -1.5f), FRotator(1.5f, 0.f, -1.5f),
+			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3 },
 			{ TEXT("AKSU (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood"),
-			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(33.f, 3.5f, -3.5f) },
+			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(33.f, 3.5f, -3.5f),
+			  FVector(15.f, -5.5f, -1.5f), FRotator(1.5f, 0.f, -1.5f),
+			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3 },
 		};
+		// Pistol = burst or single (NO auto). Sidearm hold; shortest range.
 		const FPFWeaponDef GPistols[] = {
-			// Sidearm: bring it up, in, and centered vs a rifle; a touch larger; short muzzle; sight low so ADS drops.
 			{ TEXT("Pistol"), TEXT("/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol"),
 			  nullptr, FVector(8.f, 3.5f, -2.5f), FRotator(-2.f, -90.f, 2.f), 0.58f, FVector(18.f, 2.5f, -2.5f),
-			  FVector(17.f, -3.f, -0.5f), FRotator(1.5f, 0.f, -1.5f) },
+			  FVector(17.f, -3.f, -0.5f), FRotator(1.5f, 0.f, -1.5f),
+			  (1 << 0) | (1 << 1), EPFFireMode::Single, 2.0f, 0.12f, 9000.f, 1.2f, 3 },
 		};
 
 		struct FCatEntry { const TCHAR* Label; const FPFWeaponDef* Defs; int32 Count; };

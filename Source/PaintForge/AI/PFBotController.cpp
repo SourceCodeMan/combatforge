@@ -42,6 +42,7 @@ void APFBotController::OnPossess(APawn* InPawn)
 	CurrentTarget = nullptr;
 	bFiring = false;
 	FireHoldTimer = 0.f;
+	bFireModeAssigned = false;   // re-pick the fire mode for the new pawn (its ApplyWeaponLoadout reset the default)
 	ApplySkill();
 }
 
@@ -110,6 +111,25 @@ void APFBotController::Tick(float DeltaSeconds)
 		if (Weapon->GetTotalAmmo() <= static_cast<int32>(Weapon->HopperCapacity))
 		{
 			Weapon->ServerRefillFromPickup();
+		}
+		// One-time per spawn: pick a fire mode from the equipped weapon's ALLOWED set, keyed by roster index so
+		// some bots run auto, some burst, some single (deterministic, evenly spread). Runs after the pawn's
+		// BeginPlay->ApplyWeaponLoadout has set the allowed mask.
+		if (!bFireModeAssigned && PS != nullptr)
+		{
+			bFireModeAssigned = true;
+			TArray<EPFFireMode, TInlineAllocator<3>> Allowed;
+			for (uint8 m = 0; m < 3; ++m)
+			{
+				if (Weapon->IsFireModeAllowed(static_cast<EPFFireMode>(m)))
+				{
+					Allowed.Add(static_cast<EPFFireMode>(m));
+				}
+			}
+			if (Allowed.Num() > 0)
+			{
+				Weapon->SetFireMode(Allowed[PS->RosterIndex % Allowed.Num()]);
+			}
 		}
 	}
 

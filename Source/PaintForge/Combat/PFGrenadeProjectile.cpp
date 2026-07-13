@@ -24,7 +24,8 @@
 
 APFGrenadeProjectile::APFGrenadeProjectile()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;              // enabled only for the smoke cloud animation
+	PrimaryActorTick.bStartWithTickEnabled = false;    // off during flight/fuse; StartSmokeVisual turns it on
 	bReplicates = true;
 	SetReplicateMovement(true);
 	bAlwaysRelevant = true;   // small arena + short-lived; guarantees OnRep for cosmetics/smoke
@@ -257,6 +258,12 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		SmokeMat = Cast<UMaterialInterface>(
 			FSoftObjectPath(TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke")).TryLoad());
 	}
+	bSmokeVolumetric = bVolumetric;
+	SmokeStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	SmokeMIDs.Reset();
+	PuffTargetScale.Reset();
+	PuffMaxDensity.Reset();
+	PuffDissolveWindow.Reset();
 
 	// Engine sphere is 50 uu radius; scale so the main puff radius ~= SmokeRadius. A denser overlapping cluster
 	// of varied spheres reads as a billowing cloud (not a few hard balls) and conceals better.
@@ -281,34 +288,76 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		{
 			continue;
 		}
+		const FVector TargetScale(BaseScale * Scales[i]);
 		Puff->SetupAttachment(Collision);
 		Puff->SetStaticMesh(Sphere);
 		Puff->SetRelativeLocation(Offsets[i]);
-		Puff->SetRelativeScale3D(FVector(BaseScale * Scales[i]));
+		Puff->SetRelativeScale3D(TargetScale * 0.2f);   // start small; billows up in Tick
 		Puff->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Puff->SetCastShadow(false);
 		Puff->SetCanEverAffectNavigation(false);
 		Puff->RegisterComponent();
+
+		UMaterialInstanceDynamic* PuffMID = nullptr;
 		if (SmokeMat != nullptr)
 		{
-			if (UMaterialInstanceDynamic* MID = Puff->CreateDynamicMaterialInstance(0, SmokeMat))
+			PuffMID = Puff->CreateDynamicMaterialInstance(0, SmokeMat);
+			if (PuffMID != nullptr)
 			{
 				const FLinearColor Grey(0.6f, 0.6f, 0.62f, 1.f);
 				if (bVolumetric)
 				{
-					// M_PF_SmokeVolume params.
-					MID->SetVectorParameterValue(TEXT("SmokeColor"), Grey);
-					MID->SetScalarParameterValue(TEXT("Density"), 0.85f);
+					PuffMID->SetVectorParameterValue(TEXT("SmokeColor"), Grey);
+					PuffMID->SetScalarParameterValue(TEXT("Density"), 0.f);   // start invisible; ramps up in Tick
 				}
 				else
 				{
-					// Old unlit puff params (no-ops if absent).
-					MID->SetVectorParameterValue(TEXT("EmissiveColor"), Grey);
-					MID->SetVectorParameterValue(TEXT("Color"), Grey);
+					PuffMID->SetVectorParameterValue(TEXT("EmissiveColor"), Grey);
+					PuffMID->SetVectorParameterValue(TEXT("Color"), Grey);
 				}
 			}
 		}
+
+		// Staggered dissolve: puffs begin fading at different times-before-end (2.6 s .. 0.7 s), so they thin
+		// out one at a time instead of all vanishing on one frame. Keep every window < SmokeDuration.
 		SmokePuffs.Add(Puff);
+		SmokeMIDs.Add(PuffMID);
+		PuffTargetScale.Add(TargetScale);
+		PuffMaxDensity.Add(0.85f);
+		PuffDissolveWindow.Add(FMath::Lerp(2.6f, 0.7f, static_cast<float>(i) / 8.f));
+	}
+	SetActorTickEnabled(true);   // begin the appear/dissolve animation
+}
+
+void APFGrenadeProjectile::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (SmokeStartTime < 0.f || SmokePuffs.Num() == 0)
+	{
+		return;
+	}
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : SmokeStartTime;
+	const float Elapsed = Now - SmokeStartTime;
+	const float Appear = FMath::SmoothStep(0.f, SmokeAppearDur, Elapsed);   // billow-in over ~0.6 s
+	const float Remain = SmokeDuration - Elapsed;
+	for (int32 i = 0; i < SmokePuffs.Num(); ++i)
+	{
+		if (SmokePuffs[i] == nullptr || !PuffTargetScale.IsValidIndex(i))
+		{
+			continue;
+		}
+		const float Window = PuffDissolveWindow.IsValidIndex(i) ? PuffDissolveWindow[i] : 1.f;
+		const float Diss = 1.f - FMath::Clamp(Remain / FMath::Max(0.1f, Window), 0.f, 1.f);
+		const float Fade = FMath::SmoothStep(0.f, 1.f, Diss);   // this puff's own dissolve 0..1
+		// Volumetric fades via opacity (Density) so keep near full size; the unlit fallback has no opacity param,
+		// so shrink it away instead.
+		const float FadeScaleTarget = bSmokeVolumetric ? 0.85f : 0.05f;
+		const float ScaleFactor = FMath::Lerp(0.2f, 1.f, Appear) * FMath::Lerp(1.f, FadeScaleTarget, Fade);
+		SmokePuffs[i]->SetRelativeScale3D(PuffTargetScale[i] * ScaleFactor);
+		if (bSmokeVolumetric && SmokeMIDs.IsValidIndex(i) && SmokeMIDs[i] != nullptr && PuffMaxDensity.IsValidIndex(i))
+		{
+			SmokeMIDs[i]->SetScalarParameterValue(TEXT("Density"), PuffMaxDensity[i] * Appear * (1.f - Fade));
+		}
 	}
 }
 

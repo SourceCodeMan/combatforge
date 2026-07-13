@@ -2143,7 +2143,7 @@ void APaintForgeGameMode::TickDominationScoring()
 		if (OutA + OutB > 0)
 		{
 			const FVector CPLoc = CP->GetActorLocation();
-			constexpr float RadiusSq = 350.f * 350.f;
+			constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's tripled capture radius
 			for (APlayerState* PSBase : GS->PlayerArray)
 			{
 				APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
@@ -2227,7 +2227,7 @@ void APaintForgeGameMode::TickHardpointScoring()
 	}
 
 	const FVector CPLoc = Active->GetActorLocation();
-	constexpr float RadiusSq = 350.f * 350.f;
+	constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's tripled capture radius
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);

@@ -107,9 +107,12 @@ namespace
 
 	TArray<int16> SynthElim()
 	{
+		// Low concussive "thunk" (non-lethal "he's out"), NOT a bright two-note coin chime: a filtered noise
+		// impact over a low ~160 Hz body, then a short lower downward tail so it reads as a soft thud, not a jingle.
 		return Concat(
-			SynthSineBlip(980.f, 0.07f, 0.45f, 0.002f, 0.03f),
-			SynthSineBlip(620.f, 0.11f, 0.42f, 0.002f, 0.06f));
+			MixAdd(SynthNoiseBurst(0.10f, 0.5f, 0.28f),
+				SynthSineBlip(160.f, 0.14f, 0.55f, 0.001f, 0.11f), 0.9f),
+			SynthSineBlip(105.f, 0.11f, 0.32f, 0.003f, 0.09f));
 	}
 
 	TArray<int16> SynthSplatIncoming()
@@ -248,7 +251,7 @@ void UPFCombatAudio::EnsureSounds()
 	};
 
 	CueHitmarker = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_1-1_Cue.Interface_1-1_Cue"));
-	CueElim = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Special_Collectible_26-1_Cue.Special_Collectible_26-1_Cue"));
+	CueElim = nullptr;   // force the redesigned procedural "thunk" — the old cue was a coin/collectible chime
 	CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_7-1_Cue.Gunshot_7-1_Cue"));
 	if (CueMuzzle == nullptr)
 	{
