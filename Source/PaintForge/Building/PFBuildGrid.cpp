@@ -79,13 +79,13 @@ APFBuildGrid::APFBuildGrid()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
-	// Art pass (M1): prefer the concrete build-piece master — team color lives on its "Color"
-	// vector param as an EMISSIVE trim (keeps team readability on a realistic surface). Fall back
-	// to the engine BasicShapeMaterial (full-surface "Color" tint) until M_PF_BuildPiece is
-	// authored, so pieces always render. Same "Color" call site works for both (BeginPlay).
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	// Base/fallback material for pieces + the placement ghost. Placed structural pieces get real warehouse
+	// concrete/metal MIs in BeginPlay; this is only the seed + fallback. Prefer the engine BasicShapeMaterial
+	// (proven ISM-safe, full-surface "Color" tint) over M_PF_BuildPiece — the latter compiles to the UE CHECKER
+	// on instanced static meshes, which is exactly the "checkered walls" bug. Same "Color" call site works.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	ShapeMaterial = ArtMatFinder.Succeeded() ? ArtMatFinder.Object : BasicMatFinder.Object;
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	ShapeMaterial = BasicMatFinder.Succeeded() ? BasicMatFinder.Object : ArtMatFinder.Object;
 
 	// Structural + temporary prop placeholders (props swap to warehouse meshes in BeginPlay).
 	UStaticMesh* MeshPerType[7] =

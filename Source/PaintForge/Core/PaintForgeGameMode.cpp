@@ -1228,13 +1228,19 @@ void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim,
 	}
 
 	TWeakObjectPtr<APaintForgeCharacter> WeakVictim(Victim);
+	TWeakObjectPtr<APaintForgePlayerState> WeakVictimPS(Victim->GetPlayerState<APaintForgePlayerState>());
 	TWeakObjectPtr<APaintForgeGameMode> WeakThis(this);
 	FTimerHandle RespawnHandle;
 	GetWorldTimerManager().SetTimer(RespawnHandle,
-		FTimerDelegate::CreateLambda([WeakThis, WeakVictim]()
+		FTimerDelegate::CreateLambda([WeakThis, WeakVictim, WeakVictimPS]()
 		{
-			if (WeakThis.IsValid() && WeakVictim.IsValid())
+			if (!WeakThis.IsValid())
 			{
+				return;
+			}
+			if (WeakVictim.IsValid())
+			{
+				// Pawn survived the out window — reset it in place.
 				if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
 				{
 					PS->ServerClearOutState();
@@ -1243,6 +1249,17 @@ void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim,
 				if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
 				{
 					WeakThis->TeleportPawnTo(WeakVictim.Get(), WeakThis->GetSpawnTransform(PS));
+				}
+			}
+			else if (WeakVictimPS.IsValid())
+			{
+				// Pawn was destroyed during the out window (e.g. a still-driven bot corpse fell past KillZ) —
+				// restart via the controller so the player/bot returns instead of freezing out for the match.
+				APaintForgePlayerState* PS = WeakVictimPS.Get();
+				PS->ServerClearOutState();
+				if (AController* C = PS->GetOwningController())
+				{
+					WeakThis->RestartPlayer(C);
 				}
 			}
 		}),

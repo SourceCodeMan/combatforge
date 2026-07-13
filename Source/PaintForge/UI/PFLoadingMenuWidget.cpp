@@ -26,6 +26,7 @@
 #include "Core/PFUserPrefs.h"
 #include "Player/PaintForgeCharacter.h"
 #include "Player/PFCharacterPreviewActor.h"
+#include "UI/PFOptionsWidget.h"
 #include "InputCoreTypes.h"
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -412,6 +413,23 @@ void UPFLoadingMenuWidget::OnTabHowTo() { SelectMenuTab(1); }
 void UPFLoadingMenuWidget::OnTabLoadout() { SelectMenuTab(2); }
 void UPFLoadingMenuWidget::OnTabCharacter() { SelectMenuTab(3); }
 
+void UPFLoadingMenuWidget::OnOptionsClicked()
+{
+	// Reuse the in-game options widget as an overlay above the boot menu (Z=200 > the menu's 100).
+	if (BootOptions == nullptr)
+	{
+		BootOptions = CreateWidget<UPFOptionsWidget>(GetOwningPlayer(), UPFOptionsWidget::StaticClass());
+		if (BootOptions != nullptr)
+		{
+			BootOptions->AddToViewport(200);
+		}
+	}
+	if (BootOptions != nullptr)
+	{
+		BootOptions->Open();
+	}
+}
+
 const TCHAR* UPFLoadingMenuWidget::MarkerPresetName(int32 Idx)
 {
 	switch (Idx)
@@ -464,6 +482,7 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 {
 	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
 	Sub->SetText(FText::FromString(TEXT("Local preferences — saved to this PC, applied when you spawn.")));
+	Sub->SetFont(PFLoadFont(13, false));
 	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
 	Sub->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Sub))
@@ -477,6 +496,7 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
 		Lab->SetText(FText::FromString(TEXT("MARKER")));
+		Lab->SetFont(PFLoadFont(13, true));
 		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
 		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
 		Sizer->SetWidthOverride(110.f);
@@ -486,6 +506,9 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 		LoadoutMarkerButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
 		LoadoutMarkerButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnMarkerCycle);
 		LoadoutMarkerValueText = WidgetTree->ConstructWidget<UTextBlock>();
+		LoadoutMarkerValueText->SetFont(PFLoadFont(12, false));
+		LoadoutMarkerValueText->SetJustification(ETextJustify::Center);
+		LoadoutMarkerValueText->SetClipping(EWidgetClipping::ClipToBounds);
 		LoadoutMarkerValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		LoadoutMarkerButton->AddChild(LoadoutMarkerValueText);
 		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(LoadoutMarkerButton))
@@ -505,6 +528,7 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
 		Lab->SetText(FText::FromString(TEXT("CROSSHAIR")));
+		Lab->SetFont(PFLoadFont(13, true));
 		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
 		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
 		Sizer->SetWidthOverride(110.f);
@@ -514,6 +538,9 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 		LoadoutCrosshairButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
 		LoadoutCrosshairButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnCrosshairCycle);
 		LoadoutCrosshairValueText = WidgetTree->ConstructWidget<UTextBlock>();
+		LoadoutCrosshairValueText->SetFont(PFLoadFont(12, false));
+		LoadoutCrosshairValueText->SetJustification(ETextJustify::Center);
+		LoadoutCrosshairValueText->SetClipping(EWidgetClipping::ClipToBounds);
 		LoadoutCrosshairValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		LoadoutCrosshairButton->AddChild(LoadoutCrosshairValueText);
 		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(LoadoutCrosshairButton))
@@ -529,7 +556,8 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 	}
 
 	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
-	Hint->SetText(FText::FromString(TEXT("Click a row to cycle · saved instantly · team paint color is fixed")));
+	Hint->SetText(FText::FromString(TEXT("Click a row to cycle · saved instantly · team color is fixed")));
+	Hint->SetFont(PFLoadFont(12, false));
 	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
 	Hint->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Hint))
@@ -556,8 +584,36 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		V->SetHorizontalAlignment(HAlign_Center);
 	}
 
-	CharConfig = PFChar::LoadConfig();
+	ActiveSaveSlot = PFChar::GetActiveSaveSlot();
+	CharConfig = PFChar::LoadConfig(ActiveSaveSlot);
 	CharSlotValueTexts.Reset();
+	SaveSlotButtons.Reset();
+
+	// Save-slot row (CoD create-a-class): pick a slot to load/edit; part edits auto-save to the active slot,
+	// and the pawn spawns with whichever slot is active.
+	UHorizontalBox* SlotRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	for (int32 ss = 0; ss < PFChar::SaveSlotCount(); ++ss)
+	{
+		UPFCharSaveSlotButton* SlotBtn = WidgetTree->ConstructWidget<UPFCharSaveSlotButton>(UPFCharSaveSlotButton::StaticClass());
+		SlotBtn->InitSlot(this, ss);
+		UTextBlock* SlotLab = WidgetTree->ConstructWidget<UTextBlock>();
+		SlotLab->SetText(FText::FromString(FString::Printf(TEXT("  %d  "), ss + 1)));
+		SlotLab->SetFont(PFLoadFont(16, true));
+		SlotLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		SlotLab->SetJustification(ETextJustify::Center);
+		SlotBtn->SetContent(SlotLab);
+		SaveSlotButtons.Add(SlotBtn);
+		if (UHorizontalBoxSlot* H = SlotRow->AddChildToHorizontalBox(SlotBtn))
+		{
+			H->SetPadding(FMargin(5.f, 0.f));
+			H->SetVerticalAlignment(VAlign_Center);
+		}
+	}
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SlotRow))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+	}
 
 	// Left: live rotating 3D preview (render target bound in EnsureCharPreview). Right: per-slot steppers.
 	UHorizontalBox* Body = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -642,7 +698,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 	}
 
 	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
-	Hint->SetText(FText::FromString(TEXT("< / > to change each piece · saved instantly · team color is separate")));
+	Hint->SetText(FText::FromString(TEXT("Pick a slot 1-5 · < / > to change each piece · saved instantly · drag to rotate")));
 	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
 	Hint->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Hint))
@@ -652,6 +708,42 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 	}
 
 	RefreshCharacterLabels();
+	RefreshSaveSlotHighlight();
+}
+
+void UPFLoadingMenuWidget::RefreshSaveSlotHighlight()
+{
+	const FLinearColor Hot(1.f, 0.92f, 0.35f, 0.95f);
+	const FLinearColor Cold(0.12f, 0.13f, 0.16f, 1.f);
+	for (int32 i = 0; i < SaveSlotButtons.Num(); ++i)
+	{
+		if (SaveSlotButtons[i] != nullptr)
+		{
+			SaveSlotButtons[i]->SetBackgroundColor(i == ActiveSaveSlot ? Hot : Cold);
+		}
+	}
+}
+
+void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
+{
+	if (SaveSlot < 0 || SaveSlot >= PFChar::SaveSlotCount())
+	{
+		return;
+	}
+	ActiveSaveSlot = SaveSlot;
+	PFChar::SetActiveSaveSlot(SaveSlot);
+	CharConfig = PFChar::LoadConfig(SaveSlot);
+	// Push the newly-selected slot to the spawned pawn + the tab preview.
+	if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetOwningPlayerPawn()))
+	{
+		Char->ReapplyCharacterConfig();
+	}
+	if (CharPreviewActor != nullptr)
+	{
+		CharPreviewActor->ApplyConfig(CharConfig);
+	}
+	RefreshCharacterLabels();
+	RefreshSaveSlotHighlight();
 }
 
 void UPFLoadingMenuWidget::RefreshCharacterLabels()
@@ -757,6 +849,21 @@ void UPFCharSlotButton::HandleClicked()
 	}
 }
 
+void UPFCharSaveSlotButton::InitSlot(UPFLoadingMenuWidget* InOwner, int32 InSaveSlot)
+{
+	OwnerWidget = InOwner;
+	SaveSlot = InSaveSlot;
+	OnClicked.AddUniqueDynamic(this, &UPFCharSaveSlotButton::HandleClicked);
+}
+
+void UPFCharSaveSlotButton::HandleClicked()
+{
+	if (OwnerWidget.IsValid())
+	{
+		OwnerWidget->NotifySaveSlotSelected(SaveSlot);
+	}
+}
+
 void UPFLoadingMenuWidget::BuildTree()
 {
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
@@ -829,10 +936,12 @@ void UPFLoadingMenuWidget::BuildTree()
 	TabHowTo = MakeMenuTab(TEXT("  HOW TO PLAY  "), TEXT("TabHowTo"));
 	TabLoadout = MakeMenuTab(TEXT("  LOADOUT  "), TEXT("TabLoadout"));
 	TabCharacter = MakeMenuTab(TEXT("  CHARACTER  "), TEXT("TabCharacter"));
+	OptionsTabButton = MakeMenuTab(TEXT("  OPTIONS  "), TEXT("TabOptions"));   // opens the options overlay
 	TabSetup->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabSetup);
 	TabHowTo->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabHowTo);
 	TabLoadout->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabLoadout);
 	TabCharacter->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabCharacter);
+	OptionsTabButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnOptionsClicked);
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabSetup))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
@@ -846,6 +955,10 @@ void UPFLoadingMenuWidget::BuildTree()
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabCharacter))
+	{
+		H->SetPadding(FMargin(4.f, 0.f));
+	}
+	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(OptionsTabButton))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
@@ -1100,6 +1213,11 @@ void UPFLoadingMenuWidget::NativeDestruct()
 		CharPreviewActor->Destroy();
 		CharPreviewActor = nullptr;
 	}
+	if (BootOptions != nullptr)
+	{
+		BootOptions->RemoveFromParent();
+		BootOptions = nullptr;
+	}
 	Super::NativeDestruct();
 }
 
@@ -1127,7 +1245,7 @@ FReply UPFLoadingMenuWidget::NativeOnMouseMove(const FGeometry& InGeometry, cons
 		const float X = InMouseEvent.GetScreenSpacePosition().X;
 		const float Dx = X - PreviewDragLastX;
 		PreviewDragLastX = X;
-		CharPreviewActor->AddYaw(Dx * 0.5f);   // ~0.5 deg per pixel; flip the sign to reverse drag direction
+		CharPreviewActor->AddYaw(-Dx * 0.5f);   // drag right spins the character right-to-left (natural grab)
 		return FReply::Handled();
 	}
 	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
@@ -1149,6 +1267,21 @@ void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 	if (bDismissed)
 	{
 		return;
+	}
+
+	// The boot-menu options overlay closes itself (Back) via its own Close(); tear it down + restore our focus.
+	if (BootOptions != nullptr && !BootOptions->IsOpen())
+	{
+		BootOptions->RemoveFromParent();
+		BootOptions = nullptr;
+		if (APlayerController* PC = GetOwningPlayer())
+		{
+			FInputModeUIOnly Mode;
+			Mode.SetWidgetToFocus(TakeWidget());
+			Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			PC->SetInputMode(Mode);
+			PC->bShowMouseCursor = true;
+		}
 	}
 
 	// Keep labels honest if GS replicates in late (client join).
@@ -1659,8 +1792,12 @@ void UPFLoadingMenuWidget::FinishWarmup()
 	}
 	bWarmupComplete = true;
 	Progress = 1.f;
-	if (ProgressBar) { ProgressBar->SetPercent(1.f); }
-	SetStatus(TEXT("Ready."));
+	if (ProgressBar)
+	{
+		ProgressBar->SetPercent(1.f);
+		ProgressBar->SetFillColorAndOpacity(FLinearColor(0.35f, 0.85f, 0.4f));   // green = done warming up
+	}
+	SetStatus(TEXT("Ready — press ENTER LOBBY to start."));
 	if (EnterButton)
 	{
 		EnterButton->SetIsEnabled(true);

@@ -46,7 +46,17 @@ namespace PFChar
 	FString PartDisplayName(int32 Slot, int32 Index);
 
 	// ---- Persistence (GGameUserSettings.ini [PaintForge]) ----
+	/** Save/load the ACTIVE save slot (convenience — routes to GetActiveSaveSlot()). */
 	void SaveConfig(const FPFCharacterConfig& Config);
-	/** Load the saved config, or DefaultConfig() if none has been saved yet. */
+	/** Load the active slot's config, or DefaultConfig() if that slot has never been saved. */
 	FPFCharacterConfig LoadConfig();
+
+	// ---- CoD-style save slots: pick one, edit it, spawn with it ----
+	/** Number of character save slots. */
+	int32 SaveSlotCount();
+	void SaveConfig(int32 SaveSlot, const FPFCharacterConfig& Config);
+	FPFCharacterConfig LoadConfig(int32 SaveSlot);
+	/** The save slot the pawn spawns with (persisted, clamped to [0, SaveSlotCount()-1]). */
+	int32 GetActiveSaveSlot();
+	void SetActiveSaveSlot(int32 SaveSlot);
 }

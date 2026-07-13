@@ -8,6 +8,7 @@
 #include "Core/PaintForgePlayerState.h"
 #include "Core/PaintForgeTypes.h"
 #include "Combat/PFWeaponComponent.h"
+#include "Combat/PFHealthComponent.h"
 #include "Objectives/PFControlPointActor.h"
 #include "Objectives/PFFlagActor.h"
 #include "Objectives/PFObjectiveLayout.h"
@@ -86,7 +87,12 @@ void APFBotController::Tick(float DeltaSeconds)
 	const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>();
 
 	// Only fight during a live combat round while alive; otherwise idle (freeze/build/vote/results/out).
-	const bool bAlive = (PS != nullptr) && PS->bAliveInRound;
+	// An eliminated pawn awaiting its respawn timer must go LIMP: Skirmish never clears bAliveInRound, so
+	// without the bEliminated check the bot keeps steering its own corpse — it wanders off the KillZ ledge,
+	// the pawn is destroyed, and the weak-pointer respawn is stranded (bot freezes forever).
+	const UPFHealthComponent* Health = Bot->GetHealth();
+	const bool bAlive = (PS != nullptr) && PS->bAliveInRound
+		&& (Health == nullptr || !Health->bEliminated);
 	const bool bCombatLive = (GS->Phase == EPFMatchPhase::Combat)
 		&& (GS->RoundState == EPFRoundState::Live) && GS->IsFireAllowed();
 	if (!bAlive || !bCombatLive)

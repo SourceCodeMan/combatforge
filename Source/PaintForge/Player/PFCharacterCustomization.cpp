@@ -160,29 +160,63 @@ namespace PFChar
 		return Name;
 	}
 
-	void SaveConfig(const FPFCharacterConfig& Config)
+	static constexpr int32 kSaveSlots = 5;
+
+	static int32 ClampSaveSlot(int32 SaveSlot)
+	{
+		return FMath::Clamp(SaveSlot, 0, kSaveSlots - 1);
+	}
+
+	int32 SaveSlotCount()
+	{
+		return kSaveSlots;
+	}
+
+	int32 GetActiveSaveSlot()
+	{
+		int32 Active = 0;
+		if (GConfig != nullptr)
+		{
+			GConfig->GetInt(TEXT("PaintForge"), TEXT("CharActiveSlot"), Active, GGameUserSettingsIni);
+		}
+		return ClampSaveSlot(Active);
+	}
+
+	void SetActiveSaveSlot(int32 SaveSlot)
 	{
 		if (GConfig == nullptr)
 		{
 			return;
 		}
-		GConfig->SetBool(TEXT("PaintForge"), TEXT("CharConfigSaved"), true, GGameUserSettingsIni);
+		GConfig->SetInt(TEXT("PaintForge"), TEXT("CharActiveSlot"), ClampSaveSlot(SaveSlot), GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+
+	void SaveConfig(int32 SaveSlot, const FPFCharacterConfig& Config)
+	{
+		if (GConfig == nullptr)
+		{
+			return;
+		}
+		const int32 S = ClampSaveSlot(SaveSlot);
+		GConfig->SetBool(TEXT("PaintForge"), *FString::Printf(TEXT("CharSaved%d"), S), true, GGameUserSettingsIni);
 		for (int32 i = 0; i < GSlotCount; ++i)
 		{
 			const int32 Sel = Config.Slots.IsValidIndex(i) ? Config.Slots[i] : -1;
-			const FString Key = FString::Printf(TEXT("CharSlot_%s"), GSlots[i].Id);
+			const FString Key = FString::Printf(TEXT("CharS%d_%s"), S, GSlots[i].Id);
 			GConfig->SetInt(TEXT("PaintForge"), *Key, Sel, GGameUserSettingsIni);
 		}
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 
-	FPFCharacterConfig LoadConfig()
+	FPFCharacterConfig LoadConfig(int32 SaveSlot)
 	{
 		EnsureBuilt();
+		const int32 S = ClampSaveSlot(SaveSlot);
 		bool bSaved = false;
 		if (GConfig != nullptr)
 		{
-			GConfig->GetBool(TEXT("PaintForge"), TEXT("CharConfigSaved"), bSaved, GGameUserSettingsIni);
+			GConfig->GetBool(TEXT("PaintForge"), *FString::Printf(TEXT("CharSaved%d"), S), bSaved, GGameUserSettingsIni);
 		}
 		if (!bSaved)
 		{
@@ -193,7 +227,7 @@ namespace PFChar
 		for (int32 i = 0; i < GSlotCount; ++i)
 		{
 			int32 Sel = -1;
-			const FString Key = FString::Printf(TEXT("CharSlot_%s"), GSlots[i].Id);
+			const FString Key = FString::Printf(TEXT("CharS%d_%s"), S, GSlots[i].Id);
 			if (GConfig != nullptr)
 			{
 				GConfig->GetInt(TEXT("PaintForge"), *Key, Sel, GGameUserSettingsIni);
@@ -201,5 +235,16 @@ namespace PFChar
 			C.Slots[i] = (Sel >= 0 && Sel < GSlotPartsCache[i].Num()) ? Sel : -1;   // clamp to enumerated
 		}
 		return C;
+	}
+
+	// Convenience wrappers on the active slot (pawn + existing callers use these).
+	void SaveConfig(const FPFCharacterConfig& Config)
+	{
+		SaveConfig(GetActiveSaveSlot(), Config);
+	}
+
+	FPFCharacterConfig LoadConfig()
+	{
+		return LoadConfig(GetActiveSaveSlot());
 	}
 }

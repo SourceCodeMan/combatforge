@@ -47,14 +47,15 @@ UPFBuildComponent::UPFBuildComponent()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
-	// Prefer the concrete build-piece master so the ghost matches placed structural art
-	// (triplanar + Color param). Fall back to BasicShapeMaterial if the asset is missing.
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	// Ghost material: prefer the engine BasicShapeMaterial (ISM-safe solid "Color" tint) over M_PF_BuildPiece,
+	// which renders as the UE CHECKER on instanced meshes (the "checkered build pieces" bug). A clean tinted
+	// ghost also reads better than the concrete master for a placement preview.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
 	CubeMesh      = CubeFinder.Object;
 	CylinderMesh  = CylinderFinder.Object;
 	ConeMesh      = ConeFinder.Object;
-	ShapeMaterial = ArtMatFinder.Succeeded() ? ArtMatFinder.Object : BasicMatFinder.Object;
+	ShapeMaterial = BasicMatFinder.Succeeded() ? BasicMatFinder.Object : ArtMatFinder.Object;
 }
 
 void UPFBuildComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)

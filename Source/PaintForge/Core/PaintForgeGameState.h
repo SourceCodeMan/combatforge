@@ -43,7 +43,7 @@ public:
 	UPROPERTY(Replicated)                       bool   bFillWithBots = true;
 	UPROPERTY(Replicated)                       uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count reads this
 	UPROPERTY(Replicated)                       EPFBuildMode BuildMode = EPFBuildMode::Creative;  // build style
-	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Elimination; // objective
+	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Skirmish; // objective (Skirmish = respawn default)
 	/** Host-picked community arena filename under Saved/Arenas/ (Improvement / Play-only). Empty = auto top-ranked. */
 	UPROPERTY(Replicated)                       FString SelectedCommunityMapFile;
 	/** Host-facing / lobby label for the selected community map. */

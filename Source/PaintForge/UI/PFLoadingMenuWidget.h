@@ -20,6 +20,7 @@ class UVerticalBox;
 class UWidgetSwitcher;
 class UPFLoadingMenuWidget;
 class APFCharacterPreviewActor;
+class UPFOptionsWidget;
 
 /** Row button for one community map slot (0..9 on the current page). */
 UCLASS()
@@ -56,6 +57,23 @@ private:
 	int32 Dir = 1;
 };
 
+/** One of the CoD-style save slots (payload button carrying which slot it selects). */
+UCLASS()
+class PAINTFORGE_API UPFCharSaveSlotButton : public UButton
+{
+	GENERATED_BODY()
+
+public:
+	void InitSlot(UPFLoadingMenuWidget* InOwner, int32 InSaveSlot);
+
+protected:
+	UFUNCTION() void HandleClicked();
+
+private:
+	TWeakObjectPtr<UPFLoadingMenuWidget> OwnerWidget;
+	int32 SaveSlot = 0;
+};
+
 /**
  * Full-viewport boot menu — NOT a live-game screenshot with HUD.
  * Tabs: Match Setup (mode / type / format / bots / community map) and How to Play.
@@ -79,6 +97,9 @@ public:
 	/** Character-customization prev/next step for a slot (Dir -1/+1), cycling through None + parts. */
 	void NotifyCharSlotStep(int32 SlotIdx, int32 Dir);
 
+	/** Select a save slot: make it active, load it into the editor + preview + pawn. */
+	void NotifySaveSlotSelected(int32 SaveSlot);
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
@@ -95,6 +116,8 @@ private:
 	void RefreshLoadoutLabels();
 	void BuildCharacterPage(UVerticalBox* Col);
 	void RefreshCharacterLabels();
+	/** Highlight the active save-slot button. */
+	void RefreshSaveSlotHighlight();
 	/** Lazily spawn the off-screen preview studio and bind its render target to the tab image. */
 	void EnsureCharPreview();
 	static const TCHAR* MarkerPresetName(int32 Idx);
@@ -128,6 +151,7 @@ private:
 	UFUNCTION() void OnTabHowTo();
 	UFUNCTION() void OnTabLoadout();
 	UFUNCTION() void OnTabCharacter();
+	UFUNCTION() void OnOptionsClicked();   // opens the options overlay above the boot menu
 	UFUNCTION() void OnMarkerCycle();
 	UFUNCTION() void OnCrosshairCycle();
 	UFUNCTION() void OnMapPagePrev();
@@ -155,10 +179,14 @@ private:
 	UPROPERTY() TObjectPtr<UButton> TabHowTo;
 	UPROPERTY() TObjectPtr<UButton> TabLoadout;
 	UPROPERTY() TObjectPtr<UButton> TabCharacter;
+	UPROPERTY() TObjectPtr<UButton> OptionsTabButton;
+	UPROPERTY() TObjectPtr<UPFOptionsWidget> BootOptions;   // options overlay opened from the boot menu
 	UPROPERTY() TObjectPtr<UWidgetSwitcher> MenuSwitcher;
 
 	// Character customization tab (per-slot part selection; saved to config, applied on spawn).
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> CharSlotValueTexts;
+	UPROPERTY() TArray<TObjectPtr<UPFCharSaveSlotButton>> SaveSlotButtons;   // the 5 create-a-class slots
+	int32 ActiveSaveSlot = 0;
 	UPROPERTY() TObjectPtr<UImage> CharPreviewImage;                       // shows the live 3D render target
 	UPROPERTY() TObjectPtr<APFCharacterPreviewActor> CharPreviewActor;     // off-screen studio (lazy-spawned)
 	FPFCharacterConfig CharConfig;
