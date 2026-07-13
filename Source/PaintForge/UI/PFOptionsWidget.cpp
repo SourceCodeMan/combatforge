@@ -471,7 +471,7 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 
 	AddHowToLine(Box, TEXT("COMBAT"), 15, true, Head);
 	AddHowToLine(Box, TEXT("LMB  fire     ·     RMB  aim down sights     ·     R  reload"), 13, false, Key);
-	AddHowToLine(Box, TEXT("Tag opponents with paint. Hits on body / mask take them out of the round (mode-dependent)."), 13, false, Body);
+	AddHowToLine(Box, TEXT("Tag opponents with BBs. Hits on body / mask take them out of the round (mode-dependent)."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD PHASE"), 15, true, Head);
 	AddHowToLine(Box, TEXT("F1 Wall  ·  F2 Floor  ·  F3 Ramp  ·  F4 Roof  ·  cover: Barrel / Crate / Boxes  ·  X / F5 delete"), 13, false, Key);

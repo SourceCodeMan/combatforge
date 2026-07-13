@@ -221,7 +221,7 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump · Shift sprint · Ctrl/C crouch"), 12, false, Key);
 
 	AddHowToLine(Box, TEXT("COMBAT"), 14, true, Head);
-	AddHowToLine(Box, TEXT("LMB fire · RMB aim · R reload · Tag opponents with paintballs"), 12, false, Key);
+	AddHowToLine(Box, TEXT("LMB fire · RMB aim · R reload · Tag opponents with BBs"), 12, false, Key);
 
 	AddHowToLine(Box, TEXT("BUILD"), 14, true, Head);
 	AddHowToLine(Box, TEXT("F1–F4 structure · barrel/crate/boxes cover · LMB place · R rotate · X delete · Hold Q wheel"), 12, false, Key);
