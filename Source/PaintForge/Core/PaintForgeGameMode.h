@@ -73,6 +73,8 @@ public:
 	void HostForceStart();                             // Lobby only
 	void HostCycleTeam(APaintForgePlayerState* Target); // Lobby only (T22)
 	void HostReturnToLobby();                          // Results only
+	/** Mid-match leave: host resets everyone to Lobby (playtest quit-to-menu). */
+	void HostForceReturnToLobby();
 	void HostSetFormat(uint8 NewTeamSize);             // Lobby only: 4v4 / 6v6 (bots fill to it)
 	void HostSetFillWithBots(bool bFill);              // Lobby only: top teams with bots at Lobby→Build
 	void HostSetBuildMode(EPFBuildMode NewMode);       // Lobby only: Creative / Improvement / Play-only
@@ -128,6 +130,9 @@ protected:
 	void RotateHardpoint();                            // advance active control-point slot
 	void SpawnObjectiveActors();                       // flags / control points from PFGrid layout
 	void DestroyObjectiveActors();
+	/** 4 ammo barrels at random field spots each combat start (refill mag+reserve). */
+	void SpawnAmmoBarrels();
+	void DestroyAmmoBarrels();
 	void ClearAllFlagCarriers();
 	APFFlagActor* GetFlagForTeam(uint8 Team) const;
 	bool IsTeamScoreObjectiveMode(EPFMatchType Type) const;
@@ -204,6 +209,8 @@ protected:
 	FTimerHandle ObjectiveScoreTimerHandle;  // Dom/HP periodic scoring
 	FTimerHandle HardpointRotateTimerHandle; // Hardpoint slot rotation
 	FTimerHandle CrashBreadcrumbTimer;       // 30 s host roster dump for crash triage
+
+	UPROPERTY() TArray<TObjectPtr<class APFAmmoBarrel>> AmmoBarrels;
 
 	// Effective match scaling (T15), computed at Lobby→Build from connected team sizes:
 	uint8 EffectiveRoundWinsToTake = 4;

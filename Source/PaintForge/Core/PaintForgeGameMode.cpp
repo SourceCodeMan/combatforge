@@ -10,6 +10,7 @@
 #include "AI/PFBotController.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFTargetDummy.h"
+#include "Combat/PFAmmoBarrel.h"
 #include "Building/PFArenaShell.h"
 #include "Building/PFBuildGrid.h"
 #include "Objectives/PFControlPointActor.h"
@@ -521,7 +522,7 @@ FTransform APaintForgeGameMode::GetSpawnTransform(const APaintForgePlayerState* 
 	const APaintForgeGameState* GS = GetPFGameState();
 	const EPFMatchPhase Phase = GS ? GS->Phase : EPFMatchPhase::Lobby;
 
-	// FreeForAll: free spawns across both team spawn columns (no team half ownership).
+	// FreeForAll: lobby pen; combat = random points all over the field (not just spawn columns).
 	if (GS && GS->MatchType == EPFMatchType::FreeForAll)
 	{
 		if (Phase == EPFMatchPhase::Lobby)
@@ -529,10 +530,11 @@ FTransform APaintForgeGameMode::GetSpawnTransform(const APaintForgePlayerState* 
 			return ArenaShell->GetWarmupSpawnTransform(
 				FMath::Min<int32>(PS->RosterIndex, PFGrid::MaxRosterSlots - 1));
 		}
-		const int32 FreeIdx = static_cast<int32>(PS->RosterIndex) % (PFGrid::SpawnPointsPerTeam * 2);
-		const uint8 Side = static_cast<uint8>(FreeIdx / PFGrid::SpawnPointsPerTeam);
-		const int32 Slot = FreeIdx % PFGrid::SpawnPointsPerTeam;
-		return ArenaShell->GetTeamSpawnTransform(Side, Slot);
+		// Salt mixes roster + round + a rolling counter so respawns don't stack.
+		const int32 Salt = static_cast<int32>(PS->RosterIndex) * 97
+			+ static_cast<int32>(GS->RoundNumber) * 131
+			+ static_cast<int32>(FMath::FloorToInt(GetWorld() ? GetWorld()->GetTimeSeconds() * 1000.f : 0.f));
+		return ArenaShell->GetRandomFieldSpawnTransform(Salt);
 	}
 
 	const uint8 Team = (PS->TeamId <= 1) ? PS->TeamId : 0;
@@ -794,8 +796,9 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 
 	case EPFMatchPhase::Vote:
 	{
-		// Objective actors live only during combat Live — tear them down on the way out.
+		// Objective actors + ammo barrels live only during combat Live — tear them down.
 		DestroyObjectiveActors();
+		DestroyAmmoBarrels();
 		GS->ServerSetRoundState(EPFRoundState::None, 0.f);
 		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this,
 			&APaintForgeGameMode::FinalizeVotePhase, VotePhaseDuration, false);
@@ -961,6 +964,26 @@ void APaintForgeGameMode::HostReturnToLobby()
 		return;
 	}
 	SetPhase(EPFMatchPhase::Lobby);
+}
+
+void APaintForgeGameMode::HostForceReturnToLobby()
+{
+	// Mid-match quit-to-menu (host): tear down combat toys and jump straight to Lobby.
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase == EPFMatchPhase::Lobby)
+	{
+		return;
+	}
+	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
+	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
+	GetWorldTimerManager().ClearTimer(LobbyCountdownHandle);
+	GetWorldTimerManager().ClearTimer(ObjectiveScoreTimerHandle);
+	GetWorldTimerManager().ClearTimer(HardpointRotateTimerHandle);
+	DestroyObjectiveActors();
+	DestroyAmmoBarrels();
+	RemoveAllBots();
+	SetPhase(EPFMatchPhase::Lobby);
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: host force-returned to Lobby (quit to menu)"));
 }
 
 void APaintForgeGameMode::HostSetFormat(uint8 NewTeamSize)
@@ -1401,6 +1424,9 @@ void APaintForgeGameMode::BeginLiveRound()
 	{
 		return;
 	}
+
+	// Fresh ammo stations each Live (4 random field spots).
+	SpawnAmmoBarrels();
 
 	if (GS->MatchType == EPFMatchType::Skirmish)
 	{
@@ -1849,6 +1875,85 @@ void APaintForgeGameMode::DestroyObjectiveActors()
 		}
 	}
 	ControlPoints.Reset();
+}
+
+void APaintForgeGameMode::SpawnAmmoBarrels()
+{
+	if (!HasAuthority() || !ArenaShell)
+	{
+		return;
+	}
+	DestroyAmmoBarrels();
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = this;
+
+	// Four well-separated random field spots (re-roll if too close).
+	TArray<FVector> Spots;
+	const int32 Wanted = 4;
+	for (int32 Attempt = 0; Attempt < 40 && Spots.Num() < Wanted; ++Attempt)
+	{
+		const FTransform T = ArenaShell->GetRandomFieldSpawnTransform(
+			0xBEEF + Attempt * 17 + Spots.Num() * 91
+			+ static_cast<int32>(World->GetTimeSeconds() * 10.f));
+		const FVector Loc = T.GetLocation();
+		bool bFar = true;
+		for (const FVector& Existing : Spots)
+		{
+			if (FVector::DistSquared(Existing, Loc) < FMath::Square(900.f))
+			{
+				bFar = false;
+				break;
+			}
+		}
+		if (bFar)
+		{
+			Spots.Add(Loc);
+		}
+	}
+	// Fallback fill if random clustering failed.
+	while (Spots.Num() < Wanted)
+	{
+		const float Fx = 6400.f, Fy = 4000.f;
+		const FVector Corners[4] = {
+			FVector(Fx * 0.25f, Fy * 0.25f, 100.f),
+			FVector(Fx * 0.75f, Fy * 0.25f, 100.f),
+			FVector(Fx * 0.25f, Fy * 0.75f, 100.f),
+			FVector(Fx * 0.75f, Fy * 0.75f, 100.f),
+		};
+		Spots.Add(Corners[Spots.Num() % 4]);
+	}
+
+	for (int32 i = 0; i < Wanted; ++i)
+	{
+		APFAmmoBarrel* Barrel = World->SpawnActor<APFAmmoBarrel>(
+			APFAmmoBarrel::StaticClass(), Spots[i], FRotator::ZeroRotator, Params);
+		if (Barrel)
+		{
+			Barrel->ServerActivateAt(Spots[i]);
+			AmmoBarrels.Add(Barrel);
+		}
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: spawned %d ammo barrels"), AmmoBarrels.Num());
+}
+
+void APaintForgeGameMode::DestroyAmmoBarrels()
+{
+	for (APFAmmoBarrel* B : AmmoBarrels)
+	{
+		if (B)
+		{
+			B->Destroy();
+		}
+	}
+	AmmoBarrels.Reset();
 }
 
 void APaintForgeGameMode::ClearAllFlagCarriers()

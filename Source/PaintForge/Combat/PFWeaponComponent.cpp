@@ -40,6 +40,7 @@ void UPFWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME_CONDITION(UPFWeaponComponent, HopperCount, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(UPFWeaponComponent, ReserveAmmo, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(UPFWeaponComponent, bReloading, COND_OwnerOnly);
 }
 
@@ -47,13 +48,14 @@ void UPFWeaponComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Local loadout marker preset (rate + hopper) before first fill.
+	// Local loadout marker preset (rate; mag size stays 30 / total 150).
 	FPFUserPrefs::ApplyMarkerPresetToWeapon(this);
 
-	// Keep the live count honest against a data-only-BP-tuned capacity (§4.1 tunables).
+	// Start with a full mag + full reserve on authority (clients get COND_OwnerOnly rep).
 	if (GetOwnerRole() == ROLE_Authority)
 	{
 		HopperCount = HopperCapacity;
+		ReserveAmmo = MaxReserveAmmo;
 		OnHopperChangedEvent.Broadcast(HopperCount);
 	}
 }
@@ -82,7 +84,8 @@ void UPFWeaponComponent::StartReload()
 	{
 		return;
 	}
-	if (bReloading || HopperCount >= HopperCapacity)
+	// Need room in the mag AND spare balls to load.
+	if (bReloading || HopperCount >= HopperCapacity || ReserveAmmo <= 0)
 	{
 		return;
 	}
@@ -485,7 +488,7 @@ void UPFWeaponComponent::ClientHitConfirm_Implementation(uint32 ShotIndex, bool 
 void UPFWeaponComponent::ServerStartReload_Implementation()
 {
 	const APaintForgeCharacter* Char = GetPFCharacter();
-	if (Char == nullptr || bReloading || HopperCount >= HopperCapacity)
+	if (Char == nullptr || bReloading || HopperCount >= HopperCapacity || ReserveAmmo <= 0)
 	{
 		return;
 	}
@@ -509,7 +512,7 @@ void UPFWeaponComponent::ServerStartReload_Implementation()
 
 void UPFWeaponComponent::BeginReload(double Now)
 {
-	if (bReloading || HopperCount >= HopperCapacity)
+	if (bReloading || HopperCount >= HopperCapacity || ReserveAmmo <= 0)
 	{
 		return;
 	}
@@ -536,7 +539,14 @@ void UPFWeaponComponent::BeginReload(double Now)
 
 void UPFWeaponComponent::FinishReload()
 {
-	HopperCount = HopperCapacity;
+	// Pull from reserve into the magazine (no infinite pods).
+	const int32 Room = static_cast<int32>(HopperCapacity) - static_cast<int32>(HopperCount);
+	const int32 Take = FMath::Clamp(Room, 0, ReserveAmmo);
+	if (Take > 0)
+	{
+		HopperCount = static_cast<uint8>(HopperCount + Take);
+		ReserveAmmo -= Take;
+	}
 	bReloading = false;
 	OnHopperChangedEvent.Broadcast(HopperCount);
 	OnReloadStateChangedEvent.Broadcast(false);
@@ -675,9 +685,34 @@ void UPFWeaponComponent::OnRep_Hopper()
 	OnHopperChangedEvent.Broadcast(HopperCount);
 }
 
+void UPFWeaponComponent::OnRep_Reserve()
+{
+	// Reuse hopper event so the combat HUD refreshes mag+reserve display.
+	OnHopperChangedEvent.Broadcast(HopperCount);
+}
+
 void UPFWeaponComponent::OnRep_Reload()
 {
 	OnReloadStateChangedEvent.Broadcast(bReloading);
+}
+
+bool UPFWeaponComponent::ServerRefillFromPickup()
+{
+	APaintForgeCharacter* Char = GetPFCharacter();
+	if (Char == nullptr || !Char->HasAuthority())
+	{
+		return false;
+	}
+	const bool bMagNeed = HopperCount < HopperCapacity;
+	const bool bResNeed = ReserveAmmo < MaxReserveAmmo;
+	if (!bMagNeed && !bResNeed)
+	{
+		return false;
+	}
+	HopperCount = HopperCapacity;
+	ReserveAmmo = MaxReserveAmmo;
+	OnHopperChangedEvent.Broadcast(HopperCount);
+	return true;
 }
 
 APaintForgeCharacter* UPFWeaponComponent::GetPFCharacter() const

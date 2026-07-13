@@ -12,6 +12,7 @@
 #include "Combat/PFWeaponComponent.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFCombatAudio.h"
+#include "Combat/PFAmmoBarrel.h"
 #include "Building/PFBuildComponent.h"
 #include "Core/PFUserPrefs.h"
 
@@ -28,6 +29,7 @@
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputActionValue.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -479,6 +481,10 @@ void APaintForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	EIC->BindAction(Cfg->IA_ADS, ETriggerEvent::Started, this, &APaintForgeCharacter::OnADSPressed);
 	EIC->BindAction(Cfg->IA_ADS, ETriggerEvent::Completed, this, &APaintForgeCharacter::OnADSReleased);
 	EIC->BindAction(Cfg->IA_Reload, ETriggerEvent::Started, this, &APaintForgeCharacter::OnReloadPressed);
+	if (Cfg->IA_Interact)
+	{
+		EIC->BindAction(Cfg->IA_Interact, ETriggerEvent::Started, this, &APaintForgeCharacter::OnInteractPressed);
+	}
 
 	// pkg-building owns every IMC_Build action (§3.3 / §3.5).
 	if (BuildComponent != nullptr)
@@ -613,6 +619,41 @@ void APaintForgeCharacter::OnReloadPressed()
 	if (WeaponComponent != nullptr)
 	{
 		WeaponComponent->StartReload();
+	}
+}
+
+void APaintForgeCharacter::OnInteractPressed()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	// Nearest available ammo barrel in interact range.
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	APFAmmoBarrel* Best = nullptr;
+	float BestDistSq = FMath::Square(220.f);
+	const FVector Me = GetActorLocation();
+	for (TActorIterator<APFAmmoBarrel> It(World); It; ++It)
+	{
+		APFAmmoBarrel* Barrel = *It;
+		if (!Barrel || !Barrel->IsAvailable())
+		{
+			continue;
+		}
+		const float D = FVector::DistSquared(Me, Barrel->GetActorLocation());
+		if (D <= BestDistSq)
+		{
+			BestDistSq = D;
+			Best = Barrel;
+		}
+	}
+	if (Best)
+	{
+		Best->LocalRequestInteract();
 	}
 }
 
@@ -969,6 +1010,12 @@ FName APaintForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponent
 	{
 		const FString Bone = Body->GetBoneName(i).ToString();
 		const FString Lower = Bone.ToLower();
+		// Never attach to head / neck / spine — looks like "gun on head".
+		if (Lower.Contains(TEXT("head")) || Lower.Contains(TEXT("neck"))
+			|| Lower.Contains(TEXT("spine")) || Lower.Contains(TEXT("clavicle")))
+		{
+			continue;
+		}
 		if ((Lower.Contains(TEXT("hand")) && (Lower.Contains(TEXT("_r")) || Lower.EndsWith(TEXT("r"))
 				|| Lower.Contains(TEXT("right"))))
 			|| Lower.Contains(TEXT("weapon")))
@@ -1228,16 +1275,10 @@ void APaintForgeCharacter::UpdateWeaponHoldPose()
 	{
 		return;
 	}
-	// Critical: always choose every frame — raise while shooting, hand when idle
-	// (previous "edge only" return-to-hand left the gun stuck at the shoulder).
-	if (ShouldRaiseWeapon())
-	{
-		ApplyRaisedWeaponPose();
-	}
-	else
-	{
-		ApplyHandWeaponPose();
-	}
+	// Always keep the TP gun on the hand bone. The old "raise to eye" path parented the
+	// mesh to the capsule root at eye height — remotes saw every gun sitting on the head
+	// and auth balls spawned from that tip. FP viewmodel (camera) stays separate for the owner.
+	ApplyHandWeaponPose();
 }
 
 void APaintForgeCharacter::ApplyArtLoadout()
@@ -1362,7 +1403,7 @@ void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 
 FVector APaintForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 {
-	// Owning-client cosmetic tracers: from the FP barrel tip (viewmodel space), not under the camera.
+	// Owning-client cosmetic tracers: FP barrel tip (viewmodel on camera — correct FPS height).
 	if (bCosmetic && ViewModelRoot != nullptr && !MuzzleLocalFP.IsNearlyZero())
 	{
 		return ViewModelRoot->GetComponentTransform().TransformPosition(MuzzleLocalFP);
@@ -1372,21 +1413,20 @@ FVector APaintForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 		return FirstPersonCamera->GetComponentLocation() + FirstPersonCamera->GetForwardVector() * 55.f;
 	}
 
-	// Authoritative / remote: when the TP gun is raised onto the aim line (parent = capsule root),
-	// spawn from the barrel tip. When it's still hand-carried at the hip, use eye-line — never
-	// the hip tip (balls looking like they come off the dirt).
+	// Authoritative / remote: spawn from the TP rifle barrel when it's seated on the body.
 	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr && bUsingArtBody
 		&& !WeaponMeshComp->bHiddenInGame
-		&& WeaponMeshComp->GetAttachParent() == GetRootComponent())
+		&& WeaponMeshComp->GetAttachParent() == GetMesh())
 	{
 		return WeaponMeshComp->GetComponentTransform().TransformPosition(RifleMuzzleLocalTP);
 	}
 
-	// Eye-line fallback (hip-carry or no art body) — never use the hand-gun tip at the hip.
+	// Fallback: slightly forward of the eye (no art body / hidden gun).
 	const FRotationMatrix AimBasis(GetBaseAimRotation());
 	return GetEyeWorldLocation()
-		+ AimBasis.GetUnitAxis(EAxis::X) * 65.f
-		+ AimBasis.GetUnitAxis(EAxis::Y) * 10.f;
+		+ AimBasis.GetUnitAxis(EAxis::X) * 55.f
+		+ AimBasis.GetUnitAxis(EAxis::Y) * 12.f
+		+ AimBasis.GetUnitAxis(EAxis::Z) * (-8.f);
 }
 
 // ---------------------------------------------------------------------------

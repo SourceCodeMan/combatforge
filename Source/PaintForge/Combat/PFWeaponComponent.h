@@ -54,7 +54,10 @@ public:
 		// ONLY source of hitmarkers (B3). Broadcasts OnHitConfirmedEvent.
 
 	// ---- Replicated (owner-only correction of predicted values) ----
-	UPROPERTY(ReplicatedUsing=OnRep_Hopper) uint8 HopperCount = 100;   // COND_OwnerOnly
+	/** Balls in the current magazine (0..HopperCapacity). */
+	UPROPERTY(ReplicatedUsing=OnRep_Hopper) uint8 HopperCount = 30;   // COND_OwnerOnly
+	/** Spare balls carried (not in mag). Mag + reserve ≤ MaxTotalAmmo. */
+	UPROPERTY(ReplicatedUsing=OnRep_Reserve) int32 ReserveAmmo = 120; // COND_OwnerOnly
 	UPROPERTY(ReplicatedUsing=OnRep_Reload) bool  bReloading  = false; // COND_OwnerOnly
 
 	// ---- Cross-package reads ----
@@ -63,14 +66,26 @@ public:
 	static FRandomStream MakeShotStream(int32 PlayerId, uint32 ShotIndex);
 		// seed = (int32)HashCombine((uint32)PlayerId, ShotIndex); PlayerId = PlayerState::GetPlayerId()
 
+	/** Total balls currently held (mag + reserve). */
+	int32 GetTotalAmmo() const { return static_cast<int32>(HopperCount) + ReserveAmmo; }
+
+	/**
+	 * Authority: top up mag to capacity and refill reserve to MaxReserveAmmo
+	 * (ammo barrel pickup). Returns true if anything was granted.
+	 */
+	bool ServerRefillFromPickup();
+
 	// ---- UI subscription points ----
 	FPFOnHitConfirmed       OnHitConfirmedEvent;
 	FPFOnHopperChanged      OnHopperChangedEvent;
 	FPFOnReloadStateChanged OnReloadStateChangedEvent;
 
-	// ---- Config (defaults per 04 / contract §4.3) ----
+	// ---- Config (defaults: 30-round mag, 150 total carry) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float FireRateBps = 12.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 HopperCapacity = 100;
+	/** Magazine size (default 30). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 HopperCapacity = 30;
+	/** Max spare balls outside the mag (default 120 → 150 total with full mag). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") int32 MaxReserveAmmo = 120;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ReloadTime = 1.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float MuzzleSpeedUU = 10000.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjGravityScale = 0.35f;
@@ -99,6 +114,7 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION() void OnRep_Hopper();
+	UFUNCTION() void OnRep_Reserve();
 	UFUNCTION() void OnRep_Reload();
 
 	// Intra RPC: server must learn about manual reloads (auto-reload triggers independently

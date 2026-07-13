@@ -452,9 +452,9 @@ const TCHAR* UPFLobbyWidget::MarkerPresetName(int32 Idx)
 {
 	switch (Idx)
 	{
-	case 1: return TEXT("  Rapid — 14 bps · 80 balls  ");
-	case 2: return TEXT("  Tournament — 10 bps · 140 balls  ");
-	default: return TEXT("  Standard — 12 bps · 100 balls  ");
+	case 1: return TEXT("  Rapid — 14 bps · 30-mag / 150 total  ");
+	case 2: return TEXT("  Tournament — 10 bps · 30-mag / 150 total  ");
+	default: return TEXT("  Standard — 12 bps · 30-mag / 150 total  ");
 	}
 }
 
@@ -483,11 +483,11 @@ void UPFLobbyWidget::RefreshLoadoutLabels()
 		FString Sum;
 		switch (WorkingMarkerPreset)
 		{
-		case 1: Sum = TEXT("Faster fire, smaller hopper — aggressive duel style."); break;
-		case 2: Sum = TEXT("Slower fire, huge hopper — control and volume."); break;
-		default: Sum = TEXT("Balanced marker — the default playtest setup."); break;
+		case 1: Sum = TEXT("Faster fire rate — same 30-round mag / 150 total ammo."); break;
+		case 2: Sum = TEXT("Slower controlled fire — same 30-round mag / 150 total ammo."); break;
+		default: Sum = TEXT("Balanced rate — 30-round mag, 150 total, refill at ammo barrels."); break;
 		}
-		Sum += TEXT("\nTeam paint color is set by your team, not loadout.");
+		Sum += TEXT("\nCrosshair style is local. Team paint color comes from your team.");
 		LoadoutSummaryText->SetText(FText::FromString(Sum));
 	}
 }
@@ -505,18 +505,20 @@ void UPFLobbyWidget::ApplyLoadoutPrefs()
 			if (UPFWeaponComponent* W = Char->GetWeapon())
 			{
 				FPFUserPrefs::ApplyMarkerPresetToWeapon(W);
-				// Top up hopper when applying in lobby so the new capacity is usable.
-				if (W->HopperCount < W->HopperCapacity)
+				// Host/authority: full mag+reserve so the new preset is immediately playable.
+				if (Char->HasAuthority())
 				{
 					W->HopperCount = W->HopperCapacity;
-					W->OnHopperChangedEvent.Broadcast(W->HopperCount);
+					W->ReserveAmmo = W->MaxReserveAmmo;
 				}
+				W->OnHopperChangedEvent.Broadcast(W->HopperCount);
 			}
 		}
 	}
 	if (LoadoutHintText)
 	{
-		LoadoutHintText->SetText(FText::FromString(TEXT("Saved. Marker & crosshair apply next match / immediately.")));
+		LoadoutHintText->SetText(FText::FromString(
+			TEXT("Saved. Fire rate + crosshair apply now; mag stays 30 / 150 total.")));
 	}
 }
 

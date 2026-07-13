@@ -232,22 +232,32 @@ void UPFVoteWidget::BuildTree()
 		}
 
 		SubmitButton = WidgetTree->ConstructWidget<UButton>();
-		SubmitButton->SetBackgroundColor(FLinearColor(0.12f, 0.35f, 0.75f));
+		SubmitButton->SetBackgroundColor(FLinearColor(0.12f, 0.55f, 0.25f));
 		SubmitButton->OnClicked.AddUniqueDynamic(this, &UPFVoteWidget::HandleSubmitClicked);
 		UTextBlock* SubmitLabel = WidgetTree->ConstructWidget<UTextBlock>();
-		SubmitLabel->SetText(FText::FromString(TEXT("SUBMIT")));
-		SubmitLabel->SetFont(PFVoteFont(18, true));
+		SubmitLabel->SetText(FText::FromString(TEXT("  SUBMIT VOTE  ")));
+		SubmitLabel->SetFont(PFVoteFont(20, true));
 		SubmitLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		SubmitLabel->SetJustification(ETextJustify::Center);
 		SubmitButton->SetContent(SubmitLabel);
 		USizeBox* SubmitSizer = WidgetTree->ConstructWidget<USizeBox>();
-		SubmitSizer->SetWidthOverride(240.f);
-		SubmitSizer->SetHeightOverride(52.f);
+		SubmitSizer->SetWidthOverride(320.f);
+		SubmitSizer->SetHeightOverride(64.f);
 		SubmitSizer->SetContent(SubmitButton);
 		if (UVerticalBoxSlot* VSlot = Step2->AddChildToVerticalBox(SubmitSizer))
 		{
 			VSlot->SetHorizontalAlignment(HAlign_Center);
-			VSlot->SetPadding(FMargin(0.f, 8.f));
+			VSlot->SetPadding(FMargin(0.f, 16.f));
+		}
+
+		UTextBlock* SubmitHint = WidgetTree->ConstructWidget<UTextBlock>();
+		SubmitHint->SetText(FText::FromString(TEXT("Chips optional — hit SUBMIT when ready")));
+		SubmitHint->SetFont(PFVoteFont(13, false));
+		SubmitHint->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.78f, 0.85f)));
+		SubmitHint->SetJustification(ETextJustify::Center);
+		if (UVerticalBoxSlot* VSlot = Step2->AddChildToVerticalBox(SubmitHint))
+		{
+			VSlot->SetHorizontalAlignment(HAlign_Center);
 		}
 	}
 	StepSwitcher->AddChild(Step2);
@@ -316,7 +326,12 @@ void UPFVoteWidget::HandleThumbUpClicked()
 	Thumb = EPFThumbVote::Up;
 	if (StepSwitcher)
 	{
-		StepSwitcher->SetActiveWidgetIndex(1); // advances instantly (01 §4.2)
+		StepSwitcher->SetActiveWidgetIndex(1);
+	}
+	if (StatusText)
+	{
+		StatusText->SetText(FText::FromString(TEXT("Optional: tag what stood out, then SUBMIT")));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.5f)));
 	}
 }
 
@@ -330,6 +345,11 @@ void UPFVoteWidget::HandleThumbDownClicked()
 	if (StepSwitcher)
 	{
 		StepSwitcher->SetActiveWidgetIndex(1);
+	}
+	if (StatusText)
+	{
+		StatusText->SetText(FText::FromString(TEXT("Optional: tag what stood out, then SUBMIT")));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.5f)));
 	}
 }
 
@@ -437,6 +457,10 @@ void UPFVoteWidget::SubmitVote()
 	{
 		PC->ServerSubmitVote(Thumb, LikedIds, DislikedIds);
 	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("VoteWidget: no PC — vote RPC not sent"));
+	}
 
 	auto Disable = [](UButton* Btn) { if (Btn) { Btn->SetIsEnabled(false); } };
 	Disable(ThumbUpButton);
@@ -448,7 +472,15 @@ void UPFVoteWidget::SubmitVote()
 	}
 	if (StatusText)
 	{
-		StatusText->SetText(FText::FromString(TEXT("Vote submitted")));
+		StatusText->SetText(FText::FromString(TEXT("VOTE LOCKED IN — waiting for others…")));
+		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.25f, 0.95f, 0.4f)));
+	}
+	if (SubmitButton)
+	{
+		if (UTextBlock* L = Cast<UTextBlock>(SubmitButton->GetContent()))
+		{
+			L->SetText(FText::FromString(TEXT("  SUBMITTED  ")));
+		}
 	}
 }
 

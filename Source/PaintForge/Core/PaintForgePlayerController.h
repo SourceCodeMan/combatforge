@@ -35,6 +35,8 @@ public:
 	UFUNCTION(Server, Reliable) void ServerHostForceStart();      // ignored if not host
 	UFUNCTION(Server, Reliable) void ServerHostCycleTeam(APaintForgePlayerState* Target);
 	UFUNCTION(Server, Reliable) void ServerHostReturnToLobby();
+	/** Mid-match quit-to-menu (host only). Clients should disconnect instead. */
+	UFUNCTION(Server, Reliable) void ServerHostForceReturnToLobby();
 	UFUNCTION(Server, Reliable) void ServerHostSetFormat(uint8 TeamSize);   // Lobby only: 4v4 / 6v6
 	UFUNCTION(Server, Reliable) void ServerHostSetFillWithBots(bool bFill); // Lobby only: fill roster with bots
 	UFUNCTION(Server, Reliable) void ServerHostSetBuildMode(uint8 Mode);    // Lobby only: 0=Creative 1=Improvement 2=PlayOnly
@@ -75,6 +77,14 @@ public:
 	/** Open / close / toggle video-audio-controls options (local only). */
 	void ToggleOptionsMenu();
 	bool IsOptionsMenuOpen() const;
+
+	/** Quit entire process (main menu). */
+	void QuitToDesktop();
+	/**
+	 * Leave the match: host force-returns everyone to Lobby; remote clients disconnect.
+	 * Safe from options / lobby.
+	 */
+	void QuitToMenu();
 
 protected:
 	// ---- Engine overrides ----

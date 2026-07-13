@@ -584,6 +584,21 @@ void UPFLoadingMenuWidget::BuildTree()
 		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 	}
 
+	QuitDesktopButton = WidgetTree->ConstructWidget<UButton>();
+	QuitDesktopButton->SetBackgroundColor(FLinearColor(0.25f, 0.08f, 0.08f, 0.95f));
+	QuitDesktopButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuitDesktopClicked);
+	QuitDesktopLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	QuitDesktopLabel->SetText(FText::FromString(TEXT("QUIT TO DESKTOP")));
+	QuitDesktopLabel->SetFont(PFLoadFont(14, true));
+	QuitDesktopLabel->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.85f)));
+	QuitDesktopLabel->SetJustification(ETextJustify::Center);
+	QuitDesktopButton->AddChild(QuitDesktopLabel);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(QuitDesktopButton))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+	}
+
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Col))
 	{
 		S->SetAnchors(FAnchors(0.5f, 0.5f));
@@ -1193,4 +1208,18 @@ void UPFLoadingMenuWidget::OnEnterClicked()
 		TEXT("LoadingMenu: dismissed — entering lobby (Mode=%s Type=%s Format=%s Bots=%s)"),
 		*BuildModeLabel(SelectedBuildMode), *MatchTypeLabel(SelectedMatchType),
 		*FormatLabel(SelectedTeamSize), bSelectedFillBots ? TEXT("on") : TEXT("off"));
+}
+
+void UPFLoadingMenuWidget::OnQuitDesktopClicked()
+{
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->QuitToDesktop();
+		return;
+	}
+	// Fallback if no PC yet (very early boot).
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		PC->ConsoleCommand(TEXT("quit"));
+	}
 }

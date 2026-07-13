@@ -81,6 +81,7 @@ private:
 	bool NeedsCommunityMap() const;
 
 	UFUNCTION() void OnEnterClicked();
+	UFUNCTION() void OnQuitDesktopClicked();
 	UFUNCTION() void OnModeClicked();
 	UFUNCTION() void OnTypeClicked();
 	UFUNCTION() void OnFormatClicked();
@@ -104,6 +105,8 @@ private:
 	UPROPERTY() TObjectPtr<UProgressBar> ProgressBar;
 	UPROPERTY() TObjectPtr<UButton> EnterButton;
 	UPROPERTY() TObjectPtr<UTextBlock> EnterLabel;
+	UPROPERTY() TObjectPtr<UButton> QuitDesktopButton;
+	UPROPERTY() TObjectPtr<UTextBlock> QuitDesktopLabel;
 
 	// Top-level menu tabs: 0 = Match Setup, 1 = How to Play
 	UPROPERTY() TObjectPtr<UButton> TabSetup;

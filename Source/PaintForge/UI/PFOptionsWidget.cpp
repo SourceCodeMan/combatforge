@@ -141,8 +141,12 @@ void UPFOptionsWidget::BuildTree()
 	UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>();
 	ApplyButton = MakeTabButton(TEXT("  APPLY  "), TEXT("ApplyBtn"));
 	BackButton = MakeTabButton(TEXT("  BACK  "), TEXT("BackBtn"));
+	QuitMenuButton = MakeTabButton(TEXT("  QUIT TO MENU  "), TEXT("QuitMenuBtn"));
+	QuitDesktopButton = MakeTabButton(TEXT("  QUIT TO DESKTOP  "), TEXT("QuitDeskBtn"));
 	ApplyButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnApplyClicked);
 	BackButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnBackClicked);
+	QuitMenuButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnQuitToMenuClicked);
+	QuitDesktopButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnQuitToDesktopClicked);
 	if (UHorizontalBoxSlot* H = Footer->AddChildToHorizontalBox(ApplyButton))
 	{
 		H->SetPadding(FMargin(6.f));
@@ -151,12 +155,20 @@ void UPFOptionsWidget::BuildTree()
 	{
 		H->SetPadding(FMargin(6.f));
 	}
+	if (UHorizontalBoxSlot* H = Footer->AddChildToHorizontalBox(QuitMenuButton))
+	{
+		H->SetPadding(FMargin(6.f));
+	}
+	if (UHorizontalBoxSlot* H = Footer->AddChildToHorizontalBox(QuitDesktopButton))
+	{
+		H->SetPadding(FMargin(6.f));
+	}
 	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(Footer))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
 	}
 
-	HintText = MakeLabel(WidgetTree, TEXT("Esc closes · Apply saves to disk"), 12, false);
+	HintText = MakeLabel(WidgetTree, TEXT("Esc closes · Apply saves · Quit to Menu leaves the match"), 12, false);
 	HintText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
 	HintText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(HintText))
@@ -540,6 +552,22 @@ void UPFOptionsWidget::OnTabHowTo() { SelectTab(3); }
 void UPFOptionsWidget::OnBackClicked()
 {
 	Close();
+}
+
+void UPFOptionsWidget::OnQuitToMenuClicked()
+{
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->QuitToMenu();
+	}
+}
+
+void UPFOptionsWidget::OnQuitToDesktopClicked()
+{
+	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
+	{
+		PC->QuitToDesktop();
+	}
 }
 
 void UPFOptionsWidget::OnApplyClicked()

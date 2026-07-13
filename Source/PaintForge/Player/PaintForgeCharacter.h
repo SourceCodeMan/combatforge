@@ -88,6 +88,7 @@ protected:
 	void OnADSPressed();
 	void OnADSReleased();
 	void OnReloadPressed();
+	void OnInteractPressed();   // E — nearest ammo barrel
 
 	/** Sprint-out raise timer elapsed — release the buffered fire (04 §1.1). */
 	void OnSprintOutFinished();
@@ -195,13 +196,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
-	// Grip in hand bone space (SM_Rifle / olive: local +Y barrel-forward). Tuned for hand_r readability.
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(-3.f, 6.f, 1.5f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(-5.f, 88.f, 8.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(0.88f);
-	// Fallback when the mesh has no hand bone: low "hip-carry" in mesh space (never mesh origin).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(12.f, 28.f, 55.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(10.f, 90.f, -15.f);
+	// Grip in hand bone space (SM_Rifle / olive: local +Y barrel-forward). Tuned for hand_r.
+	// Keep modest so Quantum/Survival hands don't shove the mesh into the skull.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(-2.f, 8.f, -2.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(0.f, 90.f, 0.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(0.85f);
+	// Fallback when the mesh has no hand bone: hip-carry in mesh space (low — not chest/head).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(18.f, 22.f, 28.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(5.f, 90.f, -10.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
 	// Optional single-slot overrides (mannequin only). Human models keep authored multi-slot mats.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> Team0BodyMaterial = nullptr;

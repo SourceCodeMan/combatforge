@@ -1121,3 +1121,15 @@ FTransform APFArenaShell::GetWarmupDummyTransform(int32 SlotIdx) const
 	const float Y = PenCenterY + PenHalf - 300.f;   // north line, facing the players
 	return FTransform(FRotator(0.f, -90.f, 0.f), FVector(X, Y, 90.f));   // dummy body r≈40 h≈180
 }
+
+FTransform APFArenaShell::GetRandomFieldSpawnTransform(int32 Salt) const
+{
+	// Deterministic-ish per salt so the same restart doesn't always land the same point when
+	// callers re-use a stable salt; add time variance via Salt from GameMode.
+	FRandomStream Rng(0xA77E0000u ^ static_cast<uint32>(Salt) ^ static_cast<uint32>(Salt * 2654435761u));
+	const float Margin = 500.f;   // keep clear of perimeter walls / dock dressing
+	const float X = Rng.FRandRange(Margin, FieldX - Margin);
+	const float Y = Rng.FRandRange(Margin, FieldY - Margin);
+	const float Yaw = Rng.FRandRange(0.f, 360.f);
+	return FTransform(FRotator(0.f, Yaw, 0.f), FVector(X, Y, SpawnZ));
+}

@@ -11,7 +11,7 @@
 struct PAINTFORGE_API FPFUserPrefs
 {
 	// ---- Loadout ----
-	/** 0=Standard 12bps/100, 1=Rapid 14bps/80, 2=Tournament 10bps/140 */
+	/** 0=Standard 12bps, 1=Rapid 14bps, 2=Tournament 10bps (always 30-mag / 150 total). */
 	static int32 GetMarkerPreset();
 	static void SetMarkerPreset(int32 Preset);
 

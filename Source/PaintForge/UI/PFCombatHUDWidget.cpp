@@ -78,7 +78,7 @@ void UPFCombatHUDWidget::BuildTree()
 
 	// ---- Hopper + reload — bottom right ----
 	HopperText = WidgetTree->ConstructWidget<UTextBlock>();
-	HopperText->SetText(FText::FromString(TEXT("100 / ∞")));
+	HopperText->SetText(FText::FromString(TEXT("30 | 120")));
 	HopperText->SetFont(PFCombatFont(22, true));
 	HopperText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	HopperText->SetJustification(ETextJustify::Right);
@@ -564,10 +564,18 @@ void UPFCombatHUDWidget::HandleRoundStateChanged(EPFRoundState NewState)
 
 void UPFCombatHUDWidget::HandleHopperChanged(int32 NewCount)
 {
-	if (HopperText)
+	if (!HopperText)
 	{
-		HopperText->SetText(FText::FromString(FString::Printf(TEXT("%d / ∞"), NewCount)));
+		return;
 	}
+	int32 Reserve = 0;
+	if (const UPFWeaponComponent* W = BoundWeapon.Get())
+	{
+		Reserve = W->ReserveAmmo;
+		NewCount = W->HopperCount;
+	}
+	// Mag | reserve (e.g. "30 | 120")
+	HopperText->SetText(FText::FromString(FString::Printf(TEXT("%d | %d"), NewCount, Reserve)));
 }
 
 void UPFCombatHUDWidget::HandleReloadStateChanged(bool bNowReloading)

@@ -657,6 +657,49 @@ void APaintForgePlayerController::ServerHostReturnToLobby_Implementation()
 	}
 }
 
+void APaintForgePlayerController::ServerHostForceReturnToLobby_Implementation()
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (APaintForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APaintForgeGameMode>() : nullptr)
+	{
+		GM->HostForceReturnToLobby();
+	}
+}
+
+void APaintForgePlayerController::QuitToDesktop()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+	// Hard quit — used from the boot loading menu.
+	ConsoleCommand(TEXT("quit"));
+}
+
+void APaintForgePlayerController::QuitToMenu()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+	// Close options first so input mode is clean.
+	if (IsOptionsMenuOpen())
+	{
+		ToggleOptionsMenu();
+	}
+	if (IsHostController())
+	{
+		// Listen host: soft-reset match to Lobby without killing the process.
+		ServerHostForceReturnToLobby();
+		return;
+	}
+	// Remote client / standalone guest: leave the session.
+	ConsoleCommand(TEXT("disconnect"));
+}
+
 void APaintForgePlayerController::ServerHostSetFormat_Implementation(uint8 TeamSize)
 {
 	if (!IsHostController())

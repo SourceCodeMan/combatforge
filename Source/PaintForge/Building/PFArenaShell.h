@@ -53,6 +53,8 @@ public:
 	FTransform GetBuildStartTransform(uint8 Team, int32 SlotIdx) const;      // own-plot placement at Build start
 	FTransform GetWarmupSpawnTransform(int32 SlotIdx) const;                 // pen player spawns
 	FTransform GetWarmupDummyTransform(int32 SlotIdx) const;                 // pen dummy slots (T29)
+	/** FFA combat: random point on the play field (margin from walls). Salt diversifies picks. */
+	FTransform GetRandomFieldSpawnTransform(int32 Salt) const;
 
 protected:
 	virtual void BeginPlay() override;

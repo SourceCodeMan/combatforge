@@ -39,6 +39,8 @@ protected:
 	UFUNCTION() void OnTabHowTo();
 	UFUNCTION() void OnApplyClicked();
 	UFUNCTION() void OnBackClicked();
+	UFUNCTION() void OnQuitToMenuClicked();
+	UFUNCTION() void OnQuitToDesktopClicked();
 	UFUNCTION() void OnQualityClicked();
 	UFUNCTION() void OnWindowModeClicked();
 	UFUNCTION() void OnResolutionClicked();
@@ -83,6 +85,8 @@ private:
 	UPROPERTY() TObjectPtr<UButton> TabHowTo;
 	UPROPERTY() TObjectPtr<UButton> ApplyButton;
 	UPROPERTY() TObjectPtr<UButton> BackButton;
+	UPROPERTY() TObjectPtr<UButton> QuitMenuButton;
+	UPROPERTY() TObjectPtr<UButton> QuitDesktopButton;
 	UPROPERTY() TObjectPtr<UButton> QualityButton;
 	UPROPERTY() TObjectPtr<UTextBlock> QualityValueText;
 	UPROPERTY() TObjectPtr<UButton> WindowModeButton;

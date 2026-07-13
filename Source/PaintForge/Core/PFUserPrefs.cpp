@@ -127,24 +127,27 @@ void FPFUserPrefs::ApplyMarkerPresetToWeapon(UPFWeaponComponent* Weapon)
 	{
 		return;
 	}
+	// Mag is always 30 / total carry 150 — presets only change rate of fire (airsoft feel).
+	Weapon->HopperCapacity = 30;
+	Weapon->MaxReserveAmmo = 120;
 	switch (GetMarkerPreset())
 	{
 	case 1: // Rapid
 		Weapon->FireRateBps = 14.f;
-		Weapon->HopperCapacity = 80;
 		break;
-	case 2: // Tournament
+	case 2: // Tournament (controlled cadence)
 		Weapon->FireRateBps = 10.f;
-		Weapon->HopperCapacity = 140;
 		break;
 	default: // Standard
 		Weapon->FireRateBps = 12.f;
-		Weapon->HopperCapacity = 100;
 		break;
 	}
-	// Cap live hopper to new capacity (don't expand mid-round for free).
 	if (Weapon->HopperCount > Weapon->HopperCapacity)
 	{
 		Weapon->HopperCount = Weapon->HopperCapacity;
+	}
+	if (Weapon->ReserveAmmo > Weapon->MaxReserveAmmo)
+	{
+		Weapon->ReserveAmmo = Weapon->MaxReserveAmmo;
 	}
 }

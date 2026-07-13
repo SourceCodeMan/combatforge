@@ -76,6 +76,7 @@ void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 	IA_Fire        = MakeAction(Outer, TEXT("IA_Fire"),        EInputActionValueType::Boolean);
 	IA_ADS         = MakeAction(Outer, TEXT("IA_ADS"),         EInputActionValueType::Boolean);
 	IA_Reload      = MakeAction(Outer, TEXT("IA_Reload"),      EInputActionValueType::Boolean);
+	IA_Interact    = MakeAction(Outer, TEXT("IA_Interact"),    EInputActionValueType::Boolean);
 
 	IA_Place       = MakeAction(Outer, TEXT("IA_Place"),       EInputActionValueType::Boolean);
 	IA_DeleteTool  = MakeAction(Outer, TEXT("IA_DeleteTool"),  EInputActionValueType::Boolean);
@@ -149,9 +150,10 @@ void UPFInputConfig::Build(APaintForgePlayerController* OuterPC)
 	// ================= IMC_Combat =================
 
 	// No InputTriggerPulse on Fire — the weapon runs its own 12 bps gate (§3.3).
-	IMC_Combat->MapKey(IA_Fire,   EKeys::LeftMouseButton);
-	IMC_Combat->MapKey(IA_ADS,    EKeys::RightMouseButton);
-	IMC_Combat->MapKey(IA_Reload, EKeys::R); // T26: same key as RotatePiece, contexts never coexist
+	IMC_Combat->MapKey(IA_Fire,     EKeys::LeftMouseButton);
+	IMC_Combat->MapKey(IA_ADS,      EKeys::RightMouseButton);
+	IMC_Combat->MapKey(IA_Reload,   EKeys::R); // T26: same key as RotatePiece, contexts never coexist
+	IMC_Combat->MapKey(IA_Interact, EKeys::E); // ammo barrels
 
 	// ================= IMC_Build =================
 

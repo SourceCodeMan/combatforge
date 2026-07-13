@@ -52,6 +52,7 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Fire;        // LMB, hold (weapon runs its own 12 bps gate)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_ADS;         // RMB, hold
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Reload;      // R (T26)
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Interact;    // E — ammo barrels / future interact
 
 	// ---- Build (IMC_Build, priority 1) ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Place;       // LMB, hold (turbo in component)
