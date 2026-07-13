@@ -9,6 +9,7 @@
 #include "Dom/JsonValue.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "UnrealClient.h"   // FScreenshotRequest (screenshot-on-publish)
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -526,6 +527,16 @@ bool UPFRatingSubsystem::WriteRecordToDisk() const
 		UE_LOG(PaintForgeLog, Error,
 			TEXT("PFRatingSubsystem: failed to write match record file %s."), *CurrentFilePath);
 		return false;
+	}
+
+	// Screenshot-on-publish (#6): capture the arena WITHOUT HUD next to its JSON so the community-map picker
+	// can show a preview. Async (written a frame later); the arena is on screen during the post-match vote when
+	// this runs. No-ops on a headless/dedicated host (no viewport) — those maps just stay preview-less.
+	{
+		FString ShotPath = CurrentFilePath;
+		ShotPath.RemoveFromEnd(TEXT(".json"));
+		ShotPath += TEXT(".png");
+		FScreenshotRequest::RequestScreenshot(ShotPath, /*bInShowUI=*/false, /*bAddFilenameSuffix=*/false);
 	}
 
 	return true;

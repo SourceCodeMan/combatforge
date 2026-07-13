@@ -190,7 +190,8 @@ void UPFLobbyWidget::BuildTree()
 	}
 
 	BuildConfigPanel(RootCanvas);
-	BuildLoadoutOverlay(RootCanvas);   // added last -> drawn on top when shown
+	// Loadout overlay retired — the setter now lives on the main-menu LOADOUT tab (reads/writes the same
+	// FPFUserPrefs, applied on spawn). BuildLoadoutOverlay + its handlers remain but are no longer built/reached.
 }
 
 UButton* UPFLobbyWidget::MakeConfigButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText)
@@ -283,17 +284,7 @@ void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 	AddReadOnlyRow(Box, TEXT("BOTS"), BotsValueText);
 	AddReadOnlyRow(Box, TEXT("MAP"), MapValueText);
 
-	UButton* LoadoutBtn = WidgetTree->ConstructWidget<UButton>();
-	LoadoutBtn->SetBackgroundColor(FLinearColor(0.14f, 0.12f, 0.05f, 0.9f));
-	LoadoutBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnLoadoutClicked);
-	UTextBlock* LoadoutLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	LoadoutLabel->SetText(FText::FromString(TEXT("LOADOUT")));
-	LoadoutLabel->SetFont(PFLobbyFont(14, true));
-	LoadoutLabel->SetJustification(ETextJustify::Center);
-	LoadoutLabel->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.9f, 0.5f)));
-	LoadoutBtn->SetContent(LoadoutLabel);
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(LoadoutBtn)) { VS->SetPadding(FMargin(0.f, 10.f, 0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
-
+	// LOADOUT moved to the main-menu (boot) screen's LOADOUT tab — no longer an in-match overlay.
 	UButton* OptionsBtn = WidgetTree->ConstructWidget<UButton>();
 	OptionsBtn->SetBackgroundColor(FLinearColor(0.08f, 0.12f, 0.16f, 0.9f));
 	OptionsBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnOptionsClicked);

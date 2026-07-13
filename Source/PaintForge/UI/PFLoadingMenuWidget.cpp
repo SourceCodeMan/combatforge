@@ -23,7 +23,10 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
+#include "Core/PFUserPrefs.h"
 #include "Engine/Texture2D.h"
+#include "ImageUtils.h"
+#include "Misc/Paths.h"
 #include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInterface.h"
 #include "Engine/SkeletalMesh.h"
@@ -304,6 +307,7 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 
 	MapSlotButtons.Reset();
 	MapSlotLabels.Reset();
+	MapSlotImages.Reset();
 	for (int32 i = 0; i < MapsPerPage; ++i)
 	{
 		UPFMapPickButton* Row = WidgetTree->ConstructWidget<UPFMapPickButton>(
@@ -311,14 +315,36 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 		Row->SetBackgroundColor(FLinearColor(0.10f, 0.11f, 0.14f, 0.95f));
 		Row->InitRow(this, i);
 
+		// A UButton holds ONE child, so pack [thumbnail | label] into a HorizontalBox.
+		UHorizontalBox* RowContent = WidgetTree->ConstructWidget<UHorizontalBox>();
+
+		UImage* Thumb = WidgetTree->ConstructWidget<UImage>();
+		Thumb->SetBrush(FSlateColorBrush(FLinearColor(0.15f, 0.16f, 0.20f, 1.f)));   // fallback until a PNG loads
+		USizeBox* ThumbBox = WidgetTree->ConstructWidget<USizeBox>();
+		ThumbBox->SetWidthOverride(80.f);
+		ThumbBox->SetHeightOverride(45.f);
+		ThumbBox->SetContent(Thumb);
+		if (UHorizontalBoxSlot* H = RowContent->AddChildToHorizontalBox(ThumbBox))
+		{
+			H->SetVerticalAlignment(VAlign_Center);
+			H->SetPadding(FMargin(4.f, 2.f));
+		}
+
 		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
 		Lab->SetFont(PFLoadFont(12, false));
 		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.91f, 0.94f)));
 		Lab->SetJustification(ETextJustify::Left);
-		Row->AddChild(Lab);
+		if (UHorizontalBoxSlot* H = RowContent->AddChildToHorizontalBox(Lab))
+		{
+			H->SetVerticalAlignment(VAlign_Center);
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+
+		Row->AddChild(RowContent);
 
 		MapSlotButtons.Add(Row);
 		MapSlotLabels.Add(Lab);
+		MapSlotImages.Add(Thumb);
 		if (UVerticalBoxSlot* V = MapPickerBox->AddChildToVerticalBox(Row))
 		{
 			V->SetPadding(FMargin(0.f, 2.f));
@@ -327,30 +353,175 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 	}
 }
 
+UTexture2D* UPFLoadingMenuWidget::GetMapPreview(const FString& JsonFileName)
+{
+	if (JsonFileName.IsEmpty())
+	{
+		return nullptr;
+	}
+	if (TObjectPtr<UTexture2D>* Cached = MapPreviewCache.Find(JsonFileName))
+	{
+		return Cached->Get();   // cached (possibly null = "tried, none on disk") — only load once per file
+	}
+	FString PngName = JsonFileName;
+	PngName.RemoveFromEnd(TEXT(".json"));
+	PngName += TEXT(".png");
+	const FString PngPath = FPaths::ProjectSavedDir() / TEXT("Arenas") / PngName;
+	UTexture2D* Tex = FPaths::FileExists(PngPath) ? FImageUtils::ImportFileAsTexture2D(PngPath) : nullptr;
+	MapPreviewCache.Add(JsonFileName, Tex);
+	return Tex;
+}
+
 void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 {
-	ActiveMenuTab = FMath::Clamp(Index, 0, 1);
+	ActiveMenuTab = FMath::Clamp(Index, 0, 2);
 	if (MenuSwitcher)
 	{
 		MenuSwitcher->SetActiveWidgetIndex(ActiveMenuTab);
 	}
 	// Highlight active tab with a brighter plate.
-	if (TabSetup)
-	{
-		TabSetup->SetBackgroundColor(ActiveMenuTab == 0
-			? FLinearColor(1.f, 0.92f, 0.35f, 0.95f)
-			: FLinearColor(0.14f, 0.15f, 0.18f, 0.95f));
-	}
-	if (TabHowTo)
-	{
-		TabHowTo->SetBackgroundColor(ActiveMenuTab == 1
-			? FLinearColor(1.f, 0.92f, 0.35f, 0.95f)
-			: FLinearColor(0.14f, 0.15f, 0.18f, 0.95f));
-	}
+	const FLinearColor Hot(1.f, 0.92f, 0.35f, 0.95f);
+	const FLinearColor Cold(0.14f, 0.15f, 0.18f, 0.95f);
+	if (TabSetup)   { TabSetup->SetBackgroundColor(ActiveMenuTab == 0 ? Hot : Cold); }
+	if (TabHowTo)   { TabHowTo->SetBackgroundColor(ActiveMenuTab == 1 ? Hot : Cold); }
+	if (TabLoadout) { TabLoadout->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
 }
 
 void UPFLoadingMenuWidget::OnTabSetup() { SelectMenuTab(0); }
 void UPFLoadingMenuWidget::OnTabHowTo() { SelectMenuTab(1); }
+void UPFLoadingMenuWidget::OnTabLoadout() { SelectMenuTab(2); }
+
+const TCHAR* UPFLoadingMenuWidget::MarkerPresetName(int32 Idx)
+{
+	switch (Idx)
+	{
+	case 1:  return TEXT("  Rapid — 14 bps · 30-mag / 150 total  ");
+	case 2:  return TEXT("  Tournament — 10 bps · 30-mag / 150 total  ");
+	default: return TEXT("  Standard — 12 bps · 30-mag / 150 total  ");
+	}
+}
+
+const TCHAR* UPFLoadingMenuWidget::CrosshairStyleName(int32 Idx)
+{
+	switch (Idx)
+	{
+	case 1:  return TEXT("  Dot only  ");
+	case 2:  return TEXT("  Cross only  ");
+	default: return TEXT("  Cross + dot  ");
+	}
+}
+
+void UPFLoadingMenuWidget::RefreshLoadoutLabels()
+{
+	if (LoadoutMarkerValueText)
+	{
+		LoadoutMarkerValueText->SetText(FText::FromString(MarkerPresetName(WorkingMarkerPreset)));
+	}
+	if (LoadoutCrosshairValueText)
+	{
+		LoadoutCrosshairValueText->SetText(FText::FromString(CrosshairStyleName(WorkingCrosshairStyle)));
+	}
+}
+
+void UPFLoadingMenuWidget::OnMarkerCycle()
+{
+	WorkingMarkerPreset = (WorkingMarkerPreset + 1) % 3;
+	FPFUserPrefs::SetMarkerPreset(WorkingMarkerPreset);
+	FPFUserPrefs::Flush();
+	RefreshLoadoutLabels();
+}
+
+void UPFLoadingMenuWidget::OnCrosshairCycle()
+{
+	WorkingCrosshairStyle = (WorkingCrosshairStyle + 1) % 3;
+	FPFUserPrefs::SetCrosshairStyle(WorkingCrosshairStyle);
+	FPFUserPrefs::Flush();
+	RefreshLoadoutLabels();
+}
+
+void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
+{
+	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
+	Sub->SetText(FText::FromString(TEXT("Local preferences — saved to this PC, applied when you spawn.")));
+	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
+	Sub->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Sub))
+	{
+		V->SetPadding(FMargin(0.f, 4.f, 0.f, 16.f));
+		V->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	// Marker preset row
+	{
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
+		Lab->SetText(FText::FromString(TEXT("MARKER")));
+		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
+		Sizer->SetWidthOverride(110.f);
+		Sizer->SetContent(Lab);
+		Row->AddChildToHorizontalBox(Sizer);
+		LoadoutMarkerButton = WidgetTree->ConstructWidget<UButton>();
+		LoadoutMarkerButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+		LoadoutMarkerButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnMarkerCycle);
+		LoadoutMarkerValueText = WidgetTree->ConstructWidget<UTextBlock>();
+		LoadoutMarkerValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		LoadoutMarkerButton->AddChild(LoadoutMarkerValueText);
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(LoadoutMarkerButton))
+		{
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			H->SetPadding(FMargin(8.f, 0.f));
+		}
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(40.f, 6.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+	}
+
+	// Crosshair row
+	{
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
+		Lab->SetText(FText::FromString(TEXT("CROSSHAIR")));
+		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
+		Sizer->SetWidthOverride(110.f);
+		Sizer->SetContent(Lab);
+		Row->AddChildToHorizontalBox(Sizer);
+		LoadoutCrosshairButton = WidgetTree->ConstructWidget<UButton>();
+		LoadoutCrosshairButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+		LoadoutCrosshairButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnCrosshairCycle);
+		LoadoutCrosshairValueText = WidgetTree->ConstructWidget<UTextBlock>();
+		LoadoutCrosshairValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		LoadoutCrosshairButton->AddChild(LoadoutCrosshairValueText);
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(LoadoutCrosshairButton))
+		{
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			H->SetPadding(FMargin(8.f, 0.f));
+		}
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(40.f, 6.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+	}
+
+	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
+	Hint->SetText(FText::FromString(TEXT("Click a row to cycle · saved instantly · team paint color is fixed")));
+	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
+	Hint->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Hint))
+	{
+		V->SetPadding(FMargin(0.f, 16.f, 0.f, 0.f));
+		V->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	// Seed working values from saved prefs + paint the labels.
+	WorkingMarkerPreset = FPFUserPrefs::GetMarkerPreset();
+	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
+	RefreshLoadoutLabels();
+}
 
 void UPFLoadingMenuWidget::BuildTree()
 {
@@ -422,13 +593,19 @@ void UPFLoadingMenuWidget::BuildTree()
 	UHorizontalBox* MenuTabs = WidgetTree->ConstructWidget<UHorizontalBox>();
 	TabSetup = MakeMenuTab(TEXT("  MATCH SETUP  "), TEXT("TabSetup"));
 	TabHowTo = MakeMenuTab(TEXT("  HOW TO PLAY  "), TEXT("TabHowTo"));
+	TabLoadout = MakeMenuTab(TEXT("  LOADOUT  "), TEXT("TabLoadout"));
 	TabSetup->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabSetup);
 	TabHowTo->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabHowTo);
+	TabLoadout->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabLoadout);
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabSetup))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabHowTo))
+	{
+		H->SetPadding(FMargin(4.f, 0.f));
+	}
+	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabLoadout))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
@@ -535,8 +712,12 @@ void UPFLoadingMenuWidget::BuildTree()
 	UVerticalBox* HowToCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	BuildHowToPlayPage(HowToCol);
 
+	UVerticalBox* LoadoutCol = WidgetTree->ConstructWidget<UVerticalBox>();
+	BuildLoadoutPage(LoadoutCol);
+
 	MenuSwitcher->AddChild(SetupCol);
 	MenuSwitcher->AddChild(HowToCol);
+	MenuSwitcher->AddChild(LoadoutCol);   // index 2
 
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MenuSizer))
 	{
@@ -818,12 +999,27 @@ void UPFLoadingMenuWidget::RefreshMapPicker()
 				? FLinearColor(0.25f, 0.22f, 0.08f, 0.98f)
 				: FLinearColor(0.10f, 0.11f, 0.14f, 0.95f));
 		}
-		if (MapSlotLabels.IsValidIndex(SlotIdx) && MapSlotLabels[SlotIdx] && bValid)
+		if (bValid)
 		{
 			const FPFCommunityMapInfo& M = MapCatalog[CatalogIdx];
-			MapSlotLabels[SlotIdx]->SetText(FText::FromString(FString::Printf(
-				TEXT("  #%d  %s  (+%d / -%d)"),
-				CatalogIdx + 1, *M.DisplayName, M.ThumbUp, M.ThumbDown)));
+			if (MapSlotLabels.IsValidIndex(SlotIdx) && MapSlotLabels[SlotIdx])
+			{
+				MapSlotLabels[SlotIdx]->SetText(FText::FromString(FString::Printf(
+					TEXT("  #%d  %s  (+%d / -%d)"),
+					CatalogIdx + 1, *M.DisplayName, M.ThumbUp, M.ThumbDown)));
+			}
+			// Screenshot-on-publish preview (#6): show the map's PNG if it was captured, else a neutral tile.
+			if (MapSlotImages.IsValidIndex(SlotIdx) && MapSlotImages[SlotIdx])
+			{
+				if (UTexture2D* Preview = GetMapPreview(M.FileName))
+				{
+					MapSlotImages[SlotIdx]->SetBrushFromTexture(Preview, /*bMatchSize=*/false);
+				}
+				else
+				{
+					MapSlotImages[SlotIdx]->SetBrush(FSlateColorBrush(FLinearColor(0.15f, 0.16f, 0.20f, 1.f)));
+				}
+			}
 		}
 	}
 	if (MapPagePrevBtn) { MapPagePrevBtn->SetIsEnabled(bHost && MapPageIndex > 0); }

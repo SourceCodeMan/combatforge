@@ -12,6 +12,7 @@
 class UButton;
 class UCheckBox;
 class UImage;
+class UTexture2D;
 class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
@@ -63,7 +64,13 @@ protected:
 private:
 	void BuildTree();
 	void BuildHowToPlayPage(UVerticalBox* Box);
+	void BuildLoadoutPage(UVerticalBox* Col);
+	void RefreshLoadoutLabels();
+	static const TCHAR* MarkerPresetName(int32 Idx);
+	static const TCHAR* CrosshairStyleName(int32 Idx);
 	void BuildMapPicker(UVerticalBox* Parent);
+	/** Load (and cache) the screenshot-on-publish preview PNG for a saved arena, or null if none exists. */
+	UTexture2D* GetMapPreview(const FString& JsonFileName);
 	void AddHowToLine(UVerticalBox* Box, const FString& Text, int32 Size, bool bBold, const FLinearColor& Color);
 	UButton* MakeSetupButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText, FName Name);
 	UButton* MakeMenuTab(const FString& Label, FName Name);
@@ -88,6 +95,9 @@ private:
 	UFUNCTION() void OnBotsChanged(bool bIsChecked);
 	UFUNCTION() void OnTabSetup();
 	UFUNCTION() void OnTabHowTo();
+	UFUNCTION() void OnTabLoadout();
+	UFUNCTION() void OnMarkerCycle();
+	UFUNCTION() void OnCrosshairCycle();
 	UFUNCTION() void OnMapPagePrev();
 	UFUNCTION() void OnMapPageNext();
 	UFUNCTION() void OnMapAutoClicked();
@@ -108,10 +118,19 @@ private:
 	UPROPERTY() TObjectPtr<UButton> QuitDesktopButton;
 	UPROPERTY() TObjectPtr<UTextBlock> QuitDesktopLabel;
 
-	// Top-level menu tabs: 0 = Match Setup, 1 = How to Play
+	// Top-level menu tabs: 0 = Match Setup, 1 = How to Play, 2 = Loadout
 	UPROPERTY() TObjectPtr<UButton> TabSetup;
 	UPROPERTY() TObjectPtr<UButton> TabHowTo;
+	UPROPERTY() TObjectPtr<UButton> TabLoadout;
 	UPROPERTY() TObjectPtr<UWidgetSwitcher> MenuSwitcher;
+
+	// Loadout tab (local prefs: marker fire-rate preset + crosshair style).
+	UPROPERTY() TObjectPtr<UButton> LoadoutMarkerButton;
+	UPROPERTY() TObjectPtr<UTextBlock> LoadoutMarkerValueText;
+	UPROPERTY() TObjectPtr<UButton> LoadoutCrosshairButton;
+	UPROPERTY() TObjectPtr<UTextBlock> LoadoutCrosshairValueText;
+	int32 WorkingMarkerPreset = 0;
+	int32 WorkingCrosshairStyle = 0;
 
 	// Pre-game match setup (host-editable).
 	UPROPERTY() TObjectPtr<UButton> ModeButton;
@@ -137,6 +156,9 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> MapSelectedLabel;
 	UPROPERTY() TArray<TObjectPtr<UPFMapPickButton>> MapSlotButtons;
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> MapSlotLabels;
+	UPROPERTY() TArray<TObjectPtr<UImage>> MapSlotImages;
+	/** filename(.json) -> loaded PNG preview (cached; a null value means "tried, none on disk"). */
+	UPROPERTY() TMap<FString, TObjectPtr<UTexture2D>> MapPreviewCache;
 
 	EPFBuildMode SelectedBuildMode = EPFBuildMode::Creative;
 	EPFMatchType SelectedMatchType = EPFMatchType::Skirmish;
