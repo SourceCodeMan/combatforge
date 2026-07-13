@@ -8,6 +8,7 @@
 #include "Core/PaintForgeTypes.h"
 #include "Voting/PFRatingSubsystem.h"
 #include "Player/PFCharacterCustomization.h"   // FPFCharacterConfig
+#include "Combat/PFWeaponCatalog.h"            // FPFWeaponConfig
 #include "PFLoadingMenuWidget.generated.h"
 
 class UButton;
@@ -74,6 +75,24 @@ private:
 	int32 SaveSlot = 0;
 };
 
+/** Prev/next stepper for the weapon picker: Kind 0 = category, 1 = weapon (payload button). */
+UCLASS()
+class PAINTFORGE_API UPFWeaponStepButton : public UButton
+{
+	GENERATED_BODY()
+
+public:
+	void InitStep(UPFLoadingMenuWidget* InOwner, int32 InKind, int32 InDir);
+
+protected:
+	UFUNCTION() void HandleClicked();
+
+private:
+	TWeakObjectPtr<UPFLoadingMenuWidget> OwnerWidget;
+	int32 Kind = 0;
+	int32 Dir = 1;
+};
+
 /**
  * Full-viewport boot menu — NOT a live-game screenshot with HUD.
  * Tabs: Match Setup (mode / type / format / bots / community map) and How to Play.
@@ -99,6 +118,9 @@ public:
 
 	/** Select a save slot: make it active, load it into the editor + preview + pawn. */
 	void NotifySaveSlotSelected(int32 SaveSlot);
+
+	/** Weapon picker step: Kind 0 = category, 1 = weapon; Dir -1/+1. Persists + re-applies to the pawn. */
+	void NotifyWeaponStep(int32 Kind, int32 Dir);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -192,6 +214,13 @@ private:
 	FPFCharacterConfig CharConfig;
 	bool bPreviewDragging = false;   // left-drag on the preview rotates the character
 	float PreviewDragLastX = 0.f;
+
+	// Loadout tab — weapon picker (category + weapon steppers) + local prefs.
+	UPROPERTY() TObjectPtr<UTextBlock> WeaponCatValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> WeaponValueText;
+	FPFWeaponConfig WeaponConfig;
+	void BuildWeaponPicker(UVerticalBox* Col);
+	void RefreshWeaponLabels();
 
 	// Loadout tab (local prefs: marker fire-rate preset + crosshair style).
 	UPROPERTY() TObjectPtr<UButton> LoadoutMarkerButton;

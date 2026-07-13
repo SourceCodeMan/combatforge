@@ -6,6 +6,7 @@
 #include "GameFramework/Character.h"
 #include "Engine/TimerHandle.h"
 #include "Player/PFCharacterCustomization.h"   // FPFCharacterConfig
+#include "Combat/PFWeaponCatalog.h"            // FPFWeaponConfig
 #include "PaintForgeCharacter.generated.h"
 
 class UCameraComponent;
@@ -210,6 +211,7 @@ private:
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> ArmbandMID;
 	FPFCharacterConfig ActiveCharConfig;                                   // current per-slot selection
 	bool bBanditAssembled = false;
+	FPFWeaponConfig ActiveWeaponConfig;                                    // current weapon selection
 
 	/** Phase-1 spike: mount the modular Bandit body + sequence-loco anims on GetMesh(). */
 	void AssembleBanditCharacter();
@@ -222,6 +224,13 @@ public:
 	const FPFCharacterConfig& GetCharConfig() const { return ActiveCharConfig; }
 	/** Reload the saved config from prefs and re-apply the overlay parts (menu edits an already-spawned pawn). */
 	void ReapplyCharacterConfig();
+
+	/** Apply the saved weapon selection: swap the FP viewmodel + TP weapon mesh/material/pose. */
+	void ApplyWeaponLoadout();
+	/** Reload the saved weapon config and re-apply (menu edits an already-spawned pawn). */
+	void ReapplyWeaponLoadout();
+	/** Live-tune the FP weapon pose (console: pf.WeaponFP) — the per-weapon poses need dialing in-editor. */
+	void TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle);
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms

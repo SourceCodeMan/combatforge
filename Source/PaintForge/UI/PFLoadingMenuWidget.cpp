@@ -478,6 +478,8 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 		V->SetHorizontalAlignment(HAlign_Center);
 	}
 
+	BuildWeaponPicker(Col);   // < Category > / < Weapon > steppers at the top of the loadout
+
 	// Marker preset row
 	{
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -557,6 +559,117 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 	WorkingMarkerPreset = FPFUserPrefs::GetMarkerPreset();
 	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
 	RefreshLoadoutLabels();
+}
+
+void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
+{
+	WeaponConfig = PFWeapon::LoadConfig();
+
+	UTextBlock* Head = WidgetTree->ConstructWidget<UTextBlock>();
+	Head->SetText(FText::FromString(TEXT("WEAPON")));
+	Head->SetFont(PFLoadFont(15, true));
+	Head->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
+	Head->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Head))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 2.f, 0.f, 6.f));
+	}
+
+	auto MakeStepRow = [this, Col](const FString& Label, int32 Kind, TObjectPtr<UTextBlock>& OutVal)
+	{
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
+		Lab->SetText(FText::FromString(Label));
+		Lab->SetFont(PFLoadFont(13, true));
+		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+		USizeBox* LabSizer = WidgetTree->ConstructWidget<USizeBox>();
+		LabSizer->SetWidthOverride(110.f);
+		LabSizer->SetContent(Lab);
+		Row->AddChildToHorizontalBox(LabSizer);
+
+		UPFWeaponStepButton* Prev = WidgetTree->ConstructWidget<UPFWeaponStepButton>(UPFWeaponStepButton::StaticClass());
+		Prev->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+		Prev->InitStep(this, Kind, -1);
+		UTextBlock* PrevLab = WidgetTree->ConstructWidget<UTextBlock>();
+		PrevLab->SetText(FText::FromString(TEXT(" < ")));
+		PrevLab->SetFont(PFLoadFont(14, true));
+		PrevLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Prev->SetContent(PrevLab);
+		Row->AddChildToHorizontalBox(Prev);
+
+		UTextBlock* Val = WidgetTree->ConstructWidget<UTextBlock>();
+		Val->SetFont(PFLoadFont(12, false));
+		Val->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Val->SetJustification(ETextJustify::Center);
+		Val->SetClipping(EWidgetClipping::ClipToBounds);
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(Val))
+		{
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			H->SetPadding(FMargin(6.f, 0.f));
+			H->SetVerticalAlignment(VAlign_Center);
+		}
+		OutVal = Val;
+
+		UPFWeaponStepButton* Next = WidgetTree->ConstructWidget<UPFWeaponStepButton>(UPFWeaponStepButton::StaticClass());
+		Next->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+		Next->InitStep(this, Kind, +1);
+		UTextBlock* NextLab = WidgetTree->ConstructWidget<UTextBlock>();
+		NextLab->SetText(FText::FromString(TEXT(" > ")));
+		NextLab->SetFont(PFLoadFont(14, true));
+		NextLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Next->SetContent(NextLab);
+		Row->AddChildToHorizontalBox(Next);
+
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(24.f, 3.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+	};
+
+	MakeStepRow(TEXT("CATEGORY"), 0, WeaponCatValueText);
+	MakeStepRow(TEXT("WEAPON"), 1, WeaponValueText);
+	RefreshWeaponLabels();
+}
+
+void UPFLoadingMenuWidget::RefreshWeaponLabels()
+{
+	const int32 CatCount = PFWeapon::CategoryCount();
+	WeaponConfig.Category = FMath::Clamp(WeaponConfig.Category, 0, CatCount - 1);
+	const int32 WpnCount = PFWeapon::WeaponCount(WeaponConfig.Category);
+	WeaponConfig.Index = FMath::Clamp(WeaponConfig.Index, 0, WpnCount - 1);
+	if (WeaponCatValueText != nullptr)
+	{
+		WeaponCatValueText->SetText(FText::FromString(FString::Printf(TEXT("%s  (%d/%d)"),
+			*PFWeapon::CategoryLabel(WeaponConfig.Category), WeaponConfig.Category + 1, CatCount)));
+	}
+	if (WeaponValueText != nullptr)
+	{
+		WeaponValueText->SetText(FText::FromString(FString::Printf(TEXT("%s  (%d/%d)"),
+			*PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index), WeaponConfig.Index + 1, WpnCount)));
+	}
+}
+
+void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
+{
+	const int32 CatCount = PFWeapon::CategoryCount();
+	if (Kind == 0)
+	{
+		WeaponConfig.Category = (WeaponConfig.Category + Dir + CatCount) % CatCount;
+		WeaponConfig.Index = 0;   // first weapon in the new category
+	}
+	else
+	{
+		const int32 WpnCount = FMath::Max(1, PFWeapon::WeaponCount(WeaponConfig.Category));
+		WeaponConfig.Index = (WeaponConfig.Index + Dir + WpnCount) % WpnCount;
+	}
+	PFWeapon::SaveConfig(WeaponConfig);
+	if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetOwningPlayerPawn()))
+	{
+		Char->ReapplyWeaponLoadout();
+	}
+	RefreshWeaponLabels();
 }
 
 void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
@@ -848,6 +961,22 @@ void UPFCharSaveSlotButton::HandleClicked()
 	if (OwnerWidget.IsValid())
 	{
 		OwnerWidget->NotifySaveSlotSelected(SaveSlot);
+	}
+}
+
+void UPFWeaponStepButton::InitStep(UPFLoadingMenuWidget* InOwner, int32 InKind, int32 InDir)
+{
+	OwnerWidget = InOwner;
+	Kind = InKind;
+	Dir = InDir;
+	OnClicked.AddUniqueDynamic(this, &UPFWeaponStepButton::HandleClicked);
+}
+
+void UPFWeaponStepButton::HandleClicked()
+{
+	if (OwnerWidget.IsValid())
+	{
+		OwnerWidget->NotifyWeaponStep(Kind, Dir);
 	}
 }
 

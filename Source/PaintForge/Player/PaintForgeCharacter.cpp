@@ -394,6 +394,7 @@ void APaintForgeCharacter::BeginPlay()
 
 	ApplyArtLoadout();       // swaps in real body/arms/weapon if assigned; no-op (graybox) otherwise
 	SetupWeaponMaterials();  // dark gunmetal marker + emissive flash blobs
+	ApplyWeaponLoadout();    // swap to the player's selected weapon (mesh/material/pose) — after the above
 
 	// Soft wind/arena bed for the local player only (SFX volume scaled).
 	if (IsLocallyControlled())
@@ -1108,6 +1109,43 @@ void APaintForgeCharacter::ReapplyCharacterConfig()
 	ApplyCharacterConfig();
 }
 
+void APaintForgeCharacter::ApplyWeaponLoadout()
+{
+	ActiveWeaponConfig = PFWeapon::LoadConfig();
+	const FPFWeaponDef& Def = PFWeapon::Weapon(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+	UStaticMesh* WpnMesh = PFWeapon::LoadMesh(Def);
+	if (WpnMesh == nullptr)
+	{
+		return;   // asset missing — keep the current weapon
+	}
+	UMaterialInterface* Mat = PFWeapon::LoadMaterial(Def);   // nullptr = preserve the mesh's authored materials
+	RifleMaterial = Mat;   // AttachWeaponToHand + the FP block both key off this (null clears overrides)
+
+	// First-person viewmodel: swap mesh, material (or revert to authored), and the per-weapon pose.
+	if (RifleFPMesh != nullptr)
+	{
+		RifleFPMesh->SetStaticMesh(WpnMesh);
+		const int32 Mats = RifleFPMesh->GetNumMaterials();
+		for (int32 i = 0; i < Mats; ++i)
+		{
+			RifleFPMesh->SetMaterial(i, Mat);   // null reverts the slot to the mesh's authored material
+		}
+		RifleFPMesh->SetRelativeLocation(Def.FPLoc);
+		RifleFPMesh->SetRelativeRotation(Def.FPRot);
+		RifleFPMesh->SetRelativeScale3D(FVector(Def.FPScale));
+	}
+	MuzzleLocalFP = Def.MuzzleFP;
+
+	// Third-person weapon (seen by other players) — swap + re-seat on the hand.
+	WeaponMesh = WpnMesh;
+	AttachWeaponToHand();
+}
+
+void APaintForgeCharacter::ReapplyWeaponLoadout()
+{
+	ApplyWeaponLoadout();
+}
+
 void APaintForgeCharacter::SetCharSlot(int32 Slot, int32 Index)
 {
 	if (Slot < 0 || Slot >= PFChar::SlotCount())
@@ -1144,6 +1182,47 @@ static FAutoConsoleCommandWithWorldAndArgs GPFCharSlotCmd(
 	TEXT("pf.CharSlot"),
 	TEXT("Modular character: <slotIndex> <partIndex> on all pawns. Slots: 0 Head 1 Face 2 Helmet 3 Chest 4 Arms 5 Hips 6 Pants 7 Cloth 8 Backpack (-1 part = none)."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFCharSlotCmd));
+
+void APaintForgeCharacter::TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle)
+{
+	if (RifleFPMesh != nullptr)
+	{
+		RifleFPMesh->SetRelativeLocation(Loc);
+		RifleFPMesh->SetRelativeRotation(Rot);
+		RifleFPMesh->SetRelativeScale3D(FVector(Scale));
+	}
+	MuzzleLocalFP = Muzzle;
+}
+
+// Live-tune the equipped weapon's FP pose without a rebuild. Paste the printed values into PFWeaponCatalog.cpp.
+static void PFWeaponFPCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 7)
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("usage: pf.WeaponFP x y z pitch yaw roll scale [muzX muzY muzZ]"));
+		return;
+	}
+	const FVector Loc(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
+	const float Scale = FCString::Atof(*Args[6]);
+	const FVector Muzzle = (Args.Num() >= 10)
+		? FVector(FCString::Atof(*Args[7]), FCString::Atof(*Args[8]), FCString::Atof(*Args[9]))
+		: FVector(42.f, 3.5f, -3.5f);
+	for (TActorIterator<APaintForgeCharacter> It(World); It; ++It)
+	{
+		if (It->IsLocallyControlled())
+		{
+			It->TuneWeaponFP(Loc, Rot, Scale, Muzzle);
+		}
+	}
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("pf.WeaponFP: FPLoc=FVector(%.2ff,%.2ff,%.2ff), FPRot=FRotator(%.2ff,%.2ff,%.2ff), FPScale=%.3ff, MuzzleFP=FVector(%.2ff,%.2ff,%.2ff)"),
+		Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Scale, Muzzle.X, Muzzle.Y, Muzzle.Z);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponFPCmd(
+	TEXT("pf.WeaponFP"),
+	TEXT("Tune the equipped weapon's first-person pose: x y z pitch yaw roll scale [muzX muzY muzZ]. Prints values to paste into PFWeaponCatalog."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponFPCmd));
 
 void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 {
@@ -1273,12 +1352,13 @@ void APaintForgeCharacter::AttachWeaponToHand()
 	WeaponMeshComp->SetHiddenInGame(false);
 	WeaponMeshComp->SetOwnerNoSee(true);   // owner uses the FP viewmodel; remotes see the TP gun
 	WeaponMeshComp->SetCastShadow(true);
-	if (RifleMaterial != nullptr)
 	{
 		const int32 Mats = WeaponMeshComp->GetNumMaterials();
 		for (int32 i = 0; i < Mats; ++i)
 		{
-			WeaponMeshComp->SetMaterial(i, RifleMaterial);   // no missing Lyra MI refs
+			// Force our material (SM_Rifle: no missing Lyra MI refs) OR clear any stale override so a
+			// preserve-authored weapon (AK/pistol) shows its own materials after a swap.
+			WeaponMeshComp->SetMaterial(i, RifleMaterial);
 		}
 	}
 

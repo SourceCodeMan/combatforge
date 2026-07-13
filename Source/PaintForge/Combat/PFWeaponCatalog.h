@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Tom Chapman. All rights reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+
+class UStaticMesh;
+class UMaterialInterface;
+
+/**
+ * One selectable weapon: which mesh + material it uses and how it sits in the first-person viewmodel.
+ * The FP pose (Loc/Rot/Scale/Muzzle) is PER MESH — every weapon has its own origin/scale, so these are
+ * hand-tuned constants in the catalog table (start from SM_Rifle's known-good pose, then dial in-editor).
+ */
+struct FPFWeaponDef
+{
+	const TCHAR* DisplayName = TEXT("Rifle");
+	const TCHAR* MeshPath    = nullptr;   // static mesh (FP + TP)
+	const TCHAR* MaterialPath = nullptr;  // nullptr = keep the mesh's own authored materials
+	FVector  FPLoc   = FVector(3.f, 5.5f, -3.5f);
+	FRotator FPRot   = FRotator(-1.5f, -90.f, 1.5f);
+	float    FPScale = 0.48f;
+	FVector  MuzzleFP = FVector(42.f, 3.5f, -3.5f);
+};
+
+/** A player's chosen weapon: category + index into that category. */
+struct FPFWeaponConfig
+{
+	int32 Category = 0;
+	int32 Index    = 0;
+};
+
+/**
+ * Curated weapon registry (categories -> weapons). NOT UObjectLibrary-enumerated like the character parts,
+ * because each weapon needs its own FP pose + material handling. Mirrors the PFChar API shape so the loadout
+ * UI can drive it the same way.
+ */
+namespace PFWeapon
+{
+	int32 CategoryCount();
+	FString CategoryLabel(int32 Category);
+	int32 WeaponCount(int32 Category);
+	const FPFWeaponDef& Weapon(int32 Category, int32 Index);     // clamped; category 0 idx 0 = SM_Rifle default
+	FString WeaponDisplayName(int32 Category, int32 Index);
+
+	UStaticMesh* LoadMesh(const FPFWeaponDef& Def);
+	UMaterialInterface* LoadMaterial(const FPFWeaponDef& Def);   // nullptr if the def preserves authored mats
+
+	FPFWeaponConfig DefaultConfig();
+
+	// ---- Persistence (GGameUserSettings.ini [PaintForge]) ----
+	void SaveConfig(const FPFWeaponConfig& Config);
+	FPFWeaponConfig LoadConfig();
+}
