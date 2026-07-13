@@ -2,6 +2,8 @@
 
 #include "Player/PaintForgeCharacter.h"
 
+#include "HAL/IConsoleManager.h"   // pf.BanditChar spike toggle
+
 #include "PaintForge.h"
 #include "Core/PaintForgeTypes.h"
 #include "Core/PaintForgeGameState.h"
@@ -254,6 +256,50 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	// Survival (team 1): mannequin-compatible ABP_Manny (playtest-verified).
 	if (SurvivalAnimFinder.Succeeded()) { Team1AnimClass = SurvivalAnimFinder.Class; }
 	if (SurvivalIdleFinder.Succeeded()) { Team1IdleAnim = SurvivalIdleFinder.Object; }
+
+	// ---- Modular Bandit character spike (Phase 1; assembled only when `pf.BanditChar 1`) ----
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditBodyFinder(
+		TEXT("/Game/Bandits/Mesh/Body/SKM_Body.SKM_Body"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> BanditIdleFinder(
+		TEXT("/Game/Bandits/Demo/Animations/A_MM_Idle.A_MM_Idle"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> BanditWalkFinder(
+		TEXT("/Game/Bandits/Demo/Animations/A_MM_Walk_Fwd.A_MM_Walk_Fwd"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> BanditRunFinder(
+		TEXT("/Game/Bandits/Demo/Animations/A_MM_Run_Fwd.A_MM_Run_Fwd"));
+	if (BanditBodyFinder.Succeeded()) { BanditBodyMesh = BanditBodyFinder.Object; }
+	if (BanditIdleFinder.Succeeded()) { BanditIdleAnim = BanditIdleFinder.Object; }
+	if (BanditWalkFinder.Succeeded()) { BanditWalkAnim = BanditWalkFinder.Object; }
+	if (BanditRunFinder.Succeeded())  { BanditRunAnim  = BanditRunFinder.Object; }
+
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditHeadFinder(
+		TEXT("/Game/Bandits/Mesh/Body/SKM_Head.SKM_Head"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditChestFinder(
+		TEXT("/Game/Bandits/Mesh/Chest/Arafatka/SKM_Arafatka_Bege.SKM_Arafatka_Bege"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditPantsFinder(
+		TEXT("/Game/Bandits/Mesh/Pants/Jeans/SKM_Jeans.SKM_Jeans"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditArmsFinder(
+		TEXT("/Game/Bandits/Mesh/Arms/Arms/SKM_Arms.SKM_Arms"));
+	const TCHAR* BanditPartNames[] = { TEXT("BanditHead"), TEXT("BanditChest"), TEXT("BanditPants"), TEXT("BanditArms") };
+	USkeletalMesh* BanditFixedParts[] = {
+		BanditHeadFinder.Succeeded()  ? BanditHeadFinder.Object  : nullptr,
+		BanditChestFinder.Succeeded() ? BanditChestFinder.Object : nullptr,
+		BanditPantsFinder.Succeeded() ? BanditPantsFinder.Object : nullptr,
+		BanditArmsFinder.Succeeded()  ? BanditArmsFinder.Object  : nullptr,
+	};
+	for (int32 i = 0; i < 4; ++i)
+	{
+		USkeletalMeshComponent* Part = CreateDefaultSubobject<USkeletalMeshComponent>(BanditPartNames[i]);
+		if (Part == nullptr)
+		{
+			continue;
+		}
+		Part->SetupAttachment(GetMesh());
+		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Part->SetVisibility(false);
+		Part->SetHiddenInGame(true);
+		BanditParts.Add(Part);
+		BanditPartMeshes.Add(BanditFixedParts[i]);
+	}
 
 	// Soft team-tint fallback (mannequin / graybox only).
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamBodyMatFinder(
@@ -909,12 +955,89 @@ void APaintForgeCharacter::ClearBufferedJump()
 // Team + elimination cosmetics
 // ---------------------------------------------------------------------------
 
+static TAutoConsoleVariable<int32> CVarBanditChar(
+	TEXT("pf.BanditChar"), 0,
+	TEXT("Phase-1 spike: assemble the modular Bandit character on third-person pawns (1=on). Set it, then respawn/rejoin."),
+	ECVF_Default);
+
+void APaintForgeCharacter::AssembleBanditCharacter()
+{
+	USkeletalMeshComponent* Base = GetMesh();
+	if (Base == nullptr || BanditBodyMesh == nullptr)
+	{
+		return;
+	}
+
+	// Route the Bandit sequences through the existing sequence-loco path (both teams — global test toggle).
+	Team0IdleAnim = BanditIdleAnim; Team0WalkAnim = BanditWalkAnim; Team0RunAnim = BanditRunAnim;
+	Team1IdleAnim = BanditIdleAnim; Team1WalkAnim = BanditWalkAnim; Team1RunAnim = BanditRunAnim;
+
+	// Base body carries the skeleton + animation (single-node + UpdateSequenceLocomotion, like Quantum).
+	Base->SetSkeletalMeshAsset(BanditBodyMesh);
+	Base->Stop();
+	Base->SetAnimInstanceClass(nullptr);
+	Base->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	CachedWeaponAttachBone = NAME_None;
+	SeqLocoState = 0;
+	bSequenceLocoActive = true;
+	bUsingArtBody = true;
+	if (BanditIdleAnim != nullptr)
+	{
+		Base->PlayAnimation(BanditIdleAnim, /*bLooping=*/true);
+		SeqLocoState = 1;
+	}
+
+	// Modular parts follow the base pose via Leader Pose (all share SKM_Bandit_Skeleton).
+	for (int32 i = 0; i < BanditParts.Num(); ++i)
+	{
+		USkeletalMeshComponent* Part = BanditParts[i];
+		if (Part == nullptr || !BanditPartMeshes.IsValidIndex(i) || BanditPartMeshes[i] == nullptr)
+		{
+			continue;
+		}
+		Part->SetSkeletalMeshAsset(BanditPartMeshes[i]);
+		Part->SetLeaderPoseComponent(Base);
+		Part->SetVisibility(true);
+		Part->SetHiddenInGame(false);
+		Part->SetOwnerNoSee(true);
+		Part->SetCastShadow(true);
+	}
+
+	// Align: face +X, feet at capsule bottom (handles pelvis-origin packs).
+	Base->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	if (const UCapsuleComponent* Cap = GetCapsuleComponent())
+	{
+		const float MeshMinZ = BanditBodyMesh->GetBounds().GetBox().Min.Z;
+		const float FeetZ = -Cap->GetUnscaledCapsuleHalfHeight() - MeshMinZ;
+		Base->SetRelativeLocation(FVector(0.f, 0.f, FeetZ));
+	}
+	Base->SetVisibility(true);
+	Base->SetHiddenInGame(false);
+	Base->SetOwnerNoSee(true);
+	Base->SetCastShadow(true);
+	if (BodyMesh != nullptr) { BodyMesh->SetVisibility(false); }
+	if (HeadMesh != nullptr) { HeadMesh->SetVisibility(false); }
+	bBanditAssembled = true;
+	UE_LOG(PaintForgeLog, Log, TEXT("AssembleBanditCharacter: mounted Bandit body + %d parts."), BanditParts.Num());
+}
+
 void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 {
 	// Mounts the per-team skeletal body. Gated so the frequent SetTeamColor calls (ready/budget/roster
 	// flag replications all route here) don't re-mount the mesh every time.
 	if (GetMesh() == nullptr)
 	{
+		return;
+	}
+
+	// Phase-1 spike: when `pf.BanditChar 1`, mount the modular Bandit character instead of the team body.
+	if (CVarBanditChar.GetValueOnGameThread() != 0)
+	{
+		if (!bBanditAssembled)
+		{
+			AssembleBanditCharacter();
+		}
+		CachedBodyTeamId = Team;
 		return;
 	}
 	USkeletalMesh* Chosen = (Team == 1)

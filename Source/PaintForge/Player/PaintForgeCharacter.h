@@ -196,6 +196,18 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team1IdleAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team1WalkAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> Team1RunAnim = nullptr;
+
+	// ---- Modular Bandit character spike (Phase 1; toggle with `pf.BanditChar 1`) ----
+	// Base body carries SKM_Bandit_Skeleton + sequence locomotion; parts follow via Leader Pose.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<USkeletalMesh> BanditBodyMesh = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditIdleAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditWalkAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditRunAnim = nullptr;
+	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> BanditParts;       // per-slot Leader-Pose components
+	UPROPERTY() TArray<TObjectPtr<USkeletalMesh>> BanditPartMeshes;           // fixed spike part per component
+	bool bBanditAssembled = false;
+	/** Phase-1 spike: mount the modular Bandit body + parts + sequence-loco anims on GetMesh(). */
+	void AssembleBanditCharacter();
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
