@@ -268,10 +268,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.45f;
 	// Raised pose: mesh origin relative to eye (forward / right / down along aim basis).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedFromEye = FVector(28.f, 14.f, -8.f);
-	// FP viewmodel: hip-ish rest vs ADS. AdsLoc puts the sight line ON the camera axis: Y=-5.5 exactly cancels
-	// the rifle mesh's built-in +5.5 Y (RifleFPMesh rel loc), Z=+0.5 raises the bore+sight onto the eye line
-	// (was 11 uu below), X~15 keeps the aperture in focus. AdsRot levels the rail (counters the mesh -1.5/+1.5).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector ViewModelAdsLoc = FVector(15.f, -5.5f, 0.5f);
+	// FP viewmodel: hip-ish rest vs ADS. AdsLoc puts the TOP-SIGHT line on the camera axis: Y=-5.5 cancels the
+	// rifle mesh's built-in +5.5 Y; Z lowered to -1.5 so the camera looks down the TOP sight, not the bore (the
+	// iron sight sits above the barrel, so the whole gun drops that much). X~15 keeps the aperture in focus.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector ViewModelAdsLoc = FVector(15.f, -5.5f, -1.5f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FRotator ViewModelAdsRot = FRotator(1.5f, 0.f, -1.5f);
 	// Footstep stride (uu of ground travel between steps).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Audio") float FootstepStrideWalkUU = 165.f;

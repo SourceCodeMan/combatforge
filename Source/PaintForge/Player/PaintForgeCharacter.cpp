@@ -1114,6 +1114,16 @@ void APaintForgeCharacter::ApplyWeaponLoadout()
 	ActiveWeaponConfig = PFWeapon::LoadConfig();
 	const FPFWeaponDef& Def = PFWeapon::Weapon(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
 	UStaticMesh* WpnMesh = PFWeapon::LoadMesh(Def);
+#if !UE_BUILD_SHIPPING
+	// Confirm what actually equipped (category logic is correct; if a weapon LOOKS wrong it's the per-weapon
+	// FP scale/pose, not the selection — tune with pf.WeaponFP).
+	if (IsLocallyControlled() && GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Yellow, FString::Printf(TEXT("Weapon: %s / %s%s"),
+			*PFWeapon::CategoryLabel(ActiveWeaponConfig.Category), Def.DisplayName,
+			WpnMesh ? TEXT("") : TEXT("  [mesh missing]")));
+	}
+#endif
 	if (WpnMesh == nullptr)
 	{
 		return;   // asset missing — keep the current weapon
