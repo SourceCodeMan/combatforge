@@ -1145,6 +1145,8 @@ void APaintForgeCharacter::ApplyWeaponLoadout()
 		RifleFPMesh->SetRelativeScale3D(FVector(Def.FPScale));
 	}
 	MuzzleLocalFP = Def.MuzzleFP;
+	ViewModelAdsLoc = Def.AdsLoc;   // per-weapon aim pose (each weapon's sight sits differently)
+	ViewModelAdsRot = Def.AdsRot;
 
 	// Third-person weapon (seen by other players) — swap + re-seat on the hand.
 	WeaponMesh = WpnMesh;
@@ -1233,6 +1235,38 @@ static FAutoConsoleCommandWithWorldAndArgs GPFWeaponFPCmd(
 	TEXT("pf.WeaponFP"),
 	TEXT("Tune the equipped weapon's first-person pose: x y z pitch yaw roll scale [muzX muzY muzZ]. Prints values to paste into PFWeaponCatalog."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponFPCmd));
+
+void APaintForgeCharacter::TuneWeaponADS(const FVector& Loc, const FRotator& Rot)
+{
+	ViewModelAdsLoc = Loc;
+	ViewModelAdsRot = Rot;
+}
+
+// Live-tune the equipped weapon's aim-down-sight pose. Hold right-click to see it; paste into PFWeaponCatalog.
+static void PFWeaponADSCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 6)
+	{
+		UE_LOG(PaintForgeLog, Log, TEXT("usage: pf.WeaponADS x y z pitch yaw roll  (hold right-click to preview)"));
+		return;
+	}
+	const FVector Loc(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
+	for (TActorIterator<APaintForgeCharacter> It(World); It; ++It)
+	{
+		if (It->IsLocallyControlled())
+		{
+			It->TuneWeaponADS(Loc, Rot);
+		}
+	}
+	UE_LOG(PaintForgeLog, Log,
+		TEXT("pf.WeaponADS: AdsLoc=FVector(%.2ff,%.2ff,%.2ff), AdsRot=FRotator(%.2ff,%.2ff,%.2ff)"),
+		Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponADSCmd(
+	TEXT("pf.WeaponADS"),
+	TEXT("Tune the equipped weapon's aim-down-sight pose: x y z pitch yaw roll. Hold right-click to preview; prints values for PFWeaponCatalog."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponADSCmd));
 
 void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 {

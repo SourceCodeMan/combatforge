@@ -21,6 +21,10 @@ struct FPFWeaponDef
 	FRotator FPRot   = FRotator(-1.5f, -90.f, 1.5f);
 	float    FPScale = 0.48f;
 	FVector  MuzzleFP = FVector(42.f, 3.5f, -3.5f);
+	// Per-weapon aim-down-sight pose (the viewmodel anchor at full ADS). Each weapon's sight sits differently,
+	// so ADS alignment is per-weapon. Defaults to the verified SM_Rifle ADS; tune others with pf.WeaponADS.
+	FVector  AdsLoc  = FVector(15.f, -5.5f, -1.5f);
+	FRotator AdsRot  = FRotator(1.5f, 0.f, -1.5f);
 };
 
 /** A player's chosen weapon: category + index into that category. */
