@@ -708,11 +708,21 @@ void UPFOptionsWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	SetIsFocusable(true);   // required so key-rebind capture (NativeOnKeyDown) receives input
-	SetVisibility(ESlateVisibility::Collapsed);
-	bOpen = false;
+	if (bEmbedded)
+	{
+		// Hosted as a menu tab: stay visible + keep the chrome hidden (don't collapse like the overlay does).
+		ApplyEmbeddedChrome();
+		SetVisibility(ESlateVisibility::Visible);
+		bOpen = true;
+	}
+	else
+	{
+		SetVisibility(ESlateVisibility::Collapsed);
+		bOpen = false;
+	}
 	PullFromSettings();
 	RefreshLabels();
-	SelectTab(0);
+	SelectTab(bEmbedded ? ActiveTab : 0);
 }
 
 void UPFOptionsWidget::Open()
@@ -741,15 +751,22 @@ void UPFOptionsWidget::OpenHowToPlay()
 	Open();
 }
 
-void UPFOptionsWidget::EnterEmbeddedMode()
+void UPFOptionsWidget::ApplyEmbeddedChrome()
 {
-	// Force the tree to build, then strip the overlay chrome so only the settings card shows in the tab.
-	TakeWidget();
 	if (Dimmer)            { Dimmer->SetVisibility(ESlateVisibility::Collapsed); }
 	if (TitleText)         { TitleText->SetVisibility(ESlateVisibility::Collapsed); }
 	if (BackButton)        { BackButton->SetVisibility(ESlateVisibility::Collapsed); }
 	if (QuitMenuButton)    { QuitMenuButton->SetVisibility(ESlateVisibility::Collapsed); }
 	if (QuitDesktopButton) { QuitDesktopButton->SetVisibility(ESlateVisibility::Collapsed); }
+}
+
+void UPFOptionsWidget::EnterEmbeddedMode()
+{
+	// Mark embedded FIRST so NativeConstruct (which fires later, when added to the parent tree) keeps us visible
+	// instead of collapsing. Force the tree to build, then strip the overlay chrome so only the card shows.
+	bEmbedded = true;
+	TakeWidget();
+	ApplyEmbeddedChrome();
 	PullFromSettings();
 	RefreshLabels();
 	SelectTab(0);

@@ -55,8 +55,8 @@ APFGrenadeProjectile::APFGrenadeProjectile()
 	Movement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Movement"));
 	Movement->UpdatedComponent = Collision;
 	Movement->InitialSpeed = 0.f;                 // set in ServerInit
-	Movement->MaxSpeed = 4000.f;
-	Movement->ProjectileGravityScale = 1.0f;      // real lob (heavier than the flat-shooting BB)
+	Movement->MaxSpeed = 6500.f;                  // headroom for the faster throw
+	Movement->ProjectileGravityScale = 0.55f;     // flatter, faster arc (was a floaty full-gravity lob)
 	Movement->bShouldBounce = true;
 	Movement->Bounciness = 0.35f;
 	Movement->Friction = 0.35f;
@@ -85,10 +85,10 @@ void APFGrenadeProjectile::ServerInit(const FVector& AimDir, uint8 Team, EPFGren
 	KindRep = static_cast<uint8>(Type);
 	ThrowerWeak = Thrower;
 
-	FVector Launch = (AimDir + FVector(0.f, 0.f, 0.35f)).GetSafeNormal();   // toss with an upward arc
+	FVector Launch = (AimDir + FVector(0.f, 0.f, 0.08f)).GetSafeNormal();   // near-flat: hug the crosshair (~4.6°)
 	if (Launch.IsNearlyZero())
 	{
-		Launch = FVector(1.f, 0.f, 0.35f).GetSafeNormal();
+		Launch = FVector(1.f, 0.f, 0.08f).GetSafeNormal();
 	}
 	if (Movement)
 	{
@@ -247,22 +247,34 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 	{
 		return;
 	}
+	// Prefer the translucent volumetric smoke material (soft, depth-faded edges); fall back to the old unlit
+	// puff if it hasn't been generated yet (run Scripts/gen_combat_fx.py).
 	UMaterialInterface* SmokeMat = Cast<UMaterialInterface>(
-		FSoftObjectPath(TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke")).TryLoad());
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_SmokeVolume.M_PF_SmokeVolume")).TryLoad());
+	const bool bVolumetric = (SmokeMat != nullptr);
+	if (SmokeMat == nullptr)
+	{
+		SmokeMat = Cast<UMaterialInterface>(
+			FSoftObjectPath(TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke")).TryLoad());
+	}
 
-	// Engine sphere is 50 uu radius; scale so the main puff radius ~= SmokeRadius. A small overlapping cluster
-	// reads denser/puffier and conceals better than one translucent sphere.
+	// Engine sphere is 50 uu radius; scale so the main puff radius ~= SmokeRadius. A denser overlapping cluster
+	// of varied spheres reads as a billowing cloud (not a few hard balls) and conceals better.
 	const float BaseScale = SmokeRadius / 50.f;
-	const FVector Offsets[5] = {
+	const FVector Offsets[9] = {
 		FVector(0.f, 0.f, SmokeRadius * 0.35f),
 		FVector(SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.1f),
 		FVector(-SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.15f),
 		FVector(0.f, SmokeRadius * 0.5f, SmokeRadius * 0.2f),
 		FVector(0.f, -SmokeRadius * 0.5f, SmokeRadius * 0.1f),
+		FVector(SmokeRadius * 0.32f, SmokeRadius * 0.32f, SmokeRadius * 0.55f),
+		FVector(-SmokeRadius * 0.32f, SmokeRadius * 0.3f, SmokeRadius * 0.05f),
+		FVector(SmokeRadius * 0.28f, -SmokeRadius * 0.34f, SmokeRadius * 0.4f),
+		FVector(-SmokeRadius * 0.3f, -SmokeRadius * 0.28f, SmokeRadius * 0.45f),
 	};
-	const float Scales[5] = { 1.0f, 0.72f, 0.75f, 0.7f, 0.72f };
+	const float Scales[9] = { 1.05f, 0.72f, 0.75f, 0.7f, 0.72f, 0.6f, 0.66f, 0.62f, 0.58f };
 
-	for (int32 i = 0; i < 5; ++i)
+	for (int32 i = 0; i < 9; ++i)
 	{
 		UStaticMeshComponent* Puff = NewObject<UStaticMeshComponent>(this);
 		if (Puff == nullptr)
@@ -281,11 +293,19 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		{
 			if (UMaterialInstanceDynamic* MID = Puff->CreateDynamicMaterialInstance(0, SmokeMat))
 			{
-				// Grey the muzzle smoke into a battlefield concealment cloud (no-ops if params are absent).
-				const FLinearColor Grey(0.62f, 0.62f, 0.64f, 1.f);
-				MID->SetVectorParameterValue(TEXT("Color"), Grey);
-				MID->SetVectorParameterValue(TEXT("Tint"), Grey);
-				MID->SetVectorParameterValue(TEXT("BaseColor"), Grey);
+				const FLinearColor Grey(0.6f, 0.6f, 0.62f, 1.f);
+				if (bVolumetric)
+				{
+					// M_PF_SmokeVolume params.
+					MID->SetVectorParameterValue(TEXT("SmokeColor"), Grey);
+					MID->SetScalarParameterValue(TEXT("Density"), 0.85f);
+				}
+				else
+				{
+					// Old unlit puff params (no-ops if absent).
+					MID->SetVectorParameterValue(TEXT("EmissiveColor"), Grey);
+					MID->SetVectorParameterValue(TEXT("Color"), Grey);
+				}
 			}
 		}
 		SmokePuffs.Add(Puff);

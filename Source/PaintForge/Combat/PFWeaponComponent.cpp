@@ -818,8 +818,10 @@ void UPFWeaponComponent::StartThrow(EPFGrenadeType Type)
 	{
 		return;
 	}
-	const FVector Origin = Char->GetMuzzleLocation(false);
+	// Throw from the camera forward (not the TP rifle barrel) so the grenade leaves screen center along the
+	// crosshair instead of squirting out of the hand.
 	const FVector AimDir = Char->GetControlRotation().Vector();
+	const FVector Origin = Char->GetEyeWorldLocation() + AimDir * 60.f;
 	if (UPFCombatAudio* Audio = Char->GetCombatAudio())
 	{
 		Audio->PlayGrenadeThrow();   // instant local feel; world detonation FX comes from the grenade
@@ -858,16 +860,16 @@ void UPFWeaponComponent::ServerThrowGrenade_Implementation(FVector_NetQuantize10
 	{
 		return;
 	}
-	// Origin anti-spoof: must be near the pawn, else fall back to the server muzzle (mirrors ServerFire).
-	FVector SpawnOrigin = Origin;
-	if (FVector::DistSquared(SpawnOrigin, Char->GetActorLocation()) > FMath::Square(250.f))
-	{
-		SpawnOrigin = Char->GetMuzzleLocation(false);
-	}
 	FVector Dir = FVector(AimDir);
 	if (!Dir.Normalize())
 	{
 		Dir = Char->GetActorForwardVector();
+	}
+	// Origin anti-spoof: must be near the pawn, else fall back to the camera-forward spawn (mirrors the client).
+	FVector SpawnOrigin = Origin;
+	if (FVector::DistSquared(SpawnOrigin, Char->GetActorLocation()) > FMath::Square(250.f))
+	{
+		SpawnOrigin = Char->GetEyeWorldLocation() + Dir * 60.f;
 	}
 
 	FActorSpawnParameters Params;

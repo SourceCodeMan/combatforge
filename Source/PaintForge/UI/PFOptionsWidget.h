@@ -71,6 +71,7 @@ protected:
 
 private:
 	void BuildTree();
+	void ApplyEmbeddedChrome();   // collapse the dimmer/title/Back/Quit so only the settings card shows
 	void BuildVideoPage(UWidget* ParentBox);
 	void BuildAudioPage(UWidget* ParentBox);
 	void BuildControlsPage(UWidget* ParentBox);
@@ -145,6 +146,7 @@ private:
 	float  WorkingFov = 105.f;
 
 	bool bOpen = false;
+	bool bEmbedded = false;   // hosted inline as a menu tab (not a full-screen overlay)
 	int32 ActiveTab = 0;
 
 	// ---- Key rebinding ----

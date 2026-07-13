@@ -875,8 +875,15 @@ void APaintForgeGameMode::NotifyReadyChangedInternal(const APaintForgePlayerStat
 			{
 				bBuildEarlyEndActive = true;
 				GS->ServerSetPhaseEndTime(Now + LobbyStartCountdown);
-				GetWorldTimerManager().SetTimer(PhaseTimerHandle, this,
-					&APaintForgeGameMode::StartNextRoundFromBuildEnd, LobbyStartCountdown, false);
+				if (LobbyStartCountdown <= 0.f)
+				{
+					StartNextRoundFromBuildEnd();   // instant end — no stray 0-second one-shot timer
+				}
+				else
+				{
+					GetWorldTimerManager().SetTimer(PhaseTimerHandle, this,
+						&APaintForgeGameMode::StartNextRoundFromBuildEnd, LobbyStartCountdown, false);
+				}
 				UE_LOG(PaintForgeLog, Log, TEXT("GameMode: all ready - build phase ending in %.0f s"), LobbyStartCountdown);
 			}
 		}
@@ -896,6 +903,12 @@ void APaintForgeGameMode::BeginLobbyStartCountdown(bool bForced)
 	APaintForgeGameState* GS = GetPFGameState();
 	if (!GS || GS->Phase != EPFMatchPhase::Lobby || bLobbyCountdownActive)
 	{
+		return;
+	}
+	if (LobbyStartCountdown <= 0.f)
+	{
+		// No pre-match grace — go straight to Build (Combat then supplies the single per-round "GET READY" Freeze).
+		SetPhase(EPFMatchPhase::Build);
 		return;
 	}
 	bLobbyCountdownActive = true;

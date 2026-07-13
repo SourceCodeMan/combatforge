@@ -59,6 +59,9 @@ public:
 	void  SetEliminatedAppearance(bool bEliminated); // hide mesh; collision handled by health component
 	FVector GetMuzzleLocation(bool bCosmetic) const; // FP viewmodel tip / TP rifle tip / eye-line fallback
 
+	/** Eye world position (capsule top - eye offset) — used for aim-line raise, muzzle fallback, grenade spawn. */
+	FVector GetEyeWorldLocation() const;
+
 	// ---- Weapon-fire cosmetics (pkg-weapons calls these per shot) ----
 	void  OnFireCosmetic();        // owning client: viewmodel recoil kick only (airsoft — no flash)
 	void  OnRemoteFireCosmetic();  // remote viewers: no flash (airsoft); reserved for future feel
@@ -154,9 +157,6 @@ protected:
 
 	/** Find a usable weapon attach bone/socket name on the live body. */
 	FName ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const;
-
-	/** Eye world position (capsule top - eye offset) for aim-line raise + muzzle fallback. */
-	FVector GetEyeWorldLocation() const;
 
 	/** Builds the primitive marker viewmodel (receiver/guard/barrel/stock/mag/grip) under Parent. */
 	void BuildMarker(USceneComponent* Parent, const FString& Prefix, UStaticMesh* Cube, UStaticMesh* Cylinder,
@@ -259,9 +259,11 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.45f;
 	// Raised pose: mesh origin relative to eye (forward / right / down along aim basis).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedFromEye = FVector(28.f, 14.f, -8.f);
-	// FP viewmodel: hip-ish rest vs ADS (pulled toward iron-sight center).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector ViewModelAdsLoc = FVector(16.f, 1.5f, -7.5f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FRotator ViewModelAdsRot = FRotator(0.5f, 0.f, 0.f);
+	// FP viewmodel: hip-ish rest vs ADS. AdsLoc puts the sight line ON the camera axis: Y=-5.5 exactly cancels
+	// the rifle mesh's built-in +5.5 Y (RifleFPMesh rel loc), Z=+0.5 raises the bore+sight onto the eye line
+	// (was 11 uu below), X~15 keeps the aperture in focus. AdsRot levels the rail (counters the mesh -1.5/+1.5).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector ViewModelAdsLoc = FVector(15.f, -5.5f, 0.5f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FRotator ViewModelAdsRot = FRotator(1.5f, 0.f, -1.5f);
 	// Footstep stride (uu of ground travel between steps).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Audio") float FootstepStrideWalkUU = 165.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Audio") float FootstepStrideSprintUU = 130.f;
@@ -285,8 +287,8 @@ private:
 
 	// ---- Config (04 §1) — BaseFOV also set from options (PFUserPrefs) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float BaseFOV = 105.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float ADSFOV = 70.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float ADSInTime = 0.18f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float ADSFOV = 58.f;   // tighter magnified sight picture
+	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float ADSInTime = 0.14f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float ADSOutTime = 0.14f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float SprintFOVKick = 6.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float SprintKickTime = 0.15f;

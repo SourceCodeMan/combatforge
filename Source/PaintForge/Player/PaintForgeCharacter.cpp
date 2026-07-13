@@ -498,7 +498,10 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 				}
 			}
 
-			const float Ads = FMath::Clamp(ADSAlpha, 0.f, 1.f);
+			// Ease-out cubic (same curve as the FOV) so the gun snaps toward the sight and settles in lockstep
+			// with the zoom instead of drifting linearly.
+			const float RawAds = FMath::Clamp(ADSAlpha, 0.f, 1.f);
+			const float Ads = 1.f - FMath::Cube(1.f - RawAds);
 			const FVector Home = FMath::Lerp(ViewModelHomeLoc, ViewModelAdsLoc, Ads);
 			const FRotator HomeRot = FMath::Lerp(FRotator::ZeroRotator, ViewModelAdsRot, Ads);
 			ViewModelRoot->SetRelativeLocation(Home + RecoilOffset + ReloadLoc);
@@ -1706,7 +1709,9 @@ void APaintForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	}
 	if (bUsingArtBody && GetMesh() != nullptr)
 	{
-		GetMesh()->SetHiddenInGame(bEliminated);
+		// Propagate to children so the modular character parts (CharBaseComps/CharSlotComps) + armband hide with
+		// the base body — otherwise an eliminated pawn leaves its clothing/head/legs frozen in the idle pose.
+		GetMesh()->SetHiddenInGame(bEliminated, /*bPropagateToChildren=*/true);
 	}
 	if (WeaponMeshComp != nullptr)
 	{

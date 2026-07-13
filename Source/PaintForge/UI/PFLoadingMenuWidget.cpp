@@ -1350,6 +1350,15 @@ void UPFLoadingMenuWidget::ReloadMapCatalog()
 			Rating->ListTopCommunityMaps(MapCatalog, MaxMaps);
 		}
 	}
+	// Only surface maps that have a screenshot — hides picture-less arenas (incl. auto-regenerated seeds) so the
+	// picker never shows a blank tile.
+	MapCatalog.RemoveAll([](const FPFCommunityMapInfo& M)
+	{
+		FString PngName = M.FileName;
+		PngName.RemoveFromEnd(TEXT(".json"));
+		PngName += TEXT(".png");
+		return !FPaths::FileExists(FPaths::ProjectSavedDir() / TEXT("Arenas") / PngName);
+	});
 	const int32 PageCount = FMath::Max(1, FMath::DivideAndRoundUp(FMath::Max(MapCatalog.Num(), 1), MapsPerPage));
 	MapPageIndex = FMath::Clamp(MapPageIndex, 0, PageCount - 1);
 	if (SelectedMapCatalogIndex != INDEX_NONE && !MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
