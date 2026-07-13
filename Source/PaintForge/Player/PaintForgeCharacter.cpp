@@ -271,34 +271,48 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	if (BanditWalkFinder.Succeeded()) { BanditWalkAnim = BanditWalkFinder.Object; }
 	if (BanditRunFinder.Succeeded())  { BanditRunAnim  = BanditRunFinder.Object; }
 
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditHeadFinder(
-		TEXT("/Game/Bandits/Mesh/Body/SKM_Head.SKM_Head"));
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditChestFinder(
-		TEXT("/Game/Bandits/Mesh/Chest/Arafatka/SKM_Arafatka_Bege.SKM_Arafatka_Bege"));
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditPantsFinder(
-		TEXT("/Game/Bandits/Mesh/Pants/Jeans/SKM_Jeans.SKM_Jeans"));
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BanditArmsFinder(
-		TEXT("/Game/Bandits/Mesh/Arms/Arms/SKM_Arms.SKM_Arms"));
-	const TCHAR* BanditPartNames[] = { TEXT("BanditHead"), TEXT("BanditChest"), TEXT("BanditPants"), TEXT("BanditArms") };
-	USkeletalMesh* BanditFixedParts[] = {
-		BanditHeadFinder.Succeeded()  ? BanditHeadFinder.Object  : nullptr,
-		BanditChestFinder.Succeeded() ? BanditChestFinder.Object : nullptr,
-		BanditPantsFinder.Succeeded() ? BanditPantsFinder.Object : nullptr,
-		BanditArmsFinder.Succeeded()  ? BanditArmsFinder.Object  : nullptr,
-	};
-	for (int32 i = 0; i < 4; ++i)
+	// Config-driven modular slot components (base skin head/legs + one per PFChar customization slot). Part
+	// meshes are assigned at assembly time from the active FPFCharacterConfig via the registry — no hardcoded
+	// part paths, so all ~437 parts are reachable.
+	auto MakePartComp = [this](const FString& CompName) -> USkeletalMeshComponent*
 	{
-		USkeletalMeshComponent* Part = CreateDefaultSubobject<USkeletalMeshComponent>(BanditPartNames[i]);
-		if (Part == nullptr)
+		USkeletalMeshComponent* C = CreateDefaultSubobject<USkeletalMeshComponent>(*CompName);
+		if (C != nullptr)
 		{
-			continue;
+			C->SetupAttachment(GetMesh());
+			C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			C->SetVisibility(false);
+			C->SetHiddenInGame(true);
 		}
-		Part->SetupAttachment(GetMesh());
-		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Part->SetVisibility(false);
-		Part->SetHiddenInGame(true);
-		BanditParts.Add(Part);
-		BanditPartMeshes.Add(BanditFixedParts[i]);
+		return C;
+	};
+	for (int32 i = 0; i < 2; ++i)
+	{
+		if (USkeletalMeshComponent* C = MakePartComp(FString::Printf(TEXT("CharBase%d"), i)))
+		{
+			CharBaseComps.Add(C);
+		}
+	}
+	for (int32 i = 0; i < PFChar::SlotCount(); ++i)
+	{
+		if (USkeletalMeshComponent* C = MakePartComp(FString::Printf(TEXT("CharSlot%d"), i)))
+		{
+			CharSlotComps.Add(C);
+		}
+	}
+
+	// Team-colored armband — the team tell on the shared Bandit body. Engine cylinder wrapped thin around the
+	// upper arm; re-parented to the arm bone, sized, and tinted at assembly time (see AssembleBanditCharacter).
+	ArmbandMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Armband"));
+	if (ArmbandMesh != nullptr)
+	{
+		ArmbandMesh->SetupAttachment(GetMesh());
+		if (CylMesh != nullptr) { ArmbandMesh->SetStaticMesh(CylMesh); }
+		ArmbandMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ArmbandMesh->SetCastShadow(false);
+		ArmbandMesh->SetVisibility(false);
+		ArmbandMesh->SetHiddenInGame(true);
+		ArmbandMesh->SetOwnerNoSee(true);   // hidden from the owning first-person view
 	}
 
 	// Soft team-tint fallback (mannequin / graybox only).
@@ -955,11 +969,6 @@ void APaintForgeCharacter::ClearBufferedJump()
 // Team + elimination cosmetics
 // ---------------------------------------------------------------------------
 
-static TAutoConsoleVariable<int32> CVarBanditChar(
-	TEXT("pf.BanditChar"), 0,
-	TEXT("Phase-1 spike: assemble the modular Bandit character on third-person pawns (1=on). Set it, then respawn/rejoin."),
-	ECVF_Default);
-
 void APaintForgeCharacter::AssembleBanditCharacter()
 {
 	USkeletalMeshComponent* Base = GetMesh();
@@ -987,21 +996,12 @@ void APaintForgeCharacter::AssembleBanditCharacter()
 		SeqLocoState = 1;
 	}
 
-	// Modular parts follow the base pose via Leader Pose (all share SKM_Bandit_Skeleton).
-	for (int32 i = 0; i < BanditParts.Num(); ++i)
+	// Modular parts assembled from the player's saved character (SKM_Bandit_Skeleton -> Leader Pose).
+	if (ActiveCharConfig.Slots.Num() == 0)
 	{
-		USkeletalMeshComponent* Part = BanditParts[i];
-		if (Part == nullptr || !BanditPartMeshes.IsValidIndex(i) || BanditPartMeshes[i] == nullptr)
-		{
-			continue;
-		}
-		Part->SetSkeletalMeshAsset(BanditPartMeshes[i]);
-		Part->SetLeaderPoseComponent(Base);
-		Part->SetVisibility(true);
-		Part->SetHiddenInGame(false);
-		Part->SetOwnerNoSee(true);
-		Part->SetCastShadow(true);
+		ActiveCharConfig = PFChar::LoadConfig();
 	}
+	ApplyCharacterConfig();
 
 	// Align: face +X, feet at capsule bottom (handles pelvis-origin packs).
 	Base->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
@@ -1017,9 +1017,127 @@ void APaintForgeCharacter::AssembleBanditCharacter()
 	Base->SetCastShadow(true);
 	if (BodyMesh != nullptr) { BodyMesh->SetVisibility(false); }
 	if (HeadMesh != nullptr) { HeadMesh->SetVisibility(false); }
+
+	// Re-seat the rifle on the new (Bandit) skeleton's hand bone — otherwise GetMuzzleLocation falls back to
+	// the eye line and BBs spawn from the head. Bandit skeleton is Mannequin-compatible, so hand_r resolves.
+	AttachWeaponToHand();
+
+	// Team-colored armband on the upper arm. Bandit skeleton is Mannequin-compatible, so "upperarm_l" resolves;
+	// if a pack lacks that bone the band simply rides the mesh root (still visible, just not on the arm).
+	if (ArmbandMesh != nullptr)
+	{
+		ArmbandMesh->AttachToComponent(Base, FAttachmentTransformRules::KeepRelativeTransform, TEXT("upperarm_l"));
+		ArmbandMesh->SetRelativeLocation(FVector(16.f, 0.f, 0.f));      // down the bicep from the shoulder joint
+		ArmbandMesh->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));     // cylinder axis -> along the arm bone (+X)
+		ArmbandMesh->SetRelativeScale3D(FVector(0.16f, 0.16f, 0.045f)); // thin band, ~8 cm radius
+		if (ArmbandMID == nullptr && TeamBodyMaterial != nullptr)
+		{
+			ArmbandMID = ArmbandMesh->CreateDynamicMaterialInstance(0, TeamBodyMaterial);
+		}
+		if (ArmbandMID != nullptr)
+		{
+			ArmbandMID->SetVectorParameterValue(TEXT("Color"), PFColors::ForTeam(CachedBodyTeamId));
+		}
+		ArmbandMesh->SetVisibility(true);
+		ArmbandMesh->SetHiddenInGame(false);
+		ArmbandMesh->SetOwnerNoSee(true);
+	}
+
 	bBanditAssembled = true;
-	UE_LOG(PaintForgeLog, Log, TEXT("AssembleBanditCharacter: mounted Bandit body + %d parts."), BanditParts.Num());
+	UE_LOG(PaintForgeLog, Log, TEXT("AssembleBanditCharacter: mounted Bandit body + %d slot comps (%d parts in registry)."),
+		CharSlotComps.Num(), PFChar::TotalPartCount());
 }
+
+void APaintForgeCharacter::ApplyCharacterConfig()
+{
+	USkeletalMeshComponent* Base = GetMesh();
+	if (Base == nullptr)
+	{
+		return;
+	}
+	auto Mount = [Base](USkeletalMeshComponent* C, USkeletalMesh* M)
+	{
+		if (C == nullptr)
+		{
+			return;
+		}
+		if (M != nullptr)
+		{
+			C->SetSkeletalMeshAsset(M);
+			C->SetLeaderPoseComponent(Base);
+			C->SetVisibility(true);
+			C->SetHiddenInGame(false);
+			C->SetOwnerNoSee(true);
+			C->SetCastShadow(true);
+		}
+		else
+		{
+			C->SetSkeletalMeshAsset(nullptr);
+			C->SetVisibility(false);
+			C->SetHiddenInGame(true);
+		}
+	};
+
+	const TArray<FSoftObjectPath>& BaseP = PFChar::BaseParts();
+	for (int32 i = 0; i < CharBaseComps.Num(); ++i)
+	{
+		USkeletalMesh* M = BaseP.IsValidIndex(i) ? Cast<USkeletalMesh>(BaseP[i].TryLoad()) : nullptr;
+		Mount(CharBaseComps[i], M);
+	}
+	for (int32 s = 0; s < CharSlotComps.Num(); ++s)
+	{
+		const int32 Sel = ActiveCharConfig.Slots.IsValidIndex(s) ? ActiveCharConfig.Slots[s] : -1;
+		USkeletalMesh* M = (Sel >= 0) ? PFChar::LoadPart(s, Sel) : nullptr;
+		Mount(CharSlotComps[s], M);
+	}
+}
+
+void APaintForgeCharacter::ReapplyCharacterConfig()
+{
+	if (!bBanditAssembled)
+	{
+		return;   // only meaningful once the modular character is mounted (pf.BanditChar)
+	}
+	ActiveCharConfig = PFChar::LoadConfig();
+	ApplyCharacterConfig();
+}
+
+void APaintForgeCharacter::SetCharSlot(int32 Slot, int32 Index)
+{
+	if (Slot < 0 || Slot >= PFChar::SlotCount())
+	{
+		return;
+	}
+	if (ActiveCharConfig.Slots.Num() != PFChar::SlotCount())
+	{
+		ActiveCharConfig = PFChar::DefaultConfig();
+	}
+	ActiveCharConfig.Slots[Slot] = Index;
+	ApplyCharacterConfig();
+}
+
+// Browse parts without the UI (Phase 2): set a slot's part index on every character in the world.
+static void PFCharSlotCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 2)
+	{
+		return;
+	}
+	const int32 Slot = FCString::Atoi(*Args[0]);
+	const int32 Index = FCString::Atoi(*Args[1]);
+	int32 Applied = 0;
+	for (TActorIterator<APaintForgeCharacter> It(World); It; ++It)
+	{
+		It->SetCharSlot(Slot, Index);
+		++Applied;
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("pf.CharSlot: slot %d ('%s') -> part %d on %d character(s); %d parts in that slot."),
+		Slot, *PFChar::SlotLabel(Slot), Index, Applied, PFChar::SlotParts(Slot).Num());
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFCharSlotCmd(
+	TEXT("pf.CharSlot"),
+	TEXT("Modular character: <slotIndex> <partIndex> on all pawns. Slots: 0 Head 1 Face 2 Helmet 3 Chest 4 Arms 5 Hips 6 Pants 7 Cloth 8 Backpack (-1 part = none)."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFCharSlotCmd));
 
 void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 {
@@ -1030,16 +1148,20 @@ void APaintForgeCharacter::ApplyTeamBody(uint8 Team)
 		return;
 	}
 
-	// Phase-1 spike: when `pf.BanditChar 1`, mount the modular Bandit character instead of the team body.
-	if (CVarBanditChar.GetValueOnGameThread() != 0)
+	// The modular Bandit character is the body for every player (replaces the old Quantum/Survival team bodies).
+	// Assemble once; the frequent SetTeamColor re-calls just refresh the cached team. Falls back to the legacy
+	// per-team body below only if the Bandit pack is absent.
+	if (!bBanditAssembled && BanditBodyMesh != nullptr)
 	{
-		if (!bBanditAssembled)
-		{
-			AssembleBanditCharacter();
-		}
+		AssembleBanditCharacter();
+	}
+	if (bBanditAssembled)
+	{
 		CachedBodyTeamId = Team;
+		bUsingArtBody = true;
 		return;
 	}
+
 	USkeletalMesh* Chosen = (Team == 1)
 		? (Team1BodyMesh ? Team1BodyMesh : ThirdPersonBodyMesh)
 		: (Team0BodyMesh ? Team0BodyMesh : ThirdPersonBodyMesh);
@@ -1510,6 +1632,11 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 	bTeamAppearanceApplied = true;
 
 	const FLinearColor TeamColor = PFColors::ForTeam(TeamId);
+	// Team armband takes the full vivid team color (max readability — it's the primary friend/foe tell).
+	if (ArmbandMID != nullptr)
+	{
+		ArmbandMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
+	}
 	// Muted team tint for the soldier body — clearly team-colored but not neon speedball (splats/tracers
 	// keep the full vivid ForTeam color). Tune the 0.45 lerp toward gray to taste.
 	const FLinearColor BodyTint = FMath::Lerp(TeamColor, FLinearColor(0.22f, 0.22f, 0.24f, 1.f), 0.45f);

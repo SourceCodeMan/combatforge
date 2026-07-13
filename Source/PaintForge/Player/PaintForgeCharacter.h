@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Engine/TimerHandle.h"
+#include "Player/PFCharacterCustomization.h"   // FPFCharacterConfig
 #include "PaintForgeCharacter.generated.h"
 
 class UCameraComponent;
@@ -203,11 +204,26 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditIdleAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditWalkAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditRunAnim = nullptr;
-	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> BanditParts;       // per-slot Leader-Pose components
-	UPROPERTY() TArray<TObjectPtr<USkeletalMesh>> BanditPartMeshes;           // fixed spike part per component
+	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharBaseComps;   // fixed base skin parts (head/legs)
+	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharSlotComps;   // one per PFChar customization slot
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> ArmbandMesh;              // team-colored band (team distinction)
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> ArmbandMID;
+	FPFCharacterConfig ActiveCharConfig;                                   // current per-slot selection
 	bool bBanditAssembled = false;
-	/** Phase-1 spike: mount the modular Bandit body + parts + sequence-loco anims on GetMesh(). */
+
+	/** Phase-1 spike: mount the modular Bandit body + sequence-loco anims on GetMesh(). */
 	void AssembleBanditCharacter();
+	/** Phase-2: mount base skin + each config-selected overlay part via Leader Pose. */
+	void ApplyCharacterConfig();
+
+public:
+	/** Set one slot's part index and re-apply (console/UI driven). */
+	void SetCharSlot(int32 Slot, int32 Index);
+	const FPFCharacterConfig& GetCharConfig() const { return ActiveCharConfig; }
+	/** Reload the saved config from prefs and re-apply the overlay parts (menu edits an already-spawned pawn). */
+	void ReapplyCharacterConfig();
+
+private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone

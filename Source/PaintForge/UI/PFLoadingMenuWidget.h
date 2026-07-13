@@ -7,6 +7,7 @@
 #include "Components/Button.h"
 #include "Core/PaintForgeTypes.h"
 #include "Voting/PFRatingSubsystem.h"
+#include "Player/PFCharacterCustomization.h"   // FPFCharacterConfig
 #include "PFLoadingMenuWidget.generated.h"
 
 class UButton;
@@ -36,6 +37,24 @@ private:
 	int32 SlotIndex = 0;
 };
 
+/** Prev/next stepper for one character-customization slot (payload button; avoids per-row handlers). */
+UCLASS()
+class PAINTFORGE_API UPFCharSlotButton : public UButton
+{
+	GENERATED_BODY()
+
+public:
+	void InitStep(UPFLoadingMenuWidget* InOwner, int32 InSlot, int32 InDir);
+
+protected:
+	UFUNCTION() void HandleClicked();
+
+private:
+	TWeakObjectPtr<UPFLoadingMenuWidget> OwnerWidget;
+	int32 SlotIndex = 0;
+	int32 Dir = 1;
+};
+
 /**
  * Full-viewport boot menu — NOT a live-game screenshot with HUD.
  * Tabs: Match Setup (mode / type / format / bots / community map) and How to Play.
@@ -56,6 +75,9 @@ public:
 	/** Map-row click from UPFMapPickButton (slot 0..9 on current page). */
 	void NotifyMapSlotClicked(int32 SlotIndex);
 
+	/** Character-customization prev/next step for a slot (Dir -1/+1), cycling through None + parts. */
+	void NotifyCharSlotStep(int32 SlotIdx, int32 Dir);
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
@@ -66,6 +88,8 @@ private:
 	void BuildHowToPlayPage(UVerticalBox* Box);
 	void BuildLoadoutPage(UVerticalBox* Col);
 	void RefreshLoadoutLabels();
+	void BuildCharacterPage(UVerticalBox* Col);
+	void RefreshCharacterLabels();
 	static const TCHAR* MarkerPresetName(int32 Idx);
 	static const TCHAR* CrosshairStyleName(int32 Idx);
 	void BuildMapPicker(UVerticalBox* Parent);
@@ -96,6 +120,7 @@ private:
 	UFUNCTION() void OnTabSetup();
 	UFUNCTION() void OnTabHowTo();
 	UFUNCTION() void OnTabLoadout();
+	UFUNCTION() void OnTabCharacter();
 	UFUNCTION() void OnMarkerCycle();
 	UFUNCTION() void OnCrosshairCycle();
 	UFUNCTION() void OnMapPagePrev();
@@ -122,7 +147,12 @@ private:
 	UPROPERTY() TObjectPtr<UButton> TabSetup;
 	UPROPERTY() TObjectPtr<UButton> TabHowTo;
 	UPROPERTY() TObjectPtr<UButton> TabLoadout;
+	UPROPERTY() TObjectPtr<UButton> TabCharacter;
 	UPROPERTY() TObjectPtr<UWidgetSwitcher> MenuSwitcher;
+
+	// Character customization tab (per-slot part selection; saved to config, applied on spawn).
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> CharSlotValueTexts;
+	FPFCharacterConfig CharConfig;
 
 	// Loadout tab (local prefs: marker fire-rate preset + crosshair style).
 	UPROPERTY() TObjectPtr<UButton> LoadoutMarkerButton;

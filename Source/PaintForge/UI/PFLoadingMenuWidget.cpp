@@ -24,6 +24,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
 #include "Core/PFUserPrefs.h"
+#include "Player/PaintForgeCharacter.h"
 #include "Engine/Texture2D.h"
 #include "ImageUtils.h"
 #include "Misc/Paths.h"
@@ -374,7 +375,7 @@ UTexture2D* UPFLoadingMenuWidget::GetMapPreview(const FString& JsonFileName)
 
 void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 {
-	ActiveMenuTab = FMath::Clamp(Index, 0, 2);
+	ActiveMenuTab = FMath::Clamp(Index, 0, 3);
 	if (MenuSwitcher)
 	{
 		MenuSwitcher->SetActiveWidgetIndex(ActiveMenuTab);
@@ -382,14 +383,16 @@ void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 	// Highlight active tab with a brighter plate.
 	const FLinearColor Hot(1.f, 0.92f, 0.35f, 0.95f);
 	const FLinearColor Cold(0.14f, 0.15f, 0.18f, 0.95f);
-	if (TabSetup)   { TabSetup->SetBackgroundColor(ActiveMenuTab == 0 ? Hot : Cold); }
-	if (TabHowTo)   { TabHowTo->SetBackgroundColor(ActiveMenuTab == 1 ? Hot : Cold); }
-	if (TabLoadout) { TabLoadout->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
+	if (TabSetup)     { TabSetup->SetBackgroundColor(ActiveMenuTab == 0 ? Hot : Cold); }
+	if (TabHowTo)     { TabHowTo->SetBackgroundColor(ActiveMenuTab == 1 ? Hot : Cold); }
+	if (TabLoadout)   { TabLoadout->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
+	if (TabCharacter) { TabCharacter->SetBackgroundColor(ActiveMenuTab == 3 ? Hot : Cold); }
 }
 
 void UPFLoadingMenuWidget::OnTabSetup() { SelectMenuTab(0); }
 void UPFLoadingMenuWidget::OnTabHowTo() { SelectMenuTab(1); }
 void UPFLoadingMenuWidget::OnTabLoadout() { SelectMenuTab(2); }
+void UPFLoadingMenuWidget::OnTabCharacter() { SelectMenuTab(3); }
 
 const TCHAR* UPFLoadingMenuWidget::MarkerPresetName(int32 Idx)
 {
@@ -523,6 +526,153 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 	RefreshLoadoutLabels();
 }
 
+void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
+{
+	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
+	Sub->SetText(FText::FromString(TEXT("Customize your character — saved to this PC, applied when you spawn.")));
+	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
+	Sub->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Sub))
+	{
+		V->SetPadding(FMargin(0.f, 4.f, 0.f, 12.f));
+		V->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	CharConfig = PFChar::LoadConfig();
+	CharSlotValueTexts.Reset();
+
+	for (int32 s = 0; s < PFChar::SlotCount(); ++s)
+	{
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+
+		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
+		Lab->SetText(FText::FromString(PFChar::SlotLabel(s).ToUpper()));
+		Lab->SetFont(PFLoadFont(13, true));
+		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+		USizeBox* LabSizer = WidgetTree->ConstructWidget<USizeBox>();
+		LabSizer->SetWidthOverride(110.f);
+		LabSizer->SetContent(Lab);
+		Row->AddChildToHorizontalBox(LabSizer);
+
+		UPFCharSlotButton* Prev = WidgetTree->ConstructWidget<UPFCharSlotButton>(UPFCharSlotButton::StaticClass());
+		Prev->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+		Prev->InitStep(this, s, -1);
+		UTextBlock* PrevLab = WidgetTree->ConstructWidget<UTextBlock>();
+		PrevLab->SetText(FText::FromString(TEXT(" < ")));
+		PrevLab->SetFont(PFLoadFont(14, true));
+		PrevLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Prev->SetContent(PrevLab);
+		Row->AddChildToHorizontalBox(Prev);
+
+		UTextBlock* Val = WidgetTree->ConstructWidget<UTextBlock>();
+		Val->SetFont(PFLoadFont(12, false));
+		Val->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Val->SetJustification(ETextJustify::Center);
+		Val->SetClipping(EWidgetClipping::ClipToBounds);
+		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(Val))
+		{
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			H->SetPadding(FMargin(6.f, 0.f));
+			H->SetVerticalAlignment(VAlign_Center);
+		}
+		CharSlotValueTexts.Add(Val);
+
+		UPFCharSlotButton* Next = WidgetTree->ConstructWidget<UPFCharSlotButton>(UPFCharSlotButton::StaticClass());
+		Next->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+		Next->InitStep(this, s, +1);
+		UTextBlock* NextLab = WidgetTree->ConstructWidget<UTextBlock>();
+		NextLab->SetText(FText::FromString(TEXT(" > ")));
+		NextLab->SetFont(PFLoadFont(14, true));
+		NextLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Next->SetContent(NextLab);
+		Row->AddChildToHorizontalBox(Next);
+
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(24.f, 3.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+	}
+
+	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
+	Hint->SetText(FText::FromString(TEXT("< / > to change each piece · saved instantly · team color is separate")));
+	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
+	Hint->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Hint))
+	{
+		V->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
+		V->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	RefreshCharacterLabels();
+}
+
+void UPFLoadingMenuWidget::RefreshCharacterLabels()
+{
+	if (CharConfig.Slots.Num() != PFChar::SlotCount())
+	{
+		CharConfig = PFChar::LoadConfig();
+	}
+	for (int32 s = 0; s < CharSlotValueTexts.Num() && s < PFChar::SlotCount(); ++s)
+	{
+		if (CharSlotValueTexts[s] == nullptr)
+		{
+			continue;
+		}
+		const int32 Sel = CharConfig.Slots.IsValidIndex(s) ? CharConfig.Slots[s] : -1;
+		const int32 N = PFChar::SlotParts(s).Num();
+		const FString Text = (Sel < 0 || N == 0)
+			? FString::Printf(TEXT("None  (0/%d)"), N)
+			: FString::Printf(TEXT("%s  (%d/%d)"), *PFChar::PartDisplayName(s, Sel), Sel + 1, N);
+		CharSlotValueTexts[s]->SetText(FText::FromString(Text));
+	}
+}
+
+void UPFLoadingMenuWidget::NotifyCharSlotStep(int32 SlotIdx, int32 Dir)
+{
+	if (SlotIdx < 0 || SlotIdx >= PFChar::SlotCount())
+	{
+		return;
+	}
+	if (CharConfig.Slots.Num() != PFChar::SlotCount())
+	{
+		CharConfig = PFChar::LoadConfig();
+	}
+	const int32 N = PFChar::SlotParts(SlotIdx).Num();
+	if (N <= 0)
+	{
+		return;
+	}
+	int32 Cur = CharConfig.Slots.IsValidIndex(SlotIdx) ? CharConfig.Slots[SlotIdx] : -1;
+	Cur += Dir;
+	if (Cur < -1)      { Cur = N - 1; }   // wrap below None -> last part
+	else if (Cur >= N) { Cur = -1; }      // wrap past last -> None
+	CharConfig.Slots[SlotIdx] = Cur;
+	PFChar::SaveConfig(CharConfig);
+	// Live-update the already-spawned local pawn (it mounted before this edit, so it won't re-load on its own).
+	if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(GetOwningPlayerPawn()))
+	{
+		Char->ReapplyCharacterConfig();
+	}
+	RefreshCharacterLabels();
+}
+
+void UPFCharSlotButton::InitStep(UPFLoadingMenuWidget* InOwner, int32 InSlot, int32 InDir)
+{
+	OwnerWidget = InOwner;
+	SlotIndex = InSlot;
+	Dir = InDir;
+	OnClicked.AddUniqueDynamic(this, &UPFCharSlotButton::HandleClicked);
+}
+
+void UPFCharSlotButton::HandleClicked()
+{
+	if (OwnerWidget.IsValid())
+	{
+		OwnerWidget->NotifyCharSlotStep(SlotIndex, Dir);
+	}
+}
+
 void UPFLoadingMenuWidget::BuildTree()
 {
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
@@ -594,9 +744,11 @@ void UPFLoadingMenuWidget::BuildTree()
 	TabSetup = MakeMenuTab(TEXT("  MATCH SETUP  "), TEXT("TabSetup"));
 	TabHowTo = MakeMenuTab(TEXT("  HOW TO PLAY  "), TEXT("TabHowTo"));
 	TabLoadout = MakeMenuTab(TEXT("  LOADOUT  "), TEXT("TabLoadout"));
+	TabCharacter = MakeMenuTab(TEXT("  CHARACTER  "), TEXT("TabCharacter"));
 	TabSetup->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabSetup);
 	TabHowTo->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabHowTo);
 	TabLoadout->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabLoadout);
+	TabCharacter->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabCharacter);
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabSetup))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
@@ -606,6 +758,10 @@ void UPFLoadingMenuWidget::BuildTree()
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabLoadout))
+	{
+		H->SetPadding(FMargin(4.f, 0.f));
+	}
+	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabCharacter))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
@@ -715,9 +871,13 @@ void UPFLoadingMenuWidget::BuildTree()
 	UVerticalBox* LoadoutCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	BuildLoadoutPage(LoadoutCol);
 
+	UVerticalBox* CharacterCol = WidgetTree->ConstructWidget<UVerticalBox>();
+	BuildCharacterPage(CharacterCol);
+
 	MenuSwitcher->AddChild(SetupCol);
 	MenuSwitcher->AddChild(HowToCol);
-	MenuSwitcher->AddChild(LoadoutCol);   // index 2
+	MenuSwitcher->AddChild(LoadoutCol);      // index 2
+	MenuSwitcher->AddChild(CharacterCol);    // index 3
 
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MenuSizer))
 	{

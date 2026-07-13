@@ -23,7 +23,8 @@ public class PaintForge : ModuleRules
 			"AIModule",                      // AAIController base for roster-filling bots (PFBotController)
 			"Json", "JsonUtilities",         // arena rating records
 			"RenderCore",                    // GShaderCompilingManager / loading-screen shader drain
-			"RHI"                            // shader pipeline cache helpers
+			"RHI",                           // shader pipeline cache helpers
+			"AssetRegistry"                  // UObjectLibrary part enumeration (PFCharacterCustomization)
 		});
 		// No private-only deps in v1. NOT needed: OnlineSubsystem (02 D12),
 		// Niagara (post-v1 art), GameplayAbilities (overkill).
