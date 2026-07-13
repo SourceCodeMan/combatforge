@@ -16,6 +16,9 @@ namespace PFWeapon
 		// from that same pose and needs an in-editor tuning pass (use `pf.WeaponFP x y z pitch yaw roll scale`
 		// on the equipped weapon, then paste the printed values here). Bandits/Quantum meshes keep their own
 		// authored materials (MaterialPath = nullptr); only SM_Rifle force-overrides (it soft-refs a missing Lyra mat).
+		// FIRST-PASS poses (from playtest screenshots). SM_Rifle is verified. AK/AKSU render like the rifle so
+		// their hold = rifle; only the muzzle (tracer origin) is shortened per barrel length. Pistol is a
+		// different class → held closer/higher/centered/larger. Fine-tune any of these with pf.WeaponFP / pf.WeaponADS.
 		const FPFWeaponDef GRifles[] = {
 			{ TEXT("Rifle (default)"), TEXT("/Game/Weapons/Rifle/Mesh/SM_Rifle.SM_Rifle"),
 			  TEXT("/Game/Weapons/Rifle/M_PF_Rifle.M_PF_Rifle"),
@@ -24,19 +27,21 @@ namespace PFWeapon
 			  TEXT("/Game/QuantumCharacter/Materials/M_Rifle_Olive.M_Rifle_Olive"),
 			  FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(42.f, 3.5f, -3.5f) },
 			{ TEXT("AK (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black"),
-			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(42.f, 3.5f, -3.5f) },
+			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(40.f, 3.5f, -3.5f) },
 			{ TEXT("AK (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
-			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(42.f, 3.5f, -3.5f) },
+			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(40.f, 3.5f, -3.5f) },
 		};
 		const FPFWeaponDef GSMGs[] = {
 			{ TEXT("AKSU (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black"),
-			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(36.f, 3.5f, -3.5f) },
+			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(33.f, 3.5f, -3.5f) },
 			{ TEXT("AKSU (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood"),
-			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(36.f, 3.5f, -3.5f) },
+			  nullptr, FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(33.f, 3.5f, -3.5f) },
 		};
 		const FPFWeaponDef GPistols[] = {
+			// Sidearm: bring it up, in, and centered vs a rifle; a touch larger; short muzzle; sight low so ADS drops.
 			{ TEXT("Pistol"), TEXT("/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol"),
-			  nullptr, FVector(5.f, 4.f, -4.f), FRotator(-2.f, -90.f, 2.f), 0.48f, FVector(20.f, 3.f, -3.f) },
+			  nullptr, FVector(8.f, 3.5f, -2.5f), FRotator(-2.f, -90.f, 2.f), 0.58f, FVector(18.f, 2.5f, -2.5f),
+			  FVector(17.f, -3.f, -0.5f), FRotator(1.5f, 0.f, -1.5f) },
 		};
 
 		struct FCatEntry { const TCHAR* Label; const FPFWeaponDef* Defs; int32 Count; };
