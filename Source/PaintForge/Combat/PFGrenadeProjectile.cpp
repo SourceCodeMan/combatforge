@@ -55,8 +55,8 @@ APFGrenadeProjectile::APFGrenadeProjectile()
 	Movement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Movement"));
 	Movement->UpdatedComponent = Collision;
 	Movement->InitialSpeed = 0.f;                 // set in ServerInit
-	Movement->MaxSpeed = 6500.f;                  // headroom for the faster throw
-	Movement->ProjectileGravityScale = 0.55f;     // flatter, faster arc (was a floaty full-gravity lob)
+	Movement->MaxSpeed = 4000.f;
+	Movement->ProjectileGravityScale = 1.0f;      // original lob arc (the throw itself was right; only the spawn point was wrong)
 	Movement->bShouldBounce = true;
 	Movement->Bounciness = 0.35f;
 	Movement->Friction = 0.35f;
@@ -85,10 +85,10 @@ void APFGrenadeProjectile::ServerInit(const FVector& AimDir, uint8 Team, EPFGren
 	KindRep = static_cast<uint8>(Type);
 	ThrowerWeak = Thrower;
 
-	FVector Launch = (AimDir + FVector(0.f, 0.f, 0.08f)).GetSafeNormal();   // near-flat: hug the crosshair (~4.6°)
+	FVector Launch = (AimDir + FVector(0.f, 0.f, 0.35f)).GetSafeNormal();   // original toss arc (spawns from the eyes now)
 	if (Launch.IsNearlyZero())
 	{
-		Launch = FVector(1.f, 0.f, 0.08f).GetSafeNormal();
+		Launch = FVector(1.f, 0.f, 0.35f).GetSafeNormal();
 	}
 	if (Movement)
 	{

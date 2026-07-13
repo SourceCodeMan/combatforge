@@ -62,9 +62,9 @@ protected:
 	UPROPERTY(Replicated) FVector_NetQuantize100 DetonatePoint = FVector::ZeroVector;
 
 	// ---- Config ----
-	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float ThrowSpeed    = 3400.f;   // fast, flat throw (was a slow lob)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float FuseSeconds   = 1.4f;     // trimmed so the faster nade doesn't sail too far
-	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") int32 FragBBCount   = 30;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float ThrowSpeed    = 1650.f;   // original toss speed (throw was right; only the spawn was wrong)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float FuseSeconds   = 1.6f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") int32 FragBBCount   = 90;       // 3x pellets
 	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float SmokeDuration = 8.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float SmokeRadius   = 300.f;
 

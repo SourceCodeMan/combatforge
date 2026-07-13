@@ -303,17 +303,23 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 
 	// Team-colored armband — the team tell on the shared Bandit body. Engine cylinder wrapped thin around the
 	// upper arm; re-parented to the arm bone, sized, and tinted at assembly time (see AssembleBanditCharacter).
-	ArmbandMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Armband"));
-	if (ArmbandMesh != nullptr)
+	auto MakeArmband = [this, CylMesh](const TCHAR* Name) -> UStaticMeshComponent*
 	{
-		ArmbandMesh->SetupAttachment(GetMesh());
-		if (CylMesh != nullptr) { ArmbandMesh->SetStaticMesh(CylMesh); }
-		ArmbandMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		ArmbandMesh->SetCastShadow(false);
-		ArmbandMesh->SetVisibility(false);
-		ArmbandMesh->SetHiddenInGame(true);
-		ArmbandMesh->SetOwnerNoSee(true);   // hidden from the owning first-person view
-	}
+		UStaticMeshComponent* C = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+		if (C != nullptr)
+		{
+			C->SetupAttachment(GetMesh());
+			if (CylMesh != nullptr) { C->SetStaticMesh(CylMesh); }
+			C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			C->SetCastShadow(false);
+			C->SetVisibility(false);
+			C->SetHiddenInGame(true);
+			C->SetOwnerNoSee(true);   // hidden from the owning first-person view
+		}
+		return C;
+	};
+	ArmbandMesh  = MakeArmband(TEXT("Armband"));    // left arm
+	ArmbandMeshR = MakeArmband(TEXT("ArmbandR"));   // right arm
 
 	// Soft team-tint fallback (mannequin / graybox only).
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TeamBodyMatFinder(
@@ -1029,26 +1035,32 @@ void APaintForgeCharacter::AssembleBanditCharacter()
 	// the eye line and BBs spawn from the head. Bandit skeleton is Mannequin-compatible, so hand_r resolves.
 	AttachWeaponToHand();
 
-	// Team-colored armband on the upper arm. Bandit skeleton is Mannequin-compatible, so "upperarm_l" resolves;
-	// if a pack lacks that bone the band simply rides the mesh root (still visible, just not on the arm).
-	if (ArmbandMesh != nullptr)
+	// Team-colored armbands on BOTH upper arms. Bandit skeleton is Mannequin-compatible, so upperarm_l/_r resolve;
+	// if a pack lacks a bone the band simply rides the mesh root (still visible, just not on the arm).
+	auto MountArmband = [this, Base](UStaticMeshComponent* Band, TObjectPtr<UMaterialInstanceDynamic>& MID, const TCHAR* Bone)
 	{
-		ArmbandMesh->AttachToComponent(Base, FAttachmentTransformRules::KeepRelativeTransform, TEXT("upperarm_l"));
-		ArmbandMesh->SetRelativeLocation(FVector(16.f, 0.f, 0.f));      // down the bicep from the shoulder joint
-		ArmbandMesh->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));     // cylinder axis -> along the arm bone (+X)
-		ArmbandMesh->SetRelativeScale3D(FVector(0.16f, 0.16f, 0.045f)); // thin band, ~8 cm radius
-		if (ArmbandMID == nullptr && TeamBodyMaterial != nullptr)
+		if (Band == nullptr)
 		{
-			ArmbandMID = ArmbandMesh->CreateDynamicMaterialInstance(0, TeamBodyMaterial);
+			return;
 		}
-		if (ArmbandMID != nullptr)
+		Band->AttachToComponent(Base, FAttachmentTransformRules::KeepRelativeTransform, Bone);
+		Band->SetRelativeLocation(FVector(16.f, 0.f, 0.f));      // down the bicep from the shoulder joint
+		Band->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));     // cylinder axis -> along the arm bone (+X)
+		Band->SetRelativeScale3D(FVector(0.16f, 0.16f, 0.045f)); // thin band, ~8 cm radius
+		if (MID == nullptr && TeamBodyMaterial != nullptr)
 		{
-			ArmbandMID->SetVectorParameterValue(TEXT("Color"), PFColors::ForTeam(CachedBodyTeamId));
+			MID = Band->CreateDynamicMaterialInstance(0, TeamBodyMaterial);
 		}
-		ArmbandMesh->SetVisibility(true);
-		ArmbandMesh->SetHiddenInGame(false);
-		ArmbandMesh->SetOwnerNoSee(true);
-	}
+		if (MID != nullptr)
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), PFColors::ForTeam(CachedBodyTeamId));
+		}
+		Band->SetVisibility(true);
+		Band->SetHiddenInGame(false);
+		Band->SetOwnerNoSee(true);
+	};
+	MountArmband(ArmbandMesh, ArmbandMID, TEXT("upperarm_l"));
+	MountArmband(ArmbandMeshR, ArmbandMIDR, TEXT("upperarm_r"));
 
 	bBanditAssembled = true;
 	UE_LOG(PaintForgeLog, Log, TEXT("AssembleBanditCharacter: mounted Bandit body + %d slot comps (%d parts in registry)."),
@@ -1766,6 +1778,10 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 	if (ArmbandMID != nullptr)
 	{
 		ArmbandMID->SetVectorParameterValue(TEXT("Color"), TeamColor);
+	}
+	if (ArmbandMIDR != nullptr)
+	{
+		ArmbandMIDR->SetVectorParameterValue(TEXT("Color"), TeamColor);
 	}
 	// Muted team tint for the soldier body — clearly team-colored but not neon speedball (splats/tracers
 	// keep the full vivid ForTeam color). Tune the 0.45 lerp toward gray to taste.

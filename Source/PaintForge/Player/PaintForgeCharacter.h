@@ -207,8 +207,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditRunAnim = nullptr;
 	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharBaseComps;   // fixed base skin parts (head/legs)
 	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharSlotComps;   // one per PFChar customization slot
-	UPROPERTY() TObjectPtr<UStaticMeshComponent> ArmbandMesh;              // team-colored band (team distinction)
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> ArmbandMesh;              // team-colored band, left arm (team distinction)
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> ArmbandMID;
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> ArmbandMeshR;            // right arm
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> ArmbandMIDR;
 	FPFCharacterConfig ActiveCharConfig;                                   // current per-slot selection
 	bool bBanditAssembled = false;
 	FPFWeaponConfig ActiveWeaponConfig;                                    // current weapon selection
