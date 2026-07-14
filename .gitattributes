@@ -3,6 +3,7 @@ Content/Scene_Warehouse/** filter=lfs diff=lfs merge=lfs -text
 Content/Survival_Character/** filter=lfs diff=lfs merge=lfs -text
 Content/QuantumCharacter/** filter=lfs diff=lfs merge=lfs -text
 Content/MaterialsScifi/** filter=lfs diff=lfs merge=lfs -text
+Content/Bandits/** filter=lfs diff=lfs merge=lfs -text
 
 # Line endings — shell scripts MUST stay LF (a CRLF .command/.sh breaks bash on Mac/Linux).
 *.command text eol=lf
