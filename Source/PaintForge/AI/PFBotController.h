@@ -71,6 +71,7 @@ protected:
 	// before a freshly-acquired target may be fired on. Default Rookie = easy bots for the kids' session.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") EPFBotSkill Skill = EPFBotSkill::Rookie;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ReactionDelay = 0.6f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float CombatMemorySec = 1.5f;   // still "in combat" this long after last engageable contact → no reaction re-arm
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimTurnRate = 2.5f;      // control-rotation ease speed (low = laggy aim, misses strafers)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimJitterInterval = 0.6f;// how often the random aim error is re-rolled
 
@@ -120,7 +121,9 @@ private:
 	APaintForgeCharacter* GetBotCharacter() const;
 	APaintForgeCharacter* AcquireNearestEnemy() const;   // nearest hostile the bot can SEE (perception) or feel (proximity)
 	bool IsHostilePlayerState(const class APaintForgePlayerState* OtherPS) const;   // game team rules (mirrors GetTeamAttitudeTowards)
-	bool HasLineOfSight(const APaintForgeCharacter* Target) const;
+	// bBodiesBlock=false (tracking/acquisition): only world geometry breaks sight — bodies crossing the line
+	// don't make the bot "forget" a target. bBodiesBlock=true (firing): a FRIENDLY body in the way holds fire.
+	bool HasLineOfSight(const APaintForgeCharacter* Target, bool bBodiesBlock = false) const;
 
 	// Perception callback (must be UFUNCTION — OnTargetPerceptionUpdated is a dynamic delegate). Hearing stimuli
 	// become an "investigate this noise" goal; sight is polled directly in the target scan.
@@ -182,4 +185,9 @@ private:
 	uint8 LastKnownHP = 255;         // 255 = uninitialised (first tick this life)
 	uint8 RoundMaxHP = 1;            // highest HP seen this life → the injury denominator
 	float SuppressedUntil = -1000.f; // world time until which the bot is "under fire"
+
+	// Combat continuity: the reaction "notice" delay only re-arms when the bot has been OUT of combat for a
+	// while. Without this, every momentary target loss (a body crossing the trace, a target swap) re-armed the
+	// delay and clustered bots never got a shot off.
+	float LastCombatTime = -1000.f;
 };

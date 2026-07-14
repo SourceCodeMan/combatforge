@@ -128,6 +128,7 @@ void APFBotController::OnPossess(APawn* InPawn)
 	bHaveTacticalGoal = false;   ReposTimer = 0.f;   // re-evaluate firing position for the new pawn
 	LastKnownHP = 255;   RoundMaxHP = 1;   SuppressedUntil = -1000.f;   // fresh health/suppression for the new life
 	ScanTimer = 0.f;   ScanYawOffset = 0.f;
+	LastCombatTime = -1000.f;   // fresh life = out of combat → first contact gets a full reaction delay
 	// Give this bot a team id so perception has a concrete affiliation (attitude itself comes from the
 	// GetTeamAttitudeTowards override, but a real id avoids any NoTeam short-circuit in the sense filter).
 	if (const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>())
@@ -256,6 +257,10 @@ void APFBotController::Tick(float DeltaSeconds)
 		TargetRefreshTimer = TargetRefreshInterval;
 		APaintForgeCharacter* Curr = CurrentTarget.Get();
 		const bool bCurrOK = IsTargetEngageable(Curr);
+		if (bCurrOK)
+		{
+			LastCombatTime = NowSec;   // we have live contact — keep the combat window open
+		}
 		APaintForgeCharacter* Best = AcquireNearestEnemy();   // nearest VISIBLE enemy (else nearest)
 		if (Best != nullptr && Best != Curr)
 		{
@@ -270,16 +275,18 @@ void APFBotController::Tick(float DeltaSeconds)
 			const bool bPointBlankThreat = (BestD < PointBlankUU) && (CurrD > PointBlankUU);
 			if (!bCurrOK || bClearlyCloser || bPointBlankThreat)
 			{
-				// Re-arm the "notice" reaction gap ONLY when acquiring from no engageable target. Switching
-				// between two enemies we can already SEE must not reset the trigger — re-arming on every refresh
-				// made bots stutter / never fire when enemies clustered (playtest 07-14: fireHold stuck at 0.21).
-				if (!bCurrOK)
+				// Re-arm the "notice" reaction gap ONLY when the bot has genuinely been OUT of combat for
+				// CombatMemorySec. Re-arming on any lesser condition (every switch, or even every acquire-from-
+				// invalid) left crowds of bots perpetually "noticing": momentary target losses re-armed the gap
+				// faster than it could count down, so whole clusters stood staring (playtest 07-14, twice).
+				if ((NowSec - LastCombatTime) > CombatMemorySec)
 				{
 					FireHoldTimer = (BestD < PointBlankUU) ? (ReactionDelay * 0.35f) : ReactionDelay;
 				}
 				CurrentTarget = Best;
 				bHaveTacticalGoal = false;   // new target → re-pick a firing position now, don't reuse the old one
 			}
+			LastCombatTime = NowSec;   // acquiring/holding an enemy counts as contact either way
 		}
 		else if (Best == nullptr && !bCurrOK)
 		{
@@ -426,18 +433,25 @@ void APFBotController::Tick(float DeltaSeconds)
 		DesiredAim.Pitch = FMath::Clamp(DesiredAim.Pitch + AimJitterPitch, -80.f, 80.f);
 		SetControlRotation(FMath::RInterpTo(GetControlRotation(), DesiredAim, DeltaSeconds, EffTurnRate));
 
-		const bool bLOS = HasLineOfSight(Target);
+		// Firing check is the STRICT one (bBodiesBlock): geometry blocks, a friendly in the line of fire holds the
+		// trigger, but a hostile in the way is fine to shoot. Target RETENTION elsewhere stays body-transparent.
+		const bool bLOS = HasLineOfSight(Target, /*bBodiesBlock=*/true);
 		const bool bWantFire = (Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && bLOS;
 		SetFiring(bWantFire);
+		if (bWantFire)
+		{
+			LastCombatTime = NowSec;   // actively shooting = definitely in combat
+		}
 
-		// Diagnostic: if an enemy is point-blank but we're NOT firing, log why (LOS / reaction gap / range) so a
-		// remaining "won't shoot in your face" case is pinpointed instead of guessed. Throttled (shares NavWarnTimer).
-		if (!bWantFire && Dist < PointBlankUU && NavWarnTimer <= 0.f)
+		// Diagnostic: point-blank enemy, reaction gap ALREADY expired, still not firing → genuine stall worth a
+		// log line. (A counting-down FireHoldTimer is healthy and no longer logged — pre-fix it spammed hundreds
+		// of lines a match and buried the real signal.) Throttled (shares NavWarnTimer).
+		if (!bWantFire && Dist < PointBlankUU && FireHoldTimer <= 0.f && NavWarnTimer <= 0.f)
 		{
 			NavWarnTimer = 3.f;
 			UE_LOG(PaintForgeLog, Warning,
-				TEXT("Bot NOT firing point-blank: dist=%.0f LOS=%d fireHold=%.2f inRange=%d"),
-				Dist, bLOS ? 1 : 0, FireHoldTimer, (Dist <= EngageRangeUU) ? 1 : 0);
+				TEXT("Bot NOT firing point-blank (stall): dist=%.0f LOS=%d inRange=%d"),
+				Dist, bLOS ? 1 : 0, (Dist <= EngageRangeUU) ? 1 : 0);
 		}
 	}
 	else
@@ -951,7 +965,7 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 	return false;
 }
 
-bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target) const
+bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target, bool bBodiesBlock) const
 {
 	const APaintForgeCharacter* Bot = GetBotCharacter();
 	UWorld* World = GetWorld();
@@ -964,9 +978,28 @@ bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target) const
 	FCollisionQueryParams Params(FName(TEXT("BotLOS")), /*bTraceComplex=*/false, Bot);
 	Params.AddIgnoredActor(Target);
 	FHitResult Hit;
-	// Trace ignores self + target: a blocking hit means cover/geometry is in the way → no line of sight.
 	const bool bBlocked = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
-	return !bBlocked;
+	if (!bBlocked)
+	{
+		return true;
+	}
+	// WHAT blocked matters. In a crowd, character bodies constantly cross the trace — if that counted as
+	// "lost sight", every bot's target flickered un-engageable several times a second, each re-acquire re-armed
+	// the reaction delay, and whole clusters just stood staring (playtest: "one bot shoots, the rest stand").
+	//  - blocked by a HOSTILE body: still a firefight — shooting means you hit that enemy instead. Sight holds.
+	//  - blocked by a FRIENDLY body: sight holds for tracking, but bBodiesBlock (the FIRING check) returns
+	//    false so a bot never sprays a teammate in the back. Only world geometry truly breaks sight.
+	const APaintForgeCharacter* Blocker = Cast<APaintForgeCharacter>(Hit.GetActor());
+	if (Blocker == nullptr)
+	{
+		return false;   // wall / built piece / prop — genuinely no line of sight
+	}
+	if (bBodiesBlock)
+	{
+		// Firing check: a hostile in the way is a fine thing to shoot; a teammate is not.
+		return IsHostilePlayerState(Blocker->GetPlayerState<APaintForgePlayerState>());
+	}
+	return true;   // tracking/retention: a body crossing the line never makes the bot "forget" its target
 }
 
 void APFBotController::SetFiring(bool bFire)
