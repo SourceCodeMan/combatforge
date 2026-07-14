@@ -129,7 +129,7 @@ private:
 	void SetFiring(bool bFire);
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
 	void MoveToGoal(const FVector& RawGoal, AActor* FallbackActor);   // navmesh MoveTo toward a tactical point (falls back to the enemy if the point is off-mesh)
-	FVector ChooseTacticalPosition(const APaintForgeCharacter* Target) const;   // EQS-lite: best nearby firing position
+	FVector ChooseTacticalPosition(const APaintForgeCharacter* Target, const FVector* Anchor = nullptr) const;   // EQS-lite: best nearby firing position (Anchor = objective to hold near)
 	bool IsTargetEngageable(const APaintForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
 	bool ComputeObjectiveGoal(FVector& OutGoal);   // Dom/Hardpoint/CTF: where to push (false in fight modes)
 	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)

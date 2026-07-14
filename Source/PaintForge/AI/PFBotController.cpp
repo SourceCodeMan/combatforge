@@ -296,6 +296,10 @@ void APFBotController::Tick(float DeltaSeconds)
 	// Objective goal (Domination / Hardpoint / CTF): where this bot should push, even with no enemy in sight.
 	FVector ObjGoal;
 	const bool bHasObjective = ComputeObjectiveGoal(ObjGoal);
+	// Hold-ground modes (Domination / Hardpoint): the bot should CONTEST its point — fight its way to it and hold
+	// it — instead of letting a spotted enemy draw it off the objective. (CTF is a carry mode, so it's excluded.)
+	const bool bHoldGround = bHasObjective
+		&& (GS->MatchType == EPFMatchType::Domination || GS->MatchType == EPFMatchType::Hardpoint);
 
 	// Search goal: the more RECENT of "where I last saw you" and "where I heard a noise", while still fresh — so a
 	// bot that lost sight (you ducked behind cover) or was shot from behind goes to hunt/investigate, not idle.
@@ -428,15 +432,23 @@ void APFBotController::Tick(float DeltaSeconds)
 	const float SearchReachUU = 250.f;   // within this of a hunt/investigate point counts as "arrived"
 	FVector GoalLoc = BotLoc;
 	bool bMove = false;
-	if (Target != nullptr)
+	if (Target != nullptr && bHoldGround && FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU * 2.f)
+	{
+		// FIGHT TOWARD THE OBJECTIVE: we can see an enemy but we're off our point — advance to contest it while
+		// still shooting (aim/fire above tracks the enemy), rather than chasing them away from the objective.
+		GoalLoc = ObjGoal;
+		bMove = true;
+	}
+	else if (Target != nullptr)
 	{
 		// FIGHT: reposition to the best nearby firing position (LOS + cover + range + flank + spread), re-evaluated
 		// periodically. This replaces the old strafe-in-the-open with deliberate tactical movement — bots work to
-		// cover, hold angles, and flank as a group. Aim/fire (above) keeps the enemy tracked while we move.
+		// cover, hold angles, and flank as a group. In hold-ground modes the position is anchored to the objective
+		// so the bot fights FROM the point. Aim/fire (above) keeps the enemy tracked while we move.
 		ReposTimer -= DeltaSeconds;
 		if (!bHaveTacticalGoal || ReposTimer <= 0.f)
 		{
-			TacticalGoal = ChooseTacticalPosition(Target);
+			TacticalGoal = ChooseTacticalPosition(Target, bHoldGround ? &ObjGoal : nullptr);
 			bHaveTacticalGoal = true;
 			ReposTimer = RepositionInterval;
 		}
@@ -552,7 +564,7 @@ void APFBotController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollow
 	// fresh tactical goal and re-paths. Nothing to do here but let the throttle re-fire (bIdle in Tick catches it).
 }
 
-FVector APFBotController::ChooseTacticalPosition(const APaintForgeCharacter* Target) const
+FVector APFBotController::ChooseTacticalPosition(const APaintForgeCharacter* Target, const FVector* Anchor) const
 {
 	const APaintForgeCharacter* Bot = GetBotCharacter();
 	UWorld* World = GetWorld();
@@ -646,6 +658,14 @@ FVector APFBotController::ChooseTacticalPosition(const APaintForgeCharacter* Tar
 
 		// (6) Inertia: a small bonus for holding ground so bots don't dither between near-equal spots.
 		if (FVector::DistSquared2D(P, BotLoc) < FMath::Square(150.f)) { Score += 0.3f; }
+
+		// (7) Objective anchor (Hardpoint/Domination): strongly prefer firing from ON/NEAR the point so the bot
+		//     contests it while fighting instead of chasing the enemy off the objective.
+		if (Anchor != nullptr)
+		{
+			const float AnchorDist = FVector::Dist2D(P, *Anchor);
+			Score += FMath::Clamp(1.5f - AnchorDist / 800.f, -1.5f, 1.5f);   // ~+1.5 on the point → negative far off it
+		}
 
 		if (Score > BestScore) { BestScore = Score; BestPos = P; }
 	};
