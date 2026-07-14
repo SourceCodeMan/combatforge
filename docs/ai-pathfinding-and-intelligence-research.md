@@ -1,6 +1,15 @@
 # Combat Forge — AI Pathfinding & Intelligence: Research + Implementation Plan
 
-*Research doc, 2026‑07‑14. Written overnight per Tom's request: "the goal is intelligent AI… they run into walls and they're pretty dumb… find out how other games (Gray Zone Warfare, CoD, Battlefield) do bots/pathfinding, and whether we can implement it here." Nothing here is built yet — this is the plan to review in the morning.*
+*Research doc, 2026‑07‑14. Written overnight per Tom's request: "the goal is intelligent AI… they run into walls and they're pretty dumb… find out how other games (Gray Zone Warfare, CoD, Battlefield) do bots/pathfinding, and whether we can implement it here."*
+
+> **✅ IMPLEMENTATION STATUS (2026‑07‑14): all five phases below are SHIPPED.**
+> - **Phase 0 — dynamic runtime navmesh + MoveTo pathfinding** (`ffbeb86`, freeze fix `b694365`) — *playtest‑verified: bots route around the built fort.* Also fixed prop collision so props block pawns/BBs.
+> - **Phase 1 — perception**: sight cone + hearing + team attitude + last‑known‑position + investigate (`a5249aa`). Plus a point‑blank engagement fix (`5f2428e`).
+> - **Phase 2 — tactical positioning**: EQS‑lite cover/flank/range/spread firing‑position scoring, pure C++ (`155cc6d`).
+> - **Phase 3 — accuracy under pressure**: suppression (hit → wider aim + break for cover) + injury (`1e6c714`).
+> - **Phase 4 — squad coordination**: per‑team shared enemy‑sighting blackboard (`UPFSquadSubsystem`); the squad converges on a spotted enemy (`ef0ca6f`).
+>
+> The §7 architecture question resolved to **pure C++** (option A): navmesh + invokers are asset‑free; perception, EQS‑lite tactics, and the squad board are all C++ — the zero‑editor‑asset rule held. Phases 1–4 are built + boot‑clean but **not yet playtest‑verified**. The plan below is the original research; it's kept as the rationale of record.
 
 ---
 
