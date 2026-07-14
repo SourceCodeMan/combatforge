@@ -290,21 +290,48 @@ void APFBotController::Tick(float DeltaSeconds)
 	const bool bIdle = (GetMoveStatus() == EPathFollowingStatus::Idle);
 	if ((RepathTimer <= 0.f && bGoalMoved) || bIdle)
 	{
-		MoveToGoal(GoalLoc);
+		MoveToGoal(GoalLoc, Target);   // Target = enemy pawn; used as an on-mesh fallback if GoalLoc is off-mesh
 		RepathTimer = RepathInterval;
 	}
 }
 
-void APFBotController::MoveToGoal(const FVector& GoalLoc)
+void APFBotController::MoveToGoal(const FVector& RawGoal, AActor* FallbackActor)
 {
-	LastPathedGoal = GoalLoc;
+	LastPathedGoal = RawGoal;
+
+	// The tactical goal is a heading projected ~700uu ahead, which VERY OFTEN lands just off the mesh (past a
+	// wall, over the perimeter, above a carved hole). MoveTo's own projection uses the agent's tiny
+	// DefaultQueryExtent (50,50,250) and misses → it returns Failed and the bot FREEZES. So snap the goal to
+	// the navmesh ourselves with a generous extent, and only path to a real on-mesh point. (With partial paths
+	// on, an unreachable-but-on-mesh goal succeeds; a hard Failed only happens when the goal isn't on the mesh.)
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	FVector Goal = RawGoal;
+	bool bGoalOnMesh = false;
+	if (Nav != nullptr)
+	{
+		FNavLocation Projected;
+		if (Nav->ProjectPointToNavigation(RawGoal, Projected, FVector(600.f, 600.f, 500.f)))
+		{
+			Goal = Projected.Location;
+			bGoalOnMesh = true;
+		}
+	}
 
 	FAIMoveRequest Req;
-	Req.SetGoalLocation(GoalLoc);
+	if (!bGoalOnMesh && FallbackActor != nullptr)
+	{
+		// No mesh near the desired heading (e.g. facing straight into a wall). Path to the enemy instead — a
+		// pawn is always on the mesh — so the bot advances toward the fight rather than standing still.
+		Req.SetGoalActor(FallbackActor);
+	}
+	else
+	{
+		Req.SetGoalLocation(Goal);
+	}
 	Req.SetAcceptanceRadius(MoveAcceptUU);
 	Req.SetUsePathfinding(true);
 	Req.SetAllowPartialPath(true);      // unreachable goal → walk as far along the route as the mesh allows
-	Req.SetProjectGoalLocation(true);   // snap an off-mesh point (projected heading) down onto the navmesh
+	Req.SetProjectGoalLocation(true);   // belt+braces (we already snapped Goal above)
 	Req.SetCanStrafe(true);             // decouple facing from move dir — the aim code owns yaw
 	const FPathFollowingRequestResult Result = MoveTo(Req);
 	if (Result.Code == EPathFollowingRequestResult::RequestSuccessful)
@@ -313,19 +340,20 @@ void APFBotController::MoveToGoal(const FVector& GoalLoc)
 	}
 	else if (Result.Code == EPathFollowingRequestResult::Failed)
 	{
-		// No navmesh under the bot (or the goal couldn't project). Almost always means the runtime navmesh
-		// hasn't generated over the arena — surface it loudly (throttled) so a broken nav setup is obvious in
-		// the playtest log instead of silently-frozen bots.
+		// Still failed after snapping the goal. Distinguish "goal genuinely off-mesh" from "navmesh is
+		// LOCAL/fragmented" (bot on a small island, can't reach the arena centre) so the log pinpoints it.
 		if (NavWarnTimer <= 0.f)
 		{
 			NavWarnTimer = 3.f;
-			UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
-			FNavLocation Projected;
-			const bool bOnMesh = (Nav != nullptr) && GetPawn() != nullptr
-				&& Nav->ProjectPointToNavigation(GetPawn()->GetActorLocation(), Projected, FVector(200.f, 200.f, 400.f));
+			const FVector BotLoc = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
+			FNavLocation Here, Ctr;
+			const bool bHere = (Nav != nullptr) && Nav->ProjectPointToNavigation(BotLoc, Here, FVector(200.f, 200.f, 400.f));
+			const bool bCtr  = (Nav != nullptr) && Nav->ProjectPointToNavigation(FVector(3200.f, 2000.f, BotLoc.Z), Ctr, FVector(800.f, 800.f, 800.f));
 			UE_LOG(PaintForgeLog, Warning,
-				TEXT("Bot MoveTo FAILED (no path). NavSystem=%s BotOnNavmesh=%s — is the runtime navmesh generating over the arena?"),
-				Nav ? TEXT("yes") : TEXT("NULL"), bOnMesh ? TEXT("yes") : TEXT("NO"));
+				TEXT("Bot MoveTo FAILED. NavSys=%s BotOnMesh=%s GoalSnapped=%s ArenaCtrOnMesh=%s -> %s"),
+				Nav ? TEXT("yes") : TEXT("NULL"), bHere ? TEXT("yes") : TEXT("NO"),
+				bGoalOnMesh ? TEXT("yes") : TEXT("NO"), bCtr ? TEXT("yes") : TEXT("NO"),
+				(bHere && !bCtr) ? TEXT("navmesh looks LOCAL/fragmented") : TEXT("goal unreachable this beat"));
 		}
 	}
 }

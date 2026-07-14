@@ -78,7 +78,7 @@ private:
 	bool HasLineOfSight(const APaintForgeCharacter* Target) const;
 	void SetFiring(bool bFire);
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
-	void MoveToGoal(const FVector& GoalLoc);   // issue a navmesh MoveTo (strafe-facing) toward a tactical point
+	void MoveToGoal(const FVector& RawGoal, AActor* FallbackActor);   // navmesh MoveTo toward a tactical point (falls back to the enemy if the point is off-mesh)
 	bool IsTargetEngageable(const APaintForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
 	bool ComputeObjectiveGoal(FVector& OutGoal);   // Dom/Hardpoint/CTF: where to push (false in fight modes)
 	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)
