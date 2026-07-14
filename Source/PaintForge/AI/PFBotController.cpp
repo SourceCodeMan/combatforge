@@ -262,10 +262,21 @@ void APFBotController::Tick(float DeltaSeconds)
 			const FVector BotAt = Bot->GetActorLocation();
 			const float BestD = FVector::Dist(BotAt, Best->GetActorLocation());
 			const float CurrD = bCurrOK ? FVector::Dist(BotAt, Curr->GetActorLocation()) : TNumericLimits<float>::Max();
-			// Switch if we have no valid target, OR the new one is clearly closer, OR it's point-blank.
-			if (!bCurrOK || BestD < CurrD * 0.8f || BestD < PointBlankUU)
+			// Switch if: no valid target, OR the new one is clearly closer (hysteresis), OR it's a point-blank
+			// threat while the current target is NOT already close. That last guard is key: two clustered close
+			// enemies must NOT make the bot switch every refresh — a bot on a FAR foe still turns to a point-blank
+			// attacker, but it won't ping-pong between two enemies already in its face.
+			const bool bClearlyCloser = BestD < CurrD * 0.8f;
+			const bool bPointBlankThreat = (BestD < PointBlankUU) && (CurrD > PointBlankUU);
+			if (!bCurrOK || bClearlyCloser || bPointBlankThreat)
 			{
-				FireHoldTimer = (BestD < PointBlankUU) ? (ReactionDelay * 0.35f) : ReactionDelay;
+				// Re-arm the "notice" reaction gap ONLY when acquiring from no engageable target. Switching
+				// between two enemies we can already SEE must not reset the trigger — re-arming on every refresh
+				// made bots stutter / never fire when enemies clustered (playtest 07-14: fireHold stuck at 0.21).
+				if (!bCurrOK)
+				{
+					FireHoldTimer = (BestD < PointBlankUU) ? (ReactionDelay * 0.35f) : ReactionDelay;
+				}
 				CurrentTarget = Best;
 				bHaveTacticalGoal = false;   // new target → re-pick a firing position now, don't reuse the old one
 			}
