@@ -14,6 +14,7 @@
 #include "Objectives/PFObjectiveLayout.h"
 
 #include "Engine/World.h"
+#include "Engine/Engine.h"   // GEngine->AddOnScreenDebugMessage (pf.NavCheck on-screen readout)
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "NavigationSystem.h"
@@ -52,6 +53,15 @@ static FAutoConsoleCommandWithWorld GNavCheckCmd(
 			bOnMesh ? TEXT("YES") : TEXT("no"),
 			*Loc.ToCompactString(),
 			bOnMesh ? *FString::Printf(TEXT(" (mesh @ %s)"), *Projected.Location.ToCompactString()) : TEXT(""));
+		// Also print on-screen so it's visible in-game without opening the log.
+		if (GEngine != nullptr)
+		{
+			const FColor Col = bOnMesh ? FColor::Green : FColor::Red;
+			GEngine->AddOnScreenDebugMessage(-1, 8.f, Col,
+				FString::Printf(TEXT("pf.NavCheck: navmesh=%s  PlayerOnNavmesh=%s"),
+					Nav ? TEXT("present") : TEXT("MISSING"),
+					bOnMesh ? TEXT("YES (pathfinding live)") : TEXT("NO (bots can't path here)")));
+		}
 	}));
 
 APFBotController::APFBotController()
