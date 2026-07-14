@@ -8,6 +8,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "UObject/SoftObjectPath.h"
 
 namespace PFBuildPieceVisuals
@@ -90,6 +91,38 @@ namespace
 		return nullptr;
 	}
 
+	// Megascans warehouse props import with NO simple collision (or collision authored off), so the build
+	// ISM's QueryAndPhysics + Block(Pawn/Paintball) responses hit nothing → pawns AND projectiles pass
+	// straight through the barrels/crates/boxes. Give the mesh one box primitive matching its bounds so
+	// every instanced copy blocks. A box is analytic (no cook) and, unlike the mesh's own missing complex
+	// collision, always answers pawn capsule sweeps + paintball traces. Simple-as-complex so line traces
+	// (LOS / hitscan-style checks) resolve to the box too. Idempotent: skips meshes that already collide
+	// (the engine BasicShape fallbacks), and skips if the box was already added this session.
+	void EnsureSimpleBoxCollision(UStaticMesh* Mesh)
+	{
+		if (Mesh == nullptr)
+		{
+			return;
+		}
+		UBodySetup* BS = Mesh->GetBodySetup();
+		if (BS == nullptr)
+		{
+			Mesh->CreateBodySetup();
+			BS = Mesh->GetBodySetup();
+		}
+		if (BS == nullptr || BS->AggGeom.GetElementCount() > 0)
+		{
+			return;   // no body setup available, or it already has simple collision → leave it be
+		}
+		const FBoxSphereBounds B = Mesh->GetBounds();
+		FKBoxElem Box(B.BoxExtent.X * 2.f, B.BoxExtent.Y * 2.f, B.BoxExtent.Z * 2.f);
+		Box.Center = B.Origin;
+		BS->AggGeom.BoxElems.Add(Box);
+		BS->CollisionTraceFlag = CTF_UseSimpleAsComplex;   // the box also answers complex (line-trace) queries
+		BS->InvalidatePhysicsData();   // frees any already-cooked body, resets bCreatedPhysicsMeshes
+		BS->CreatePhysicsMeshes();     // rebuild the runtime body now including the new box
+	}
+
 	void FitSlot(FPropSlot& Slot, UStaticMesh* Fallback)
 	{
 		UStaticMesh* Chosen = nullptr;
@@ -111,6 +144,12 @@ namespace
 		if (!Chosen)
 		{
 			return;
+		}
+
+		// Warehouse props need collision injected (see EnsureSimpleBoxCollision); engine fallbacks already have it.
+		if (Slot.bWarehouse)
+		{
+			EnsureSimpleBoxCollision(Chosen);
 		}
 
 		const FBoxSphereBounds B = Chosen->GetBounds();

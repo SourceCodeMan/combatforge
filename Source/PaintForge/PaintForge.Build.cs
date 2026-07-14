@@ -21,6 +21,7 @@ public class PaintForge : ModuleRules
 			"NetCore",                       // push-model / net serialization helpers
 			"EngineCameras",                 // UWaveOscillatorCameraShakePattern (PFCameraShakes)
 			"AIModule",                      // AAIController base for roster-filling bots (PFBotController)
+			"NavigationSystem",              // runtime navmesh + nav invokers + MoveTo pathfinding (dynamic built arena)
 			"Json", "JsonUtilities",         // arena rating records
 			"RenderCore",                    // GShaderCompilingManager / loading-screen shader drain
 			"RHI",                           // shader pipeline cache helpers

@@ -112,7 +112,12 @@ APFBuildGrid::APFBuildGrid()
 			ISMC->SetMobility(EComponentMobility::Static);
 			ISMC->SetStaticMesh(MeshPerType[TypeIdx]);
 			ISMC->SetMaterial(0, ShapeMaterial);
-			ISMC->SetCanEverAffectNavigation(false);
+			// Built pieces shape the runtime navmesh so bots PATH AROUND player forts instead of running into
+			// them: walls/roofs carve holes, floors/ramps add walkable surface, props (now box-collided) become
+			// cover the mesh flows around. Every piece has simple collision (engine cubes/cones + the injected
+			// prop boxes), so the ISM's built-in per-instance nav export works and AddInstance auto-dirties the
+			// affected tiles (RuntimeGeneration=Dynamic). Was false — that's WHY bots ignored the fort geometry.
+			ISMC->SetCanEverAffectNavigation(true);
 			ISMC->SetCastShadow(true);
 
 			// RemovePieceLocal's index bookkeeping assumes swap-removal (last instance fills the

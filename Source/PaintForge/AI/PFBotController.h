@@ -46,6 +46,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnUnPossess() override;
+	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
 
 protected:
 	// ---- Brain tunables ----
@@ -63,11 +64,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimTurnRate = 2.5f;      // control-rotation ease speed (low = laggy aim, misses strafers)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimJitterInterval = 0.6f;// how often the random aim error is re-rolled
 
-	// Reactive navigation (open arena, sparse player-built cover): whisker length + unstick threshold.
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeUU = 420.f;    // forward look-ahead (earlier turn = fewer wall bumps)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AvoidProbeRadius = 46.f; // >= pawn capsule radius so "clear" paths don't scrape walls
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float StuckMoveThresh = 45.f;  // min 2D move per 0.5s before we count as stuck
+	// Navmesh pathfinding (replaces the old reactive whisker-steer): the bot picks a tactical GOAL POINT
+	// and the RecastNavMesh routes it there, so it walks AROUND the player-built fort instead of into it.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float GoalProjectUU = 700.f;  // how far ahead the tactical heading is projected into a move goal
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float MoveAcceptUU = 70.f;    // "arrived" tolerance for a MoveTo request
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float RepathInterval = 0.35f; // min seconds between re-issued moves (re-pathing every tick thrashes PathFollowing)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float RepathMoveThreshUU = 150.f; // re-path early only when the goal jumped at least this far
 
 private:
 	APaintForgeCharacter* GetBotCharacter() const;
@@ -75,7 +78,7 @@ private:
 	bool HasLineOfSight(const APaintForgeCharacter* Target) const;
 	void SetFiring(bool bFire);
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
-	FVector SteerAvoidingObstacles(const FVector& DesiredDir) const;   // whisker-steer a move dir around cover/walls
+	void MoveToGoal(const FVector& GoalLoc);   // issue a navmesh MoveTo (strafe-facing) toward a tactical point
 	bool IsTargetEngageable(const APaintForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
 	bool ComputeObjectiveGoal(FVector& OutGoal);   // Dom/Hardpoint/CTF: where to push (false in fight modes)
 	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)
@@ -88,11 +91,12 @@ private:
 	float AimJitterYaw = 0.f;
 	float AimJitterPitch = 0.f;
 	float AimJitterTimer = 0.f;
-	// Reactive-avoidance / unstick state.
-	FVector StuckSamplePos = FVector::ZeroVector;
-	float StuckSampleTimer = 0.f;
-	float EscapeTimer = 0.f;
-	float EscapeSign = 1.f;
+	// Navmesh path-following state: throttle re-pathing by time + goal displacement so a fresh MoveTo
+	// doesn't abort the last one every tick (which thrashes PathFollowing → jitter).
+	FVector LastPathedGoal = FVector::ZeroVector;
+	float RepathTimer = 0.f;
+	FAIRequestID CurrentMoveId;
+	float NavWarnTimer = 0.f;   // throttles the "no navmesh under me" diagnostic so it can't spam the log
 	// Objective-mode targets (Domination / Hardpoint / CTF), cached once per match.
 	TArray<TWeakObjectPtr<APFControlPointActor>> ControlPointsCache;
 	TArray<TWeakObjectPtr<APFFlagActor>> FlagsCache;

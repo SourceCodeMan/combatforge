@@ -884,15 +884,18 @@ UStaticMeshComponent* APFArenaShell::MakeMeshPart(const FString& Name, UStaticMe
 	const bool bShadow =
 		bCastShadow || Mode == EPFShellCollision::Solid || Mode == EPFShellCollision::SolidBuildable;
 	Comp->SetCastShadow(bShadow);
-	Comp->SetCanEverAffectNavigation(false);
 
 	if (Mode == EPFShellCollision::Cosmetic)
 	{
 		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Comp->SetCanEverAffectNavigation(false);   // backdrop / trusses — purely cosmetic, never navigation
 	}
 	else
 	{
 		Comp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		// Solid parts shape the runtime navmesh: the field floor GIVES bots their base walkable surface,
+		// and the perimeter walls STOP the mesh at the arena edge so bots never path out of bounds.
+		Comp->SetCanEverAffectNavigation(true);
 		Comp->SetCollisionObjectType(ECC_WorldStatic);
 		Comp->SetCollisionResponseToAllChannels(ECR_Ignore);
 		Comp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);

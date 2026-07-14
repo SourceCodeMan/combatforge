@@ -33,6 +33,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "NavigationInvokerComponent.h"
 #include "InputActionValue.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -53,6 +54,13 @@ APaintForgeCharacter::APaintForgeCharacter(const FObjectInitializer& ObjectIniti
 	bUseControllerRotationRoll = false;
 
 	PFMovement = Cast<UPFCharacterMovementComponent>(GetCharacterMovement());
+
+	// Nav invoker: builds the runtime navmesh in a radius around this pawn so bots always have a mesh to
+	// path on over the freshly-built fort. Radii are generous (cover most of the arena around any combatant)
+	// since a bot pathing on an incomplete mesh is worse than the modest build cost. Removal radius must
+	// exceed generation (hysteresis, prevents tile thrash at the edge). Auto-registers as a default subobject.
+	NavInvoker = CreateDefaultSubobject<UNavigationInvokerComponent>(TEXT("NavInvoker"));
+	NavInvoker->SetGenerationRadii(7000.f, 9000.f);
 
 	UCapsuleComponent* Capsule = GetCapsuleComponent();
 	Capsule->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);   // §4.6

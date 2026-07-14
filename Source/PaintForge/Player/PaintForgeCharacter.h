@@ -17,6 +17,7 @@ class UPFCharacterMovementComponent;
 class UPFCombatAudio;
 class UPFHealthComponent;
 class UPFWeaponComponent;
+class UNavigationInvokerComponent;
 class UStaticMesh;
 class USkeletalMesh;
 class USkeletalMeshComponent;
@@ -177,6 +178,10 @@ private:
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UPFHealthComponent> HealthComponent;
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UPFCombatAudio> CombatAudioComponent;
 	UPROPERTY(Transient) TObjectPtr<UPFCharacterMovementComponent> PFMovement;
+	// Generates the runtime navmesh in a radius around this pawn (host players + server bots both carry one),
+	// so the dynamic mesh over the player-built arena exists wherever combatants actually are. See DefaultEngine.ini
+	// [/Script/NavigationSystem.NavigationSystemV1] bGenerateNavigationOnlyAroundNavigationInvokers=True.
+	UPROPERTY(VisibleAnywhere, Category="PF|AI") TObjectPtr<UNavigationInvokerComponent> NavInvoker;
 
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> BodyMID;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> HeadMID;

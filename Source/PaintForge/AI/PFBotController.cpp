@@ -16,6 +16,9 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
+#include "NavigationSystem.h"
+#include "NavigationData.h"
+#include "Navigation/PathFollowingComponent.h"
 
 // Live playtest knob: override skill for newly spawned bots (takes effect next build/round). -1 = default.
 static TAutoConsoleVariable<int32> CVarBotSkill(
@@ -23,6 +26,33 @@ static TAutoConsoleVariable<int32> CVarBotSkill(
 	-1,
 	TEXT("Bot difficulty for newly spawned bots: -1=default, 0=Rookie(easy), 1=Regular, 2=Sharpshooter."),
 	ECVF_Default);
+
+// Nav diagnostic: run `pf.NavCheck` in the console to confirm the runtime navmesh generated over the arena
+// and covers the local player. The authoritative test is ProjectPointToNavigation (is there mesh under me?).
+static FAutoConsoleCommandWithWorld GNavCheckCmd(
+	TEXT("pf.NavCheck"),
+	TEXT("Report whether the runtime navmesh is present and covers the local player (AI pathfinding diagnostic)."),
+	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+	{
+		if (World == nullptr)
+		{
+			return;
+		}
+		UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+		APlayerController* PC = World->GetFirstPlayerController();
+		APawn* Pawn = PC ? PC->GetPawn() : nullptr;
+		const FVector Loc = Pawn ? Pawn->GetActorLocation() : FVector::ZeroVector;
+		FNavLocation Projected;
+		const bool bOnMesh = (Nav != nullptr) && (Pawn != nullptr)
+			&& Nav->ProjectPointToNavigation(Loc, Projected, FVector(300.f, 300.f, 600.f));
+		UE_LOG(PaintForgeLog, Warning,
+			TEXT("pf.NavCheck: NavSystem=%s Pawn=%s PlayerOnNavmesh=%s @ %s%s"),
+			Nav ? TEXT("yes") : TEXT("NULL"),
+			Pawn ? TEXT("yes") : TEXT("NULL"),
+			bOnMesh ? TEXT("YES") : TEXT("no"),
+			*Loc.ToCompactString(),
+			bOnMesh ? *FString::Printf(TEXT(" (mesh @ %s)"), *Projected.Location.ToCompactString()) : TEXT(""));
+	}));
 
 APFBotController::APFBotController()
 {
@@ -43,12 +73,15 @@ void APFBotController::OnPossess(APawn* InPawn)
 	bFiring = false;
 	FireHoldTimer = 0.f;
 	bFireModeAssigned = false;   // re-pick the fire mode for the new pawn (its ApplyWeaponLoadout reset the default)
+	LastPathedGoal = FVector::ZeroVector;   // force a fresh path on the new pawn's first tactical goal
+	RepathTimer = 0.f;
 	ApplySkill();
 }
 
 void APFBotController::OnUnPossess()
 {
 	SetFiring(false);
+	StopMovement();   // drop any in-flight path so the freed pawn doesn't keep walking
 	Super::OnUnPossess();
 }
 
@@ -99,6 +132,7 @@ void APFBotController::Tick(float DeltaSeconds)
 	if (!bAlive || !bCombatLive)
 	{
 		SetFiring(false);
+		StopMovement();   // halt path-following — a MoveTo left running would keep walking the (dead/frozen) pawn
 		return;
 	}
 
@@ -140,6 +174,7 @@ void APFBotController::Tick(float DeltaSeconds)
 	// and the reaction "notice" gap are applied only on a genuine target change.
 	TargetRefreshTimer -= DeltaSeconds;
 	FireHoldTimer -= DeltaSeconds;
+	NavWarnTimer -= DeltaSeconds;
 	if (!IsTargetEngageable(CurrentTarget.Get()) && TargetRefreshTimer <= 0.f)
 	{
 		TargetRefreshTimer = TargetRefreshInterval;
@@ -161,7 +196,8 @@ void APFBotController::Tick(float DeltaSeconds)
 	if (Target == nullptr && !bHasObjective)
 	{
 		SetFiring(false);
-		return;   // nothing to fight and no objective to push — idle
+		StopMovement();   // nothing to fight and no objective to push — idle in place (don't drift on a stale path)
+		return;
 	}
 
 	// --- Aim + fire (only with an enemy). Re-roll a random error every AimJitterInterval, then EASE control
@@ -193,8 +229,11 @@ void APFBotController::Tick(float DeltaSeconds)
 		SetFiring(false);   // pushing an objective with nobody in sight — hold fire
 	}
 
-	// --- Movement: pick a heading, steer it around cover, break out if pinned. In objective modes the bot
-	// heads for its point/flag (still fighting on the way); otherwise it holds a stand-off band on the enemy.
+	// --- Movement: pick a tactical GOAL POINT, then let the navmesh path there (MoveToGoal). This replaces
+	// the old raw AddMovementInput + forward-sweep avoidance: the RecastNavMesh routes the bot AROUND the
+	// player-built fort (walls, corners, bunkers) instead of grinding into it. Facing is still owned by the
+	// aim code above (SetControlRotation + bUseControllerRotationYaw), and MoveToGoal issues a strafing move
+	// so path-following never rotates the body away from its aim.
 	StrafeTimer -= DeltaSeconds;
 	if (StrafeTimer <= 0.f)
 	{
@@ -202,51 +241,90 @@ void APFBotController::Tick(float DeltaSeconds)
 		StrafeTimer = StrafeSwitchInterval;
 	}
 	const FVector BotLoc = Bot->GetActorLocation();
-	FVector Flat;          // primary heading (also drives the unstick escape)
-	FVector DesiredDir;
-	if (bHasObjective)
+
+	// The objective point is a real world location — path straight to it. Everything else (fight stand-off,
+	// on-point hold, strafe) is expressed as a tactical HEADING projected a short way ahead into a goal point,
+	// re-projected on each re-path so strafing + range-keeping keep flowing.
+	FVector GoalLoc;
+	const bool bPushObjective = bHasObjective && (FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU);
+	if (bPushObjective)
 	{
-		Flat = FVector(ObjGoal.X - BotLoc.X, ObjGoal.Y - BotLoc.Y, 0.f).GetSafeNormal();
-		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
-		if (FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU) { DesiredDir = (Flat + Right * StrafeSign * 0.25f).GetSafeNormal(); }
-		else                                                          { DesiredDir = Right * StrafeSign; }   // on the point: hold + stay dodgy
+		GoalLoc = ObjGoal;
 	}
 	else
 	{
-		const FVector ToEnemy = Target->GetActorLocation() - BotLoc;
-		Flat = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
-		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
-		const float Dist = ToEnemy.Size2D();
-		if (Dist > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
-		else if (Dist < MinRangeUU)    { DesiredDir = -Flat; }
-		else                           { DesiredDir = Right * StrafeSign; }
-	}
-
-	// Unstick: if we wanted to move but barely have over the last sample window, peel off sideways a beat.
-	StuckSampleTimer -= DeltaSeconds;
-	bool bEscaping = false;
-	if (EscapeTimer > 0.f)
-	{
-		EscapeTimer -= DeltaSeconds;
-		DesiredDir = (FVector::CrossProduct(FVector::UpVector, Flat) * EscapeSign - Flat * 0.35f).GetSafeNormal();
-		bEscaping = true;
-	}
-	else if (StuckSampleTimer <= 0.f)
-	{
-		if (!StuckSamplePos.IsZero()
-			&& FVector::DistSquared2D(BotLoc, StuckSamplePos) < FMath::Square(StuckMoveThresh))
+		FVector DesiredDir;
+		if (bHasObjective)
 		{
-			EscapeTimer = 0.7f;
-			EscapeSign = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
+			const FVector Flat = FVector(ObjGoal.X - BotLoc.X, ObjGoal.Y - BotLoc.Y, 0.f).GetSafeNormal();
+			const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
+			DesiredDir = Right * StrafeSign;   // on the point: hold + stay dodgy
 		}
-		StuckSamplePos = BotLoc;
-		StuckSampleTimer = 0.5f;
+		else
+		{
+			const FVector ToEnemy = Target->GetActorLocation() - BotLoc;
+			const FVector Flat = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
+			const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
+			const float Dist = ToEnemy.Size2D();
+			if (Dist > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
+			else if (Dist < MinRangeUU)    { DesiredDir = -Flat; }              // too close: back off (still facing enemy)
+			else                           { DesiredDir = Right * StrafeSign; } // in the band: strafe
+		}
+		GoalLoc = BotLoc + DesiredDir * GoalProjectUU;
 	}
 
-	// During an active unstick, drive the escape heading straight — piping it through the avoidance filter would
-	// let the same wall-contact that boxed us in null the escape too.
-	const FVector MoveDir = bEscaping ? DesiredDir : SteerAvoidingObstacles(DesiredDir);
-	Bot->AddMovementInput(MoveDir, 1.f);
+	// Throttle re-pathing: re-issue only when the goal has drifted enough OR we've gone idle (reached/aborted/
+	// blocked). Re-issuing every tick aborts the prior request and rebuilds the path → visible jitter.
+	RepathTimer -= DeltaSeconds;
+	const bool bGoalMoved = FVector::DistSquared(GoalLoc, LastPathedGoal) > FMath::Square(RepathMoveThreshUU);
+	const bool bIdle = (GetMoveStatus() == EPathFollowingStatus::Idle);
+	if ((RepathTimer <= 0.f && bGoalMoved) || bIdle)
+	{
+		MoveToGoal(GoalLoc);
+		RepathTimer = RepathInterval;
+	}
+}
+
+void APFBotController::MoveToGoal(const FVector& GoalLoc)
+{
+	LastPathedGoal = GoalLoc;
+
+	FAIMoveRequest Req;
+	Req.SetGoalLocation(GoalLoc);
+	Req.SetAcceptanceRadius(MoveAcceptUU);
+	Req.SetUsePathfinding(true);
+	Req.SetAllowPartialPath(true);      // unreachable goal → walk as far along the route as the mesh allows
+	Req.SetProjectGoalLocation(true);   // snap an off-mesh point (projected heading) down onto the navmesh
+	Req.SetCanStrafe(true);             // decouple facing from move dir — the aim code owns yaw
+	const FPathFollowingRequestResult Result = MoveTo(Req);
+	if (Result.Code == EPathFollowingRequestResult::RequestSuccessful)
+	{
+		CurrentMoveId = Result.MoveId;
+	}
+	else if (Result.Code == EPathFollowingRequestResult::Failed)
+	{
+		// No navmesh under the bot (or the goal couldn't project). Almost always means the runtime navmesh
+		// hasn't generated over the arena — surface it loudly (throttled) so a broken nav setup is obvious in
+		// the playtest log instead of silently-frozen bots.
+		if (NavWarnTimer <= 0.f)
+		{
+			NavWarnTimer = 3.f;
+			UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+			FNavLocation Projected;
+			const bool bOnMesh = (Nav != nullptr) && GetPawn() != nullptr
+				&& Nav->ProjectPointToNavigation(GetPawn()->GetActorLocation(), Projected, FVector(200.f, 200.f, 400.f));
+			UE_LOG(PaintForgeLog, Warning,
+				TEXT("Bot MoveTo FAILED (no path). NavSystem=%s BotOnNavmesh=%s — is the runtime navmesh generating over the arena?"),
+				Nav ? TEXT("yes") : TEXT("NULL"), bOnMesh ? TEXT("yes") : TEXT("NO"));
+		}
+	}
+}
+
+void APFBotController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result)
+{
+	Super::OnMoveCompleted(RequestID, Result);
+	// A blocked/invalid finish just means the projected goal was unreachable this beat; the next Tick picks a
+	// fresh tactical goal and re-paths. Nothing to do here but let the throttle re-fire (bIdle in Tick catches it).
 }
 
 APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
@@ -448,49 +526,6 @@ bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target) const
 	// Trace ignores self + target: a blocking hit means cover/geometry is in the way → no line of sight.
 	const bool bBlocked = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
 	return !bBlocked;
-}
-
-FVector APFBotController::SteerAvoidingObstacles(const FVector& DesiredDir) const
-{
-	const APaintForgeCharacter* Bot = GetBotCharacter();
-	UWorld* World = GetWorld();
-	if (Bot == nullptr || World == nullptr || DesiredDir.IsNearlyZero())
-	{
-		return DesiredDir;
-	}
-	const FVector Origin = Bot->GetActorLocation() + FVector(0.f, 0.f, 30.f);
-	FCollisionQueryParams Params(FName(TEXT("BotAvoid")), /*bTraceComplex=*/false, Bot);
-	// CRITICAL: the probe sphere is wider than the pawn capsule, so touching any wall would start the sweep
-	// already penetrating -> a blocking hit for EVERY heading -> ZeroVector -> the bot freezes flush to the wall.
-	// Skipping initial overlaps means a wall we're already against no longer nulls every direction.
-	Params.bFindInitialOverlaps = false;
-	const FCollisionShape Probe = FCollisionShape::MakeSphere(AvoidProbeRadius);
-	// A heading is "clear" if a short forward sphere-sweep (≈ the pawn's width) hits no static geometry
-	// (cover, walls, perimeter). A sphere, not a thin line, so convex corners and low props are caught
-	// before the capsule bumps them.
-	auto PathClear = [&](const FVector& Dir) -> bool
-	{
-		FHitResult Hit;
-		return !World->SweepSingleByChannel(Hit, Origin, Origin + Dir * AvoidProbeUU,
-			FQuat::Identity, ECC_WorldStatic, Probe, Params);
-	};
-	if (PathClear(DesiredDir))
-	{
-		return DesiredDir;
-	}
-	// Blocked ahead: fan out to the nearest clear heading, alternating sides across the FULL arc (including
-	// behind), so a pinned bot actually finds the open direction instead of guessing a rear heading.
-	static const float Sweep[] = { 35.f, -35.f, 60.f, -60.f, 90.f, -90.f, 130.f, -130.f, 160.f, -160.f, 180.f };
-	for (const float Angle : Sweep)
-	{
-		const FVector Candidate = DesiredDir.RotateAngleAxis(Angle, FVector::UpVector);
-		if (PathClear(Candidate))
-		{
-			return Candidate;
-		}
-	}
-	return DesiredDir;   // boxed in on all probes — keep pushing the desired heading so the capsule slides off a
-	                     // corner instead of freezing (returning zero was the permanent-stuck bug)
 }
 
 void APFBotController::SetFiring(bool bFire)
