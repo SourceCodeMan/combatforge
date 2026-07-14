@@ -15,6 +15,7 @@
 #include "Player/PFCameraShakes.h"
 #include "Player/PFCharacterMovementComponent.h"
 #include "Engine/World.h"
+#include "Perception/AISense_Hearing.h"   // gunfire noise → bots hear + investigate
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -446,6 +447,11 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 		Ball->InitProjectile(FVector(Shot.Origin), SpreadedDir, PS->TeamId, /*bAuthoritative=*/true,
 			this, Shot.ShotIndex);
 	}
+
+	// Gunfire noise → AI hearing: bots within range turn toward / investigate the shot (perception). Instigator
+	// is the shooter pawn so a listening bot resolves friend/foe via its GetTeamAttitudeTowards. Host-authoritative
+	// (this runs on the listen server where bot perception lives), so every human + bot shot is heard.
+	UAISense_Hearing::ReportNoiseEvent(World, ServerMuzzle, /*Loudness=*/1.f, Char, /*MaxRange=*/5000.f, TEXT("Gunfire"));
 
 	UE_LOG(PaintForgeLog, Verbose, TEXT("ServerFire accept (%s): shot %u, spread %.2f deg"),
 		*GetNameSafe(Char), Shot.ShotIndex, HalfAngleDeg);

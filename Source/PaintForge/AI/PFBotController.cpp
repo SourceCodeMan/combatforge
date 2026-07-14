@@ -20,6 +20,11 @@
 #include "NavigationSystem.h"
 #include "NavigationData.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Perception/AISenseConfig_Hearing.h"
+#include "Perception/AISense_Sight.h"
+#include "Perception/AISense_Hearing.h"
 
 // Live playtest knob: override skill for newly spawned bots (takes effect next build/round). -1 = default.
 static TAutoConsoleVariable<int32> CVarBotSkill(
@@ -69,6 +74,39 @@ APFBotController::APFBotController()
 	bWantsPlayerState = true;                       // → APaintForgePlayerState in PlayerArray (team/alive/spread-seed)
 	bSetControlRotationFromPawnOrientation = false; // we aim by SetControlRotation each tick; don't fight it
 	PrimaryActorTick.bCanEverTick = true;
+
+	// ---- AI Perception: sight cone + hearing. Friend/foe comes from GetTeamAttitudeTowards (game teams). ----
+	AIPerception = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerception"));
+	SetPerceptionComponent(*AIPerception);
+
+	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
+	SightConfig->SightRadius = SightRadiusUU;
+	SightConfig->LoseSightRadius = SightLoseRadiusUU;                 // >= SightRadius (hysteresis)
+	SightConfig->PeripheralVisionAngleDegrees = SightFOVHalfDeg;      // HALF-angle → 2x total FOV
+	SightConfig->AutoSuccessRangeFromLastSeenLocation = SightAutoSeeUU;
+	SightConfig->SetMaxAge(SearchHoldSec);                           // remember a lost target this long
+	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+	SightConfig->DetectionByAffiliation.bDetectNeutrals = false;
+	SightConfig->DetectionByAffiliation.bDetectFriendlies = false;
+	AIPerception->ConfigureSense(*SightConfig);
+	AIPerception->SetDominantSense(SightConfig->GetSenseImplementation());
+
+	HearingConfig = CreateDefaultSubobject<UAISenseConfig_Hearing>(TEXT("HearingConfig"));
+	HearingConfig->HearingRange = HearingRangeUU;
+	HearingConfig->DetectionByAffiliation.bDetectEnemies = true;
+	HearingConfig->DetectionByAffiliation.bDetectNeutrals = true;    // a gunshot is a gunshot — hear it, then investigate
+	HearingConfig->DetectionByAffiliation.bDetectFriendlies = false;
+	AIPerception->ConfigureSense(*HearingConfig);
+}
+
+void APFBotController::BeginPlay()
+{
+	Super::BeginPlay();
+	if (AIPerception != nullptr)
+	{
+		AIPerception->OnTargetPerceptionUpdated.AddDynamic(this, &APFBotController::OnPerceptionStimulus);
+	}
+	HearingSenseID = UAISense::GetSenseID<UAISense_Hearing>();
 }
 
 APaintForgeCharacter* APFBotController::GetBotCharacter() const
@@ -85,6 +123,13 @@ void APFBotController::OnPossess(APawn* InPawn)
 	bFireModeAssigned = false;   // re-pick the fire mode for the new pawn (its ApplyWeaponLoadout reset the default)
 	LastPathedGoal = FVector::ZeroVector;   // force a fresh path on the new pawn's first tactical goal
 	RepathTimer = 0.f;
+	LastSeenTime = InvestigateTime = -1000.f;   // clear stale search memory from a previous life
+	// Give this bot a team id so perception has a concrete affiliation (attitude itself comes from the
+	// GetTeamAttitudeTowards override, but a real id avoids any NoTeam short-circuit in the sense filter).
+	if (const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>())
+	{
+		SetGenericTeamId(FGenericTeamId(PS->TeamId <= 1 ? PS->TeamId : 2));
+	}
 	ApplySkill();
 }
 
@@ -211,15 +256,60 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 
 	APaintForgeCharacter* Target = CurrentTarget.Get();
+	const float NowSec = (GetWorld() != nullptr) ? GetWorld()->GetTimeSeconds() : 0.f;
 
-	// Objective goal (Domination / Hardpoint / CTF): where this bot should push, even with no enemy in
-	// sight. Fight modes leave it unset, so the bot only acts when it has an enemy.
+	// Last-known-position: remember where we last SAW the target, so when LOS breaks the bot hunts that spot
+	// instead of instantly forgetting. Updated only while the target is actually visible.
+	if (Target != nullptr && HasLineOfSight(Target))
+	{
+		LastSeenPos = Target->GetActorLocation();
+		LastSeenTime = NowSec;
+	}
+
+	// Objective goal (Domination / Hardpoint / CTF): where this bot should push, even with no enemy in sight.
 	FVector ObjGoal;
 	const bool bHasObjective = ComputeObjectiveGoal(ObjGoal);
-	if (Target == nullptr && !bHasObjective)
+
+	// Search goal: the more RECENT of "where I last saw you" and "where I heard a noise", while still fresh — so a
+	// bot that lost sight (you ducked behind cover) or was shot from behind goes to hunt/investigate, not idle.
+	const bool bSeenFresh = (NowSec - LastSeenTime) < SearchHoldSec;
+	const bool bNoiseFresh = (NowSec - InvestigateTime) < SearchHoldSec;
+	const bool bHaveSearch = bSeenFresh || bNoiseFresh;
+	const FVector SearchPos = bHaveSearch
+		? ((bSeenFresh && (!bNoiseFresh || LastSeenTime >= InvestigateTime)) ? LastSeenPos : InvestigatePos)
+		: FVector::ZeroVector;
+
+	const FVector BotLoc = Bot->GetActorLocation();
+
+	// Nothing to fight, push, or investigate → SEEK CONTACT: push toward the arena centre (where fights happen)
+	// while panning the view, rather than standing at spawn until an enemy wanders into the sight cone. Since
+	// perception only reports enemies the bot can actually see/sense, without this a Skirmish/FFA bot with no one
+	// in view would freeze. Hold + slow-scan once at the centre.
+	if (Target == nullptr && !bHasObjective && !bHaveSearch)
 	{
 		SetFiring(false);
-		StopMovement();   // nothing to fight and no objective to push — idle in place (don't drift on a stale path)
+		const FVector ArenaCenter(3200.f, 2000.f, BotLoc.Z);
+		if (FVector::Dist2D(BotLoc, ArenaCenter) > 800.f)
+		{
+			const FVector ToC = ArenaCenter - (BotLoc + FVector(0.f, 0.f, 60.f));
+			if (!ToC.IsNearlyZero())
+			{
+				SetControlRotation(FMath::RInterpTo(GetControlRotation(), ToC.Rotation(), DeltaSeconds, 4.f));
+			}
+			RepathTimer -= DeltaSeconds;
+			if (RepathTimer <= 0.f || GetMoveStatus() == EPathFollowingStatus::Idle)
+			{
+				MoveToGoal(ArenaCenter, nullptr);
+				RepathTimer = RepathInterval;
+			}
+		}
+		else
+		{
+			StopMovement();
+			FRotator ScanAim = GetControlRotation();
+			ScanAim.Yaw += DeltaSeconds * 40.f;   // slow pan to sweep for enemies
+			SetControlRotation(ScanAim);
+		}
 		return;
 	}
 
@@ -268,62 +358,79 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 	else
 	{
-		SetFiring(false);   // pushing an objective with nobody in sight — hold fire
+		// No target: hold fire and turn toward where we're heading (search LKP / objective) so the sight cone
+		// covers that direction — a bot hunting your last-known-position stares at where it thinks you are.
+		SetFiring(false);
+		const FVector LookAt = bHaveSearch ? SearchPos : ObjGoal;
+		const FVector ToLook = LookAt - (BotLoc + FVector(0.f, 0.f, 60.f));
+		if (!ToLook.IsNearlyZero())
+		{
+			SetControlRotation(FMath::RInterpTo(GetControlRotation(), ToLook.Rotation(), DeltaSeconds, 4.f));
+		}
 	}
 
-	// --- Movement: pick a tactical GOAL POINT, then let the navmesh path there (MoveToGoal). This replaces
-	// the old raw AddMovementInput + forward-sweep avoidance: the RecastNavMesh routes the bot AROUND the
-	// player-built fort (walls, corners, bunkers) instead of grinding into it. Facing is still owned by the
-	// aim code above (SetControlRotation + bUseControllerRotationYaw), and MoveToGoal issues a strafing move
-	// so path-following never rotates the body away from its aim.
+	// --- Movement: choose a tactical GOAL POINT by mode, then let the navmesh path there (MoveToGoal routes the
+	// bot AROUND the fort). Facing is owned by the aim code above; MoveToGoal strafes so it never overrides yaw.
 	StrafeTimer -= DeltaSeconds;
 	if (StrafeTimer <= 0.f)
 	{
 		StrafeSign = (FMath::FRand() < 0.5f) ? -1.f : 1.f;
 		StrafeTimer = StrafeSwitchInterval;
 	}
-	const FVector BotLoc = Bot->GetActorLocation();
 
-	// The objective point is a real world location — path straight to it. Everything else (fight stand-off,
-	// on-point hold, strafe) is expressed as a tactical HEADING projected a short way ahead into a goal point,
-	// re-projected on each re-path so strafing + range-keeping keep flowing.
-	FVector GoalLoc;
-	const bool bPushObjective = bHasObjective && (FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU);
-	if (bPushObjective)
+	const float SearchReachUU = 250.f;   // within this of a hunt/investigate point counts as "arrived"
+	FVector GoalLoc = BotLoc;
+	bool bMove = false;
+	if (Target != nullptr)
 	{
-		GoalLoc = ObjGoal;
+		// FIGHT: hold a stand-off band on the enemy with strafing, expressed as a projected heading.
+		const FVector ToEnemy = Target->GetActorLocation() - BotLoc;
+		const FVector Flat = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
+		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
+		const float D2 = ToEnemy.Size2D();
+		FVector DesiredDir;
+		if (D2 > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
+		else if (D2 < MinRangeUU)    { DesiredDir = -Flat; }                 // too close: back off (still facing enemy)
+		else                         { DesiredDir = Right * StrafeSign; }    // in the band: strafe
+		GoalLoc = BotLoc + DesiredDir * GoalProjectUU;
+		bMove = true;
+	}
+	else if (bHasObjective && FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU)
+	{
+		GoalLoc = ObjGoal;   // push the objective
+		bMove = true;
+	}
+	else if (bHaveSearch && FVector::Dist2D(BotLoc, SearchPos) > SearchReachUU)
+	{
+		GoalLoc = SearchPos;   // hunt the last-known-position / investigate a heard noise
+		bMove = true;
+	}
+	else if (bHasObjective)
+	{
+		// On the objective with nobody in sight: hold + strafe (stay dodgy).
+		const FVector Flat = FVector(ObjGoal.X - BotLoc.X, ObjGoal.Y - BotLoc.Y, 0.f).GetSafeNormal();
+		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
+		GoalLoc = BotLoc + Right * StrafeSign * GoalProjectUU;
+		bMove = true;
+	}
+	// else: reached the search point / nothing to move to — stand and scan (StopMovement below; aim handled above).
+
+	if (bMove)
+	{
+		// Throttle re-pathing: re-issue only when the goal drifted enough OR we've gone idle. Re-issuing every
+		// tick aborts the prior request and rebuilds the path → visible jitter.
+		RepathTimer -= DeltaSeconds;
+		const bool bGoalMoved = FVector::DistSquared(GoalLoc, LastPathedGoal) > FMath::Square(RepathMoveThreshUU);
+		const bool bIdle = (GetMoveStatus() == EPathFollowingStatus::Idle);
+		if ((RepathTimer <= 0.f && bGoalMoved) || bIdle)
+		{
+			MoveToGoal(GoalLoc, Target);   // Target may be null (search/objective) → MoveToGoal just paths to GoalLoc
+			RepathTimer = RepathInterval;
+		}
 	}
 	else
 	{
-		FVector DesiredDir;
-		if (bHasObjective)
-		{
-			const FVector Flat = FVector(ObjGoal.X - BotLoc.X, ObjGoal.Y - BotLoc.Y, 0.f).GetSafeNormal();
-			const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
-			DesiredDir = Right * StrafeSign;   // on the point: hold + stay dodgy
-		}
-		else
-		{
-			const FVector ToEnemy = Target->GetActorLocation() - BotLoc;
-			const FVector Flat = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
-			const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
-			const float Dist = ToEnemy.Size2D();
-			if (Dist > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
-			else if (Dist < MinRangeUU)    { DesiredDir = -Flat; }              // too close: back off (still facing enemy)
-			else                           { DesiredDir = Right * StrafeSign; } // in the band: strafe
-		}
-		GoalLoc = BotLoc + DesiredDir * GoalProjectUU;
-	}
-
-	// Throttle re-pathing: re-issue only when the goal has drifted enough OR we've gone idle (reached/aborted/
-	// blocked). Re-issuing every tick aborts the prior request and rebuilds the path → visible jitter.
-	RepathTimer -= DeltaSeconds;
-	const bool bGoalMoved = FVector::DistSquared(GoalLoc, LastPathedGoal) > FMath::Square(RepathMoveThreshUU);
-	const bool bIdle = (GetMoveStatus() == EPathFollowingStatus::Idle);
-	if ((RepathTimer <= 0.f && bGoalMoved) || bIdle)
-	{
-		MoveToGoal(GoalLoc, Target);   // Target = enemy pawn; used as an on-mesh fallback if GoalLoc is off-mesh
-		RepathTimer = RepathInterval;
+		StopMovement();
 	}
 }
 
@@ -397,57 +504,121 @@ void APFBotController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollow
 	// fresh tactical goal and re-paths. Nothing to do here but let the throttle re-fire (bIdle in Tick catches it).
 }
 
+bool APFBotController::IsHostilePlayerState(const APaintForgePlayerState* OtherPS) const
+{
+	const APaintForgePlayerState* MyPS = GetPlayerState<APaintForgePlayerState>();
+	if (OtherPS == nullptr || MyPS == nullptr || OtherPS == MyPS)
+	{
+		return false;
+	}
+	// Free-for-All has no teams — every other combatant is an enemy. Team modes: different assigned team = enemy.
+	const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
+	if (GS != nullptr && GS->MatchType == EPFMatchType::FreeForAll)
+	{
+		return true;
+	}
+	if (OtherPS->TeamId > 1)
+	{
+		return false;   // unassigned
+	}
+	return OtherPS->TeamId != MyPS->TeamId;
+}
+
+ETeamAttitude::Type APFBotController::GetTeamAttitudeTowards(const AActor& Other) const
+{
+	// Perception's affiliation filter (bDetectEnemies) resolves friend/foe through this. Key off the other
+	// pawn's PlayerState team via the game's own rules, so we don't need every player/bot controller to carry a
+	// matching FGenericTeamId (the classic "player never gets seen" perception trap).
+	const APawn* OtherPawn = Cast<const APawn>(&Other);
+	const APaintForgePlayerState* OtherPS = OtherPawn ? OtherPawn->GetPlayerState<APaintForgePlayerState>() : nullptr;
+	if (OtherPS == nullptr)
+	{
+		return ETeamAttitude::Neutral;
+	}
+	return IsHostilePlayerState(OtherPS) ? ETeamAttitude::Hostile : ETeamAttitude::Friendly;
+}
+
+void APFBotController::OnPerceptionStimulus(AActor* Actor, FAIStimulus Stimulus)
+{
+	// Sight is polled in AcquireNearestEnemy; here we only care about HEARING — a heard hostile (gunfire /
+	// footsteps) becomes an "investigate this noise" goal so a flanked bot turns toward it instead of ignoring it.
+	if (!Stimulus.WasSuccessfullySensed() || Stimulus.Type != HearingSenseID)
+	{
+		return;
+	}
+	const APawn* NoisePawn = Cast<APawn>(Actor);
+	const APaintForgePlayerState* OtherPS = NoisePawn ? NoisePawn->GetPlayerState<APaintForgePlayerState>() : nullptr;
+	if (!IsHostilePlayerState(OtherPS))
+	{
+		return;
+	}
+	InvestigatePos = Stimulus.StimulusLocation;
+	InvestigateTime = (GetWorld() != nullptr) ? GetWorld()->GetTimeSeconds() : 0.f;
+}
+
 APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
 {
 	const APaintForgeCharacter* Bot = GetBotCharacter();
-	const APaintForgePlayerState* MyPS = GetPlayerState<APaintForgePlayerState>();
-	const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
-	if (Bot == nullptr || MyPS == nullptr || GS == nullptr)
+	if (Bot == nullptr)
 	{
 		return nullptr;
 	}
-	const uint8 MyTeam = MyPS->TeamId;
-	// Free-for-All has no teams — every other living combatant is a target. Team modes keep the
-	// teammate/unassigned filter. (Reads MatchType only; the FFA rules themselves live in GameMode.)
-	const bool bFFA = (GS->MatchType == EPFMatchType::FreeForAll);
+	const FVector BotLoc = Bot->GetActorLocation();
 
-	// Track the nearest VISIBLE enemy and, separately, the nearest of any — so a bot prefers a foe it can
-	// actually shoot, but still advances toward the closest when none are currently in sight.
-	APaintForgeCharacter* BestVisible = nullptr;   float BestVisibleSq = TNumericLimits<float>::Max();
-	APaintForgeCharacter* BestAny = nullptr;       float BestAnySq = TNumericLimits<float>::Max();
-	for (APlayerState* PSBase : GS->PlayerArray)
+	APaintForgeCharacter* Best = nullptr;
+	float BestSq = TNumericLimits<float>::Max();
+	auto Consider = [&](APaintForgeCharacter* Cand)
 	{
-		const APaintForgePlayerState* OtherPS = Cast<APaintForgePlayerState>(PSBase);
-		if (OtherPS == nullptr || OtherPS == MyPS)
+		if (Cand == nullptr)
 		{
-			continue;
+			return;
 		}
-		if (!OtherPS->bAliveInRound)
+		const APaintForgePlayerState* CandPS = Cand->GetPlayerState<APaintForgePlayerState>();
+		if (CandPS == nullptr || !CandPS->bAliveInRound || !IsHostilePlayerState(CandPS))
 		{
-			continue;   // already out
+			return;
 		}
-		if (!bFFA && (OtherPS->TeamId > 1 || OtherPS->TeamId == MyTeam))
+		const float Sq = FVector::DistSquared(BotLoc, Cand->GetActorLocation());
+		if (Sq < BestSq) { BestSq = Sq; Best = Cand; }
+	};
+
+	// 1. Hostiles the bot can actually SEE — perception sight cone + range (this is what makes bots flankable).
+	if (AIPerception != nullptr)
+	{
+		TArray<AActor*> Seen;
+		AIPerception->GetCurrentlyPerceivedActors(UAISense_Sight::StaticClass(), Seen);
+		for (AActor* A : Seen)
 		{
-			continue;   // team modes: skip teammate / unassigned
-		}
-		APaintForgeCharacter* OtherChar = Cast<APaintForgeCharacter>(OtherPS->GetPawn());
-		if (OtherChar == nullptr)
-		{
-			continue;
-		}
-		const float DistSq = FVector::DistSquared(Bot->GetActorLocation(), OtherChar->GetActorLocation());
-		if (DistSq < BestAnySq)
-		{
-			BestAnySq = DistSq;
-			BestAny = OtherChar;
-		}
-		if (DistSq < BestVisibleSq && HasLineOfSight(OtherChar))
-		{
-			BestVisibleSq = DistSq;
-			BestVisible = OtherChar;
+			Consider(Cast<APaintForgeCharacter>(A));
 		}
 	}
-	return BestVisible != nullptr ? BestVisible : BestAny;
+
+	// 2. Proximity "sixth sense": any hostile within ProximityAwareUU with LOS, regardless of the view cone — so
+	//    someone right next to or behind the bot is still noticed (keeps CQB + the point-blank fix reliable, and
+	//    is a safety net if sight-affiliation is ever misconfigured).
+	const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
+	if (GS != nullptr)
+	{
+		const float ProxSq = FMath::Square(ProximityAwareUU);
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			APaintForgePlayerState* OtherPS = Cast<APaintForgePlayerState>(PSBase);
+			if (OtherPS == nullptr || !OtherPS->bAliveInRound || !IsHostilePlayerState(OtherPS))
+			{
+				continue;
+			}
+			APaintForgeCharacter* OtherChar = Cast<APaintForgeCharacter>(OtherPS->GetPawn());
+			if (OtherChar == nullptr)
+			{
+				continue;
+			}
+			if (FVector::DistSquared(BotLoc, OtherChar->GetActorLocation()) <= ProxSq && HasLineOfSight(OtherChar))
+			{
+				Consider(OtherChar);
+			}
+		}
+	}
+	return Best;
 }
 
 bool APFBotController::IsTargetEngageable(const APaintForgeCharacter* Target) const

@@ -4,11 +4,15 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
+#include "Perception/AIPerceptionTypes.h"   // FAIStimulus (perception callback param)
 #include "PFBotController.generated.h"
 
 class APaintForgeCharacter;
 class APFControlPointActor;
 class APFFlagActor;
+class UAIPerceptionComponent;
+class UAISenseConfig_Sight;
+class UAISenseConfig_Hearing;
 
 /**
  * Server-only roster-filling bot (contract addendum: bots fill teams to the selected format).
@@ -43,10 +47,16 @@ class PAINTFORGE_API APFBotController : public AAIController
 public:
 	APFBotController();
 
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnUnPossess() override;
 	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
+
+	// Friend/foe for AI Perception (the #1 perception gotcha). AAIController implements IGenericTeamAgentInterface;
+	// we override the attitude to use the GAME's team rules directly (PlayerState TeamId + FFA), so the sight/
+	// hearing affiliation filter works without every player/bot controller needing a matching FGenericTeamId.
+	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 
 protected:
 	// ---- Brain tunables ----
@@ -73,6 +83,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float CloseAimTurnMult = 4.0f;    // turn-rate multiplier at contact (tracks a circling target)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float CloseAimErrorMult = 0.30f;  // aim-error multiplier at contact (point-blank shots connect)
 
+	// ---- Perception (sight cone + hearing). Sight makes bots flankable at range; a short-range proximity sense
+	//      keeps close-quarters reliable (so FOV never regresses the point-blank fix); hearing + last-known-
+	//      position let a flanked/broken-LOS bot turn toward gunfire and hunt where it last saw you. ----
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightRadiusUU = 5000.f;     // start seeing a hostile within this range (in the cone)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightLoseRadiusUU = 5600.f; // keep seeing until beyond this (must be >= SightRadius)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightFOVHalfDeg = 100.f;    // HALF-angle from forward → 200° total cone (wide peripheral)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightAutoSeeUU = 1000.f;    // auto-see a hostile this close to where it was last seen
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float HearingRangeUU = 4500.f;    // hear gunfire/footsteps within this range
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float ProximityAwareUU = 1800.f;  // 360° "sixth sense": a hostile this close (with LOS) is always noticed
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SearchHoldSec = 6.f;        // how long to hunt a last-known-position / investigate a noise before giving up
+
 	// Navmesh pathfinding (replaces the old reactive whisker-steer): the bot picks a tactical GOAL POINT
 	// and the RecastNavMesh routes it there, so it walks AROUND the player-built fort instead of into it.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
@@ -83,8 +104,14 @@ protected:
 
 private:
 	APaintForgeCharacter* GetBotCharacter() const;
-	APaintForgeCharacter* AcquireNearestEnemy() const;
+	APaintForgeCharacter* AcquireNearestEnemy() const;   // nearest hostile the bot can SEE (perception) or feel (proximity)
+	bool IsHostilePlayerState(const class APaintForgePlayerState* OtherPS) const;   // game team rules (mirrors GetTeamAttitudeTowards)
 	bool HasLineOfSight(const APaintForgeCharacter* Target) const;
+
+	// Perception callback (must be UFUNCTION — OnTargetPerceptionUpdated is a dynamic delegate). Hearing stimuli
+	// become an "investigate this noise" goal; sight is polled directly in the target scan.
+	UFUNCTION()
+	void OnPerceptionStimulus(AActor* Actor, FAIStimulus Stimulus);
 	void SetFiring(bool bFire);
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
 	void MoveToGoal(const FVector& RawGoal, AActor* FallbackActor);   // navmesh MoveTo toward a tactical point (falls back to the enemy if the point is off-mesh)
@@ -111,4 +138,18 @@ private:
 	TArray<TWeakObjectPtr<APFFlagActor>> FlagsCache;
 	bool  bFiring = false;
 	bool  bFireModeAssigned = false;   // one-shot per spawn: pick a fire mode from the weapon's allowed set
+
+	// ---- Perception components (created in ctor) ----
+	UPROPERTY() TObjectPtr<UAIPerceptionComponent> AIPerception;
+	UPROPERTY() TObjectPtr<UAISenseConfig_Sight> SightConfig;
+	UPROPERTY() TObjectPtr<UAISenseConfig_Hearing> HearingConfig;
+	FAISenseID HearingSenseID;   // cached in BeginPlay to tag hearing stimuli in the callback
+
+	// ---- Search / investigate memory ----
+	// LastSeen* = where we last actually saw the target (hunt here when LOS breaks). Investigate* = a heard-noise
+	// location to go check. Both expire after SearchHoldSec so a bot doesn't hunt a ghost forever.
+	FVector LastSeenPos = FVector::ZeroVector;
+	float   LastSeenTime = -1000.f;
+	FVector InvestigatePos = FVector::ZeroVector;
+	float   InvestigateTime = -1000.f;
 };
