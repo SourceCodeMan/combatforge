@@ -776,13 +776,27 @@ void UPFOptionsWidget::EnterEmbeddedMode()
 
 void UPFOptionsWidget::Close()
 {
+	// Changes save on CLOSE, not only on Apply — "set quality, Esc out, next match it's back to Low" was a
+	// real playtest loss: the widget silently dropped unsaved working values.
+	PushToSettings(/*bSave=*/true);
 	SetVisibility(ESlateVisibility::Collapsed);
 	bOpen = false;
 	if (APaintForgePlayerController* PC = Cast<APaintForgePlayerController>(GetOwningPlayer()))
 	{
 		PC->NotifyOptionsMenuClosed();
 	}
-	UE_LOG(PaintForgeLog, Log, TEXT("Options: closed"));
+	UE_LOG(PaintForgeLog, Log, TEXT("Options: closed (settings saved)"));
+}
+
+void UPFOptionsWidget::NativeDestruct()
+{
+	// The EMBEDDED boot-menu instance is never Close()d — it dies with the menu when the match starts. Save
+	// its working values on the way out so options chosen in the boot menu stick too.
+	if (bEmbedded)
+	{
+		PushToSettings(/*bSave=*/true);
+	}
+	Super::NativeDestruct();
 }
 
 void UPFOptionsWidget::SelectTab(int32 Index)
@@ -996,19 +1010,15 @@ void UPFOptionsWidget::PullFromSettings()
 		else { WorkingWindowMode = 2; }
 		bWorkingFullscreen = (WorkingWindowMode == 0);
 		bWorkingVSync = S->IsVSyncEnabled();
-		WorkingQuality = FMath::Clamp(S->GetOverallScalabilityLevel(), 0, 3);
-		float ScaleNorm = S->GetResolutionScaleNormalized();
-		WorkingResScale = FMath::Clamp(ScaleNorm * 100.f, 50.f, 100.f);
-
-		const FIntPoint Res = S->GetScreenResolution();
-		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560 };
-		static const int32 H[] = { 720,  768,  900,  1080, 1440 };
-		WorkingResIndex = 3;
-		for (int32 i = 0; i < NumResolutions; ++i)
-		{
-			if (Res.X == W[i] && Res.Y == H[i]) { WorkingResIndex = i; break; }
-		}
 	}
+
+	// Seed quality/resolution/scale from OUR prefs, never from the engine readbacks — those are lossy:
+	// GetOverallScalabilityLevel() returns -1 whenever a custom resolution scale is applied (which we always
+	// apply), the old clamp turned that into 0 = Low, and the next Apply then SAVED Low for real. That was
+	// the "my graphics keep resetting to Low every match" bug.
+	WorkingQuality = FPFUserPrefs::GetQualityLevel();
+	WorkingResScale = FPFUserPrefs::GetResolutionScalePct();
+	WorkingResIndex = FPFUserPrefs::GetResolutionIndex();
 
 	if (GConfig)
 	{
@@ -1050,6 +1060,10 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	FPFUserPrefs::SetFieldOfView(WorkingFov);
 	FPFUserPrefs::SetAmbientVolume(WorkingAmbientVol);
 	FPFUserPrefs::SetWindowModeIndex(WorkingWindowMode);
+	// Mirror the user's TRUE video choices (the engine's own readbacks are lossy — see PullFromSettings).
+	FPFUserPrefs::SetQualityLevel(WorkingQuality);
+	FPFUserPrefs::SetResolutionIndex(WorkingResIndex);
+	FPFUserPrefs::SetResolutionScalePct(WorkingResScale);
 
 	if (UGameUserSettings* S = GEngine ? GEngine->GetGameUserSettings() : nullptr)
 	{

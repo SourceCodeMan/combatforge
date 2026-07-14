@@ -3,6 +3,7 @@
 #include "Voting/PFRatingSubsystem.h"
 
 #include "PaintForge.h"
+#include "Core/PFPaths.h"
 #include "Building/PFArenaSeed.h"
 #include "Building/PFArenaSerialization.h"
 
@@ -98,8 +99,7 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 	CurrentRecordJson = FPFArenaSerialization::BuildLayoutJson(FrozenPieces, MatchId, TeamSize,
 	                                                           RecordCreatedUtc);
 
-	const FString ArenaDir = FPaths::ProjectSavedDir() / TEXT("Arenas");
-	IFileManager::Get().MakeDirectory(*ArenaDir, /*Tree=*/true);
+	const FString ArenaDir = FPFPaths::ArenaDir();   // stable per-user dir (survives repackaging)
 	CurrentFilePath = ArenaDir / FString::Printf(TEXT("arena_%s_%s.json"),
 		*RecordCreatedUtc.ToString(TEXT("%Y%m%d_%H%M%S")),
 		*PFShortMatchHex(MatchId));
@@ -323,7 +323,7 @@ void UPFRatingSubsystem::ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMa
 	// First-time / empty install: ship playable starter maps.
 	EnsureSeedArenas();
 
-	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
+	const FString Dir = FPFPaths::ArenaDir();
 	TArray<FString> Files;
 	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
 
@@ -379,7 +379,7 @@ bool UPFRatingSubsystem::LoadCommunityArenaByFileName(const FString& FileName,
 	{
 		return false;
 	}
-	const FString Path = FPaths::ProjectSavedDir() / TEXT("Arenas") / FileName;
+	const FString Path = FPFPaths::ArenaDir() / FileName;
 	FPFCommunityMapInfo Info;
 	return ParseArenaFile(Path, FileName, Info, OutPieces);
 }
@@ -401,7 +401,7 @@ bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces
 		return true;
 	}
 
-	const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
+	const FString Dir = FPFPaths::ArenaDir();
 	TArray<FString> Files;
 	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
 	if (Files.Num() == 0)

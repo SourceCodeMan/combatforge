@@ -137,6 +137,32 @@ void UPFWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	if (Char != nullptr && Char->IsLocallyControlled())
 	{
 		TryFire(Now);
+
+		// Recoil-climb recovery: once the trigger is released, ease the accumulated climb back so the aim
+		// returns to where it started — reward for firing in bursts instead of holding.
+		if ((RecoilClimbPitch > 0.f || !FMath::IsNearlyZero(RecoilClimbYaw))
+			&& !bWantsFire && (Now - LastClimbShotTime) > 0.12)
+		{
+			if (APlayerController* PC = Cast<APlayerController>(Char->GetController()))
+			{
+				const float Total = RecoilClimbPitch + FMath::Abs(RecoilClimbYaw);
+				const float Step = FMath::Min(Total, ClimbRecoverDegPerSec * DeltaTime);
+				const float FracP = (Total > KINDA_SMALL_NUMBER) ? RecoilClimbPitch / Total : 0.f;
+				const float StepP = Step * FracP;
+				const float StepY = Step * (1.f - FracP) * FMath::Sign(RecoilClimbYaw);
+				FRotator CR = PC->GetControlRotation().GetNormalized();
+				CR.Pitch -= StepP;
+				CR.Yaw -= StepY;
+				PC->SetControlRotation(CR);
+				RecoilClimbPitch = FMath::Max(0.f, RecoilClimbPitch - StepP);
+				RecoilClimbYaw -= StepY;
+				if (RecoilClimbPitch < 0.02f && FMath::Abs(RecoilClimbYaw) < 0.02f)
+				{
+					RecoilClimbPitch = 0.f;
+					RecoilClimbYaw = 0.f;
+				}
+			}
+		}
 	}
 }
 
@@ -306,6 +332,20 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	if (APlayerController* PC = Cast<APlayerController>(Char->GetController()))
 	{
 		PC->ClientStartCameraShake(UPFFireShake::StaticClass(), RecoilMult);   // scale the view-punch (ADS + ramp)
+
+		// Recoil CLIMB: each shot walks the aim up + slightly right (gentler inside the free-shot window).
+		// Applied AFTER this shot's dir was sampled, so it shapes the NEXT shot — like real muzzle rise.
+		// Recovery back to the original aim runs in TickComponent once the trigger is released.
+		const float Mult = (ConsecShots < BloomFreeShots) ? ClimbFreeShotsMult : 1.f;
+		const float StepP = ClimbPitchPerShotDeg * Mult;
+		const float StepY = ClimbYawPerShotDeg * Mult;
+		FRotator CR = PC->GetControlRotation().GetNormalized();
+		CR.Pitch = FMath::Clamp(CR.Pitch + StepP, -88.f, 88.f);
+		CR.Yaw += StepY;
+		PC->SetControlRotation(CR);
+		RecoilClimbPitch += StepP;
+		RecoilClimbYaw += StepY;
+		LastClimbShotTime = Now;
 	}
 	if (UPFCombatAudio* Audio = Char->GetCombatAudio())
 	{

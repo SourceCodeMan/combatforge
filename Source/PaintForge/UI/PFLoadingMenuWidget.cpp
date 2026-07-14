@@ -3,6 +3,7 @@
 #include "UI/PFLoadingMenuWidget.h"
 
 #include "PaintForge.h"
+#include "Core/PFPaths.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerController.h"
 #include "Voting/PFRatingSubsystem.h"
@@ -373,7 +374,7 @@ UTexture2D* UPFLoadingMenuWidget::GetMapPreview(const FString& JsonFileName)
 	FString PngName = JsonFileName;
 	PngName.RemoveFromEnd(TEXT(".json"));
 	PngName += TEXT(".png");
-	const FString PngPath = FPaths::ProjectSavedDir() / TEXT("Arenas") / PngName;
+	const FString PngPath = FPFPaths::ArenaDir() / PngName;
 	UTexture2D* Tex = FPaths::FileExists(PngPath) ? FImageUtils::ImportFileAsTexture2D(PngPath) : nullptr;
 	MapPreviewCache.Add(JsonFileName, Tex);
 	return Tex;
@@ -1554,7 +1555,7 @@ void UPFLoadingMenuWidget::ReloadMapCatalog()
 		FString PngName = M.FileName;
 		PngName.RemoveFromEnd(TEXT(".json"));
 		PngName += TEXT(".png");
-		return !FPaths::FileExists(FPaths::ProjectSavedDir() / TEXT("Arenas") / PngName);
+		return !FPaths::FileExists(FPFPaths::ArenaDir() / PngName);
 	});
 	const int32 PageCount = FMath::Max(1, FMath::DivideAndRoundUp(FMath::Max(MapCatalog.Num(), 1), MapsPerPage));
 	MapPageIndex = FMath::Clamp(MapPageIndex, 0, PageCount - 1);

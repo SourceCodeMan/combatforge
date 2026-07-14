@@ -115,11 +115,11 @@ $SeedJson = @'
 }
 '@
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-foreach ($Root in @($WorkDir, (Split-Path $WorkDir -Parent), $ProjectRoot)) {
-	$ArenasDir = Join-Path $Root "Saved\Arenas"
-	New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
-	Set-Content -Path (Join-Path $ArenasDir ("arena_{0}_packagesmoke.json" -f $Stamp)) -Value $SeedJson -Encoding UTF8
-}
+# Arenas moved to the stable per-user dir (the old 3-root Saved\Arenas loop existed because the packaged
+# ProjectSavedDir was ambiguous — moot now).
+$ArenasDir = Join-Path $env:LOCALAPPDATA "CombatForge\Arenas"
+New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
+Set-Content -Path (Join-Path $ArenasDir ("arena_{0}_packagesmoke.json" -f $Stamp)) -Value $SeedJson -Encoding UTF8
 
 $Boot = Start-Process -FilePath $ClientExe.FullName -ArgumentList $BootArgs -WorkingDirectory $WorkDir -PassThru
 $Done = $Boot.WaitForExit($BootTimeoutSec * 1000)

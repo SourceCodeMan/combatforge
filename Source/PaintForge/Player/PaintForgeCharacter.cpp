@@ -1793,7 +1793,9 @@ void APaintForgeCharacter::UpdateWeaponHoldPose()
 	{
 		const FRotator Aim = GetBaseAimRotation();
 		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
-		WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, 14.f));
+		// Lift toward the shoulder so firing doesn't read as hip-fire. (A true shouldered grip — cheek on
+		// stock, arms tracking — needs the aim-pose animation pass; this is the best procedural stand-in.)
+		WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, 30.f));
 	}
 }
 

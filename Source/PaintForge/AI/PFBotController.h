@@ -60,7 +60,7 @@ public:
 
 protected:
 	// ---- Brain tunables ----
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float EngageRangeUU = 4500.f;      // max distance to open fire
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float EngageRangeUU = 8000.f;      // max distance to open fire (cross-map: arena diagonal ~7500)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float PreferredRangeUU = 1400.f;   // stand-off band centre
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float MinRangeUU = 700.f;          // back up if closer
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float TargetRefreshInterval = 0.4f;
@@ -87,8 +87,8 @@ protected:
 	// ---- Perception (sight cone + hearing). Sight makes bots flankable at range; a short-range proximity sense
 	//      keeps close-quarters reliable (so FOV never regresses the point-blank fix); hearing + last-known-
 	//      position let a flanked/broken-LOS bot turn toward gunfire and hunt where it last saw you. ----
-	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightRadiusUU = 5000.f;     // start seeing a hostile within this range (in the cone)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightLoseRadiusUU = 5600.f; // keep seeing until beyond this (must be >= SightRadius)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightRadiusUU = 8500.f;     // cross-map sight (arena diagonal ~7500): if you can see a bot, it can see you
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightLoseRadiusUU = 9000.f; // keep seeing until beyond this (must be >= SightRadius)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightFOVHalfDeg = 75.f;     // HALF-angle from where the bot looks → 150° cone; sides+rear are blind spots scanning must cover
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightAutoSeeUU = 1000.f;    // auto-see a hostile this close to where it was last seen
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float HearingRangeUU = 4500.f;    // hear gunfire/footsteps within this range

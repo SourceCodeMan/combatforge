@@ -102,6 +102,44 @@ void FPFUserPrefs::SetWindowModeIndex(int32 Idx)
 	WriteInt(TEXT("WindowModeIndex"), FMath::Clamp(Idx, 0, 2));
 }
 
+int32 FPFUserPrefs::GetQualityLevel()
+{
+	return FMath::Clamp(ReadInt(TEXT("QualityLevel"), 2), 0, 3);
+}
+
+void FPFUserPrefs::SetQualityLevel(int32 Level)
+{
+	WriteInt(TEXT("QualityLevel"), FMath::Clamp(Level, 0, 3));
+}
+
+int32 FPFUserPrefs::GetResolutionIndex()
+{
+	return FMath::Clamp(ReadInt(TEXT("ResolutionIndex"), 3), 0, 4);
+}
+
+void FPFUserPrefs::SetResolutionIndex(int32 Idx)
+{
+	WriteInt(TEXT("ResolutionIndex"), FMath::Clamp(Idx, 0, 4));
+}
+
+float FPFUserPrefs::GetResolutionScalePct()
+{
+	float V = 100.f;
+	if (GConfig)
+	{
+		GConfig->GetFloat(TEXT("PaintForge"), TEXT("ResolutionScalePct"), V, GGameUserSettingsIni);
+	}
+	return FMath::Clamp(V, 50.f, 100.f);
+}
+
+void FPFUserPrefs::SetResolutionScalePct(float Pct)
+{
+	if (GConfig)
+	{
+		GConfig->SetFloat(TEXT("PaintForge"), TEXT("ResolutionScalePct"), FMath::Clamp(Pct, 50.f, 100.f), GGameUserSettingsIni);
+	}
+}
+
 FKey FPFUserPrefs::GetKeyOverride(FName ActionId)
 {
 	if (GConfig)

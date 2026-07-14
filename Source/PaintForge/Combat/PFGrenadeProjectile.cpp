@@ -3,6 +3,7 @@
 #include "Combat/PFGrenadeProjectile.h"
 
 #include "PaintForge.h"
+#include "Combat/PFSmokeSubsystem.h"
 #include "Combat/PFPaintballProjectile.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Combat/PFSplatSubsystem.h"
@@ -124,6 +125,15 @@ void APFGrenadeProjectile::ServerDetonate()
 	if (Kind == EPFGrenadeType::Frag)
 	{
 		SpawnFragBurst(At, BurstSeed);
+	}
+	// Smoke is CONCEALMENT, not just a visual: register the cloud so bot line-of-sight treats it as a
+	// sight-blocker for its lifetime. Single bounding sphere over the 9-puff cluster (center lifted, 1.1x).
+	else if (Kind == EPFGrenadeType::Smoke)
+	{
+		if (UPFSmokeSubsystem* Smoke = GetWorld() ? GetWorld()->GetSubsystem<UPFSmokeSubsystem>() : nullptr)
+		{
+			Smoke->RegisterSmoke(At + FVector(0.f, 0.f, SmokeRadius * 0.3f), SmokeRadius * 1.1f, SmokeDuration);
+		}
 	}
 
 	// Host-local cosmetics/audio (OnRep never fires on the authority).
@@ -323,7 +333,7 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		SmokePuffs.Add(Puff);
 		SmokeMIDs.Add(PuffMID);
 		PuffTargetScale.Add(TargetScale);
-		PuffMaxDensity.Add(0.85f);
+		PuffMaxDensity.Add(1.3f);   // denser — smoke must read as a real view-blocker (it now blocks bot sight too)
 		PuffDissolveWindow.Add(FMath::Lerp(2.6f, 0.7f, static_cast<float>(i) / 8.f));
 	}
 	SetActorTickEnabled(true);   // begin the appear/dissolve animation

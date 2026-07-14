@@ -3,6 +3,7 @@
 #include "Core/PaintForgeGameMode.h"
 
 #include "PaintForge.h"
+#include "Core/PFPaths.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerController.h"
 #include "Core/PaintForgePlayerState.h"
@@ -137,11 +138,10 @@ void APaintForgeGameMode::BeginPlay()
 #if !UE_BUILD_SHIPPING
 namespace
 {
-	/** Write a tiny both-team fort into ProjectSavedDir/Arenas so packaged smokes don't depend on host paths. */
+	/** Write a tiny both-team fort into the stable arena dir so packaged smokes don't depend on host paths. */
 	bool SmokeWriteCommunityArenaSeed()
 	{
-		const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
-		IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+		const FString Dir = FPFPaths::ArenaDir();
 		const FString Path = Dir / TEXT("arena_99999999_smokeseed.json");
 		// Newest-wins loader sorts by name — high timestamp prefix stays on top of empty match dumps.
 		const TCHAR* Json =
@@ -523,13 +523,14 @@ FTransform APaintForgeGameMode::GetSpawnTransform(const APaintForgePlayerState* 
 	const APaintForgeGameState* GS = GetPFGameState();
 	const EPFMatchPhase Phase = GS ? GS->Phase : EPFMatchPhase::Lobby;
 
-	// FreeForAll: lobby pen; combat = random points all over the field (not just spawn columns).
+	// FreeForAll: combat = random points all over the field (not just spawn columns).
 	if (GS && GS->MatchType == EPFMatchType::FreeForAll)
 	{
 		if (Phase == EPFMatchPhase::Lobby)
 		{
-			return ArenaShell->GetWarmupSpawnTransform(
-				FMath::Min<int32>(PS->RosterIndex, PFGrid::MaxRosterSlots - 1));
+			// Lobby = freeform warmup ON THE FIELD (the old detached warm-up pen kept everyone boxed in a
+			// 20x20m island). Spawn columns are never buildable, so leftover forts can't embed a spawn.
+			return ArenaShell->GetTeamSpawnTransform(PS->RosterIndex % 2, GetTeamSlotIndex(PS) % PFGrid::SpawnPointsPerTeam);
 		}
 		// Salt mixes roster + round + a rolling counter so respawns don't stack.
 		const int32 Salt = static_cast<int32>(PS->RosterIndex) * 97
@@ -544,7 +545,8 @@ FTransform APaintForgeGameMode::GetSpawnTransform(const APaintForgePlayerState* 
 	switch (Phase)
 	{
 	case EPFMatchPhase::Lobby:
-		return ArenaShell->GetWarmupSpawnTransform(FMath::Min<int32>(PS->RosterIndex, PFGrid::MaxRosterSlots - 1));
+		// Lobby = freeform warmup on the field: run around, shoot, nothing counts. (Was the detached pen.)
+		return ArenaShell->GetTeamSpawnTransform(Team, TeamSlot % PFGrid::SpawnPointsPerTeam);
 
 	case EPFMatchPhase::Build:
 		return ArenaShell->GetBuildStartTransform(Team, TeamSlot);
@@ -600,6 +602,7 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
 	GetWorldTimerManager().ClearTimer(LobbyCountdownHandle);
+	GetWorldTimerManager().ClearTimer(LobbyTopUpHandle);
 	bLobbyCountdownActive = false;
 	bLobbyCountdownForced = false;
 	bBuildEarlyEndActive = false;
@@ -643,6 +646,10 @@ void APaintForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			RespawnCombatant(PS, 3);   // players and bots alike
 		}
 		RecountAlive();
+		// Freeform warmup: top every combatant's loadout up every couple of seconds so lobby play is
+		// effectively unlimited ammo/grenades (ServerRefillFromPickup no-ops when already full). Cleared on
+		// any phase transition, and the real match wipes loadouts fresh anyway (RespawnCombatant).
+		GetWorldTimerManager().SetTimer(LobbyTopUpHandle, this, &APaintForgeGameMode::TopUpLobbyLoadouts, 2.f, true);
 		break;
 	}
 
@@ -1259,6 +1266,13 @@ void APaintForgeGameMode::RespawnVictimAtTeamSpawn(APaintForgeCharacter* Victim,
 					PS->ServerClearOutState();
 				}
 				WeakVictim->GetHealth()->ResetForRound(3);
+				// Reused pawn keeps its depleted ammo/grenades unless we reset — every respawn grants a FULL
+				// loadout (mag + reserve + both grenades; also clears an in-flight reload). Fresh-pawn paths
+				// already fill in the weapon's BeginPlay.
+				if (UPFWeaponComponent* Weapon = WeakVictim->GetWeapon())
+				{
+					Weapon->ServerResetLoadout();
+				}
 				if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
 				{
 					WeakThis->TeleportPawnTo(WeakVictim.Get(), WeakThis->GetSpawnTransform(PS));
@@ -1342,6 +1356,26 @@ APaintForgePlayerState* APaintForgeGameMode::AddBot(uint8 Team)
 	UE_LOG(PaintForgeLog, Log, TEXT("GameMode: added bot '%s' (team %d, roster %d)"),
 		*PS->GetPlayerName(), PS->TeamId, PS->RosterIndex);
 	return PS;
+}
+
+void APaintForgeGameMode::TopUpLobbyLoadouts()
+{
+	// Freeform warmup: unlimited ammo/grenades while in Lobby. ServerRefillFromPickup no-ops when full, so
+	// this is cheap; the timer is cleared on any phase transition (belt: bail if the phase moved on).
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Lobby)
+	{
+		return;
+	}
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+		APaintForgeCharacter* Char = PS ? Cast<APaintForgeCharacter>(PS->GetPawn()) : nullptr;
+		if (UPFWeaponComponent* Weapon = Char ? Char->GetWeapon() : nullptr)
+		{
+			Weapon->ServerRefillFromPickup();
+		}
+	}
 }
 
 void APaintForgeGameMode::FillBotsToFormat()
@@ -1506,6 +1540,11 @@ void APaintForgeGameMode::BeginLiveRound()
 
 	if (GS->MatchType == EPFMatchType::Domination)
 	{
+		// Redesigned Domination: ONE active zone; 15s consecutive-majority capture; owner earns 1 pt/sec;
+		// the active zone rotates A->B->C so teams run zone to zone.
+		DominationActiveSlot = 0;
+		DominationCaptureProgress = 0.f;
+		DominationCapturingTeam = 255;
 		SpawnObjectiveActors();
 		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
 		ApplyServerMoveLocks();
@@ -1513,8 +1552,10 @@ void APaintForgeGameMode::BeginLiveRound()
 			&APaintForgeGameMode::ResolveDominationOnTimer, SkirmishMatchDuration, false);
 		GetWorldTimerManager().SetTimer(ObjectiveScoreTimerHandle, this,
 			&APaintForgeGameMode::TickDominationScoring, ObjectiveScoreInterval, true);
-		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Domination LIVE (%.0f s, first to %d)"),
-			SkirmishMatchDuration, SkirmishTagTarget);
+		GetWorldTimerManager().SetTimer(HardpointRotateTimerHandle, this,
+			&APaintForgeGameMode::RotateDominationZone, DominationRotateInterval, true);
+		UE_LOG(PaintForgeLog, Log, TEXT("GameMode: Domination LIVE (%.0f s, capture %.0f s, rotate %.0f s, first to %d)"),
+			SkirmishMatchDuration, DominationCaptureSeconds, DominationRotateInterval, DominationTargetScore);
 		return;
 	}
 
@@ -1879,7 +1920,9 @@ void APaintForgeGameMode::SpawnObjectiveActors()
 		for (int32 i = 0; i < PFObjectiveLayout::ControlPointCount; ++i)
 		{
 			const FVector Loc = PFObjectiveLayout::ControlPointLocation(i);
-			const bool bActive = !bHardpoint || (i == HardpointActiveSlot);
+			// Both objective modes run ONE active zone now (Dom redesign: capture-and-hold a single contested
+			// zone that rotates; Hardpoint unchanged).
+			const bool bActive = bHardpoint ? (i == HardpointActiveSlot) : (i == DominationActiveSlot);
 			APFControlPointActor* CP = World->SpawnActor<APFControlPointActor>(
 				APFControlPointActor::StaticClass(), Loc, FRotator::ZeroRotator, Params);
 			if (CP)
@@ -2118,67 +2161,125 @@ void APaintForgeGameMode::TickDominationScoring()
 		}
 	}
 
-	uint16 ScoreA = GS->TeamScores[0];
-	uint16 ScoreB = GS->TeamScores[1];
-	bool bScored = false;
-
+	// Redesigned Domination (playtest spec): ONE active zone. A team CAPTURES it by holding the MAJORITY in
+	// the zone for DominationCaptureSeconds consecutive seconds (contested = the side with more players makes
+	// progress; owner presence isn't required to defend, but out-numbering attackers stalls them). Once
+	// captured, the owner earns 1 pt/sec — until the enemy flips it with their own 15s majority, or the zone
+	// rotates (RotateDominationZone) and the fight moves.
+	APFControlPointActor* Active = nullptr;
 	for (APFControlPointActor* CP : ControlPoints)
 	{
-		if (!CP || !CP->IsPointActive())
+		if (CP && CP->IsPointActive())
 		{
-			continue;
+			Active = CP;
+			break;
 		}
-		int32 OutA = 0, OutB = 0;
-		const uint8 Sole = CP->ServerQueryOccupancy(OutA, OutB);
+	}
+	if (!Active)
+	{
+		return;
+	}
 
-		// Capture / hold: sole occupancy flips (or reaffirms) owner. Contested does not flip.
-		// Empty does not flip either — pad keeps last-captured color for map readability —
-		// but empty NEVER scores (was the bug: sticky owner + 1 Hz score with nobody on pad).
-		if (Sole <= 1)
-		{
-			CP->ServerSetControllingTeam(Sole);
-		}
+	int32 OutA = 0, OutB = 0;
+	Active->ServerQueryOccupancy(OutA, OutB);
 
-		// Stamp PS for anyone currently on this pad (HUD).
-		if (OutA + OutB > 0)
+	// Stamp PS for anyone currently on the active pad (HUD "● POINT B").
+	if (OutA + OutB > 0)
+	{
+		const FVector CPLoc = Active->GetActorLocation();
+		constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's capture radius
+		for (APlayerState* PSBase : GS->PlayerArray)
 		{
-			const FVector CPLoc = CP->GetActorLocation();
-			constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's tripled capture radius
-			for (APlayerState* PSBase : GS->PlayerArray)
+			APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
+			if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
 			{
-				APaintForgePlayerState* PS = Cast<APaintForgePlayerState>(PSBase);
-				if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
+				continue;
+			}
+			if (const APawn* Pawn = PS->GetPawn())
+			{
+				if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
 				{
-					continue;
-				}
-				if (const APawn* Pawn = PS->GetPawn())
-				{
-					if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
-					{
-						PS->ServerSetStandingOnPoint(static_cast<uint8>(CP->GetPointIndex()));
-					}
+					PS->ServerSetStandingOnPoint(static_cast<uint8>(Active->GetPointIndex()));
 				}
 			}
 		}
-
-		// Score only while a single team is present on the pad this tick.
-		if (Sole == 0) { ++ScoreA; bScored = true; }
-		else if (Sole == 1) { ++ScoreB; bScored = true; }
 	}
 
-	if (bScored)
+	const uint8 ZoneOwner = Active->GetControllingTeam();
+
+	// Majority in the zone (255 = tie or empty). Only a NON-owning majority makes capture progress.
+	uint8 Majority = 255;
+	if (OutA > OutB)      { Majority = 0; }
+	else if (OutB > OutA) { Majority = 1; }
+
+	if (Majority <= 1 && Majority != ZoneOwner)
 	{
+		if (DominationCapturingTeam != Majority)
+		{
+			DominationCapturingTeam = Majority;   // new attacker chain starts fresh
+			DominationCaptureProgress = 0.f;
+		}
+		DominationCaptureProgress += ObjectiveScoreInterval;
+		if (DominationCaptureProgress >= DominationCaptureSeconds)
+		{
+			Active->ServerSetControllingTeam(Majority);
+			UE_LOG(PaintForgeLog, Log, TEXT("Domination: team %d captured zone %d"),
+				Majority, Active->GetPointIndex());
+			DominationCapturingTeam = 255;
+			DominationCaptureProgress = 0.f;
+		}
+	}
+	else
+	{
+		// No eligible attacker majority this second (tie, empty, or the owner holds it): progress bleeds off.
+		DominationCapturingTeam = 255;
+		DominationCaptureProgress = FMath::Max(0.f, DominationCaptureProgress - ObjectiveScoreInterval);
+	}
+
+	// Owner income: 1 pt/sec while the active zone is owned (presence not required once captured).
+	if (ZoneOwner <= 1)
+	{
+		uint16 ScoreA = GS->TeamScores[0];
+		uint16 ScoreB = GS->TeamScores[1];
+		if (ZoneOwner == 0) { ++ScoreA; } else { ++ScoreB; }
 		GS->ServerSetTeamScores(ScoreA, ScoreB);
-		if (ScoreA >= SkirmishTagTarget)
+		if (ScoreA >= DominationTargetScore)
 		{
 			EndDomination(0);
 			return;
 		}
-		if (ScoreB >= SkirmishTagTarget)
+		if (ScoreB >= DominationTargetScore)
 		{
 			EndDomination(1);
 		}
 	}
+}
+
+void APaintForgeGameMode::RotateDominationZone()
+{
+	APaintForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchType != EPFMatchType::Domination
+		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live
+		|| ControlPoints.Num() == 0)
+	{
+		return;
+	}
+	// Advance the active zone A->B->C and reset it NEUTRAL: income stops, both teams sprint to the new fight.
+	DominationActiveSlot = (DominationActiveSlot + 1) % ControlPoints.Num();
+	DominationCapturingTeam = 255;
+	DominationCaptureProgress = 0.f;
+	for (int32 i = 0; i < ControlPoints.Num(); ++i)
+	{
+		if (APFControlPointActor* CP = ControlPoints[i])
+		{
+			CP->ServerSetActive(i == DominationActiveSlot);
+			if (i == DominationActiveSlot)
+			{
+				CP->ServerSetControllingTeam(255);
+			}
+		}
+	}
+	UE_LOG(PaintForgeLog, Log, TEXT("Domination: active zone -> %d"), DominationActiveSlot);
 }
 
 void APaintForgeGameMode::TickHardpointScoring()
@@ -2513,31 +2614,50 @@ void APaintForgeGameMode::NotifyPawnEliminated(APaintForgeCharacter* Victim, con
 	// stats-free 1 s reset back to the pen, mirroring the dummy behavior.
 	if (GS->Phase == EPFMatchPhase::Lobby)
 	{
-		// Warm-up pen: short "you're out" + 1 s reset (same as dummies, but with HUD countdown).
+		// Freeform warmup: near-instant, stats-free reset with a FULL loadout — die, pop back, keep playing.
 		if (VictimPS)
 		{
-			VictimPS->ServerSetOutWaitingRespawn(GS->GetServerWorldTimeSeconds() + 1.f);
+			VictimPS->ServerSetOutWaitingRespawn(GS->GetServerWorldTimeSeconds() + 0.35f);
 		}
 		TWeakObjectPtr<APaintForgeCharacter> WeakVictim(Victim);
+		TWeakObjectPtr<APaintForgePlayerState> WeakVictimPS(VictimPS);
 		TWeakObjectPtr<APaintForgeGameMode> WeakThis(this);
 		FTimerHandle ResetHandle;
 		GetWorldTimerManager().SetTimer(ResetHandle,
-			FTimerDelegate::CreateLambda([WeakThis, WeakVictim]()
+			FTimerDelegate::CreateLambda([WeakThis, WeakVictim, WeakVictimPS]()
 			{
-				if (WeakThis.IsValid() && WeakVictim.IsValid())
+				if (!WeakThis.IsValid())
+				{
+					return;
+				}
+				if (WeakVictim.IsValid())
 				{
 					if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
 					{
 						PS->ServerClearOutState();
 					}
 					WeakVictim->GetHealth()->ResetForRound(3);
+					if (UPFWeaponComponent* Weapon = WeakVictim->GetWeapon())
+					{
+						Weapon->ServerResetLoadout();   // warmup deaths refill everything too
+					}
 					if (APaintForgePlayerState* PS = WeakVictim->GetPlayerState<APaintForgePlayerState>())
 					{
 						WeakThis->TeleportPawnTo(WeakVictim.Get(), WeakThis->GetSpawnTransform(PS));
 					}
 				}
+				else if (WeakVictimPS.IsValid())
+				{
+					// Pawn destroyed mid-window (field roaming = KillZ is reachable now) — restart instead of stranding.
+					APaintForgePlayerState* PS = WeakVictimPS.Get();
+					PS->ServerClearOutState();
+					if (AController* C = PS->GetOwningController())
+					{
+						WeakThis->RestartPlayer(C);
+					}
+				}
 			}),
-			1.f, false);
+			0.35f, false);
 		return;
 	}
 

@@ -31,6 +31,16 @@ struct PAINTFORGE_API FPFUserPrefs
 	static int32 GetWindowModeIndex();      // 0=Fullscreen 1=Borderless 2=Windowed
 	static void SetWindowModeIndex(int32 Idx);
 
+	// Video prefs mirrored here because the ENGINE readbacks are lossy: GetOverallScalabilityLevel() returns
+	// -1 whenever a custom resolution scale is applied (the widget clamped that to Low and then SAVED Low on
+	// the next Apply). The user's true choices seed the UI; the engine values are derived from them.
+	static int32 GetQualityLevel();         // 0..3, default 2 (High)
+	static void SetQualityLevel(int32 Level);
+	static int32 GetResolutionIndex();      // 0..4 into the options table, default 3 (1920x1080)
+	static void SetResolutionIndex(int32 Idx);
+	static float GetResolutionScalePct();   // 50..100, default 100
+	static void SetResolutionScalePct(float Pct);
+
 	// ---- Key rebinding (stored as "Bind_<ActionId>" = key name) ----
 	/** Saved override key for a rebindable action, or an invalid FKey if none is saved. */
 	static FKey GetKeyOverride(FName ActionId);

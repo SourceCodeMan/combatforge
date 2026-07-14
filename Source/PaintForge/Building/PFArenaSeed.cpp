@@ -3,6 +3,7 @@
 #include "Building/PFArenaSeed.h"
 
 #include "PaintForge.h"
+#include "Core/PFPaths.h"
 #include "Building/PFArenaSerialization.h"
 #include "Core/PaintForgeTypes.h"
 
@@ -68,8 +69,7 @@ namespace
 	bool WriteSeedFile(const FString& FileName, const FString& MatchIdTag,
 		const TArray<FPFBuildPieceRec>& Pieces)
 	{
-		const FString Dir = FPaths::ProjectSavedDir() / TEXT("Arenas");
-		IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+		const FString Dir = FPFPaths::ArenaDir();   // stable per-user dir (survives repackaging)
 		const FString Path = Dir / FileName;
 		if (IFileManager::Get().FileExists(*Path))
 		{

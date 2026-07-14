@@ -138,6 +138,14 @@ public:
 	/** Bloom retained while ADS. High enough that sustained ADS auto fire visibly sprays (burst discipline pays). */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomADSMult = 0.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SprintOutTime = 0.18f;
+	// Sustained-fire recoil CLIMB (human players only): holding the trigger walks the aim up and slightly
+	// right per shot; releasing eases it back to where aim started. Punishes trigger-squeezing — you can't
+	// hold auto and stay perfectly on target. Bots skip this (their aim-error model plays that role).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ClimbPitchPerShotDeg  = 0.30f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ClimbYawPerShotDeg    = 0.12f;   // drifts right
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ClimbFreeShotsMult    = 0.4f;    // gentler during the first BloomFreeShots
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ClimbRecoverDegPerSec = 14.f;
+
 	// Recoil-kick feel (camera view-punch + viewmodel kick only; not the spread cone).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ADSRecoilMult    = 0.4f;   // kick x this when fully aimed
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 RecoilRampFreeShots = 5;   // first N shots of a mag stay low
@@ -198,6 +206,11 @@ private:
 	// shooter's clock so client + server chains match; remote viewers estimate with their own clock (cosmetic).
 	uint16 ConsecShots = 0;
 	float  LastShotStampT = -1000.f;
+
+	// Recoil-climb state (owning human player only): how much accumulated climb is still owed back.
+	float  RecoilClimbPitch = 0.f;
+	float  RecoilClimbYaw = 0.f;
+	double LastClimbShotTime = -1000.0;
 
 	// Reload state
 	double ReloadEndTime = 0.0;

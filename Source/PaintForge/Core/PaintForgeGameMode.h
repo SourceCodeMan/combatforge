@@ -56,6 +56,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period (Skirmish + FFA + objectives)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 CaptureFlagTarget = 3; // CTF: first team to N captures
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  HardpointRotateInterval = 45.f; // Hardpoint: seconds per slot
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  DominationCaptureSeconds = 15.f; // Dom: consecutive majority seconds to capture/flip the active zone
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  DominationRotateInterval = 60.f; // Dom: active zone advances A->B->C on this period
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="10", ClampMax="1000")) int32 DominationTargetScore = 150; // 1 pt/sec of zone ownership -> first to N wins
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  ObjectiveScoreInterval = 1.f;   // Dom/HP: score tick period
 
 	// ---- The only phase mutator in the codebase ----
@@ -128,6 +131,7 @@ protected:
 	void TickDominationScoring();                      // 1 Hz: sole occupancy on each pad → TeamScores
 	void TickHardpointScoring();                       // 1 Hz: sole occupancy on active hill → TeamScores
 	void RotateHardpoint();                            // advance active control-point slot
+	void RotateDominationZone();                       // Dom: advance the single active zone (fresh neutral fight)
 	void SpawnObjectiveActors();                       // flags / control points from PFGrid layout
 	void DestroyObjectiveActors();
 	/** 4 ammo barrels at random field spots each combat start (refill mag+reserve). */
@@ -164,6 +168,7 @@ protected:
 
 	// ---- (intra) bots (fill teams to the selected format — server only) ----
 	void FillBotsToFormat();                           // top each team up to TargetTeamSize with bots
+	void TopUpLobbyLoadouts();                         // freeform-warmup: keep every combatant's ammo/grenades full
 	void RemoveAllBots();                              // despawn every bot (controller + pawn + PlayerState)
 	APaintForgePlayerState* AddBot(uint8 Team);        // spawn a bot controller + PlayerState on Team
 	void TrimOneBotFromTeam(uint8 Team);               // free a slot for a joining human
@@ -202,10 +207,15 @@ protected:
 	UPROPERTY() TObjectPtr<APFFlagActor> Flags[2];
 	UPROPERTY() TArray<TObjectPtr<APFControlPointActor>> ControlPoints;
 	int32 HardpointActiveSlot = 0;
+	// Domination (one-active-zone redesign): which zone is live + the current capture chain.
+	int32 DominationActiveSlot = 0;
+	float DominationCaptureProgress = 0.f;   // consecutive majority-seconds by DominationCapturingTeam
+	uint8 DominationCapturingTeam = 255;
 
 	FTimerHandle PhaseTimerHandle;           // Build / Vote / Results phase ends
 	FTimerHandle RoundTimerHandle;           // Freeze / Live / Intermission steps
 	FTimerHandle LobbyCountdownHandle;       // all-ready / force-start 5 s countdown
+	FTimerHandle LobbyTopUpHandle;           // lobby warmup: looping ammo/grenade top-up
 	FTimerHandle ObjectiveScoreTimerHandle;  // Dom/HP periodic scoring
 	FTimerHandle HardpointRotateTimerHandle; // Hardpoint slot rotation
 	FTimerHandle CrashBreadcrumbTimer;       // 30 s host roster dump for crash triage

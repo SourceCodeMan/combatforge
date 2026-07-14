@@ -28,7 +28,7 @@ $Editor = Join-Path $Engine "Engine\Binaries\Win64\UnrealEditor.exe"
 if (-not (Test-Path $Editor)) { throw "UnrealEditor not found: $Editor" }
 
 # --- Seed a community arena so Improvement has something to load ---
-$ArenasDir = Join-Path $ProjectRoot "Saved\Arenas"
+$ArenasDir = Join-Path $env:LOCALAPPDATA "CombatForge\Arenas"   # stable per-user dir (moved from Saved\Arenas)
 New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
 
 # Structural X/Y are cell min-corners in sub-grid units (multiples of 4).

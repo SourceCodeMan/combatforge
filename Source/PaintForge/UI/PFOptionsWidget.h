@@ -36,6 +36,7 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;   // embedded instance saves working settings on teardown
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 	// One click handler per rebind row (UButton::OnClicked takes no payload). Each begins key capture.

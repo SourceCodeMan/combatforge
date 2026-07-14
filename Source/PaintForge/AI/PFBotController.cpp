@@ -4,6 +4,7 @@
 
 #include "PaintForge.h"
 #include "AI/PFSquadSubsystem.h"
+#include "Combat/PFSmokeSubsystem.h"
 #include "Player/PaintForgeCharacter.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerState.h"
@@ -157,15 +158,17 @@ void APFBotController::ApplySkill()
 	{
 		Effective = static_cast<EPFBotSkill>(Override);
 	}
+	// Engage ranges are CROSS-MAP now (arena diagonal ~7500): "if I can see them, they should be shooting me."
+	// Skill difficulty comes from aim error / turn rate / reaction, not from refusing to fire at distance.
 	switch (Effective)
 	{
 	case EPFBotSkill::Rookie:
-		AimErrorDeg = 14.f;  AimTurnRate = 2.5f;  ReactionDelay = 0.60f;  EngageRangeUU = 3200.f;  break;
+		AimErrorDeg = 14.f;  AimTurnRate = 2.5f;  ReactionDelay = 0.60f;  EngageRangeUU = 7000.f;  break;
 	case EPFBotSkill::Sharpshooter:
-		AimErrorDeg = 1.5f;  AimTurnRate = 11.f;  ReactionDelay = 0.12f;  EngageRangeUU = 5500.f;  break;
+		AimErrorDeg = 1.5f;  AimTurnRate = 11.f;  ReactionDelay = 0.12f;  EngageRangeUU = 8500.f;  break;
 	case EPFBotSkill::Regular:
 	default:
-		AimErrorDeg = 4.5f;  AimTurnRate = 6.5f;  ReactionDelay = 0.30f;  EngageRangeUU = 4500.f;  break;
+		AimErrorDeg = 4.5f;  AimTurnRate = 6.5f;  ReactionDelay = 0.30f;  EngageRangeUU = 8000.f;  break;
 	}
 }
 
@@ -962,9 +965,9 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 		return true;
 	}
 
-	// Domination / Hardpoint: head for a control point.
+	// Domination / Hardpoint: both modes run ONE active zone now — go fight for it. Correct for attack AND
+	// defense: standing on the owned active zone denies the enemy the majority they need to flip it.
 	APFControlPointActor* GoalCP = nullptr;
-	if (Mode == EPFMatchType::Hardpoint)
 	{
 		float BestSq = TNumericLimits<float>::Max();
 		for (const TWeakObjectPtr<APFControlPointActor>& CPPtr : ControlPointsCache)
@@ -974,21 +977,6 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 			const float DSq = FVector::DistSquared(BotLoc, CP->GetActorLocation());
 			if (DSq < BestSq) { BestSq = DSq; GoalCP = CP; }
 		}
-	}
-	else   // Domination: nearest point we don't already own (else nearest to defend)
-	{
-		float BestUnownedSq = TNumericLimits<float>::Max();
-		float BestAnySq = TNumericLimits<float>::Max();
-		APFControlPointActor* NearestAny = nullptr;
-		for (const TWeakObjectPtr<APFControlPointActor>& CPPtr : ControlPointsCache)
-		{
-			APFControlPointActor* CP = CPPtr.Get();
-			if (CP == nullptr) { continue; }
-			const float DSq = FVector::DistSquared(BotLoc, CP->GetActorLocation());
-			if (DSq < BestAnySq) { BestAnySq = DSq; NearestAny = CP; }
-			if (CP->GetControllingTeam() != MyTeam && DSq < BestUnownedSq) { BestUnownedSq = DSq; GoalCP = CP; }
-		}
-		if (GoalCP == nullptr) { GoalCP = NearestAny; }
 	}
 	if (GoalCP != nullptr)
 	{
@@ -1006,8 +994,25 @@ bool APFBotController::HasLineOfSight(const APaintForgeCharacter* Target, bool b
 	{
 		return false;
 	}
-	const FVector Start = Bot->GetActorLocation() + FVector(0.f, 0.f, 60.f);
+	// FIRING check traces from the MUZZLE, not the eye: bots stood "shooting at walls" (and whole hardpoint
+	// scrums traded fire without ever killing) because the eye cleared a half-height wall while the leveled
+	// barrel below it didn't — every BB ate the wall lip. If the barrel can't clear, don't fire; the tactical
+	// repositioning then finds a spot where it can. Tracking/acquisition keeps the eye line.
+	const FVector Start = bBodiesBlock
+		? Bot->GetMuzzleLocation(false)
+		: Bot->GetActorLocation() + FVector(0.f, 0.f, 60.f);
 	const FVector End = Target->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+
+	// Smoke conceals: a live smoke cloud on the line breaks sight exactly like world geometry (the bot then
+	// falls back to last-known-position hunting — pop smoke and RUN, it works on bots now).
+	if (const UPFSmokeSubsystem* Smoke = World->GetSubsystem<UPFSmokeSubsystem>())
+	{
+		if (Smoke->IsSegmentSmoked(Start, End))
+		{
+			return false;
+		}
+	}
+
 	FCollisionQueryParams Params(FName(TEXT("BotLOS")), /*bTraceComplex=*/false, Bot);
 	Params.AddIgnoredActor(Target);
 	FHitResult Hit;
