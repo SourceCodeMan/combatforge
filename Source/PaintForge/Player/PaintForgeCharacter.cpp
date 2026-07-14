@@ -34,6 +34,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NavigationInvokerComponent.h"
+#include "Perception/AISense_Hearing.h"   // running footsteps → AI can hear a sprinter 360°
 #include "InputActionValue.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -451,6 +452,22 @@ void APaintForgeCharacter::Tick(float DeltaSeconds)
 	// GetADSAlpha() for the authoritative spread cone (04 §2.3), so it must
 	// track the move-stream ADS intent even for remotely controlled pawns.
 	UpdateADSAlpha(DeltaSeconds);
+
+	// AI footstep noise (server-authoritative, every pawn: host player, remote players, bots). A RUNNING
+	// (sprinting) character is audible 360° — bots within range hear the footfalls and turn to investigate,
+	// even from directly behind. Sneaking (walk/crouch, i.e. NOT sprinting) is silent, so it's found only by a
+	// bot's actual line of sight. Runs on the server where bot perception lives; the server knows every pawn's
+	// authoritative sprint state + velocity (the cosmetic footstep SOUND is separate, and client-local).
+	if (HasAuthority() && PFMovement != nullptr && !PFMovement->IsFalling() && !PFMovement->IsSliding())
+	{
+		FootstepNoiseTimer -= DeltaSeconds;
+		const bool bRunning = PFMovement->IsSprintingEffective() && GetVelocity().Size2D() > 200.f;
+		if (bRunning && FootstepNoiseTimer <= 0.f)
+		{
+			FootstepNoiseTimer = FootstepNoiseInterval;
+			UAISense_Hearing::ReportNoiseEvent(GetWorld(), GetActorLocation(), 1.f, this, FootstepHearRangeUU, TEXT("Footstep"));
+		}
+	}
 
 	// Quantum (and any sequence-driven body): idle ↔ walk ↔ run without an AnimBP.
 	UpdateSequenceLocomotion();

@@ -286,6 +286,13 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Audio") float FootstepStrideWalkUU = 165.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Audio") float FootstepStrideSprintUU = 130.f;
 
+	// AI footstep noise: only RUNNING (sprinting) is loud enough for bots to hear 360° (walk/crouch = silent =
+	// sight-only). Server emits a hearing event every FootstepNoiseInterval while sprinting, audible within
+	// FootstepHearRangeUU (shorter than gunfire — footsteps don't carry as far).
+	UPROPERTY(EditDefaultsOnly, Category="PF|AI") float FootstepNoiseInterval = 0.3f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|AI") float FootstepHearRangeUU = 2200.f;
+	float FootstepNoiseTimer = 0.f;   // transient throttle
+
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
 
