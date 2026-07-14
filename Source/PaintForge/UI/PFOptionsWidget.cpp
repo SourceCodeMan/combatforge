@@ -1053,19 +1053,34 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 
 	if (UGameUserSettings* S = GEngine ? GEngine->GetGameUserSettings() : nullptr)
 	{
-		EWindowMode::Type Mode = EWindowMode::Fullscreen;
-		if (WorkingWindowMode == 1) { Mode = EWindowMode::WindowedFullscreen; }
-		else if (WorkingWindowMode == 2) { Mode = EWindowMode::Windowed; }
-		if (bWorkingFullscreen && WorkingWindowMode != 1) { Mode = EWindowMode::Fullscreen; }
+		// NEVER exclusive fullscreen. At a non-native resolution it switches the monitor's DISPLAY MODE, so
+		// alt-tabbing re-tears the whole desktop (playtest at 1440p on a 4K monitor: every window resized/
+		// zoomed). "Fullscreen" now means BORDERLESS (WindowedFullscreen) — the desktop is untouched and
+		// alt-tab is instant, which is the modern-shooter standard.
+		const EWindowMode::Type Mode = (WorkingWindowMode == 2 && !bWorkingFullscreen)
+			? EWindowMode::Windowed
+			: EWindowMode::WindowedFullscreen;
 		S->SetFullscreenMode(Mode);
 		S->SetVSyncEnabled(bWorkingVSync);
 		S->SetOverallScalabilityLevel(WorkingQuality);
-		S->SetResolutionScaleNormalized(FMath::Clamp(WorkingResScale / 100.f, 0.5f, 1.f));
 
 		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560 };
 		static const int32 H[] = { 720,  768,  900,  1080, 1440 };
 		const int32 i = FMath::Clamp(WorkingResIndex, 0, NumResolutions - 1);
-		S->SetScreenResolution(FIntPoint(W[i], H[i]));
+		float Scale = FMath::Clamp(WorkingResScale / 100.f, 0.5f, 1.f);
+		if (Mode == EWindowMode::WindowedFullscreen)
+		{
+			// Borderless always fills the desktop, so make the RESOLUTION pick still mean something: fold it
+			// into the render scale (1440p on a 4K desktop = ~67% render cost, 1080p = 50%). The window never
+			// changes size; only the internal render resolution does.
+			const FIntPoint Desktop = S->GetDesktopResolution();
+			if (Desktop.Y > 0)
+			{
+				Scale = FMath::Clamp(Scale * (static_cast<float>(H[i]) / static_cast<float>(Desktop.Y)), 0.5f, 1.f);
+			}
+		}
+		S->SetResolutionScaleNormalized(Scale);
+		S->SetScreenResolution(FIntPoint(W[i], H[i]));   // honored in Windowed; borderless sizes to the desktop
 		S->ApplySettings(false);
 		if (bSave)
 		{

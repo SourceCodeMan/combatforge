@@ -1783,6 +1783,18 @@ void APaintForgeCharacter::UpdateWeaponHoldPose()
 	// mesh to the capsule root at eye height — remotes saw every gun sitting on the head
 	// and auth balls spawned from that tip. FP viewmodel (camera) stays separate for the owner.
 	ApplyHandWeaponPose();
+
+	// While aiming/shooting, POINT the hand-held gun along the aim instead of the hip-carry angle. Without
+	// this, bots + remote players visibly fired from a barrel aimed at the ground ("shooting from their
+	// ankles") once the muzzle started sampling the real barrel tip. The gun STAYS attached to the hand —
+	// the muzzle-origin gate depends on that — it's only re-oriented in place + lifted a touch so the
+	// barrel clears the thigh. (SM_Rifle family: local +Y is barrel-forward → yaw -90 onto the aim.)
+	if (ShouldRaiseWeapon())
+	{
+		const FRotator Aim = GetBaseAimRotation();
+		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
+		WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, 14.f));
+	}
 }
 
 void APaintForgeCharacter::ApplyArtLoadout()

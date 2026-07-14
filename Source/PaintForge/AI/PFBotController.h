@@ -190,4 +190,5 @@ private:
 	// while. Without this, every momentary target loss (a body crossing the trace, a target swap) re-armed the
 	// delay and clustered bots never got a shot off.
 	float LastCombatTime = -1000.f;
+	float TriggerPullTimer = 0.f;   // Single/Burst re-pull cadence while the bot wants to fire
 };

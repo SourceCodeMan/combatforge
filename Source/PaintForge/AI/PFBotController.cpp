@@ -129,6 +129,7 @@ void APFBotController::OnPossess(APawn* InPawn)
 	LastKnownHP = 255;   RoundMaxHP = 1;   SuppressedUntil = -1000.f;   // fresh health/suppression for the new life
 	ScanTimer = 0.f;   ScanYawOffset = 0.f;
 	LastCombatTime = -1000.f;   // fresh life = out of combat → first contact gets a full reaction delay
+	TriggerPullTimer = 0.f;
 	// Give this bot a team id so perception has a concrete affiliation (attitude itself comes from the
 	// GetTeamAttitudeTowards override, but a real id avoids any NoTeam short-circuit in the sense filter).
 	if (const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>())
@@ -357,10 +358,24 @@ void APFBotController::Tick(float DeltaSeconds)
 			FVector Lead;
 			if (Squad->GetSharedLead(PS->TeamId, Bot->GetActorLocation(), NowSec, SearchHoldSec, nullptr, Lead))
 			{
+				// De-clump: every no-target bot gets the SAME lead, so without an offset they all pile onto one
+				// spot, stand shoulder-to-shoulder, and block each other. Approach from a per-bot angle instead.
+				Lead += FRotator(0.f, PS->RosterIndex * 137.f, 0.f).Vector() * 350.f;
 				SearchPos = Lead;
 				bHaveSearch = true;
 			}
 		}
+	}
+
+	// Consume a REACHED search point: arriving and finding nothing means the lead is spent — clear it so the
+	// bot flows on to the objective / seek-contact instead of camping the spot staring at a wall (playtest:
+	// pairs of bots standing idle at walls were parked on stale investigate points, constantly refreshed by
+	// distant gunfire noise).
+	if (bHaveSearch && Target == nullptr && FVector::Dist2D(Bot->GetActorLocation(), SearchPos) < 250.f)
+	{
+		LastSeenTime = -1000.f;
+		InvestigateTime = -1000.f;
+		bHaveSearch = false;
 	}
 
 	const FVector BotLoc = Bot->GetActorLocation();
@@ -441,6 +456,24 @@ void APFBotController::Tick(float DeltaSeconds)
 		if (bWantFire)
 		{
 			LastCombatTime = NowSec;   // actively shooting = definitely in combat
+
+			// RE-PULL the trigger for Single/Burst bots. SetFiring only presses on the edge, and a Single-mode
+			// weapon fires ONE shot per pull — so a third of the roster (mode variety is per-bot) fired once per
+			// engagement and then stood there while the Auto bots did all the shooting ("only one bot shoots at
+			// a time"). Cycle the trigger at a humanlike cadence while the bot still wants to fire.
+			if (UPFWeaponComponent* Weapon = Bot->GetWeapon())
+			{
+				if (Weapon->GetFireMode() != EPFFireMode::Auto)
+				{
+					TriggerPullTimer -= DeltaSeconds;
+					if (TriggerPullTimer <= 0.f)
+					{
+						Weapon->StopFire();
+						Weapon->StartFire();
+						TriggerPullTimer = (Weapon->GetFireMode() == EPFFireMode::Single) ? 0.45f : 0.85f;
+					}
+				}
+			}
 		}
 
 		// Diagnostic: point-blank enemy, reaction gap ALREADY expired, still not firing → genuine stall worth a
