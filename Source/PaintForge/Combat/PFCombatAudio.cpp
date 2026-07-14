@@ -343,9 +343,13 @@ void UPFCombatAudio::EnsureSounds()
 	MuzzleConcurrency = NewObject<USoundConcurrency>(this);
 	{
 		FSoundConcurrencySettings& C = MuzzleConcurrency->Concurrency;
-		C.MaxCount = 6;
+		C.MaxCount = 8;
 		C.bLimitToOwner = false;
-		C.ResolutionRule = EMaxConcurrentResolutionRule::StopFarthestThenPreventNew;
+		// StopOldest, NOT StopFarthestThenPreventNew: muzzle sounds are all co-located at the gun, so "farthest"
+		// can't pick a slot to free and the rule falls into "prevent new" — the fire sound goes permanently silent
+		// after the group fills (~30 s of auto fire), while kills (different path) keep playing. StopOldest always
+		// evicts the oldest shot to make room, so a new shot ALWAYS sounds. (Also caps leaked procedural voices.)
+		C.ResolutionRule = EMaxConcurrentResolutionRule::StopOldest;
 		C.RetriggerTime = 0.f;
 	}
 

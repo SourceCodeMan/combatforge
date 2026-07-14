@@ -1090,6 +1090,16 @@ void APaintForgeCharacter::AssembleBanditCharacter()
 	MountArmband(ArmbandMesh, ArmbandMID, TEXT("upperarm_l"), 1.f);
 	MountArmband(ArmbandMeshR, ArmbandMIDR, TEXT("upperarm_r"), -1.f);
 
+	// Free-for-All has no teams, so the team-colored armband (a friend/foe tell) is meaningless — hide it in FFA.
+	if (const APaintForgeGameState* GSFFA = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr)
+	{
+		if (GSFFA->MatchType == EPFMatchType::FreeForAll)
+		{
+			if (ArmbandMesh != nullptr)  { ArmbandMesh->SetVisibility(false); }
+			if (ArmbandMeshR != nullptr) { ArmbandMeshR->SetVisibility(false); }
+		}
+	}
+
 	bBanditAssembled = true;
 	UE_LOG(PaintForgeLog, Log, TEXT("AssembleBanditCharacter: mounted Bandit body + %d slot comps (%d parts in registry)."),
 		CharSlotComps.Num(), PFChar::TotalPartCount());
@@ -1824,6 +1834,14 @@ void APaintForgeCharacter::SetTeamColor(uint8 TeamId)
 	if (ArmbandMIDR != nullptr)
 	{
 		ArmbandMIDR->SetVectorParameterValue(TEXT("Color"), TeamColor);
+	}
+	// FFA has no teams → hide the armband tell (belt-and-suspenders with the mount-time gate, in case team info
+	// converged after the body was assembled). Team modes keep it visible.
+	{
+		const APaintForgeGameState* GSFFA = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
+		const bool bFFA = (GSFFA != nullptr) && (GSFFA->MatchType == EPFMatchType::FreeForAll);
+		if (ArmbandMesh != nullptr)  { ArmbandMesh->SetVisibility(!bFFA); }
+		if (ArmbandMeshR != nullptr) { ArmbandMeshR->SetVisibility(!bFFA); }
 	}
 	// Muted team tint for the soldier body — clearly team-colored but not neon speedball (splats/tracers
 	// keep the full vivid ForTeam color). Tune the 0.45 lerp toward gray to taste.
