@@ -125,6 +125,7 @@ void APFBotController::OnPossess(APawn* InPawn)
 	RepathTimer = 0.f;
 	LastSeenTime = InvestigateTime = -1000.f;   // clear stale search memory from a previous life
 	bHaveTacticalGoal = false;   ReposTimer = 0.f;   // re-evaluate firing position for the new pawn
+	LastKnownHP = 255;   RoundMaxHP = 1;   SuppressedUntil = -1000.f;   // fresh health/suppression for the new life
 	// Give this bot a team id so perception has a concrete affiliation (attitude itself comes from the
 	// GetTeamAttitudeTowards override, but a real id avoids any NoTeam short-circuit in the sense filter).
 	if (const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>())
@@ -190,6 +191,22 @@ void APFBotController::Tick(float DeltaSeconds)
 		SetFiring(false);
 		StopMovement();   // halt path-following — a MoveTo left running would keep walking the (dead/frozen) pawn
 		return;
+	}
+
+	const float NowSec = (GetWorld() != nullptr) ? GetWorld()->GetTimeSeconds() : 0.f;
+
+	// Suppression: detect taking a hit (HP dropped since last tick) → mark "under fire" (widens aim below) and,
+	// on a fresh hit, break for a new tactical position (cover). RoundMaxHP is the injury denominator this life.
+	if (Health != nullptr)
+	{
+		RoundMaxHP = FMath::Max(RoundMaxHP, Health->HP);
+		if (LastKnownHP != 255 && Health->HP < LastKnownHP)
+		{
+			const bool bWasSuppressed = (NowSec < SuppressedUntil);
+			SuppressedUntil = NowSec + SuppressDurationSec;
+			if (!bWasSuppressed) { bHaveTacticalGoal = false; }   // just got shot → reposition to cover now
+		}
+		LastKnownHP = Health->HP;
 	}
 
 	// Bots can't walk to the [E] ammo barrels, so once their 150-ball supply ran dry they'd roam the rest of
@@ -258,7 +275,6 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 
 	APaintForgeCharacter* Target = CurrentTarget.Get();
-	const float NowSec = (GetWorld() != nullptr) ? GetWorld()->GetTimeSeconds() : 0.f;
 
 	// Last-known-position: remember where we last SAW the target, so when LOS breaks the bot hunts that spot
 	// instead of instantly forgetting. Updated only while the target is actually visible.
@@ -330,7 +346,12 @@ void APFBotController::Tick(float DeltaSeconds)
 		// gets tracked and hit instead of walking around a slow, 14°-wide Rookie aim.
 		const float CloseT = (Dist < CloseAimRangeUU) ? (1.f - Dist / CloseAimRangeUU) : 0.f;   // 0 at edge → 1 at contact
 		const float EffTurnRate = AimTurnRate * FMath::Lerp(1.f, CloseAimTurnMult, CloseT);
-		const float EffAimError = AimErrorDeg * FMath::Lerp(1.f, CloseAimErrorMult, CloseT);
+		// Accuracy under pressure: injured (low HP) + suppressed (recently shot) bots aim WIDER — so trading fire
+		// wears a bot down and staying on target rewards you (Gray-Zone-style situational accuracy).
+		const float HealthFrac = (Health != nullptr && RoundMaxHP > 0) ? static_cast<float>(Health->HP) / static_cast<float>(RoundMaxHP) : 1.f;
+		float AccPenalty = FMath::Lerp(1.f, InjuryErrorMaxMult, 1.f - HealthFrac);
+		if (NowSec < SuppressedUntil) { AccPenalty *= SuppressErrorMult; }
+		const float EffAimError = AimErrorDeg * FMath::Lerp(1.f, CloseAimErrorMult, CloseT) * AccPenalty;
 
 		AimJitterTimer -= DeltaSeconds;
 		if (AimJitterTimer <= 0.f)

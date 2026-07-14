@@ -103,6 +103,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float CoverProbeUU = 250.f;        // how far to probe for adjacent cover around a candidate
 	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float SpreadRadiusUU = 700.f;      // penalize candidate points within this of a teammate (de-clump)
 
+	// ---- Accuracy under pressure (Gray-Zone-style): being shot or hurt degrades aim + drives the bot to cover.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Accuracy") float SuppressDurationSec = 1.6f;  // "under fire" window after taking a hit
+	UPROPERTY(EditDefaultsOnly, Category="PF|Accuracy") float SuppressErrorMult = 2.2f;    // aim cone widens this much while suppressed
+	UPROPERTY(EditDefaultsOnly, Category="PF|Accuracy") float InjuryErrorMaxMult = 1.8f;   // aim cone at near-death vs full health
+
 	// Navmesh pathfinding (replaces the old reactive whisker-steer): the bot picks a tactical GOAL POINT
 	// and the RecastNavMesh routes it there, so it walks AROUND the player-built fort instead of into it.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
@@ -167,4 +172,9 @@ private:
 	FVector TacticalGoal = FVector::ZeroVector;
 	bool    bHaveTacticalGoal = false;
 	float   ReposTimer = 0.f;
+
+	// ---- Suppression / injury state: detect taking a hit (HP drop) to widen aim + break for cover. ----
+	uint8 LastKnownHP = 255;         // 255 = uninitialised (first tick this life)
+	uint8 RoundMaxHP = 1;            // highest HP seen this life → the injury denominator
+	float SuppressedUntil = -1000.f; // world time until which the bot is "under fire"
 };
