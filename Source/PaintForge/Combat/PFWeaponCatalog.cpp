@@ -34,16 +34,17 @@ namespace PFWeapon
 			{ TEXT("AK (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
 			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(20.f, 3.f, -3.f) },
 		};
-		// SMG = burst or automatic (NO single); looser accuracy + shorter range than a rifle.
+		// SMG = burst or automatic (NO single); looser accuracy + shorter range than a rifle, but the fastest
+		// ROF and a smaller mag (rifle 30/12bps, SMG 25/14bps, pistol 18/10bps - per-weapon identity).
 		const FPFWeaponDef GSMGs[] = {
 			{ TEXT("AKSU (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black"),
 			  nullptr, FVector(2.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f),
 			  FVector(15.f, -5.5f, -1.5f), FRotator(1.5f, 0.f, -1.5f),
-			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3 },
+			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3, /*MagSize*/ 25, /*Bps*/ 14.f },
 			{ TEXT("AKSU (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood"),
 			  nullptr, FVector(2.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f),
 			  FVector(15.f, -5.5f, -1.5f), FRotator(1.5f, 0.f, -1.5f),
-			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3 },
+			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3, /*MagSize*/ 25, /*Bps*/ 14.f },
 		};
 		// Pistol = burst or single (NO auto). Sidearm hold; shortest range.
 		const FPFWeaponDef GPistols[] = {
@@ -52,7 +53,7 @@ namespace PFWeapon
 			{ TEXT("Pistol"), TEXT("/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol"),
 			  nullptr, FVector(-12.f, 3.f, -4.f), FRotator(-2.f, -90.f, 2.f), 0.40f, FVector(6.f, 2.f, -3.f),
 			  FVector(9.f, -3.f, -4.f), FRotator(1.5f, 0.f, -1.5f),
-			  (1 << 0) | (1 << 1), EPFFireMode::Single, 2.0f, 0.12f, 9000.f, 1.2f, 3, /*MagSize*/ 18 },
+			  (1 << 0) | (1 << 1), EPFFireMode::Single, 2.0f, 0.12f, 9000.f, 1.2f, 3, /*MagSize*/ 18, /*Bps*/ 10.f },
 		};
 
 		struct FCatEntry { const TCHAR* Label; const FPFWeaponDef* Defs; int32 Count; };

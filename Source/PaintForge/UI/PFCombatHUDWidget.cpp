@@ -895,7 +895,7 @@ void UPFCombatHUDWidget::UpdateObjectiveStatus()
 	{
 		if (LocalPS->StandingOnPoint != 255)
 		{
-			static const TCHAR* PointNames[] = { TEXT("A"), TEXT("MID"), TEXT("B") };
+			static const TCHAR* PointNames[] = { TEXT("A"), TEXT("B"), TEXT("C") };
 			const int32 Idx = FMath::Clamp(static_cast<int32>(LocalPS->StandingOnPoint), 0, 2);
 			if (GS->MatchType == EPFMatchType::Hardpoint)
 			{

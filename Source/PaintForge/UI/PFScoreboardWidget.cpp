@@ -430,7 +430,7 @@ void UPFScoreboardWidget::AddRow(const APaintForgePlayerState* PS)
 	}
 	else if (PS->StandingOnPoint != 255)
 	{
-		static const TCHAR* PointNames[] = { TEXT("A"), TEXT("MID"), TEXT("B") };
+		static const TCHAR* PointNames[] = { TEXT("A"), TEXT("B"), TEXT("C") };
 		const int32 Idx = FMath::Clamp(static_cast<int32>(PS->StandingOnPoint), 0, 2);
 		DisplayName += FString::Printf(TEXT("  ·  %s"), PointNames[Idx]);
 	}

@@ -9,6 +9,7 @@
 class UMaterialInstanceDynamic;
 class USphereComponent;
 class UStaticMeshComponent;
+class UTextRenderComponent;
 
 /**
  * Domination / Hardpoint control volume (Objectives/). Server evaluates occupancy;
@@ -56,6 +57,10 @@ private:
 	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<USphereComponent> CaptureSphere;
 	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<UStaticMeshComponent> PoleMesh;   // flag pole
 	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<UStaticMeshComponent> FlagMesh;   // flag (team-colored)
+	// Floating point letter (A/B/C) above the flag — back-to-back pair reads from both spawns without a tick
+	// or billboarding (same pattern as the ammo barrel's AMMO sign).
+	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<UTextRenderComponent> LetterFront;
+	UPROPERTY(VisibleAnywhere, Category="PF|CP") TObjectPtr<UTextRenderComponent> LetterBack;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> PadMID;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> FlagMID;
 

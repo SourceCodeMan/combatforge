@@ -13,8 +13,6 @@ struct PAINTFORGE_API FPFUserPrefs
 {
 	// ---- Loadout ----
 	/** 0=Standard 12bps, 1=Rapid 14bps, 2=Tournament 10bps (always 30-mag / 150 total). */
-	static int32 GetMarkerPreset();
-	static void SetMarkerPreset(int32 Preset);
 
 	/** 0=Cross+dot, 1=Dot only, 2=Cross only */
 	static int32 GetCrosshairStyle();
@@ -42,5 +40,4 @@ struct PAINTFORGE_API FPFUserPrefs
 
 	static void Flush();
 
-	static void ApplyMarkerPresetToWeapon(class UPFWeaponComponent* Weapon);
 };

@@ -163,7 +163,6 @@ private:
 	void RefreshSaveSlotHighlight();
 	/** Lazily spawn the off-screen preview studio and bind its render target to the tab image. */
 	void EnsureCharPreview();
-	static const TCHAR* MarkerPresetName(int32 Idx);
 	static const TCHAR* CrosshairStyleName(int32 Idx);
 	void BuildMapPicker(UVerticalBox* Parent);
 	/** Load (and cache) the screenshot-on-publish preview PNG for a saved arena, or null if none exists. */
@@ -197,7 +196,6 @@ private:
 	UFUNCTION() void OnTabLoadout();
 	UFUNCTION() void OnTabCharacter();
 	UFUNCTION() void OnOptionsClicked();   // opens the options overlay above the boot menu
-	UFUNCTION() void OnMarkerCycle();
 	UFUNCTION() void OnCrosshairCycle();
 	UFUNCTION() void OnMapPagePrev();
 	UFUNCTION() void OnMapPageNext();
@@ -246,11 +244,8 @@ private:
 	void RefreshWeaponLabels();
 
 	// Loadout tab (local prefs: marker fire-rate preset + crosshair style).
-	UPROPERTY() TObjectPtr<UButton> LoadoutMarkerButton;
-	UPROPERTY() TObjectPtr<UTextBlock> LoadoutMarkerValueText;
 	UPROPERTY() TObjectPtr<UButton> LoadoutCrosshairButton;
 	UPROPERTY() TObjectPtr<UTextBlock> LoadoutCrosshairValueText;
-	int32 WorkingMarkerPreset = 0;
 	int32 WorkingCrosshairStyle = 0;
 
 	// Pre-game match setup (host-editable).

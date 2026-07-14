@@ -159,5 +159,5 @@ private:
 	bool bListeningForKey = false;
 	int32 ListeningIndex = -1;
 
-	static constexpr int32 NumResolutions = 6;
+	static constexpr int32 NumResolutions = 5;   // capped at 1440p — 4K murders framerate on this content for no gameplay gain
 };

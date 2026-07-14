@@ -57,7 +57,6 @@ protected:
 	UFUNCTION() void OnLoadoutClicked();
 	UFUNCTION() void OnLoadoutClose();
 	UFUNCTION() void OnLoadoutApply();
-	UFUNCTION() void OnMarkerCycle();
 	UFUNCTION() void OnCrosshairCycle();
 	UFUNCTION() void OnOptionsClicked();
 
@@ -73,7 +72,6 @@ private:
 	void ApplyLoadoutPrefs();
 	bool IsLocalHost() const;
 
-	static const TCHAR* MarkerPresetName(int32 Idx);
 	static const TCHAR* CrosshairStyleName(int32 Idx);
 
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
@@ -89,14 +87,11 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> ConfigHintText;
 	UPROPERTY() TObjectPtr<UBorder> LoadoutOverlay;
 
-	UPROPERTY() TObjectPtr<UButton> MarkerButton;
-	UPROPERTY() TObjectPtr<UTextBlock> MarkerValueText;
 	UPROPERTY() TObjectPtr<UButton> CrosshairButton;
 	UPROPERTY() TObjectPtr<UTextBlock> CrosshairValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> LoadoutHintText;
 	UPROPERTY() TObjectPtr<UTextBlock> LoadoutSummaryText;
 
-	int32 WorkingMarkerPreset = 0;
 	int32 WorkingCrosshairStyle = 0;
 
 	float PollAccum = 0.f;

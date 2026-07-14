@@ -35,7 +35,8 @@ struct FPFWeaponDef
 	float       MuzzleSpeedUU    = 12000.f;   // speed x lifetime ~= effective range
 	float       ProjLifetimeSec  = 2.2f;
 	uint8       ClassBurstCount  = 3;
-	uint8       MagSize          = 30;        // per-weapon magazine (overrides the global marker preset)
+	uint8       MagSize          = 30;        // per-weapon magazine
+	float       FireRateBps      = 12.f;      // per-weapon rate of fire (BBs/sec) — replaced the global marker preset
 };
 
 /** A player's chosen weapon: category + index into that category. */

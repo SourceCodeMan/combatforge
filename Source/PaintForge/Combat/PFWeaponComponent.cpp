@@ -4,7 +4,6 @@
 
 #include "PaintForge.h"
 #include "Combat/PFCombatAudio.h"
-#include "Core/PFUserPrefs.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFPaintballProjectile.h"
 #include "Combat/PFGrenadeProjectile.h"
@@ -52,8 +51,8 @@ void UPFWeaponComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Local loadout marker preset (rate; mag size stays 30 / total 150).
-	FPFUserPrefs::ApplyMarkerPresetToWeapon(this);
+	// (The old global "marker preset" is gone — mag size, ROF, spread, and range are all per-weapon now,
+	// applied from PFWeaponCatalog in ApplyWeaponLoadout.)
 
 	// Start with a full mag + full reserve + grenade loadout on authority (clients get COND_OwnerOnly rep).
 	if (GetOwnerRole() == ROLE_Authority)

@@ -86,7 +86,7 @@ namespace
 		case EPFMatchType::CaptureFlag:
 			return TEXT("Grab their flag · score at your base · first to 3");
 		case EPFMatchType::Domination:
-			return TEXT("Hold points A / MID / B · score over time");
+			return TEXT("Hold points A / B / C · score over time");
 		case EPFMatchType::Hardpoint:
 			return TEXT("One rotating point · hold it · score over time");
 		default:
@@ -339,29 +339,7 @@ void UPFLobbyWidget::BuildLoadoutOverlay(UCanvasPanel* RootCanvas)
 	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
 	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Sub)) { VS->SetPadding(FMargin(0.f, 8.f, 0.f, 18.f)); VS->SetHorizontalAlignment(HAlign_Center); }
 
-	// Marker preset
-	UHorizontalBox* MRow = WidgetTree->ConstructWidget<UHorizontalBox>();
-	UTextBlock* MLab = WidgetTree->ConstructWidget<UTextBlock>();
-	MLab->SetText(FText::FromString(TEXT("MARKER")));
-	MLab->SetFont(PFLobbyFont(14, true));
-	MLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
-	USizeBox* MSizer = WidgetTree->ConstructWidget<USizeBox>();
-	MSizer->SetWidthOverride(100.f);
-	MSizer->SetContent(MLab);
-	MRow->AddChildToHorizontalBox(MSizer);
-	MarkerButton = WidgetTree->ConstructWidget<UButton>();
-	MarkerButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
-	MarkerButton->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnMarkerCycle);
-	MarkerValueText = WidgetTree->ConstructWidget<UTextBlock>();
-	MarkerValueText->SetFont(PFLobbyFont(15, true));
-	MarkerValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	MarkerButton->AddChild(MarkerValueText);
-	if (UHorizontalBoxSlot* HS = MRow->AddChildToHorizontalBox(MarkerButton))
-	{
-		HS->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		HS->SetPadding(FMargin(8.f, 0.f));
-	}
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(MRow)) { VS->SetPadding(FMargin(40.f, 6.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
+	// (No MARKER preset row — weapon stats are per-weapon in the catalog now.)
 
 	// Crosshair
 	UHorizontalBox* CRow = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -439,16 +417,6 @@ void UPFLobbyWidget::BuildLoadoutOverlay(UCanvasPanel* RootCanvas)
 	}
 }
 
-const TCHAR* UPFLobbyWidget::MarkerPresetName(int32 Idx)
-{
-	switch (Idx)
-	{
-	case 1: return TEXT("  Rapid — 14 bps · 30-mag / 150 total  ");
-	case 2: return TEXT("  Tournament — 10 bps · 30-mag / 150 total  ");
-	default: return TEXT("  Standard — 12 bps · 30-mag / 150 total  ");
-	}
-}
-
 const TCHAR* UPFLobbyWidget::CrosshairStyleName(int32 Idx)
 {
 	switch (Idx)
@@ -461,61 +429,33 @@ const TCHAR* UPFLobbyWidget::CrosshairStyleName(int32 Idx)
 
 void UPFLobbyWidget::RefreshLoadoutLabels()
 {
-	if (MarkerValueText)
-	{
-		MarkerValueText->SetText(FText::FromString(MarkerPresetName(WorkingMarkerPreset)));
-	}
 	if (CrosshairValueText)
 	{
 		CrosshairValueText->SetText(FText::FromString(CrosshairStyleName(WorkingCrosshairStyle)));
 	}
 	if (LoadoutSummaryText)
 	{
-		FString Sum;
-		switch (WorkingMarkerPreset)
-		{
-		case 1: Sum = TEXT("Faster fire rate — same 30-round mag / 150 total ammo."); break;
-		case 2: Sum = TEXT("Slower controlled fire — same 30-round mag / 150 total ammo."); break;
-		default: Sum = TEXT("Balanced rate — 30-round mag, 150 total, refill at ammo barrels."); break;
-		}
-		Sum += TEXT("\nCrosshair style is local. Team paint color comes from your team.");
-		LoadoutSummaryText->SetText(FText::FromString(Sum));
+		// Weapon stats (mag / ROF / accuracy / range) are per-weapon now — pick your gun in the LOADOUT tab.
+		LoadoutSummaryText->SetText(FText::FromString(
+			TEXT("Mag size, fire rate, and accuracy come from your chosen weapon.\nCrosshair style is local. Team paint color comes from your team.")));
 	}
 }
 
 void UPFLobbyWidget::ApplyLoadoutPrefs()
 {
-	FPFUserPrefs::SetMarkerPreset(WorkingMarkerPreset);
+	// Crosshair only — weapon stats are per-weapon (catalog) and must NOT be clobbered here (the old preset
+	// re-apply reset the pistol's 18-round mag back to 30 mid-session).
 	FPFUserPrefs::SetCrosshairStyle(WorkingCrosshairStyle);
 	FPFUserPrefs::Flush();
 
-	if (APlayerController* PC = GetOwningPlayer())
-	{
-		if (APaintForgeCharacter* Char = Cast<APaintForgeCharacter>(PC->GetPawn()))
-		{
-			if (UPFWeaponComponent* W = Char->GetWeapon())
-			{
-				FPFUserPrefs::ApplyMarkerPresetToWeapon(W);
-				// Host/authority: full mag+reserve so the new preset is immediately playable.
-				if (Char->HasAuthority())
-				{
-					W->HopperCount = W->HopperCapacity;
-					W->ReserveAmmo = W->MaxReserveAmmo;
-				}
-				W->OnHopperChangedEvent.Broadcast(W->HopperCount);
-			}
-		}
-	}
 	if (LoadoutHintText)
 	{
-		LoadoutHintText->SetText(FText::FromString(
-			TEXT("Saved. Fire rate + crosshair apply now; mag stays 30 / 150 total.")));
+		LoadoutHintText->SetText(FText::FromString(TEXT("Saved. Crosshair applies now.")));
 	}
 }
 
 void UPFLobbyWidget::OnLoadoutClicked()
 {
-	WorkingMarkerPreset = FPFUserPrefs::GetMarkerPreset();
 	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
 	RefreshLoadoutLabels();
 	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Visible); }
@@ -529,12 +469,6 @@ void UPFLobbyWidget::OnLoadoutClose()
 void UPFLobbyWidget::OnLoadoutApply()
 {
 	ApplyLoadoutPrefs();
-}
-
-void UPFLobbyWidget::OnMarkerCycle()
-{
-	WorkingMarkerPreset = (WorkingMarkerPreset + 1) % 3;
-	RefreshLoadoutLabels();
 }
 
 void UPFLobbyWidget::OnCrosshairCycle()
@@ -560,8 +494,10 @@ void UPFLobbyWidget::RefreshConfig()
 	if (TypeValueText)   { TypeValueText->SetText(FText::FromString(LobbyMatchTypeLabel(GS->MatchType))); }
 	if (FormatValueText)
 	{
-		FormatValueText->SetText(FText::FromString(
-			FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize)));
+		// FFA has no teams: the format value means TOTAL players (TeamSize*2), not "N v N".
+		FormatValueText->SetText(FText::FromString(GS->MatchType == EPFMatchType::FreeForAll
+			? FString::Printf(TEXT("%d players"), GS->TargetTeamSize * 2)
+			: FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize)));
 	}
 	if (BotsValueText)
 	{

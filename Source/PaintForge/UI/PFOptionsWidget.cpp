@@ -922,8 +922,8 @@ const TCHAR* UPFOptionsWidget::WindowModeName(int32 Idx)
 
 FString UPFOptionsWidget::ResolutionLabel() const
 {
-	static const int32 W[] = { 1280, 1366, 1600, 1920, 2560, 3840 };
-	static const int32 H[] = { 720,  768,  900,  1080, 1440, 2160 };
+	static const int32 W[] = { 1280, 1366, 1600, 1920, 2560 };
+	static const int32 H[] = { 720,  768,  900,  1080, 1440 };
 	const int32 i = FMath::Clamp(WorkingResIndex, 0, NumResolutions - 1);
 	return FString::Printf(TEXT("%dx%d"), W[i], H[i]);
 }
@@ -1001,8 +1001,8 @@ void UPFOptionsWidget::PullFromSettings()
 		WorkingResScale = FMath::Clamp(ScaleNorm * 100.f, 50.f, 100.f);
 
 		const FIntPoint Res = S->GetScreenResolution();
-		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560, 3840 };
-		static const int32 H[] = { 720,  768,  900,  1080, 1440, 2160 };
+		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560 };
+		static const int32 H[] = { 720,  768,  900,  1080, 1440 };
 		WorkingResIndex = 3;
 		for (int32 i = 0; i < NumResolutions; ++i)
 		{
@@ -1062,8 +1062,8 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 		S->SetOverallScalabilityLevel(WorkingQuality);
 		S->SetResolutionScaleNormalized(FMath::Clamp(WorkingResScale / 100.f, 0.5f, 1.f));
 
-		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560, 3840 };
-		static const int32 H[] = { 720,  768,  900,  1080, 1440, 2160 };
+		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560 };
+		static const int32 H[] = { 720,  768,  900,  1080, 1440 };
 		const int32 i = FMath::Clamp(WorkingResIndex, 0, NumResolutions - 1);
 		S->SetScreenResolution(FIntPoint(W[i], H[i]));
 		S->ApplySettings(false);

@@ -103,7 +103,7 @@ namespace
 		case EPFMatchType::CaptureFlag:
 			return TEXT("Grab their flag · score at your base · first to 3");
 		case EPFMatchType::Domination:
-			return TEXT("Hold points A / MID / B · score over time");
+			return TEXT("Hold points A / B / C · score over time");
 		case EPFMatchType::Hardpoint:
 			return TEXT("One rotating point · hold it · score over time");
 		default:
@@ -417,16 +417,6 @@ void UPFLoadingMenuWidget::OnTabCharacter() { SelectMenuTab(3); }
 
 void UPFLoadingMenuWidget::OnOptionsClicked() { SelectMenuTab(4); }
 
-const TCHAR* UPFLoadingMenuWidget::MarkerPresetName(int32 Idx)
-{
-	switch (Idx)
-	{
-	case 1:  return TEXT("  Rapid — 14 bps · 30-mag / 150 total  ");
-	case 2:  return TEXT("  Tournament — 10 bps · 30-mag / 150 total  ");
-	default: return TEXT("  Standard — 12 bps · 30-mag / 150 total  ");
-	}
-}
-
 const TCHAR* UPFLoadingMenuWidget::CrosshairStyleName(int32 Idx)
 {
 	switch (Idx)
@@ -439,22 +429,10 @@ const TCHAR* UPFLoadingMenuWidget::CrosshairStyleName(int32 Idx)
 
 void UPFLoadingMenuWidget::RefreshLoadoutLabels()
 {
-	if (LoadoutMarkerValueText)
-	{
-		LoadoutMarkerValueText->SetText(FText::FromString(MarkerPresetName(WorkingMarkerPreset)));
-	}
 	if (LoadoutCrosshairValueText)
 	{
 		LoadoutCrosshairValueText->SetText(FText::FromString(CrosshairStyleName(WorkingCrosshairStyle)));
 	}
-}
-
-void UPFLoadingMenuWidget::OnMarkerCycle()
-{
-	WorkingMarkerPreset = (WorkingMarkerPreset + 1) % 3;
-	FPFUserPrefs::SetMarkerPreset(WorkingMarkerPreset);
-	FPFUserPrefs::Flush();
-	RefreshLoadoutLabels();
 }
 
 void UPFLoadingMenuWidget::OnCrosshairCycle()
@@ -480,37 +458,7 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 
 	BuildWeaponPicker(Col);   // < Category > / < Weapon > steppers at the top of the loadout
 
-	// Marker preset row
-	{
-		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
-		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
-		Lab->SetText(FText::FromString(TEXT("MARKER")));
-		Lab->SetFont(PFLoadFont(13, true));
-		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
-		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
-		Sizer->SetWidthOverride(110.f);
-		Sizer->SetContent(Lab);
-		Row->AddChildToHorizontalBox(Sizer);
-		LoadoutMarkerButton = WidgetTree->ConstructWidget<UButton>();
-		LoadoutMarkerButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
-		LoadoutMarkerButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnMarkerCycle);
-		LoadoutMarkerValueText = WidgetTree->ConstructWidget<UTextBlock>();
-		LoadoutMarkerValueText->SetFont(PFLoadFont(12, false));
-		LoadoutMarkerValueText->SetJustification(ETextJustify::Center);
-		LoadoutMarkerValueText->SetClipping(EWidgetClipping::ClipToBounds);
-		LoadoutMarkerValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		LoadoutMarkerButton->AddChild(LoadoutMarkerValueText);
-		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(LoadoutMarkerButton))
-		{
-			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-			H->SetPadding(FMargin(8.f, 0.f));
-		}
-		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
-		{
-			V->SetPadding(FMargin(40.f, 6.f));
-			V->SetHorizontalAlignment(HAlign_Fill);
-		}
-	}
+	// (No MARKER preset row — mag size / ROF / accuracy are per-weapon in the catalog now; the preset was a lie.)
 
 	// Crosshair row
 	{
@@ -556,7 +504,6 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 	}
 
 	// Seed working values from saved prefs + paint the labels.
-	WorkingMarkerPreset = FPFUserPrefs::GetMarkerPreset();
 	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
 	RefreshLoadoutLabels();
 }
@@ -1086,11 +1033,20 @@ void UPFLoadingMenuWidget::RefreshSetupCards()
 		}
 	}
 	const int32 FmtSel = (SelectedTeamSize == 6) ? 1 : 0;
+	// Free-for-All has no teams, so "4 v 4" is a lie there — the same format value means 8 / 12 total players
+	// (FillBotsToFormat: FFA fills TeamSize*2 combatants). Re-text the cards to match the selected game mode.
+	const bool bFFA = (SelectedMatchType == EPFMatchType::FreeForAll);
 	for (int32 i = 0; i < FormatCards.Num(); ++i)
 	{
 		if (FormatCards[i] != nullptr)
 		{
 			FormatCards[i]->SetBackgroundColor(i == FmtSel ? Hot : Cold);
+			if (UTextBlock* Lab = Cast<UTextBlock>(FormatCards[i]->GetContent()))
+			{
+				Lab->SetText(FText::FromString(bFFA
+					? (i == 0 ? TEXT("8 PLAYERS") : TEXT("12 PLAYERS"))
+					: (i == 0 ? TEXT("4 v 4") : TEXT("6 v 6"))));
+			}
 		}
 	}
 	// Description = the selected GAME MODE (what Tom asked to explain at the top).
@@ -1214,11 +1170,9 @@ void UPFLoadingMenuWidget::BuildTree()
 	TabLoadout->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabLoadout);
 	TabCharacter->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabCharacter);
 	OptionsTabButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnOptionsClicked);
+	// Tab display order: MATCH SETUP · LOADOUT · CHARACTER · OPTIONS · HOW TO PLAY (reference last). The
+	// switcher page indices are decoupled from this order, so only the add order changes.
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabSetup))
-	{
-		H->SetPadding(FMargin(4.f, 0.f));
-	}
-	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabHowTo))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
@@ -1231,6 +1185,10 @@ void UPFLoadingMenuWidget::BuildTree()
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(OptionsTabButton))
+	{
+		H->SetPadding(FMargin(4.f, 0.f));
+	}
+	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabHowTo))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}

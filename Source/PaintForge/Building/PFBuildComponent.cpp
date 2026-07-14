@@ -211,7 +211,12 @@ void UPFBuildComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	}
 
 	const APaintForgeGameState* GS = World->GetGameState<APaintForgeGameState>();
-	if (!GS || !GS->IsBuildAllowed())
+	// Play-only matches pass through a REAL (replicated) 0.1s Build phase for the community-arena inject, which
+	// used to flash a floating ghost wall at spawn for the first second. Nobody builds in play-only — suppress
+	// the ghost entirely there. (FreeForAll is play-only by rule; mirrors the GameMode's play-only predicate.)
+	const bool bPlayOnly = GS != nullptr
+		&& (GS->BuildMode == EPFBuildMode::PlayOnly || GS->MatchType == EPFMatchType::FreeForAll);
+	if (!GS || !GS->IsBuildAllowed() || bPlayOnly)
 	{
 		SetGhostVisible(false);
 		LastSentSlot.bValid = false;

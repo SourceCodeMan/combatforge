@@ -2,7 +2,6 @@
 
 #include "Core/PFUserPrefs.h"
 
-#include "Combat/PFWeaponComponent.h"
 #include "Misc/ConfigCacheIni.h"
 
 namespace
@@ -51,16 +50,6 @@ namespace
 	{
 		if (GConfig) { GConfig->SetBool(TEXT("PaintForge"), Key, V, GGameUserSettingsIni); }
 	}
-}
-
-int32 FPFUserPrefs::GetMarkerPreset()
-{
-	return FMath::Clamp(ReadInt(TEXT("MarkerPreset"), 0), 0, 2);
-}
-
-void FPFUserPrefs::SetMarkerPreset(int32 Preset)
-{
-	WriteInt(TEXT("MarkerPreset"), FMath::Clamp(Preset, 0, 2));
 }
 
 int32 FPFUserPrefs::GetCrosshairStyle()
@@ -153,33 +142,3 @@ void FPFUserPrefs::Flush()
 	}
 }
 
-void FPFUserPrefs::ApplyMarkerPresetToWeapon(UPFWeaponComponent* Weapon)
-{
-	if (!Weapon)
-	{
-		return;
-	}
-	// Mag is always 30 / total carry 150 — presets only change rate of fire (airsoft feel).
-	Weapon->HopperCapacity = 30;
-	Weapon->MaxReserveAmmo = 120;
-	switch (GetMarkerPreset())
-	{
-	case 1: // Rapid
-		Weapon->FireRateBps = 14.f;
-		break;
-	case 2: // Tournament (controlled cadence)
-		Weapon->FireRateBps = 10.f;
-		break;
-	default: // Standard
-		Weapon->FireRateBps = 12.f;
-		break;
-	}
-	if (Weapon->HopperCount > Weapon->HopperCapacity)
-	{
-		Weapon->HopperCount = Weapon->HopperCapacity;
-	}
-	if (Weapon->ReserveAmmo > Weapon->MaxReserveAmmo)
-	{
-		Weapon->ReserveAmmo = Weapon->MaxReserveAmmo;
-	}
-}

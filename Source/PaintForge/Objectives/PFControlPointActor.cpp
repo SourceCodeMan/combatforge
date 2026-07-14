@@ -9,6 +9,7 @@
 
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
@@ -37,8 +38,6 @@ APFControlPointActor::APFControlPointActor()
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(
 		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(
-		TEXT("/Engine/BasicShapes/Cone.Cone"));
 
 	PadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PadMesh"));
 	PadMesh->SetupAttachment(SceneRoot);
@@ -71,16 +70,36 @@ APFControlPointActor::APFControlPointActor()
 		PoleMesh->SetStaticMesh(CylinderFinder.Object);
 	}
 
+	// Banner (flat team-colored quad hanging off the pole top) — was a cone, which read as a construction marker,
+	// not a flag ("just a cone on a pole"). Matches the CTF flag's look.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	FlagMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FlagMesh"));
 	FlagMesh->SetupAttachment(SceneRoot);
-	FlagMesh->SetRelativeScale3D(FVector(0.6f, 0.6f, 1.0f));
-	FlagMesh->SetRelativeLocation(FVector(0.f, 0.f, 360.f));   // near the pole top
+	FlagMesh->SetRelativeScale3D(FVector(1.3f, 0.06f, 0.8f));   // ~130 wide x 6 thin x 80 tall
+	FlagMesh->SetRelativeLocation(FVector(65.f, 0.f, 350.f));   // hangs off the pole top (+X), inner edge on the pole
 	FlagMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FlagMesh->SetCastShadow(false);
-	if (ConeFinder.Succeeded())
+	if (CubeFinder.Succeeded())
 	{
-		FlagMesh->SetStaticMesh(ConeFinder.Object);
+		FlagMesh->SetStaticMesh(CubeFinder.Object);
 	}
+
+	// A/B/C letter above the flag, readable across the arena. Two back-to-back faces instead of billboarding
+	// (text render's readable face is -X and the actor never ticks). Text is set in ApplyVisualState — the
+	// PointIndex isn't known until ServerInit / replication.
+	auto MakeLetter = [this](const TCHAR* Name, float Yaw) -> UTextRenderComponent*
+	{
+		UTextRenderComponent* T = CreateDefaultSubobject<UTextRenderComponent>(Name);
+		T->SetupAttachment(SceneRoot);
+		T->SetRelativeLocation(FVector(0.f, 0.f, 520.f));
+		T->SetRelativeRotation(FRotator(0.f, Yaw, 0.f));
+		T->SetHorizontalAlignment(EHTA_Center);
+		T->SetVerticalAlignment(EVRTA_TextCenter);
+		T->SetWorldSize(180.f);
+		return T;
+	};
+	LetterFront = MakeLetter(TEXT("LetterFront"), 0.f);
+	LetterBack  = MakeLetter(TEXT("LetterBack"), 180.f);
 }
 
 void APFControlPointActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -215,5 +234,18 @@ void APFControlPointActor::ApplyVisualState()
 	if (FlagMID)
 	{
 		FlagMID->SetVectorParameterValue(TEXT("Color"), Color);
+	}
+
+	// Point letter: index 0/1/2 → A/B/C, tinted with ownership like the pad + flag. PointIndex replicates with
+	// the same OnRep as team/active, so every server/client refresh funnels through here.
+	const FString Letter = FString::Chr(static_cast<TCHAR>(TEXT('A') + FMath::Clamp(PointIndex, 0, 2)));
+	for (UTextRenderComponent* T : { LetterFront.Get(), LetterBack.Get() })
+	{
+		if (T != nullptr)
+		{
+			T->SetText(FText::FromString(Letter));
+			T->SetTextRenderColor(Color.ToFColor(/*bSRGB=*/true));
+			T->SetVisibility(bActive);
+		}
 	}
 }
