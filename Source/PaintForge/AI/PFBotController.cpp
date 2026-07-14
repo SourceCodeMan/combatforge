@@ -124,6 +124,7 @@ void APFBotController::OnPossess(APawn* InPawn)
 	LastPathedGoal = FVector::ZeroVector;   // force a fresh path on the new pawn's first tactical goal
 	RepathTimer = 0.f;
 	LastSeenTime = InvestigateTime = -1000.f;   // clear stale search memory from a previous life
+	bHaveTacticalGoal = false;   ReposTimer = 0.f;   // re-evaluate firing position for the new pawn
 	// Give this bot a team id so perception has a concrete affiliation (attitude itself comes from the
 	// GetTeamAttitudeTowards override, but a real id avoids any NoTeam short-circuit in the sense filter).
 	if (const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>())
@@ -247,6 +248,7 @@ void APFBotController::Tick(float DeltaSeconds)
 			{
 				FireHoldTimer = (BestD < PointBlankUU) ? (ReactionDelay * 0.35f) : ReactionDelay;
 				CurrentTarget = Best;
+				bHaveTacticalGoal = false;   // new target → re-pick a firing position now, don't reuse the old one
 			}
 		}
 		else if (Best == nullptr && !bCurrOK)
@@ -383,16 +385,17 @@ void APFBotController::Tick(float DeltaSeconds)
 	bool bMove = false;
 	if (Target != nullptr)
 	{
-		// FIGHT: hold a stand-off band on the enemy with strafing, expressed as a projected heading.
-		const FVector ToEnemy = Target->GetActorLocation() - BotLoc;
-		const FVector Flat = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
-		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
-		const float D2 = ToEnemy.Size2D();
-		FVector DesiredDir;
-		if (D2 > PreferredRangeUU)   { DesiredDir = (Flat + Right * StrafeSign * 0.4f).GetSafeNormal(); }
-		else if (D2 < MinRangeUU)    { DesiredDir = -Flat; }                 // too close: back off (still facing enemy)
-		else                         { DesiredDir = Right * StrafeSign; }    // in the band: strafe
-		GoalLoc = BotLoc + DesiredDir * GoalProjectUU;
+		// FIGHT: reposition to the best nearby firing position (LOS + cover + range + flank + spread), re-evaluated
+		// periodically. This replaces the old strafe-in-the-open with deliberate tactical movement — bots work to
+		// cover, hold angles, and flank as a group. Aim/fire (above) keeps the enemy tracked while we move.
+		ReposTimer -= DeltaSeconds;
+		if (!bHaveTacticalGoal || ReposTimer <= 0.f)
+		{
+			TacticalGoal = ChooseTacticalPosition(Target);
+			bHaveTacticalGoal = true;
+			ReposTimer = RepositionInterval;
+		}
+		GoalLoc = TacticalGoal;
 		bMove = true;
 	}
 	else if (bHasObjective && FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU)
@@ -502,6 +505,114 @@ void APFBotController::OnMoveCompleted(FAIRequestID RequestID, const FPathFollow
 	Super::OnMoveCompleted(RequestID, Result);
 	// A blocked/invalid finish just means the projected goal was unreachable this beat; the next Tick picks a
 	// fresh tactical goal and re-paths. Nothing to do here but let the throttle re-fire (bIdle in Tick catches it).
+}
+
+FVector APFBotController::ChooseTacticalPosition(const APaintForgeCharacter* Target) const
+{
+	const APaintForgeCharacter* Bot = GetBotCharacter();
+	UWorld* World = GetWorld();
+	if (Bot == nullptr || Target == nullptr || World == nullptr)
+	{
+		return (Bot != nullptr) ? Bot->GetActorLocation() : FVector::ZeroVector;
+	}
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	const FVector BotLoc = Bot->GetActorLocation();
+	const FVector EnemyLoc = Target->GetActorLocation();
+	const FVector EnemyEye = EnemyLoc + FVector(0.f, 0.f, 40.f);
+	const FVector EnemyFwd = FVector(Target->GetActorForwardVector().X, Target->GetActorForwardVector().Y, 0.f).GetSafeNormal();
+
+	// Teammate positions (spread / de-clump). Small: <= a few per side.
+	TArray<FVector, TInlineAllocator<8>> Mates;
+	const APaintForgePlayerState* MyPS = GetPlayerState<APaintForgePlayerState>();
+	if (const APaintForgeGameState* GS = World->GetGameState<APaintForgeGameState>())
+	{
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			const APaintForgePlayerState* OtherPS = Cast<APaintForgePlayerState>(PSBase);
+			if (OtherPS == nullptr || OtherPS == MyPS || !OtherPS->bAliveInRound || IsHostilePlayerState(OtherPS))
+			{
+				continue;   // only living teammates
+			}
+			if (const APawn* MatePawn = OtherPS->GetPawn())
+			{
+				Mates.Add(MatePawn->GetActorLocation());
+			}
+		}
+	}
+
+	FVector BestPos = BotLoc;
+	float BestScore = -TNumericLimits<float>::Max();
+	FCollisionQueryParams Q(FName(TEXT("BotTactic")), /*bTraceComplex=*/false, Bot);
+	Q.AddIgnoredActor(Target);
+
+	auto Evaluate = [&](const FVector& Raw)
+	{
+		FVector P = Raw;
+		if (Nav != nullptr)
+		{
+			FNavLocation Proj;
+			if (!Nav->ProjectPointToNavigation(Raw, Proj, FVector(220.f, 220.f, 300.f)))
+			{
+				return;   // not on the navmesh → not a place we can stand
+			}
+			P = Proj.Location;
+		}
+		const float Dist = FVector::Dist2D(P, EnemyLoc);
+		if (Dist > EngageRangeUU)
+		{
+			return;   // can't shoot from out here
+		}
+
+		float Score = 0.f;
+
+		// (1) Can we SHOOT from here? A firing position needs LOS; no-LOS spots are only retreats → penalised.
+		FHitResult Hit;
+		const bool bLOS = !World->LineTraceSingleByChannel(Hit, P + FVector(0.f, 0.f, 60.f), EnemyEye, ECC_Visibility, Q);
+		Score += bLOS ? 3.f : -2.5f;
+
+		// (2) Good range: prefer the stand-off band; punish being right on top of the enemy.
+		Score += 1.f - FMath::Abs(Dist - PreferredRangeUU) / FMath::Max(EngageRangeUU, 1.f);
+		if (Dist < MinRangeUU) { Score -= 1.f; }
+
+		// (3) Near cover: short cardinal probes — a wall/prop beside us is good (we can duck); boxed-in is bad.
+		int32 CoverSides = 0;
+		static const FVector Dirs[4] = { FVector(1,0,0), FVector(-1,0,0), FVector(0,1,0), FVector(0,-1,0) };
+		const FVector Chest = P + FVector(0.f, 0.f, 40.f);
+		for (const FVector& D : Dirs)
+		{
+			FHitResult CH;
+			if (World->LineTraceSingleByChannel(CH, Chest, Chest + D * CoverProbeUU, ECC_WorldStatic, Q)) { ++CoverSides; }
+		}
+		Score += CoverSides * 0.5f;
+		if (CoverSides >= 4) { Score -= 1.5f; }   // fully walled in — can't fight from here
+
+		// (4) Flank: prefer the enemy's side/rear over walking straight into their facing.
+		const FVector EToP = FVector(P.X - EnemyLoc.X, P.Y - EnemyLoc.Y, 0.f).GetSafeNormal();
+		if (!EnemyFwd.IsNearlyZero() && !EToP.IsNearlyZero())
+		{
+			Score += (1.f - FVector::DotProduct(EnemyFwd, EToP)) * 0.5f;   // 0 in front → +1 behind
+		}
+
+		// (5) Spread: don't pile onto a teammate's spot.
+		for (const FVector& M : Mates)
+		{
+			if (FVector::DistSquared2D(P, M) < FMath::Square(SpreadRadiusUU)) { Score -= 0.7f; }
+		}
+
+		// (6) Inertia: a small bonus for holding ground so bots don't dither between near-equal spots.
+		if (FVector::DistSquared2D(P, BotLoc) < FMath::Square(150.f)) { Score += 0.3f; }
+
+		if (Score > BestScore) { BestScore = Score; BestPos = P; }
+	};
+
+	Evaluate(BotLoc);   // include "stay put" as a candidate
+	for (int32 i = 0; i < 8; ++i)
+	{
+		const FVector Dir = FRotator(0.f, i * 45.f, 0.f).Vector();
+		Evaluate(BotLoc + Dir * ReposSampleNearUU);
+		Evaluate(BotLoc + Dir * ReposSampleFarUU);
+	}
+	return BestPos;
 }
 
 bool APFBotController::IsHostilePlayerState(const APaintForgePlayerState* OtherPS) const

@@ -94,6 +94,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float ProximityAwareUU = 1800.f;  // 360° "sixth sense": a hostile this close (with LOS) is always noticed
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SearchHoldSec = 6.f;        // how long to hunt a last-known-position / investigate a noise before giving up
 
+	// ---- Tactical positioning (EQS-lite): instead of standing in the open, periodically pick the best nearby
+	//      FIRING POSITION — line of sight to shoot, near cover, good range, off the enemy's facing (flank),
+	//      spread from teammates — and reposition there. Makes bots use the fort + flank as a group. ----
+	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float RepositionInterval = 1.2f;   // seconds between firing-position re-evaluations
+	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float ReposSampleNearUU = 350.f;   // inner ring radius of candidate points
+	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float ReposSampleFarUU = 850.f;    // outer ring radius of candidate points
+	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float CoverProbeUU = 250.f;        // how far to probe for adjacent cover around a candidate
+	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float SpreadRadiusUU = 700.f;      // penalize candidate points within this of a teammate (de-clump)
+
 	// Navmesh pathfinding (replaces the old reactive whisker-steer): the bot picks a tactical GOAL POINT
 	// and the RecastNavMesh routes it there, so it walks AROUND the player-built fort instead of into it.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
@@ -115,6 +124,7 @@ private:
 	void SetFiring(bool bFire);
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
 	void MoveToGoal(const FVector& RawGoal, AActor* FallbackActor);   // navmesh MoveTo toward a tactical point (falls back to the enemy if the point is off-mesh)
+	FVector ChooseTacticalPosition(const APaintForgeCharacter* Target) const;   // EQS-lite: best nearby firing position
 	bool IsTargetEngageable(const APaintForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
 	bool ComputeObjectiveGoal(FVector& OutGoal);   // Dom/Hardpoint/CTF: where to push (false in fight modes)
 	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)
@@ -152,4 +162,9 @@ private:
 	float   LastSeenTime = -1000.f;
 	FVector InvestigatePos = FVector::ZeroVector;
 	float   InvestigateTime = -1000.f;
+
+	// ---- Tactical reposition state: the current chosen firing position + its re-evaluation timer. ----
+	FVector TacticalGoal = FVector::ZeroVector;
+	bool    bHaveTacticalGoal = false;
+	float   ReposTimer = 0.f;
 };
