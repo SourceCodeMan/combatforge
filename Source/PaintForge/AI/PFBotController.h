@@ -88,7 +88,7 @@ protected:
 	//      position let a flanked/broken-LOS bot turn toward gunfire and hunt where it last saw you. ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightRadiusUU = 5000.f;     // start seeing a hostile within this range (in the cone)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightLoseRadiusUU = 5600.f; // keep seeing until beyond this (must be >= SightRadius)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightFOVHalfDeg = 100.f;    // HALF-angle from forward → 200° total cone (wide peripheral)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightFOVHalfDeg = 75.f;     // HALF-angle from where the bot looks → 150° cone; sides+rear are blind spots scanning must cover
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float SightAutoSeeUU = 1000.f;    // auto-see a hostile this close to where it was last seen
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float HearingRangeUU = 4500.f;    // hear gunfire/footsteps within this range
 	UPROPERTY(EditDefaultsOnly, Category="PF|Perception") float ProximityAwareUU = 1800.f;  // 360° "sixth sense": a hostile this close (with LOS) is always noticed
@@ -167,6 +167,11 @@ private:
 	float   LastSeenTime = -1000.f;
 	FVector InvestigatePos = FVector::ZeroVector;
 	float   InvestigateTime = -1000.f;
+
+	// ---- Idle scanning: when not engaged the bot glances around (front sweeps + periodic flank/rear checks) so
+	//      it isn't permanently blind behind — a patient flanker is caught when the sweep brings them into view.
+	float ScanTimer = 0.f;
+	float ScanYawOffset = 0.f;   // current glance offset (deg) added to the look direction
 
 	// ---- Tactical reposition state: the current chosen firing position + its re-evaluation timer. ----
 	FVector TacticalGoal = FVector::ZeroVector;

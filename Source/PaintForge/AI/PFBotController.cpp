@@ -127,6 +127,7 @@ void APFBotController::OnPossess(APawn* InPawn)
 	LastSeenTime = InvestigateTime = -1000.f;   // clear stale search memory from a previous life
 	bHaveTacticalGoal = false;   ReposTimer = 0.f;   // re-evaluate firing position for the new pawn
 	LastKnownHP = 255;   RoundMaxHP = 1;   SuppressedUntil = -1000.f;   // fresh health/suppression for the new life
+	ScanTimer = 0.f;   ScanYawOffset = 0.f;
 	// Give this bot a team id so perception has a concrete affiliation (attitude itself comes from the
 	// GetTeamAttitudeTowards override, but a real id avoids any NoTeam short-circuit in the sense filter).
 	if (const APaintForgePlayerState* PS = GetPlayerState<APaintForgePlayerState>())
@@ -293,6 +294,25 @@ void APFBotController::Tick(float DeltaSeconds)
 		}
 	}
 
+	// Human-like scanning: when NOT engaged, glance around — mostly sweep the front arc, periodically snap a
+	// flank/rear check — so the view cone eventually covers behind the bot and a patient flanker is caught. The
+	// offset rides on top of whatever the bot is looking toward (goal/search). Reset the instant we have a target.
+	if (Target != nullptr)
+	{
+		ScanYawOffset = 0.f;
+	}
+	else
+	{
+		ScanTimer -= DeltaSeconds;
+		if (ScanTimer <= 0.f)
+		{
+			ScanYawOffset = (FMath::FRand() < 0.30f)
+				? FMath::FRandRange(120.f, 200.f) * (FMath::FRand() < 0.5f ? -1.f : 1.f)   // glance to a flank / behind
+				: FMath::FRandRange(-70.f, 70.f);                                          // sweep the front arc
+			ScanTimer = FMath::FRandRange(1.2f, 2.6f);
+		}
+	}
+
 	// Objective goal (Domination / Hardpoint / CTF): where this bot should push, even with no enemy in sight.
 	FVector ObjGoal;
 	const bool bHasObjective = ComputeObjectiveGoal(ObjGoal);
@@ -340,7 +360,9 @@ void APFBotController::Tick(float DeltaSeconds)
 			const FVector ToC = ArenaCenter - (BotLoc + FVector(0.f, 0.f, 60.f));
 			if (!ToC.IsNearlyZero())
 			{
-				SetControlRotation(FMath::RInterpTo(GetControlRotation(), ToC.Rotation(), DeltaSeconds, 4.f));
+				FRotator LookRot = ToC.Rotation();
+				LookRot.Yaw += ScanYawOffset;   // glance around while advancing
+				SetControlRotation(FMath::RInterpTo(GetControlRotation(), LookRot, DeltaSeconds, 3.5f));
 			}
 			RepathTimer -= DeltaSeconds;
 			if (RepathTimer <= 0.f || GetMoveStatus() == EPathFollowingStatus::Idle)
@@ -409,14 +431,17 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 	else
 	{
-		// No target: hold fire and turn toward where we're heading (search LKP / objective) so the sight cone
-		// covers that direction — a bot hunting your last-known-position stares at where it thinks you are.
+		// No target: hold fire and look toward where we're heading (search LKP / objective) WITH scan glances on
+		// top, so the sight cone sweeps its surroundings — a bot hunting your last-known-position also checks its
+		// flanks and back rather than tunnel-visioning straight ahead.
 		SetFiring(false);
 		const FVector LookAt = bHaveSearch ? SearchPos : ObjGoal;
 		const FVector ToLook = LookAt - (BotLoc + FVector(0.f, 0.f, 60.f));
 		if (!ToLook.IsNearlyZero())
 		{
-			SetControlRotation(FMath::RInterpTo(GetControlRotation(), ToLook.Rotation(), DeltaSeconds, 4.f));
+			FRotator LookRot = ToLook.Rotation();
+			LookRot.Yaw += ScanYawOffset;
+			SetControlRotation(FMath::RInterpTo(GetControlRotation(), LookRot, DeltaSeconds, 3.5f));
 		}
 	}
 
@@ -734,65 +759,53 @@ void APFBotController::OnPerceptionStimulus(AActor* Actor, FAIStimulus Stimulus)
 
 APaintForgeCharacter* APFBotController::AcquireNearestEnemy() const
 {
+	// A bot only acquires an enemy it can actually SEE: within sight range, INSIDE its view cone (relative to
+	// where it's currently looking — which includes the scan glances), and with a clear line of sight. Anyone
+	// outside the cone (e.g. sneaking up behind) is IGNORED until the bot's sweep brings them into view or it
+	// hears them. Deliberately a manual cone test rather than the perception sense: exact + tunable FOV, keyed
+	// straight off the game's team rules, and independent of perception affiliation config.
 	const APaintForgeCharacter* Bot = GetBotCharacter();
-	if (Bot == nullptr)
+	const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
+	if (Bot == nullptr || GS == nullptr)
 	{
 		return nullptr;
 	}
 	const FVector BotLoc = Bot->GetActorLocation();
+	const FVector Look = GetControlRotation().Vector();
+	const FVector Look2D = FVector(Look.X, Look.Y, 0.f).GetSafeNormal();
+	const float CosHalfFOV = FMath::Cos(FMath::DegreesToRadians(SightFOVHalfDeg));
+	const float SightSq = FMath::Square(SightRadiusUU);
 
 	APaintForgeCharacter* Best = nullptr;
 	float BestSq = TNumericLimits<float>::Max();
-	auto Consider = [&](APaintForgeCharacter* Cand)
+	for (APlayerState* PSBase : GS->PlayerArray)
 	{
-		if (Cand == nullptr)
+		const APaintForgePlayerState* OtherPS = Cast<APaintForgePlayerState>(PSBase);
+		if (OtherPS == nullptr || !OtherPS->bAliveInRound || !IsHostilePlayerState(OtherPS))
 		{
-			return;
+			continue;
 		}
-		const APaintForgePlayerState* CandPS = Cand->GetPlayerState<APaintForgePlayerState>();
-		if (CandPS == nullptr || !CandPS->bAliveInRound || !IsHostilePlayerState(CandPS))
+		APaintForgeCharacter* OtherChar = Cast<APaintForgeCharacter>(OtherPS->GetPawn());
+		if (OtherChar == nullptr)
 		{
-			return;
+			continue;
 		}
-		const float Sq = FVector::DistSquared(BotLoc, Cand->GetActorLocation());
-		if (Sq < BestSq) { BestSq = Sq; Best = Cand; }
-	};
-
-	// 1. Hostiles the bot can actually SEE — perception sight cone + range (this is what makes bots flankable).
-	if (AIPerception != nullptr)
-	{
-		TArray<AActor*> Seen;
-		AIPerception->GetCurrentlyPerceivedActors(UAISense_Sight::StaticClass(), Seen);
-		for (AActor* A : Seen)
+		const FVector ToEnemy = OtherChar->GetActorLocation() - BotLoc;
+		const float DistSq = ToEnemy.SizeSquared();
+		if (DistSq > SightSq)
 		{
-			Consider(Cast<APaintForgeCharacter>(A));
+			continue;   // out of sight range
 		}
-	}
-
-	// 2. Proximity "sixth sense": any hostile within ProximityAwareUU with LOS, regardless of the view cone — so
-	//    someone right next to or behind the bot is still noticed (keeps CQB + the point-blank fix reliable, and
-	//    is a safety net if sight-affiliation is ever misconfigured).
-	const APaintForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<APaintForgeGameState>() : nullptr;
-	if (GS != nullptr)
-	{
-		const float ProxSq = FMath::Square(ProximityAwareUU);
-		for (APlayerState* PSBase : GS->PlayerArray)
+		const FVector ToEnemy2D = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
+		if (!Look2D.IsNearlyZero() && FVector::DotProduct(Look2D, ToEnemy2D) < CosHalfFOV)
 		{
-			APaintForgePlayerState* OtherPS = Cast<APaintForgePlayerState>(PSBase);
-			if (OtherPS == nullptr || !OtherPS->bAliveInRound || !IsHostilePlayerState(OtherPS))
-			{
-				continue;
-			}
-			APaintForgeCharacter* OtherChar = Cast<APaintForgeCharacter>(OtherPS->GetPawn());
-			if (OtherChar == nullptr)
-			{
-				continue;
-			}
-			if (FVector::DistSquared(BotLoc, OtherChar->GetActorLocation()) <= ProxSq && HasLineOfSight(OtherChar))
-			{
-				Consider(OtherChar);
-			}
+			continue;   // outside the view cone → the bot can't see it (flankable)
 		}
+		if (!HasLineOfSight(OtherChar))
+		{
+			continue;   // geometry in the way → not seen
+		}
+		if (DistSq < BestSq) { BestSq = DistSq; Best = OtherChar; }
 	}
 	return Best;
 }
