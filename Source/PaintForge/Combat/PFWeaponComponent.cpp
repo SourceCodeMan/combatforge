@@ -251,7 +251,10 @@ void UPFWeaponComponent::FireOneShot(double Now)
 
 	// DO-NOT-TOUCH (B3, §5.15): exactly ONE VRandCone pull per shot from the shared
 	// deterministic stream. Any extra pull on either side desyncs every later shot.
-	const float HalfAngleDeg = GetCurrentSpreadHalfAngleDeg();
+	// StampT is sampled ONCE and reused for the cone, the packet, and the bloom advance — the server reuses
+	// Packet.ClientTime for its own cone, so both sides compute the identical half-angle for this exact shot.
+	const float StampT = static_cast<float>(Now);
+	const float HalfAngleDeg = GetSpreadHalfAngleDeg(StampT);
 	FRandomStream Stream = MakeShotStream(PS->GetPlayerId(), ShotIndexCounter);
 	const FVector SpreadedDir = Stream.VRandCone(BaseDir, FMath::DegreesToRadians(HalfAngleDeg));
 
@@ -275,8 +278,8 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	const float RecoilMult = ADSMult * MagMult;
 	++ShotsThisMag;
 
-	// Raise TP gun + FP recoil BEFORE sampling muzzle so balls leave the aim-line barrel,
-	// not the hip-carry tip.
+	// FP recoil kick (pure feel). NOTE: this must never move/re-parent the TP rifle — the muzzle is sampled a
+	// few lines below, and a one-frame pose swap here once sent every third-person shot out of the shooter's eyes.
 	Char->OnFireCosmetic(RecoilMult);
 
 	if (!Char->HasAuthority())
@@ -296,8 +299,8 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	{
 		// Client-side bloom for the next predicted shot. A listen host skips this:
 		// ServerFire_Implementation (invoked synchronously below) is its single accumulation —
-		// registering here too would double the host's bloom (+0.24°/shot vs +0.12°).
-		RegisterShotBloom(Now);
+		// advancing here too would double the host's bloom chain.
+		AdvanceBloom(StampT);
 	}
 
 	// Muzzle feel (04 §4): fire shake doubles as recoil (feel-only; bloom is the spray cost).
@@ -314,7 +317,7 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	Packet.Origin = Char->GetMuzzleLocation(false);   // server-muzzle convention (04 §2.2)
 	Packet.Dir = BaseDir;                              // BASE dir — server applies the same spread
 	Packet.ShotIndex = ShotIndexCounter;
-	Packet.ClientTime = static_cast<float>(Now);       // reserved for post-v1 rewind (04 §5.2)
+	Packet.ClientTime = StampT;                        // the bloom/spread clock — server reuses it (see ServerFire)
 	ServerFire(Packet);
 
 	if (!Char->HasAuthority() && HopperCount == 0)
@@ -362,6 +365,22 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 		UE_LOG(PaintForgeLog, Warning, TEXT("ServerFire reject (%s): non-monotonic ShotIndex %u <= %u"),
 			*GetNameSafe(Char), Shot.ShotIndex, LastServerShotIndex);
 		return;
+	}
+
+	// ClientTime drives the bloom clock (both sides key the cone off the SHOOTER's stamp), so sanity-check it:
+	// strictly increasing, and the CLAIMED inter-shot gap may not exceed the server-observed gap (+jitter) —
+	// a forged large gap would reset bloom for free. A forged small gap only inflates the cheater's own bloom.
+	float StampT = Shot.ClientTime;
+	if (LastAcceptedClientTime > -999.f)
+	{
+		if (StampT <= LastAcceptedClientTime)
+		{
+			UE_LOG(PaintForgeLog, Warning, TEXT("ServerFire reject (%s): non-increasing ClientTime"),
+				*GetNameSafe(Char));
+			return;
+		}
+		const float MaxGap = static_cast<float>(Now - LastServerAcceptTime) + 0.1f;
+		StampT = FMath::Min(StampT, LastAcceptedClientTime + MaxGap);
 	}
 
 	// Token bucket: cap 3, refill 12/s — tolerates jitter bursts, rejects macros (04 §2.1).
@@ -423,13 +442,16 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 
 	FireTokens -= 1.f;
 	LastServerShotIndex = Shot.ShotIndex;
+	LastAcceptedClientTime = StampT;
+	LastServerAcceptTime = Now;
 
-	// DO-NOT-TOUCH (B3, §5.15): SAME stream, SAME single VRandCone pull as the owning client.
-	const float HalfAngleDeg = GetCurrentSpreadHalfAngleDeg();
+	// DO-NOT-TOUCH (B3, §5.15): SAME stream, SAME single VRandCone pull as the owning client — and the SAME
+	// StampT (the client's own ClientTime), so both sides evaluate the bloom chain on bit-identical operands.
+	const float HalfAngleDeg = GetSpreadHalfAngleDeg(StampT);
 	FRandomStream Stream = MakeShotStream(PS->GetPlayerId(), Shot.ShotIndex);
 	const FVector SpreadedDir = Stream.VRandCone(BaseDir, FMath::DegreesToRadians(HalfAngleDeg));
 
-	RegisterShotBloom(Now);
+	AdvanceBloom(StampT);
 
 	HopperCount = static_cast<uint8>(HopperCount - 1);
 	OnHopperChangedEvent.Broadcast(HopperCount);   // host UI (§5.9); remote owner via rep
@@ -484,8 +506,9 @@ void UPFWeaponComponent::MulticastShotFX_Implementation(FVector_NetQuantize100 O
 		return;
 	}
 
-	// Track the shooter's bloom on this viewer so the estimated cone stays honest.
-	RegisterShotBloom(World->GetTimeSeconds());
+	// Track the shooter's bloom on this viewer so the estimated cone stays honest. Remote viewers can't know the
+	// shooter's clock, so they chain on their own (cosmetic-only divergence, accepted by B3).
+	AdvanceBloom(static_cast<float>(World->GetTimeSeconds()));
 
 	int32 PlayerId = 0;
 	if (OwnerPawn != nullptr)
@@ -665,6 +688,14 @@ void UPFWeaponComponent::UpdateReload(double Now)
 
 float UPFWeaponComponent::GetCurrentSpreadHalfAngleDeg() const
 {
+	// Crosshair/UI convenience: evaluate the cone "now" on the local clock. Correct on the owning client
+	// because its shots are stamped from this same clock.
+	const UWorld* World = GetWorld();
+	return GetSpreadHalfAngleDeg(World != nullptr ? static_cast<float>(World->GetTimeSeconds()) : 0.f);
+}
+
+float UPFWeaponComponent::GetSpreadHalfAngleDeg(float StampT) const
+{
 	const APaintForgeCharacter* Char = GetPFCharacter();
 	const UWorld* World = GetWorld();
 	if (Char == nullptr || World == nullptr)
@@ -701,8 +732,8 @@ float UPFWeaponComponent::GetCurrentSpreadHalfAngleDeg() const
 		Spread += SpreadSlideAdd * HipOnly;   // slide fire is mostly hipfire (04 §1.2)
 	}
 
-	// Bloom nearly vanishes while fully ADS (BloomADSMult ~0.12).
-	const float Bloom = GetEffectiveBloomDeg(World->GetTimeSeconds());
+	// Recoil bloom, keyed to the shot stamp (deterministic across client/server); softened while ADS.
+	const float Bloom = GetBloomDegForStamp(StampT);
 	Spread += Bloom * FMath::Lerp(1.f, BloomADSMult, ADSAlpha);
 
 	return Spread;
@@ -714,22 +745,27 @@ FRandomStream UPFWeaponComponent::MakeShotStream(int32 PlayerId, uint32 ShotInde
 	return FRandomStream(static_cast<int32>(HashCombine(static_cast<uint32>(PlayerId), ShotIndex)));
 }
 
-float UPFWeaponComponent::GetEffectiveBloomDeg(double Now) const
+float UPFWeaponComponent::GetBloomDegForStamp(float StampT) const
 {
-	const double SinceLastShot = Now - LastShotTime;
-	if (SinceLastShot <= BloomDecayDelay)
+	// "Halo" pattern: the first BloomFreeShots of a consecutive burst are flat, then each extra shot widens the
+	// cone by BloomPerShot up to BloomCap. A pause > BloomResetGap (a real trigger release — 3x the auto cadence)
+	// starts a fresh burst. N = shots ALREADY fired in this burst before the shot at StampT.
+	const uint16 N = ((StampT - LastShotStampT) > BloomResetGap) ? 0 : ConsecShots;
+	if (N < BloomFreeShots)
 	{
-		return BloomAccumDeg;
+		return 0.f;
 	}
-	// Decays 6°/s starting 0.15 s after the last shot (04 §2.3).
-	return FMath::Max(0.f,
-		BloomAccumDeg - BloomDecayPerSec * static_cast<float>(SinceLastShot - BloomDecayDelay));
+	return FMath::Min(static_cast<float>(N - BloomFreeShots + 1) * BloomPerShot, BloomCap);
 }
 
-void UPFWeaponComponent::RegisterShotBloom(double Now)
+void UPFWeaponComponent::AdvanceBloom(float StampT)
 {
-	BloomAccumDeg = FMath::Min(GetEffectiveBloomDeg(Now) + BloomPerShot, BloomCap);
-	LastShotTime = Now;
+	if ((StampT - LastShotStampT) > BloomResetGap)
+	{
+		ConsecShots = 0;   // burst ended — fresh chain
+	}
+	++ConsecShots;
+	LastShotStampT = StampT;
 }
 
 // ---------------------------------------------------------------- OnReps & helpers

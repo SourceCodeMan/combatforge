@@ -80,6 +80,7 @@ public:
 
 	// ---- Cross-package reads ----
 	float GetCurrentSpreadHalfAngleDeg() const;  // live cone incl. bloom + movement state; crosshair polls per tick
+	float GetSpreadHalfAngleDeg(float StampT) const;   // per-shot cone with bloom keyed to the shot's stamp (deterministic client+server)
 	// Spread-seed contract (client & server MUST both use this — B3):
 	static FRandomStream MakeShotStream(int32 PlayerId, uint32 ShotIndex);
 		// seed = (int32)HashCombine((uint32)PlayerId, ShotIndex); PlayerId = PlayerState::GetPlayerId()
@@ -128,12 +129,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadAirAdd = 1.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadSlideAdd = 1.0f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadCrouchMult = 0.8f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomPerShot = 0.12f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomCap = 1.8f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomDecayPerSec = 6.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomDecayDelay = 0.15f;
-	/** Bloom retained while ADS (0 = none). Low value = ADS feels much more accurate. */
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomADSMult = 0.12f;
+	// Recoil bloom ("halo" pattern): the first BloomFreeShots of a consecutive burst are flat, then every extra
+	// shot adds BloomPerShot to the cone up to BloomCap; a BloomResetGap pause (trigger release) resets it.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomPerShot = 0.15f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomCap = 2.0f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 BloomFreeShots = 5;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomResetGap = 0.25f;   // ~3 intervals at 12 bps: a real release, not auto cadence
+	/** Bloom retained while ADS. High enough that sustained ADS auto fire visibly sprays (burst discipline pays). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomADSMult = 0.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SprintOutTime = 0.18f;
 	// Recoil-kick feel (camera view-punch + viewmodel kick only; not the spread cone).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ADSRecoilMult    = 0.4f;   // kick x this when fully aimed
@@ -169,9 +172,10 @@ private:
 	void CancelReload();                // sprint/slide: restores nothing — hopper only fills on finish
 	void UpdateReload(double Now);
 
-	// ---- Bloom (lazy-decay accumulator; const-readable) ----
-	float GetEffectiveBloomDeg(double Now) const;
-	void  RegisterShotBloom(double Now);
+	// ---- Bloom (consecutive-shot counter, clocked by the SHOOTER's stamp — FPFShotPacket.ClientTime — so the
+	//      owning client and the server evaluate bit-identical operands and agree on every shot's cone) ----
+	float GetBloomDegForStamp(float StampT) const;   // cone contribution for a shot fired at StampT
+	void  AdvanceBloom(float StampT);                // count the shot at StampT (resets after BloomResetGap)
 
 	// ---- Helpers ----
 	APaintForgeCharacter*  GetPFCharacter() const;
@@ -190,9 +194,10 @@ private:
 	uint8  ShotsThisPull = 0;           // shots emitted since the current trigger press (Single/Burst latch)
 	uint8  ShotsThisMag = 0;            // shots since the mag was last filled (recoil ramp; client-local feel)
 
-	// Bloom state (updated on every observed shot: local fire / server fire / remote multicast)
-	float  BloomAccumDeg = 0.f;
-	double LastShotTime = -1000.0;
+	// Bloom state (advanced on every observed shot: local fire / server fire / remote multicast). Keyed off the
+	// shooter's clock so client + server chains match; remote viewers estimate with their own clock (cosmetic).
+	uint16 ConsecShots = 0;
+	float  LastShotStampT = -1000.f;
 
 	// Reload state
 	double ReloadEndTime = 0.0;
@@ -202,4 +207,8 @@ private:
 	float  FireTokens = 3.f;            // token bucket, cap 3, refill 12/s (04 §2.1)
 	double LastTokenRefillTime = 0.0;
 	uint32 LastServerShotIndex = 0;     // monotonicity / replay guard
+	// ClientTime drives the bloom clock, so the server sanity-checks it: strictly increasing, and the claimed
+	// inter-shot gap can't exceed the server-observed gap (a forged big gap would be a free accuracy reset).
+	float  LastAcceptedClientTime = -1000.f;
+	double LastServerAcceptTime = -1000.0;
 };

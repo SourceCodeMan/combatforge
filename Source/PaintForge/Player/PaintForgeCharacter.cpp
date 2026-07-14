@@ -1935,10 +1935,12 @@ FVector APaintForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 		return FirstPersonCamera->GetComponentLocation() + FirstPersonCamera->GetForwardVector() * 55.f;
 	}
 
-	// Authoritative / remote: spawn from the TP rifle barrel when it's seated on the body.
+	// Authoritative / remote: spawn from the TP rifle barrel when it's seated on the body. IsAttachedTo (not a
+	// direct-parent check) so any future pose swap that inserts an intermediate parent can't silently kick every
+	// shot back to the eye fallback — that exact failure shipped once (see OnFireCosmetic).
 	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr && bUsingArtBody
 		&& !WeaponMeshComp->bHiddenInGame
-		&& WeaponMeshComp->GetAttachParent() == GetMesh())
+		&& GetMesh() != nullptr && WeaponMeshComp->IsAttachedTo(GetMesh()))
 	{
 		return WeaponMeshComp->GetComponentTransform().TransformPosition(RifleMuzzleLocalTP);
 	}
@@ -2019,20 +2021,16 @@ void APaintForgeCharacter::OnFireCosmetic(float RecoilScale)
 	// Airsoft marker: viewmodel recoil only — no muzzle flash. Kick scaled by ADS + mag-ramp (see FireOneShot).
 	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f) * RecoilScale;
 	RecoilPitch += RecoilKickPitchDeg * RecoilScale;
-	// Keep TP gun raised through the shot cadence so muzzle/balls aren't hip-height.
 	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
-	if (bUsingArtBody)
-	{
-		ApplyRaisedWeaponPose();
-	}
+	// Do NOT ApplyRaisedWeaponPose() here. It re-parented the TP rifle to the capsule AT EYE HEIGHT for exactly
+	// the one frame in which FireOneShot samples GetMuzzleLocation(false) → the hand-rifle gate failed and every
+	// third-person shot (bots + remote players) spawned its BB at the shooter's EYES. The raise was already
+	// visually dead (UpdateWeaponHoldPose re-seats the gun to the hand every tick); killing it fixes the origin.
 }
 
 void APaintForgeCharacter::OnRemoteFireCosmetic()
 {
-	// Airsoft: no flash. Brief TP raise so remotes see the marker up with the shot.
+	// Airsoft: no flash. (No raised-pose swap here either — see OnFireCosmetic; it poisoned same-frame
+	// GetMuzzleLocation queries on viewers, e.g. the shot audio position.)
 	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
-	if (bUsingArtBody)
-	{
-		ApplyRaisedWeaponPose();
-	}
 }
