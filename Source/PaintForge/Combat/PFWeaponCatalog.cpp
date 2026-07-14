@@ -28,10 +28,11 @@ namespace PFWeapon
 			  FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(42.f, 3.5f, -3.5f) },
 			// Bandits AK meshes are authored larger than the Lyra rifle — scale WAY down (0.48 filled the screen)
 			// and pull toward center. Still a blind guess; live-tune with pf.WeaponFP.
+			// Hand-tuned in-game (pf.WeaponFP).
 			{ TEXT("AK (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black"),
-			  nullptr, FVector(-4.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f) },
+			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(20.f, 3.f, -3.f) },
 			{ TEXT("AK (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
-			  nullptr, FVector(-4.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f) },
+			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(20.f, 3.f, -3.f) },
 		};
 		// SMG = burst or automatic (NO single); looser accuracy + shorter range than a rifle.
 		const FPFWeaponDef GSMGs[] = {
