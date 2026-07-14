@@ -1037,15 +1037,18 @@ void APaintForgeCharacter::AssembleBanditCharacter()
 
 	// Team-colored armbands on BOTH upper arms. Bandit skeleton is Mannequin-compatible, so upperarm_l/_r resolve;
 	// if a pack lacks a bone the band simply rides the mesh root (still visible, just not on the arm).
-	auto MountArmband = [this, Base](UStaticMeshComponent* Band, TObjectPtr<UMaterialInstanceDynamic>& MID, const TCHAR* Bone)
+	auto MountArmband = [this, Base](UStaticMeshComponent* Band, TObjectPtr<UMaterialInstanceDynamic>& MID,
+		const TCHAR* Bone, float BicepDir)
 	{
 		if (Band == nullptr)
 		{
 			return;
 		}
 		Band->AttachToComponent(Base, FAttachmentTransformRules::KeepRelativeTransform, Bone);
-		Band->SetRelativeLocation(FVector(16.f, 0.f, 0.f));      // down the bicep from the shoulder joint
-		Band->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));     // cylinder axis -> along the arm bone (+X)
+		// The right arm bone mirrors the left, so its +X runs toward the neck — flip the offset per side so the
+		// band sits on the bicep on BOTH arms (left = +X down the arm, right = -X down the arm).
+		Band->SetRelativeLocation(FVector(16.f * BicepDir, 0.f, 0.f));
+		Band->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));     // cylinder axis -> along the arm bone
 		Band->SetRelativeScale3D(FVector(0.16f, 0.16f, 0.045f)); // thin band, ~8 cm radius
 		if (MID == nullptr && TeamBodyMaterial != nullptr)
 		{
@@ -1059,8 +1062,8 @@ void APaintForgeCharacter::AssembleBanditCharacter()
 		Band->SetHiddenInGame(false);
 		Band->SetOwnerNoSee(true);
 	};
-	MountArmband(ArmbandMesh, ArmbandMID, TEXT("upperarm_l"));
-	MountArmband(ArmbandMeshR, ArmbandMIDR, TEXT("upperarm_r"));
+	MountArmband(ArmbandMesh, ArmbandMID, TEXT("upperarm_l"), 1.f);
+	MountArmband(ArmbandMeshR, ArmbandMIDR, TEXT("upperarm_r"), -1.f);
 
 	bBanditAssembled = true;
 	UE_LOG(PaintForgeLog, Log, TEXT("AssembleBanditCharacter: mounted Bandit body + %d slot comps (%d parts in registry)."),

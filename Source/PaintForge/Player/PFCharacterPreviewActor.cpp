@@ -82,12 +82,14 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	HideFlag(TEXT("Fog"));
 	HideFlag(TEXT("VolumetricFog"));
 	HideFlag(TEXT("Cloud"));
-	// Pin exposure (min == max) so it's stable. The level sun is bright, so we expose DOWN hard to avoid the
-	// blow-out / washed-out look — HIGHER value = darker image. Tune this one number if it's off.
+	// Pin exposure (min == max) so it's stable, then compensate DOWN with a strong negative EV bias — the pin
+	// alone flattened out, so the bias is the real "make it darker" lever (each -1 EV halves the brightness).
 	Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
 	Capture->PostProcessSettings.AutoExposureMinBrightness = 25.f;
 	Capture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
 	Capture->PostProcessSettings.AutoExposureMaxBrightness = 25.f;
+	Capture->PostProcessSettings.bOverride_AutoExposureBias = true;
+	Capture->PostProcessSettings.AutoExposureBias = -3.f;   // darken ~8x; more negative = darker still
 
 	auto MakeLight = [this](const FString& LightName, const FVector& Loc, float Lumens) -> UPointLightComponent*
 	{
@@ -104,9 +106,9 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 		return L;
 	};
 	// Gentle fill only — the level's directional sun is the key light. Keep these low so they don't wash it out.
-	KeyLight  = MakeLight(TEXT("KeyLight"),  FVector(260.f, -180.f, 240.f), 8000.f);
-	FillLight = MakeLight(TEXT("FillLight"), FVector(240.f,  200.f, 120.f), 2000.f);
-	RimLight  = MakeLight(TEXT("RimLight"),  FVector(-160.f,  40.f, 260.f), 4000.f);
+	KeyLight  = MakeLight(TEXT("KeyLight"),  FVector(260.f, -180.f, 240.f), 4500.f);
+	FillLight = MakeLight(TEXT("FillLight"), FVector(240.f,  200.f, 120.f), 1000.f);
+	RimLight  = MakeLight(TEXT("RimLight"),  FVector(-160.f,  40.f, 260.f), 2500.f);
 }
 
 void APFCharacterPreviewActor::BeginPlay()

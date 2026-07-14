@@ -93,6 +93,24 @@ private:
 	int32 Dir = 1;
 };
 
+/** A clickable match-setup card (CoD-style): Kind 0 = build mode, 1 = game mode, 2 = format. */
+UCLASS()
+class PAINTFORGE_API UPFModeCardButton : public UButton
+{
+	GENERATED_BODY()
+
+public:
+	void InitCard(UPFLoadingMenuWidget* InOwner, int32 InKind, int32 InValue);
+
+protected:
+	UFUNCTION() void HandleClicked();
+
+private:
+	TWeakObjectPtr<UPFLoadingMenuWidget> OwnerWidget;
+	int32 Kind = 0;
+	int32 Value = 0;
+};
+
 /**
  * Full-viewport boot menu — NOT a live-game screenshot with HUD.
  * Tabs: Match Setup (mode / type / format / bots / community map) and How to Play.
@@ -121,6 +139,9 @@ public:
 
 	/** Weapon picker step: Kind 0 = category, 1 = weapon; Dir -1/+1. Persists + re-applies to the pawn. */
 	void NotifyWeaponStep(int32 Kind, int32 Dir);
+
+	/** Match-setup card clicked: Kind 0 = build mode, 1 = game mode, 2 = format; Value = enum/team-size. */
+	void NotifyCardSelected(int32 Kind, int32 Value);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -156,6 +177,8 @@ private:
 	void FinishWarmup();
 	void SeedFromGameState();
 	void RefreshSetupLabels();
+	void BuildSetupCards(UVerticalBox* Col);   // CoD-style description panel + mode/type/format card rows
+	void RefreshSetupCards();                  // highlight the selected cards + update the description
 	void RefreshMapPicker();
 	void ReloadMapCatalog();
 	void ApplySelectionsToHost();
@@ -231,6 +254,13 @@ private:
 	int32 WorkingCrosshairStyle = 0;
 
 	// Pre-game match setup (host-editable).
+	// CoD-style card selectors (replace the < > steppers): a description panel + one card row per selector.
+	UPROPERTY() TObjectPtr<UTextBlock> SetupDescTitle;
+	UPROPERTY() TObjectPtr<UTextBlock> SetupDescText;
+	UPROPERTY() TArray<TObjectPtr<UPFModeCardButton>> ModeCards;    // index = EPFBuildMode
+	UPROPERTY() TArray<TObjectPtr<UPFModeCardButton>> TypeCards;    // index = EPFMatchType
+	UPROPERTY() TArray<TObjectPtr<UPFModeCardButton>> FormatCards;  // 0 = 4v4, 1 = 6v6
+
 	UPROPERTY() TObjectPtr<UButton> ModeButton;
 	UPROPERTY() TObjectPtr<UTextBlock> ModeValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> ModeBlurbText;

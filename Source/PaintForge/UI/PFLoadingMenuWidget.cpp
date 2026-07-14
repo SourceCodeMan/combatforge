@@ -980,6 +980,162 @@ void UPFWeaponStepButton::HandleClicked()
 	}
 }
 
+void UPFModeCardButton::InitCard(UPFLoadingMenuWidget* InOwner, int32 InKind, int32 InValue)
+{
+	OwnerWidget = InOwner;
+	Kind = InKind;
+	Value = InValue;
+	OnClicked.AddUniqueDynamic(this, &UPFModeCardButton::HandleClicked);
+}
+
+void UPFModeCardButton::HandleClicked()
+{
+	if (OwnerWidget.IsValid())
+	{
+		OwnerWidget->NotifyCardSelected(Kind, Value);
+	}
+}
+
+void UPFLoadingMenuWidget::BuildSetupCards(UVerticalBox* Col)
+{
+	// Description panel — the selected game mode's name + what it is (CoD-style header above the cards).
+	SetupDescTitle = WidgetTree->ConstructWidget<UTextBlock>();
+	SetupDescTitle->SetFont(PFLoadFont(20, true));
+	SetupDescTitle->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
+	SetupDescTitle->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SetupDescTitle))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+	}
+	SetupDescText = WidgetTree->ConstructWidget<UTextBlock>();
+	SetupDescText->SetFont(PFLoadFont(13, false));
+	SetupDescText->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.81f, 0.88f)));
+	SetupDescText->SetJustification(ETextJustify::Center);
+	SetupDescText->SetAutoWrapText(true);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SetupDescText))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
+	}
+
+	auto MakeCardRow = [this, Col](const FString& Header, int32 Kind, int32 Count,
+		TFunctionRef<FString(int32)> LabelFn, TArray<TObjectPtr<UPFModeCardButton>>& OutCards)
+	{
+		UTextBlock* Head = WidgetTree->ConstructWidget<UTextBlock>();
+		Head->SetText(FText::FromString(Header));
+		Head->SetFont(PFLoadFont(11, true));
+		Head->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Head))
+		{
+			V->SetPadding(FMargin(4.f, 4.f, 0.f, 3.f));
+		}
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+		OutCards.Reset();
+		for (int32 i = 0; i < Count; ++i)
+		{
+			UPFModeCardButton* Card = WidgetTree->ConstructWidget<UPFModeCardButton>(UPFModeCardButton::StaticClass());
+			Card->InitCard(this, Kind, i);
+			UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
+			Lab->SetText(FText::FromString(LabelFn(i)));
+			Lab->SetFont(PFLoadFont(11, true));
+			Lab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			Lab->SetJustification(ETextJustify::Center);
+			Lab->SetAutoWrapText(true);   // long names (e.g. "Capture the Flag") wrap inside the card
+			Card->SetContent(Lab);
+			OutCards.Add(Card);
+			if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(Card))
+			{
+				H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+				H->SetPadding(FMargin(3.f, 0.f));
+			}
+		}
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
+		{
+			V->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+	};
+
+	MakeCardRow(TEXT("BUILD MODE"), 0, static_cast<int32>(EPFBuildMode::MAX_Count),
+		[](int32 i) { return BuildModeLabel(static_cast<EPFBuildMode>(i)); }, ModeCards);
+	MakeCardRow(TEXT("GAME MODE"), 1, static_cast<int32>(EPFMatchType::MAX_Count),
+		[](int32 i) { return MatchTypeLabel(static_cast<EPFMatchType>(i)); }, TypeCards);
+	MakeCardRow(TEXT("FORMAT"), 2, 2,
+		[](int32 i) { return FString(i == 0 ? TEXT("4 v 4") : TEXT("6 v 6")); }, FormatCards);
+
+	RefreshSetupCards();
+}
+
+void UPFLoadingMenuWidget::RefreshSetupCards()
+{
+	const FLinearColor Hot(1.f, 0.85f, 0.25f, 0.95f);
+	const FLinearColor Cold(0.14f, 0.15f, 0.18f, 0.95f);
+	for (int32 i = 0; i < ModeCards.Num(); ++i)
+	{
+		if (ModeCards[i] != nullptr)
+		{
+			ModeCards[i]->SetBackgroundColor(i == static_cast<int32>(SelectedBuildMode) ? Hot : Cold);
+		}
+	}
+	for (int32 i = 0; i < TypeCards.Num(); ++i)
+	{
+		if (TypeCards[i] != nullptr)
+		{
+			TypeCards[i]->SetBackgroundColor(i == static_cast<int32>(SelectedMatchType) ? Hot : Cold);
+		}
+	}
+	const int32 FmtSel = (SelectedTeamSize == 6) ? 1 : 0;
+	for (int32 i = 0; i < FormatCards.Num(); ++i)
+	{
+		if (FormatCards[i] != nullptr)
+		{
+			FormatCards[i]->SetBackgroundColor(i == FmtSel ? Hot : Cold);
+		}
+	}
+	// Description = the selected GAME MODE (what Tom asked to explain at the top).
+	if (SetupDescTitle != nullptr)
+	{
+		SetupDescTitle->SetText(FText::FromString(MatchTypeLabel(SelectedMatchType)));
+	}
+	if (SetupDescText != nullptr)
+	{
+		SetupDescText->SetText(FText::FromString(MatchTypeBlurb(SelectedMatchType)));
+	}
+}
+
+void UPFLoadingMenuWidget::NotifyCardSelected(int32 Kind, int32 Value)
+{
+	if (!IsLocalHost() || bDismissed)
+	{
+		return;
+	}
+	if (Kind == 0)
+	{
+		SelectedBuildMode = static_cast<EPFBuildMode>(
+			FMath::Clamp(Value, 0, static_cast<int32>(EPFBuildMode::MAX_Count) - 1));
+	}
+	else if (Kind == 1)
+	{
+		SelectedMatchType = static_cast<EPFMatchType>(
+			FMath::Clamp(Value, 0, static_cast<int32>(EPFMatchType::MAX_Count) - 1));
+		if (SelectedMatchType == EPFMatchType::FreeForAll)
+		{
+			SelectedBuildMode = EPFBuildMode::PlayOnly;   // FFA is play-only by design
+		}
+	}
+	else if (Kind == 2)
+	{
+		SelectedTeamSize = (Value == 1) ? 6 : 4;
+	}
+	RefreshSetupCards();
+	ApplySelectionsToHost();
+	if (NeedsCommunityMap())
+	{
+		ApplyMapSelectionToHost();
+	}
+}
+
 void UPFLoadingMenuWidget::BuildTree()
 {
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
@@ -1092,53 +1248,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	// Page 0 — match setup
 	UVerticalBox* SetupCol = WidgetTree->ConstructWidget<UVerticalBox>();
 
-	ModeButton = MakeSetupButton(TEXT("MODE"), ModeValueText, TEXT("ModeBtn"));
-	ModeButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnModeClicked);
-	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(ModeButton))
-	{
-		V->SetPadding(FMargin(0.f, 2.f));
-		V->SetHorizontalAlignment(HAlign_Fill);
-	}
-	ModeBlurbText = WidgetTree->ConstructWidget<UTextBlock>();
-	ModeBlurbText->SetFont(PFLoadFont(12, false));
-	ModeBlurbText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
-	ModeBlurbText->SetJustification(ETextJustify::Left);
-	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(ModeBlurbText))
-	{
-		V->SetPadding(FMargin(4.f, 2.f, 4.f, 10.f));
-	}
-
-	TypeButton = MakeSetupButton(TEXT("TYPE"), TypeValueText, TEXT("TypeBtn"));
-	TypeButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTypeClicked);
-	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(TypeButton))
-	{
-		V->SetPadding(FMargin(0.f, 2.f));
-		V->SetHorizontalAlignment(HAlign_Fill);
-	}
-	TypeBlurbText = WidgetTree->ConstructWidget<UTextBlock>();
-	TypeBlurbText->SetFont(PFLoadFont(12, false));
-	TypeBlurbText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
-	TypeBlurbText->SetJustification(ETextJustify::Left);
-	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(TypeBlurbText))
-	{
-		V->SetPadding(FMargin(4.f, 2.f, 4.f, 10.f));
-	}
-
-	FormatButton = MakeSetupButton(TEXT("FORMAT"), FormatValueText, TEXT("FormatBtn"));
-	FormatButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnFormatClicked);
-	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(FormatButton))
-	{
-		V->SetPadding(FMargin(0.f, 2.f));
-		V->SetHorizontalAlignment(HAlign_Fill);
-	}
-	FormatBlurbText = WidgetTree->ConstructWidget<UTextBlock>();
-	FormatBlurbText->SetFont(PFLoadFont(12, false));
-	FormatBlurbText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
-	FormatBlurbText->SetJustification(ETextJustify::Left);
-	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(FormatBlurbText))
-	{
-		V->SetPadding(FMargin(4.f, 2.f, 4.f, 10.f));
-	}
+	BuildSetupCards(SetupCol);   // CoD-style: description panel + mode/type/format card rows
 
 	// Bots checkbox row
 	UHorizontalBox* BotsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -1639,6 +1749,7 @@ void UPFLoadingMenuWidget::RefreshSetupLabels()
 	if (TypeButton)   { TypeButton->SetBackgroundColor(BtnBg); }
 	if (FormatButton) { FormatButton->SetBackgroundColor(BtnBg); }
 
+	RefreshSetupCards();   // CoD card selectors replaced the steppers; keep them + the description in sync
 	RefreshMapPicker();
 }
 
