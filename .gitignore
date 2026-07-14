@@ -1,4 +1,4 @@
-# PaintForge .gitignore — Unreal Engine 5.6 project.
+# CombatForge .gitignore — Unreal Engine 5.6 project.
 # NOTE: Config/ and Content/ are TRACKED. Content/ ships empty except
 # Content/Maps/.gitkeep and (once created on the PC, per contract T17)
 # Content/Maps/L_Graybox.umap.

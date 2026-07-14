@@ -21,7 +21,7 @@ if (-not $ProjectRoot) {
 	$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
 
-$UProject = Join-Path $ProjectRoot "PaintForge.uproject"
+$UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 if (-not (Test-Path $UProject)) { throw "Missing $UProject" }
 
 $Editor = Join-Path $Engine "Engine\Binaries\Win64\UnrealEditor.exe"
@@ -36,7 +36,7 @@ New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
 $SeedJson = @'
 {
   "schema": 1,
-  "game": "PaintForge",
+  "game": "CombatForge",
   "matchId": "smoke-improvement-seed",
   "createdUtc": "2026-07-12T00:00:00Z",
   "teamSize": 2,
@@ -94,7 +94,7 @@ if (-not $Finished) {
 }
 
 if (-not (Test-Path $LogPath)) {
-	$Fallback = Join-Path $LogDir "PaintForge.log"
+	$Fallback = Join-Path $LogDir "CombatForge.log"
 	if (Test-Path $Fallback) { $LogPath = $Fallback }
 }
 

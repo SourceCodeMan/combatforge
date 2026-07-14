@@ -1,4 +1,4 @@
-# PaintForge — LAN / VPN playtest
+# CombatForge — LAN / VPN playtest
 
 Host a match on this PC. Friends join with `open <ip>:7777`.
 
@@ -32,7 +32,7 @@ Default map `/Game/Maps/L_Graybox` · port **7777**.
 ## Host right now (recommended)
 
 ```powershell
-cd D:\projects\paintforge   # or paintforge-grok
+cd D:\projects\combatforge   # or combatforge-grok
 git pull origin main
 
 # Option A — you play on this PC, friends join
@@ -133,7 +133,7 @@ explorer .\Saved\ClientLogs
 
 ```powershell
 .\Deploy\playtest\package-playtest.ps1
-# Output: Packaged\Playtest\Windows\PaintForge.exe
+# Output: Packaged\Playtest\Windows\CombatForge.exe
 ```
 
 Zip the `Windows` folder + `connect.ps1` for friends.
@@ -146,14 +146,14 @@ Zip the `Windows` folder + `connect.ps1` for friends.
 Server targets are not currently supported from this engine distribution.
 ```
 
-True `PaintForgeServer` needs a source-built engine. Hosting does **not** require it —
+True `CombatForgeServer` needs a source-built engine. Hosting does **not** require it —
 use `run-listen` / `run-server` (game or editor + `-server -nullrhi`).
 
 ---
 
 ## Docker
 
-Docker Desktop Linux **cannot** run Win64 `PaintForge.exe`.  
+Docker Desktop Linux **cannot** run Win64 `CombatForge.exe`.  
 For LAN/VPN on this machine: **PowerShell scripts**, not Docker.
 
 `docker/` is a stub for a future Linux VPS cook only.

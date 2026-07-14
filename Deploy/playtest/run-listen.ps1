@@ -16,12 +16,12 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_common.ps1")
 if (-not $ProjectRoot) { $ProjectRoot = Get-ProjectRoot $PSScriptRoot }
 
-$UProject = Join-Path $ProjectRoot "PaintForge.uproject"
+$UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 if (-not (Test-Path $UProject)) { throw "Missing $UProject" }
 
 if (-not $NoFirewall) { Ensure-PlaytestFirewall -Port $Port }
 
-$GameExe = Find-PaintForgeExe $ProjectRoot "PaintForge.exe"
+$GameExe = Find-CombatForgeExe $ProjectRoot "CombatForge.exe"
 $Editor = Get-UnrealEditor $Engine
 $ListenUrl = "${Map}?Listen"
 
@@ -56,12 +56,12 @@ elseif ($Editor) {
 	)
 }
 else {
-	throw "No host available. Install UE 5.6 or build/package PaintForge.exe."
+	throw "No host available. Install UE 5.6 or build/package CombatForge.exe."
 }
 
 if ($ExtraArgs) { $Args += $ExtraArgs }
 
-Write-Host "==> PaintForge LISTEN host ($Mode) - you play on this machine"
+Write-Host "==> CombatForge LISTEN host ($Mode) - you play on this machine"
 Write-Host "    Exe:  $Exe"
 Write-Host "    URL:  $ListenUrl"
 Write-Host "    Port: $Port"

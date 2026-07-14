@@ -1,8 +1,8 @@
-# PaintForge
+# CombatForge
 
 **Build the arena. Fight in it. Judge it.**
 
-PaintForge is a multiplayer first-person paintball shooter for Windows, built on Unreal Engine 5.6.
+CombatForge is a multiplayer first-person paintball shooter for Windows, built on Unreal Engine 5.6.
 Every match is three games in one:
 
 1. **Build** (Fortnite-style): each team gets 3 minutes and a per-player piece budget to build its
@@ -19,7 +19,7 @@ Every match is three games in one:
    content-derived arena fingerprint, so great arenas (and great *halves*) can someday be
    aggregated, rated, and recombined into a community pool.
 
-The arena **is** the content. Players make the map; PaintForge's job is to make that fast, fair,
+The arena **is** the content. Players make the map; CombatForge's job is to make that fast, fair,
 and rateable.
 
 ## v1 graybox — what this repo is
@@ -56,7 +56,7 @@ git pull origin main
 
 **First kids match:** Lobby TYPE=Skirmish, MODE=Play-Only, FORMAT=4v4, Enter to start.
 
-Launcher UE cannot build a true `PaintForgeServer` target; playtest uses the game binary
+Launcher UE cannot build a true `CombatForgeServer` target; playtest uses the game binary
 as listen or `-server -nullrhi`.
 
 ## Getting started (Windows)
@@ -71,24 +71,24 @@ Quick version:
 
 1. Install UE 5.6 (Epic Games Launcher) and VS 2022 with the *Game development with C++* and
    *.NET desktop development* workloads.
-2. Clone this repo to `D:\projects\paintforge`.
-3. Right-click `PaintForge.uproject` → **Generate Visual Studio project files**.
-4. Open `PaintForge.sln`, select **Development Editor | Win64**, build, launch.
+2. Clone this repo to `D:\projects\combatforge`.
+3. Right-click `CombatForge.uproject` → **Generate Visual Studio project files**.
+4. Open `CombatForge.sln`, select **Development Editor | Win64**, build, launch.
 5. First run only: create and save the empty level `/Game/Maps/L_Graybox` (exact clicks in
    [`docs/pc-setup.md`](docs/pc-setup.md)), then commit it.
 
 ## Repository layout
 
 ```
-PaintForge.uproject             UE 5.6 project (module: PaintForge, Enhanced Input)
+CombatForge.uproject             UE 5.6 project (module: CombatForge, Enhanced Input)
 Config/                         DefaultEngine / DefaultGame / DefaultInput ini
 Content/
   Maps/                         Ships empty; L_Graybox.umap is created once on the PC (T17)
 Source/
-  PaintForge.Target.cs          Game target
-  PaintForgeEditor.Target.cs    Editor target
-  PaintForge/
-    PaintForge.h/.cpp           Module impl, log category, startup engine-asset checks
+  CombatForge.Target.cs          Game target
+  CombatForgeEditor.Target.cs    Editor target
+  CombatForge/
+    CombatForge.h/.cpp           Module impl, log category, startup engine-asset checks
     Core/                       Types header, GameInstance, GameMode, GameState,
                                 PlayerState, PlayerController (phase/round state machine)
     Player/                     Character (one pawn, both phases), custom movement

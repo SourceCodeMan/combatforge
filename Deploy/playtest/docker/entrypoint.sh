@@ -7,16 +7,16 @@ PORT="${PF_PORT:-7777}"
 # Find server binary in common UAT layouts
 BIN=""
 for c in \
-	"/server/PaintForgeServer" \
-	"/server/PaintForge/Binaries/Linux/PaintForgeServer" \
-	"/server/LinuxServer/PaintForge/Binaries/Linux/PaintForgeServer" \
-	"/server/Binaries/Linux/PaintForgeServer"
+	"/server/CombatForgeServer" \
+	"/server/CombatForge/Binaries/Linux/CombatForgeServer" \
+	"/server/LinuxServer/CombatForge/Binaries/Linux/CombatForgeServer" \
+	"/server/Binaries/Linux/CombatForgeServer"
 do
 	if [[ -x "$c" ]]; then BIN="$c"; break; fi
 done
 
 if [[ -z "$BIN" ]]; then
-	echo "PaintForgeServer not found under /server. Mount or COPY a Linux dedicated server build."
+	echo "CombatForgeServer not found under /server. Mount or COPY a Linux dedicated server build."
 	echo "Contents of /server:"
 	find /server -maxdepth 4 -type f 2>/dev/null | head -50
 	exit 1

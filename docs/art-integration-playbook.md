@@ -13,7 +13,7 @@ This is a **skin, not a rewrite**. The graybox compiles today as engine `BasicSh
 
 Two facts shape the entire sequence:
 
-1. **Everything hangs off the character skeleton.** Weapons attach to a hand socket and FP arms that don't exist yet — the pawn's visible body is still two `SetOwnerNoSee` static-mesh cubes (`PaintForgeCharacter.h:102-103`) and `ACharacter::GetMesh()` is force-hidden and asset-less. So **CHARACTERS is the critical-path prerequisite for WEAPONS**, and neither can start until MetaHuman + an IK Retargeter exist.
+1. **Everything hangs off the character skeleton.** Weapons attach to a hand socket and FP arms that don't exist yet — the pawn's visible body is still two `SetOwnerNoSee` static-mesh cubes (`CombatForgeCharacter.h:102-103`) and `ACharacter::GetMesh()` is force-hidden and asset-less. So **CHARACTERS is the critical-path prerequisite for WEAPONS**, and neither can start until MetaHuman + an IK Retargeter exist.
 
 2. **Realistic PBR fights whole-surface team tint** — the project's stated constraint. Today team identity is a flat `Color` vector param tinted across the whole mesh/piece (`PFBuildGrid.cpp:163`, `PFArenaShell` `ApplyTint`, character `SetTeamColor`). Every area must **move team identity to an emissive trim/overlay** (glowing spawn stripe, uniform band, recolored paint burst) and leave the base material team-neutral. Keeping the existing param **name** (`Color`) or renaming *all* call sites is mandatory, or `SetVectorParameterValue` silently no-ops and team color vanishes.
 
@@ -34,7 +34,7 @@ Goal: **one match where the arena has real concrete + a themed shell, a MetaHuma
 
 4. **One Lyra rifle mesh on the TP hand socket** (`SetOwnerNoSee`, owner sees nothing yet — accept weapon-only-TP for the slice). No montages yet; a static weapon in-hand already sells it. *Why after character: the socket literally doesn't exist until step 3.*
 
-5. **One recolored Niagara impact + one fire sound.** Add `"Niagara"` to `PaintForge.Build.cs` deps; load the Examples Pack impact via a soft ref; recolor to `PFColors::ForTeam` with `bAutoActivate=false` → set `User.Color` → `Activate`, fired on the `Slot == INDEX_NONE` reconcile branch (`PFSplatSubsystem.cpp:110`) to avoid double-burst. Fill `PFCombatAudio::PlayMuzzle()` with one `SpawnSoundAtLocation`. *Why last: it dresses the already-working fire pipeline and needs no character/weapon dependency, but landing it here completes the sensory loop.*
+5. **One recolored Niagara impact + one fire sound.** Add `"Niagara"` to `CombatForge.Build.cs` deps; load the Examples Pack impact via a soft ref; recolor to `PFColors::ForTeam` with `bAutoActivate=false` → set `User.Color` → `Activate`, fired on the `Slot == INDEX_NONE` reconcile branch (`PFSplatSubsystem.cpp:110`) to avoid double-burst. Fill `PFCombatAudio::PlayMuzzle()` with one `SpawnSoundAtLocation`. *Why last: it dresses the already-working fire pipeline and needs no character/weapon dependency, but landing it here completes the sensory loop.*
 
 **Result after ~3-4 focused days:** concrete arena, two visually-distinct teams, a weapon in hand, colored splats, and a fire bang — a recognizable match. Everything deferred (FP arms, montages, reload anims, warehouse decorators, decal splats, full perf pass) is additive from here.
 
@@ -44,8 +44,8 @@ Goal: **one match where the arena has real concrete + a themed shell, a MetaHuma
 ## Full recommended sequence (with dependencies)
 
 **Phase 0 — Foundations (do first, unblocks everything).**
-- Acquire Fab packs into project content: Megascans concrete surface → `/Game/Megascans/Surfaces`; Niagara Examples Pack; 50 Free Game Sounds + UI SFX Free; Game Animation Sample; Animation Starter Pack; Lyra (mesh+anim harvest only). Enable the **Niagara** and **MetaHuman** plugins in `PaintForge.uproject`.
-- Add `"Niagara"` to `PublicDependencyModuleNames` (`PaintForge.Build.cs:17`) and delete the stale "Niagara (post-v1)" comment at `:26`. (Audio needs nothing new — `UGameplayStatics` is in Engine.)
+- Acquire Fab packs into project content: Megascans concrete surface → `/Game/Megascans/Surfaces`; Niagara Examples Pack; 50 Free Game Sounds + UI SFX Free; Game Animation Sample; Animation Starter Pack; Lyra (mesh+anim harvest only). Enable the **Niagara** and **MetaHuman** plugins in `CombatForge.uproject`.
+- Add `"Niagara"` to `PublicDependencyModuleNames` (`CombatForge.Build.cs:17`) and delete the stale "Niagara (post-v1)" comment at `:26`. (Audio needs nothing new — `UGameplayStatics` is in Engine.)
 - Author the shared **triplanar concrete master** `M_PF_BuildPiece` (+ optional `M_PF_Shell`) with a vector param named `Color` (accent) so existing tint call sites keep working. This is the first real content asset besides `L_Graybox`.
 
 **Phase 1 — Arena Shell + Build Pieces (parallel-safe, no character dependency).** *~2-3 days shell, ~1 day pieces.*
@@ -100,7 +100,7 @@ Create `/Game/Materials/M_PF_BuildPiece` (first real content asset besides `L_Gr
 In `APFBuildGrid::APFBuildGrid()` change the finder at PFBuildGrid.cpp:97 from `/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial` to `/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece`; keep assigning to `ShapeMaterial` (:98) and keep the per-ISMC `SetMaterial(0, ShapeMaterial)` (:123). No other ctor change - the 14-component split, meshes, and collision stay as-is.
 
 ### Step 4 - Drive the accent per team (code, minimal)
-`BeginPlay` (PFBuildGrid.cpp:154-168) already creates one MID per ISMC and sets the team color. Keep the loop; it now sets your accent param instead of a full-surface tint. If you added extra params (`WorldAlignedTextureScale`, `AccentBoost`) set them here via `MID->SetScalarParameterValue`. Because the accent is emissive-only, `PFColors::ForTeam(Team)` (PaintForgeTypes.cpp:47) stays the single source of truth shared with HUD/paintballs.
+`BeginPlay` (PFBuildGrid.cpp:154-168) already creates one MID per ISMC and sets the team color. Keep the loop; it now sets your accent param instead of a full-surface tint. If you added extra params (`WorldAlignedTextureScale`, `AccentBoost`) set them here via `MID->SetScalarParameterValue`. Because the accent is emissive-only, `PFColors::ForTeam(Team)` (CombatForgeTypes.cpp:47) stays the single source of truth shared with HUD/paintballs.
 
 ### Step 5 - Same for the arena shell (code + material)
 `APFArenaShell` uses plain `UStaticMeshComponent`s. `MakeShapePart` already tags parts with `EPFShellCollision` (PFArenaShell.cpp:135-152) - a clean material seam:
@@ -116,7 +116,7 @@ Run the listen server + one client. Confirm: (1) placed walls show tiled concret
 
 ## Weapons Art Pass — Lyra Rifle/Pistol Harvest → PFWeaponComponent (UE 5.6)
 
-**Reality check first.** `UPFWeaponComponent` today has **zero** visual surface: no weapon mesh, no skeleton, no animation. "Fire feel" is a camera shake (`PFWeaponComponent.cpp:247`) plus `PlayMuzzle()` audio (`cpp:251`). The character is static-cube graybox (`PaintForgeCharacter.h:102-103`; ctor `cpp:62-97`) with the inherited skeletal `GetMesh()` explicitly hidden (`cpp:95`). This is an **additive build**, and it **blocks on the CHARACTER pass** delivering a real skeletal body + hand socket first.
+**Reality check first.** `UPFWeaponComponent` today has **zero** visual surface: no weapon mesh, no skeleton, no animation. "Fire feel" is a camera shake (`PFWeaponComponent.cpp:247`) plus `PlayMuzzle()` audio (`cpp:251`). The character is static-cube graybox (`CombatForgeCharacter.h:102-103`; ctor `cpp:62-97`) with the inherited skeletal `GetMesh()` explicitly hidden (`cpp:95`). This is an **additive build**, and it **blocks on the CHARACTER pass** delivering a real skeletal body + hand socket first.
 
 **Harvest honesty.** Take Lyra's rifle/pistol **meshes** and **raw animation sequences** as flat assets. Do **not** adopt `B_WeaponInstance_Base`, linked anim layers, `ULyraAnimInstance`, GAS abilities, or GameFeature plugins — they're entangled with GAS and would collide with the existing server-authoritative fire pipeline. Roughly 40% of Lyra's weapon value (meshes + TP clips) migrates cleanly; the FP anims and the whole runtime framework do not.
 
@@ -128,7 +128,7 @@ Run the listen server + one client. Confirm: (1) placed walls show tiled concret
 
 3. **Retarget.** Build IK Rigs for source (Lyra UE5 / Starter-Pack UE4) and your target skeleton, then an **IK Retargeter** mapping spine/arm/leg/root chains. Fix the retarget pose before baking — UE4 (3 spine) vs UE5 (5 spine) mismatch causes stuck feet / rotated limbs otherwise.
 
-4. **Character mesh scaffolding (C++, `PaintForgeCharacter`).** Convert the inherited `GetMesh()` into the **TP skeletal body** (`SetOwnerNoSee(true)`), and add a new **FP arms** `USkeletalMeshComponent` attached to `FirstPersonCamera` (`SetOnlyOwnerSee(true)`). Retire/keep the static `BodyMesh`/`HeadMesh` cubes as the fallback graybox behind a flag.
+4. **Character mesh scaffolding (C++, `CombatForgeCharacter`).** Convert the inherited `GetMesh()` into the **TP skeletal body** (`SetOwnerNoSee(true)`), and add a new **FP arms** `USkeletalMeshComponent` attached to `FirstPersonCamera` (`SetOnlyOwnerSee(true)`). Retire/keep the static `BodyMesh`/`HeadMesh` cubes as the fallback graybox behind a flag.
 
 5. **Weapon mesh + sockets.** Add a weapon skeletal-mesh component attached to a `hand_r` socket. FPS-correct setup needs **two** (FP-arms hand `SetOnlyOwnerSee`, TP-body hand `SetOwnerNoSee`) since one mesh can't be both; for first-playable you may ship weapon-on-TP-only. Add a cosmetic **`Muzzle`** socket for flash/tracer origin.
 
@@ -148,7 +148,7 @@ Sources: [Adapting Lyra animation to your UE5 game](https://www.unrealengine.com
 
 ## CHARACTERS: MetaHuman body + two teams (Breachworks art pass)
 
-**Where this plugs in.** The pawn `APaintForgeCharacter` already reserves the right slot for a skeletal body: `ACharacter::GetMesh()` exists but is deliberately asset-less and hidden (`PaintForgeCharacter.cpp:95-98`). The visible graybox is two static-mesh cubes — `BodyMesh`/`HeadMesh` (`.h:102-103`, built `cpp:62-92`) — both `SetOwnerNoSee(true)`. So this is a swap: MetaHuman goes on `GetMesh()`, the cubes retire. The owner is first-person and never sees their own body; the MetaHuman is the third-person proxy opponents see.
+**Where this plugs in.** The pawn `ACombatForgeCharacter` already reserves the right slot for a skeletal body: `ACharacter::GetMesh()` exists but is deliberately asset-less and hidden (`CombatForgeCharacter.cpp:95-98`). The visible graybox is two static-mesh cubes — `BodyMesh`/`HeadMesh` (`.h:102-103`, built `cpp:62-92`) — both `SetOwnerNoSee(true)`. So this is a swap: MetaHuman goes on `GetMesh()`, the cubes retire. The owner is first-person and never sees their own body; the MetaHuman is the third-person proxy opponents see.
 
 ### Step 1 — Get a MetaHuman body into the project (editor)
 1. Enable the MetaHuman plugin (5.6 pipeline is fully in-editor now — no cloud/Bridge round-trip).
@@ -161,13 +161,13 @@ The MetaHuman body skeleton is naming-compatible with Manny/Quinn but ships **wi
 ### Step 3 — Retarget the free anims (editor)
 The **Game Animation Sample** and **Animation Starter Pack / Lyra** anims are all authored on the standard UE5 Mannequin. Build an IK Retargeter: source = UE Mannequin IK Rig, target = MetaHuman IK Rig. **Bake** the locomotion + rifle fire/ADS/reload sets to new sequences on the MetaHuman skeleton (don't retarget live per-frame — extra CPU on a listen-server). Note 5.6 retarget results differ from 5.5; use a 5.6-era setup. Author a body **Anim BP** (locomotion blendspace + fire/reload slots) against the MetaHuman skeleton.
 
-### Step 4 — Wire the mesh in C++ (`PaintForgeCharacter.cpp` ctor)
+### Step 4 — Wire the mesh in C++ (`CombatForgeCharacter.cpp` ctor)
 1. Delete the cube block `cpp:58-92` and the `BodyMesh`/`HeadMesh`/`BodyMID`/`HeadMID` members (`.h:102-103,110-111`); drop the `CubeFinder`/`MatFinder`/`StaticMesh` includes.
 2. On `GetMesh()`: set the body SK, set the Anim BP class (`GetMesh()->SetAnimInstanceClass(...)` or a soft class ref), set `SetOwnerNoSee(true)`, and set the **relative transform** — `SetRelativeLocation(FVector(0,0,-90))` + `SetRelativeRotation(FRotator(0,-90,0))` (the ACharacter mannequin convention; the cubes hand-placed their own offsets at `cpp:73,89` so there's nothing to inherit).
 3. Remove the `GetMesh()->SetVisibility(false)` defensive hide at `cpp:97`.
 
 ### Step 5 — Two teams via emissive overlay, not tint (the readability fix)
-Realistic PBR fights a full-body color tint (the project's stated constraint). Rework `SetTeamColor(uint8)` (`cpp:518-539`): instead of creating cube MIDs and writing `"Color"` on the whole body, create one MID on `GetMesh()` and write an **emissive `TeamTrim`** param bound to a dedicated region (chest/back panel + helmet band) — either a second material slot or a thin overlay. Keep the signature and keep pulling the color from `PFColors::ForTeam` (`Core/PaintForgeTypes.cpp:47`), so every existing caller (pkg-weapons, elim feed, HUD) is unaffected. Cheapest reliable two teams = **one body mesh + two material instances differing only in `TeamTrim`**.
+Realistic PBR fights a full-body color tint (the project's stated constraint). Rework `SetTeamColor(uint8)` (`cpp:518-539`): instead of creating cube MIDs and writing `"Color"` on the whole body, create one MID on `GetMesh()` and write an **emissive `TeamTrim`** param bound to a dedicated region (chest/back panel + helmet band) — either a second material slot or a thin overlay. Keep the signature and keep pulling the color from `PFColors::ForTeam` (`Core/CombatForgeTypes.cpp:47`), so every existing caller (pkg-weapons, elim feed, HUD) is unaffected. Cheapest reliable two teams = **one body mesh + two material instances differing only in `TeamTrim`**.
 
 ### Step 6 — Elimination + muzzle
 - `SetEliminatedAppearance(bool)` (`cpp:541-553`): retarget the two `SetHiddenInGame` calls to `GetMesh()->SetHiddenInGame`, or (better) trigger a death montage/ragdoll. Collision timing stays the health component's job (unchanged).
@@ -217,8 +217,8 @@ No paid warehouse kit needed: **Megascans-on-primitives (triplanar) + a handful 
 Both subsystems were written to be skinned without touching callers. The splat pool, team-color MIDs, reconcile logic, and all six audio call sites are the deliverable; this pass only fills bodies and swaps primitives for assets.
 
 ### 0. Prerequisites (do first)
-1. Import **Niagara Examples Pack**, **50 Free Game Sounds**, **UI SFX Free** into project content (e.g. `/Game/FX/`, `/Game/Audio/`). Enable the **Niagara** plugin in `PaintForge.uproject`.
-2. `PaintForge.Build.cs:17` — add `"Niagara"` to `PublicDependencyModuleNames`; delete the stale `// NOT needed: … Niagara` comment at `:25-26`.
+1. Import **Niagara Examples Pack**, **50 Free Game Sounds**, **UI SFX Free** into project content (e.g. `/Game/FX/`, `/Game/Audio/`). Enable the **Niagara** plugin in `CombatForge.uproject`.
+2. `CombatForge.Build.cs:17` — add `"Niagara"` to `PublicDependencyModuleNames`; delete the stale `// NOT needed: … Niagara` comment at `:25-26`.
 3. Author two tiny assets: a **paint-splat Deferred Decal material** (Color vector param + `DecalLifetimeOpacity`) and one **USoundAttenuation** + one **USoundConcurrency** for combat 3D sound.
 
 ### 1. Asset references — soft, not CDO
@@ -290,4 +290,4 @@ Load the `USoundBase` refs once (shared settings object), not per component inst
 
 **3. Retarget skeleton mismatches.** Game Animation Sample and Lyra clips are UE5 skeleton (5 spine bones); Animation Starter Pack is UE4 (3 spine) — mixing them without a corrected retarget pose gives stuck feet / rotated limbs. The MetaHuman body skeleton is naming-compatible with Manny **but ships without `ik_*` virtual bones** — copy them from `SKM_Manny_Simple` before building the IK Rig or foot IK and any `ik_`-driving anim break. Use a 5.6-specific IK Retargeter (behavior changed vs 5.5) and **bake** to new sequences rather than retargeting live every frame. Reload-anim semantics also mismatch: the game reloads a hopper "pod flip," not a magazine swap, so Lyra/Starter-Pack reload clips look wrong.
 
-**4. Keeping warnings-as-errors clean.** `bWarningsAsErrors = true` is on (`PaintForge.Build.cs:10`, contract §5.17) — every code edit must compile warning-free. Watch: `FObjectFinder` needs a cooked, *referenced* `/Game` path — a bad path silently leaves `.Object` null (no warning, just missing material), so verify new assets are referenced/loaded. Do **not** reuse the CDO-time `FObjectFinder` pattern for marketplace/Niagara content (only reliable for `/Engine`); use `TSoftObjectPtr` + `LoadSynchronous` guarded so dedicated servers never touch render packages. Renaming the `Color` tint param without updating **all** call sites (`PFBuildGrid.cpp:163`, `PFArenaShell` `ApplyTint`, character `SetTeamColor`) compiles clean but silently no-ops the team color — treat it as a correctness bug the compiler won't catch.
+**4. Keeping warnings-as-errors clean.** `bWarningsAsErrors = true` is on (`CombatForge.Build.cs:10`, contract §5.17) — every code edit must compile warning-free. Watch: `FObjectFinder` needs a cooked, *referenced* `/Game` path — a bad path silently leaves `.Object` null (no warning, just missing material), so verify new assets are referenced/loaded. Do **not** reuse the CDO-time `FObjectFinder` pattern for marketplace/Niagara content (only reliable for `/Engine`); use `TSoftObjectPtr` + `LoadSynchronous` guarded so dedicated servers never touch render packages. Renaming the `Color` tint param without updating **all** call sites (`PFBuildGrid.cpp:163`, `PFArenaShell` `ApplyTint`, character `SetTeamColor`) compiles clean but silently no-ops the team color — treat it as a correctness bug the compiler won't catch.

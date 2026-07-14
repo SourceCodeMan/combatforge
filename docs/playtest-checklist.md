@@ -1,4 +1,4 @@
-# PaintForge — playtest checklist
+# CombatForge — playtest checklist
 
 Use this for the first human / multiplayer session on **current `main`**.
 
@@ -12,7 +12,7 @@ Use this for the first human / multiplayer session on **current `main`**.
 ## Host (this PC)
 
 ```powershell
-cd D:\projects\paintforge   # or your clone
+cd D:\projects\combatforge   # or your clone
 .\Deploy\playtest\run-listen.ps1
 # or headless: .\Deploy\playtest\run-server.ps1
 .\Deploy\playtest\print-host-ips.ps1
@@ -57,7 +57,7 @@ Share LAN/VPN IP + port **7777**.
 
 | Issue | Where to look |
 |-------|----------------|
-| Host works, client dead input | `Saved/Logs/PaintForge.log` on both |
+| Host works, client dead input | `Saved/Logs/CombatForge.log` on both |
 | Join mid-round | Client should not get false breakout spam |
 | No arenas for Improvement | Play a Creative match once, or use smoke seed |
 | Port blocked | `print-host-ips` + Windows firewall (script may prompt UAC) |

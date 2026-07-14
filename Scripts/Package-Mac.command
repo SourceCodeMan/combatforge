@@ -20,8 +20,8 @@ set -e
 
 # --- EDIT THESE for your Mac ---
 UE="/Users/Shared/Epic Games/UE_5.6"
-PROJ="$HOME/projects/paintforge/PaintForge.uproject"
-OUT="$HOME/projects/paintforge/Packaged/Mac"
+PROJ="$HOME/projects/combatforge/CombatForge.uproject"
+OUT="$HOME/projects/combatforge/Packaged/Mac"
 # --------------------------------
 
 CONFIG="${1:-Development}"

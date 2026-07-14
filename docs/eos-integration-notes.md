@@ -9,7 +9,7 @@
 
 **Bottom line: EOS is cleanly deferrable. Nothing in the current code needs to change during the art pass. The one thing you owe your future self is not code — it's an identity decision (build on EOS *Connect / Product User ID*, not Epic Account Services) that costs $0 today because there's no session code to point the wrong way yet.**
 
-Breachworks is exactly where you want to be for an additive online layer. A tree-wide grep confirms **zero** session/matchmaking/travel/OnlineSubsystem code exists — joining a match is not game code at all, it's the engine console command `open <host-ip>` run against a listen server. This was a deliberate call, stamped as architecture decision **D12** (`docs/design/02-architecture.md:24`), the `Build.cs:25` comment (`NOT needed: OnlineSubsystem (02 D12)`), and the single-persistent-level design (`PaintForgeGameMode.cpp:53`, `bUseSeamlessTravel=false`).
+Breachworks is exactly where you want to be for an additive online layer. A tree-wide grep confirms **zero** session/matchmaking/travel/OnlineSubsystem code exists — joining a match is not game code at all, it's the engine console command `open <host-ip>` run against a listen server. This was a deliberate call, stamped as architecture decision **D12** (`docs/design/02-architecture.md:24`), the `Build.cs:25` comment (`NOT needed: OnlineSubsystem (02 D12)`), and the single-persistent-level design (`CombatForgeGameMode.cpp:53`, `bUseSeamlessTravel=false`).
 
 Because the level never travels and every connection — whether formed by `open <ip>` or by an EOS session — funnels through the same `PostLogin` → PlayerController → possession path, **the phase state machine (Lobby→Build→Combat→Vote→Results), the FastArray build-grid replication, and every gameplay RPC are transport-agnostic and need no rework.** EOS replaces exactly one thing: *how a client discovers the host and travels to it.* D12 predicted this precisely — "adding OSS later touches only the Lobby flow."
 
@@ -30,7 +30,7 @@ EOS has two independent identity systems and conflating them is the classic mist
 **Commit to PUID/Connect as the network identity and treat EAS as an optional later bolt-on.** If you ever make EAS mandatory you lock out everyone who won't create an Epic account and you couple netcode to the social layer. Cost to commit today: **$0** — it's a design-note line, there's no code yet. This is the single decision that keeps M4 a discovery/join swap.
 
 ### 2. Keep your vote `FGuid` exactly as-is — it does NOT conflict with a PUID
-`PaintForgeGameInstance`'s install GUID is an anonymized *vote/rating* key with no online meaning. Let PUID be the *network* identity and leave the vote hash alone. Two identities, two jobs. **No change needed** — just don't "unify" them later thinking they overlap. They don't.
+`CombatForgeGameInstance`'s install GUID is an anonymized *vote/rating* key with no online meaning. Let PUID be the *network* identity and leave the vote hash alone. Two identities, two jobs. **No change needed** — just don't "unify" them later thinking they overlap. They don't.
 
 ### 3. (Optional, cheap) When you do write the session layer, put it behind a thin facade
 A `USessionService : UGameInstanceSubsystem` exposing only Host/Find/Join/Leave, so GameMode/Lobby depend on your interface, not OSS types. This is what makes a future OSSv1→OSSv2 migration a one-file swap and lets you keep `open <ip>` as a dev/LAN fallback via `DriverClassNameFallback=IpNetDriver`. **This is future work, not a now-change** — noted here only so you don't hand-roll session calls scattered across the Lobby widget when the time comes.
@@ -54,9 +54,9 @@ None of these gate art, and none of them retroactively force gameplay changes wh
 | Travel code | **None.** No `ClientTravel`/`ServerTravel`/`OpenLevel`. | tree-wide Grep |
 | How a client joins | Engine console command `open <host-ip>` against a process launched as a listen server. Not game code. | `docs/pc-setup.md:153`, D12 |
 | Net driver | Stock `IpNetDriver` only, 60 Hz. No `NetDriverEOS`. | `02-architecture.md:370` |
-| Level / travel model | Single persistent level, `bUseSeamlessTravel=false` — phase machine runs in-place, no map load between phases. | `PaintForgeGameMode.cpp:53` (D1) |
-| Build.cs deps | `OnlineSubsystem` explicitly excluded. | `PaintForge.Build.cs:25` |
-| Only "identity" present | A per-install `FGuid` at `Saved/PaintForge/Identity.json`, SHA1-hashed, used **only** for anonymized voting. No online meaning. | `PaintForgeGameInstance.h:9-33` |
+| Level / travel model | Single persistent level, `bUseSeamlessTravel=false` — phase machine runs in-place, no map load between phases. | `CombatForgeGameMode.cpp:53` (D1) |
+| Build.cs deps | `OnlineSubsystem` explicitly excluded. | `CombatForge.Build.cs:25` |
+| Only "identity" present | A per-install `FGuid` at `Saved/CombatForge/Identity.json`, SHA1-hashed, used **only** for anonymized voting. No online meaning. | `CombatForgeGameInstance.h:9-33` |
 | `GameInstance` role | Holds identity + reserved "pending host/join parameters" — the natural home for a future session subsystem. | `02-architecture.md:34` |
 
 **Why this is the ideal starting point:** once a `UNetConnection` exists, the source of that connection (typed IP vs. EOS session) is invisible to gameplay. The GameMode phase writer, build-grid FastArray, GameState OnRep arrays (elim feed, vote tallies), and all RPCs ride that connection unchanged. So the entire EOS question genuinely reduces to swapping discovery/join — the "additive, no rework" constraint is already satisfied by the existing architecture, not something you have to engineer toward.
@@ -118,7 +118,7 @@ Each phase is strictly additive; earlier phases keep working. The gameplay core 
 ## EOS plumbing in UE 5.6 — the plugin decision and project setup
 
 ### Where the code stands (the good news)
-Breachworks has **no session/matchmaking layer at all**, and that's by design — architecture decision **D12** (`docs/design/02-architecture.md:24`), the `Build.cs:25` comment ("NOT needed: OnlineSubsystem"), and `pc-setup.md:153` (clients run console `open <host-ip>` against a listen server). The level is single/persistent (`PaintForgeGameMode.cpp:53`, `bUseSeamlessTravel=false`), so the phase state machine, FastArray build-grid, and gameplay RPCs ride over `UNetConnection` regardless of *how* the connection was formed. **EOS is therefore purely additive: it replaces "type an IP" with "find/create a session and join," and nothing in the phase/replication code changes.** D12 called this exactly right.
+Breachworks has **no session/matchmaking layer at all**, and that's by design — architecture decision **D12** (`docs/design/02-architecture.md:24`), the `Build.cs:25` comment ("NOT needed: OnlineSubsystem"), and `pc-setup.md:153` (clients run console `open <host-ip>` against a listen server). The level is single/persistent (`CombatForgeGameMode.cpp:53`, `bUseSeamlessTravel=false`), so the phase state machine, FastArray build-grid, and gameplay RPCs ride over `UNetConnection` regardless of *how* the connection was formed. **EOS is therefore purely additive: it replaces "type an IP" with "find/create a session and join," and nothing in the phase/replication code changes.** D12 called this exactly right.
 
 ### The real question: OSSv1 vs OSSv2 in 5.6
 There are two Epic-provided ways to talk to EOS, and they are genuinely different code paths:
@@ -187,7 +187,7 @@ bEnabled=true
 ```
 The `DriverClassNameFallback=IpNetDriver` is what preserves your LAN/`open <ip>` path when P2P/EOS isn't in play.
 
-**5. Wire the session flow.** In the new `USessionService`: on launch, EOS **Auth/Connect** login (Device ID or Account Portal for PC dev) to get a **ProductUserId**; Host = `CreateSession` (advertise phase/region as session attributes) then listen; Find = `FindSessions` with filters; Join = read the session's connect string and `ClientTravel` to it. The Lobby UI (currently "everyone types the same IP") gains a server-browser/"host or join" screen — this is the *only* gameplay-facing change. Your per-install **FGuid voter identity** (`PaintForgeGameInstance.h`) is unrelated to the EOS ProductUserId and can stay exactly as is.
+**5. Wire the session flow.** In the new `USessionService`: on launch, EOS **Auth/Connect** login (Device ID or Account Portal for PC dev) to get a **ProductUserId**; Host = `CreateSession` (advertise phase/region as session attributes) then listen; Find = `FindSessions` with filters; Join = read the session's connect string and `ClientTravel` to it. The Lobby UI (currently "everyone types the same IP") gains a server-browser/"host or join" screen — this is the *only* gameplay-facing change. Your per-install **FGuid voter identity** (`CombatForgeGameInstance.h`) is unrelated to the EOS ProductUserId and can stay exactly as is.
 
 ### Honest maturity verdict
 - **OSSv1 EOS in 5.6:** production-grade, well-trodden, what indies ship. Downside: Epic keeps signaling eventual deprecation, so you're adopting the "legacy" path — mitigated entirely by the thin-interface wrapper.
@@ -206,20 +206,20 @@ The `DriverClassNameFallback=IpNetDriver` is what preserves your LAN/`open <ip>`
 ## M4 — EOS Sessions: replacing raw IP-connect (discovery/join only)
 
 ### Where we are today (verified in code, not assumed)
-Breachworks has **no session, matchmaking, travel, or Online Subsystem code at all**. A tree-wide grep for `ClientTravel` / `ServerTravel` / `OpenLevel` / `GetResolvedConnectString` / `CreateSession` / `IOnlineSession` returns **zero hits**. Joining a match is not game code — it's the engine console command **`open <host-ip>`** run against a process launched as a listen server (`pc-setup.md` §8). `UPaintForgeGameInstance` holds only the anonymized install-identity GUID (voting), and `Build.cs` explicitly excludes `OnlineSubsystem` per decision **D12**.
+Breachworks has **no session, matchmaking, travel, or Online Subsystem code at all**. A tree-wide grep for `ClientTravel` / `ServerTravel` / `OpenLevel` / `GetResolvedConnectString` / `CreateSession` / `IOnlineSession` returns **zero hits**. Joining a match is not game code — it's the engine console command **`open <host-ip>`** run against a process launched as a listen server (`pc-setup.md` §8). `UCombatForgeGameInstance` holds only the anonymized install-identity GUID (voting), and `Build.cs` explicitly excludes `OnlineSubsystem` per decision **D12**.
 
 This is the *good* case: D12 already committed to the additive path — *"Steam/EOS sessions are a lobby-UX feature… adding OSS later touches only the Lobby flow."* The plan below honors that.
 
 ### What stays untouched (the whole point)
 Once a connection is established, EOS vs. `open <ip>` is invisible to the game: both funnel through the same `PostLogin` → PlayerController/PlayerState → possession path. So **none of these change**:
-- `APaintForgeGameMode` phase state machine (`SetPhase`, the single writer) — Lobby→Build→Combat→Vote→Results.
+- `ACombatForgeGameMode` phase state machine (`SetPhase`, the single writer) — Lobby→Build→Combat→Vote→Results.
 - FastArray build-grid replication (`PFBuildGrid` / `PFBuildComponent`) and all gameplay RPCs (weapon/health/vote).
 - `AGameState` OnRep arrays (elimination feed, vote tallies — D11).
 
 Only the **pre-game discovery/join** changes: the out-of-code `open <ip>` becomes `CreateSession` / `FindSessions` / `JoinSession` inside the GameInstance layer.
 
 ### The flow, mapped onto the GameInstance
-Put this in a new **`UPFSessionSubsystem : UGameInstanceSubsystem`** rather than bloating `UPaintForgeGameInstance` (keeps identity code isolated; satisfies the GI's reserved "pending host/join parameters" role). Grab the interface once: `IOnlineSubsystem::Get()->GetSessionInterface()`.
+Put this in a new **`UPFSessionSubsystem : UGameInstanceSubsystem`** rather than bloating `UCombatForgeGameInstance` (keeps identity code isolated; satisfies the GI's reserved "pending host/join parameters" role). Grab the interface once: `IOnlineSubsystem::Get()->GetSessionInterface()`.
 
 **HOST (listen server):**
 1. `FOnlineSessionSettings`: `NumPublicConnections = 8`, `bShouldAdvertise = true`, `bAllowJoinInProgress = true`, `bUseLobbiesIfAvailable = true` (**EOS requires this or `FindSessions` returns nothing**), `bIsLANMatch = bUseLAN` (dev toggle, below). Stamp a build/version key via `Settings.Set("BUILD_ID", …)` so mismatched clients can't join.
@@ -263,7 +263,7 @@ Enable plugins **OnlineSubsystemEOS + EOSShared + OnlineSubsystemUtils**; add `"
 ## EOS crossplay + console identity — what to decide now (Angle: identity & gotchas)
 
 ### Where Breachworks stands today
-There is **no online/session/identity layer in the code at all**, and that's a documented choice, not a gap: `"02 D12: no OSS"` is stamped in `PaintForgePlayerController.cpp:433` and `PaintForge.Build.cs:25`. Today it's a **listen server + raw-IP join** (`README.md:32`; client uses the console `open <host-ip>`), a single persistent level with `bUseSeamlessTravel=false` (`PaintForgeGameMode.cpp:53`), and the only "identity" is a **local per-install `FGuid`** hashed to SHA-1 for anonymized voting (`PaintForgeGameInstance.h`). A tree-wide grep for `Session/CreateSession/JoinSession/OnlineSubsystem/EOS/ClientTravel` returns **zero** gameplay hits. Good news: this means EOS is genuinely additive — it only replaces *discovery/join*, and the phase state machine, FastArray build-grid, and gameplay RPCs ride UE's replication layer unchanged either way.
+There is **no online/session/identity layer in the code at all**, and that's a documented choice, not a gap: `"02 D12: no OSS"` is stamped in `CombatForgePlayerController.cpp:433` and `CombatForge.Build.cs:25`. Today it's a **listen server + raw-IP join** (`README.md:32`; client uses the console `open <host-ip>`), a single persistent level with `bUseSeamlessTravel=false` (`CombatForgeGameMode.cpp:53`), and the only "identity" is a **local per-install `FGuid`** hashed to SHA-1 for anonymized voting (`CombatForgeGameInstance.h`). A tree-wide grep for `Session/CreateSession/JoinSession/OnlineSubsystem/EOS/ClientTravel` returns **zero** gameplay hits. Good news: this means EOS is genuinely additive — it only replaces *discovery/join*, and the phase state machine, FastArray build-grid, and gameplay RPCs ride UE's replication layer unchanged either way.
 
 ### The one architectural decision that matters: build on PUID/Connect, not EAS
 EOS has **two independent identity systems**, and conflating them is the classic corner:

@@ -11,8 +11,8 @@
 # build the brush, leaving an inert volume, in which case we abort the save and leave the map untouched.
 #
 # Run headless:
-#   "<UE>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" D:\projects\paintforge\PaintForge.uproject
-#     -run=pythonscript -script="D:\projects\paintforge\Scripts\add_nav_bounds.py"
+#   "<UE>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" D:\projects\combatforge\CombatForge.uproject
+#     -run=pythonscript -script="D:\projects\combatforge\Scripts\add_nav_bounds.py"
 import unreal
 
 MAP = "/Game/Maps/L_Graybox"

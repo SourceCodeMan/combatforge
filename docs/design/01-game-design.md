@@ -1,4 +1,4 @@
-# PaintForge — Game Design Document
+# CombatForge — Game Design Document
 
 **Doc:** 01-game-design.md · **Owner:** Lead Game Design · **Status:** v1.0 (locked for graybox milestone)
 **Engine context:** UE 5.6, C++-first, server-authoritative multiplayer from day 1. See locked technical decisions in project charter.
@@ -101,7 +101,7 @@ Side-swap every round is the fairness mechanism for asymmetric team-built halves
 
 **Build wheel & controls (Fortnite-familiar, exact bindings in the input spec doc):** Q enters/exits build mode; wheel or 1–7 selects piece; ghost preview (green valid / red invalid); LMB places; R rotates; X deletes aimed team piece (refund). Placement is server-validated (grid, budget, ownership, no-build zones, overlap).
 
-**Structural rules:** no physics/structural-integrity simulation in v1 — pieces are static once placed and support checks are simple adjacency (a floor panel needs ≥1 supported edge). No building and no destruction during CombatPhase — **decision:** the arena is fixed at fight time. Building *before* and shooting *after* is PaintForge's identity; letting combat-building in would collapse us into a worse Fortnite and wreck arena ratings (the thing voted on must be the thing fought in).
+**Structural rules:** no physics/structural-integrity simulation in v1 — pieces are static once placed and support checks are simple adjacency (a floor panel needs ≥1 supported edge). No building and no destruction during CombatPhase — **decision:** the arena is fixed at fight time. Building *before* and shooting *after* is CombatForge's identity; letting combat-building in would collapse us into a worse Fortnite and wreck arena ratings (the thing voted on must be the thing fought in).
 
 ### 2.3 Finishing early
 
@@ -167,7 +167,7 @@ Dead players in the final round may open Step 1 early while spectating, so most 
 
 ### 4.3 Arena rating data record
 
-Persisted locally in v1 (JSON lines file `Saved/PaintForge/ratings.jsonl`, one record per voter per match) plus one `ArenaSnapshot` JSON per match. Shape is backend-ready: append-only, GUID-keyed, schema-versioned.
+Persisted locally in v1 (JSON lines file `Saved/CombatForge/ratings.jsonl`, one record per voter per match) plus one `ArenaSnapshot` JSON per match. Shape is backend-ready: append-only, GUID-keyed, schema-versioned.
 
 ```json
 // ArenaRating (one per voter per match)

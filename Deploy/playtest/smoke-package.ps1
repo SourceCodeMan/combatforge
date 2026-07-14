@@ -1,7 +1,7 @@
 # Package + cook smoke (M6 landmine check).
 #
 # 1) BuildCookRun Win64 client (Development by default; pass -Config Shipping for ship path)
-# 2) Locate packaged PaintForge.exe
+# 2) Locate packaged CombatForge.exe
 # 3) Boot it briefly (-nullrhi -unattended) and require a clean exit or smoke markers
 #
 # Usage:
@@ -26,7 +26,7 @@ if (-not $ArchiveDir) {
 	$ArchiveDir = Join-Path $ProjectRoot "Packaged\Playtest"
 }
 
-$UProject = Join-Path $ProjectRoot "PaintForge.uproject"
+$UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 $RunUAT = Join-Path $Engine "Engine\Build\BatchFiles\RunUAT.bat"
 if (-not (Test-Path $UProject)) { throw "Missing $UProject" }
 if (-not (Test-Path $RunUAT)) { throw "Missing $RunUAT" }
@@ -68,10 +68,10 @@ if (-not $SkipCook) {
 }
 
 # --- 2) Find client exe ---
-$ClientExe = Get-ChildItem $ArchiveDir -Recurse -Filter "PaintForge.exe" -ErrorAction SilentlyContinue |
+$ClientExe = Get-ChildItem $ArchiveDir -Recurse -Filter "CombatForge.exe" -ErrorAction SilentlyContinue |
 	Select-Object -First 1
 if (-not $ClientExe) {
-	Write-Host "FAIL: no PaintForge.exe under $ArchiveDir"
+	Write-Host "FAIL: no CombatForge.exe under $ArchiveDir"
 	exit 1
 }
 Write-Host "==> Client: $($ClientExe.FullName)"
@@ -100,7 +100,7 @@ $WorkDir = $ClientExe.DirectoryName
 $SeedJson = @'
 {
   "schema": 1,
-  "game": "PaintForge",
+  "game": "CombatForge",
   "matchId": "package-smoke-seed",
   "createdUtc": "2026-07-12T00:00:00Z",
   "teamSize": 2,
@@ -132,9 +132,9 @@ if (-not $Done) {
 if (-not (Test-Path $BootLog)) {
 	# Packaged builds often write next to the exe or under Saved relative to cwd
 	$Alt = @(
-		(Join-Path $WorkDir "PaintForge.log"),
-		(Join-Path $WorkDir "Saved\Logs\PaintForge.log"),
-		(Join-Path $ProjectRoot "Saved\Logs\PaintForge.log")
+		(Join-Path $WorkDir "CombatForge.log"),
+		(Join-Path $WorkDir "Saved\Logs\CombatForge.log"),
+		(Join-Path $ProjectRoot "Saved\Logs\CombatForge.log")
 	) | Where-Object { Test-Path $_ } | Select-Object -First 1
 	if ($Alt) { $BootLog = $Alt }
 }
@@ -153,7 +153,7 @@ if (-not (Test-Path $BootLog)) {
 $Text = Get-Content $BootLog -Raw -ErrorAction SilentlyContinue
 $Pass = $Text -match "SMOKE: Improvement PASS"
 $Fail = $Text -match "SMOKE: Improvement FAIL"
-$Started = $Text -match "LogInit|LogLoad|PaintForge|GameMode"
+$Started = $Text -match "LogInit|LogLoad|CombatForge|GameMode"
 $Fatal = $Text -match "Fatal error|Assertion failed|Ensure condition failed"
 
 if ($Pass -and -not $Fail) {

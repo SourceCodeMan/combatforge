@@ -3,7 +3,7 @@
 #
 # Usage:
 #   .\Deploy\playtest\collect-crash-evidence.ps1
-#   .\Deploy\playtest\collect-crash-evidence.ps1 -ProjectRoot D:\projects\paintforge
+#   .\Deploy\playtest\collect-crash-evidence.ps1 -ProjectRoot D:\projects\combatforge
 param(
 	[string]$ProjectRoot = "",
 	[string]$OutDir = ""
@@ -43,10 +43,10 @@ Copy-IfExists (Join-Path $ProjectRoot "Saved\Config\CrashReportClient") "Project
 
 # Packaged game Saved (kids install folder may be elsewhere — also search common spots)
 $PackagedCandidates = @(
-	(Join-Path $ProjectRoot "Packaged\Playtest\Windows\PaintForge\Saved"),
+	(Join-Path $ProjectRoot "Packaged\Playtest\Windows\CombatForge\Saved"),
 	(Join-Path $ProjectRoot "Packaged\Playtest\Windows\Saved"),
-	"C:\Games\PaintForge\PaintForge\Saved",
-	"C:\Games\PaintForge\Saved"
+	"C:\Games\CombatForge\CombatForge\Saved",
+	"C:\Games\CombatForge\Saved"
 )
 foreach ($P in $PackagedCandidates) {
 	Copy-IfExists $P ("PackagedSaved_" + ($P -replace '[\\/:\s]', '_'))

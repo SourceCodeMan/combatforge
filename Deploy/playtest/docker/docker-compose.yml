@@ -1,12 +1,12 @@
-# Linux dedicated server for PaintForge (requires Linux server cook in ./server-linux).
+# Linux dedicated server for CombatForge (requires Linux server cook in ./server-linux).
 # Windows host LAN playtest: use ../run-server.ps1 instead — Win64 exe won't run here.
 #
 #   docker compose -f Deploy/playtest/docker/docker-compose.yml up --build
 
 services:
-  paintforge-ds:
+  combatforge-ds:
     build: .
-    container_name: paintforge-ds
+    container_name: combatforge-ds
     ports:
       - "7777:7777/udp"
       - "7777:7777/tcp"

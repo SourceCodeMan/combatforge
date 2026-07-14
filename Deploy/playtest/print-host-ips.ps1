@@ -1,5 +1,5 @@
 # Print addresses friends can use to join this machine's playtest server.
-Write-Host "=== PaintForge host addresses ==="
+Write-Host "=== CombatForge host addresses ==="
 Write-Host ""
 
 Write-Host "IPv4 adapters (prefer Ethernet/Wi-Fi or VPN):"

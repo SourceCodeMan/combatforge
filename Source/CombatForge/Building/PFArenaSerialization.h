@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Tom Chapman. All rights reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Core/CombatForgeTypes.h"
+
+class FJsonObject;
+
+/**
+ * Arena fingerprints (T27) + the ArenaLayout JSON piece/grid block (B13, schema v1).
+ * The rating subsystem (pkg-meta) owns file I/O and appends the result/votes blocks; this is
+ * the pure data side. Field names are EXACT per contract §3.7 — append-only evolution.
+ */
+struct COMBATFORGE_API FPFArenaSerialization
+{
+	/**
+	 * arenaId: lowercase SHA1-hex over the grid header + pieces sorted by
+	 * (Type, X, Y, Z, Rot, Team), EXCLUDING PieceId/Owner — identical rebuilds hash identically
+	 * regardless of who placed what (T27).
+	 */
+	static FString ComputeArenaId(const TArray<FPFBuildPieceRec>& Pieces);
+
+	/**
+	 * halfHashA/B: same algorithm over the team-filtered subset, additionally excluding Team.
+	 */
+	static FString ComputeHalfHash(const TArray<FPFBuildPieceRec>& Pieces, uint8 Team);
+
+	/**
+	 * Builds the ① piece/grid block of the match JSON: schema, game, matchId, createdUtc,
+	 * teamSize, grid{...}, arenaId, halfHashA/B, pieces[{id,t,x,y,z,r,own,team}].
+	 */
+	static TSharedRef<FJsonObject> BuildLayoutJson(const TArray<FPFBuildPieceRec>& Pieces,
+	                                               const FString& MatchId, int32 TeamSize,
+	                                               const FDateTime& CreatedUtc);
+
+	/**
+	 * Inverse of BuildLayoutJson's piece block: parses the "pieces" array back into records (and reads
+	 * "teamSize"). PieceId is read but the caller MUST re-mint ids before injecting into a live grid.
+	 * Returns false if there are no valid pieces.
+	 */
+	static bool ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
+	                            TArray<FPFBuildPieceRec>& OutPieces, int32& OutTeamSize);
+};

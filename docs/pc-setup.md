@@ -1,10 +1,10 @@
-# PaintForge — Windows PC setup & first compile
+# CombatForge — Windows PC setup & first compile
 
 **Audience:** you, on the Windows PC, doing the first-ever compile and first editor run of this
 repo. Follow it top to bottom, in order. Budget **half a day** for the whole thing (per
 architecture risk R8) — most of that is downloads and the first build.
 
-Everything here assumes the repo lives at `D:\projects\paintforge`. If you put it elsewhere,
+Everything here assumes the repo lives at `D:\projects\combatforge`. If you put it elsewhere,
 substitute your path (avoid deep nesting and spaces in the path).
 
 ---
@@ -45,21 +45,21 @@ workloads and the components above.
 D:
 mkdir D:\projects 2>nul
 cd D:\projects
-git clone <your-remote-url> paintforge
-cd paintforge
+git clone <your-remote-url> combatforge
+cd combatforge
 ```
 
-Sanity check — you should see `PaintForge.uproject`, `Source\`, `Config\`, `Content\Maps\` (empty
+Sanity check — you should see `CombatForge.uproject`, `Source\`, `Config\`, `Content\Maps\` (empty
 except `.gitkeep`), and `docs\`. There is deliberately **no** `Binaries\` or `Intermediate\` in
 git; the first build creates them.
 
 ## 4. Generate Visual Studio project files
 
-1. In File Explorer, go to `D:\projects\paintforge`.
-2. **Right-click `PaintForge.uproject`** → **Generate Visual Studio project files**.
+1. In File Explorer, go to `D:\projects\combatforge`.
+2. **Right-click `CombatForge.uproject`** → **Generate Visual Studio project files**.
    - On Windows 11 the item may be under **Show more options** (or press `Shift+F10` on the file).
    - If the menu item is missing entirely, see the triage table (§10, row 1).
-3. A console window runs UnrealBuildTool for a few seconds and produces `PaintForge.sln` plus
+3. A console window runs UnrealBuildTool for a few seconds and produces `CombatForge.sln` plus
    `Intermediate\ProjectFiles\`.
 
 Do **not** double-click the `.uproject` yet — the editor can't open the project until the module
@@ -67,9 +67,9 @@ is compiled.
 
 ## 5. First build (Development Editor | Win64)
 
-1. Open **`PaintForge.sln`** in Visual Studio 2022.
+1. Open **`CombatForge.sln`** in Visual Studio 2022.
 2. In the toolbar set the configuration to **Development Editor** and the platform to **Win64**.
-3. In Solution Explorer, expand the **Games** folder, right-click the **PaintForge** project →
+3. In Solution Explorer, expand the **Games** folder, right-click the **CombatForge** project →
    **Set as Startup Project**.
 4. **Build → Build Solution** (`Ctrl+Shift+B`). First build compiles the game module against the
    installed engine — expect **5–20 minutes** depending on CPU. Subsequent builds are incremental
@@ -80,14 +80,14 @@ is compiled.
 ## 6. First editor open
 
 Press **F5** (run with debugger) or **Ctrl+F5** (without) in Visual Studio. The Unreal Editor
-launches with the PaintForge project.
+launches with the CombatForge project.
 
 **Expected on the very first open:** `Config/DefaultEngine.ini` points the editor startup map and
 game default map at `/Game/Maps/L_Graybox` — a map that **does not exist yet** (the repo ships
 `Content/` empty by design). The editor will open an untitled/default level instead and the Output
 Log will warn that the startup map could not be found. That is normal; fix it in the next step.
 
-Also check the **Output Log** (Window → Output Log) for the `PaintForgeLog` category: module
+Also check the **Output Log** (Window → Output Log) for the `CombatForgeLog` category: module
 startup verifies the engine BasicShapes assets and the `BasicShapeMaterial` `Color` parameter with
 `ensureMsgf`. Any ensure failure here means an engine-content mismatch — stop and investigate
 before continuing.
@@ -108,7 +108,7 @@ Exact clicks:
    until it contains an asset — creating/selecting it in the dialog is fine either way.)
 5. Select the `Maps` folder, set **Name** to exactly **`L_Graybox`** → click **Save**.
 6. Verify: the Content Browser now shows `Content/Maps/L_Graybox`, and on disk there is
-   `D:\projects\paintforge\Content\Maps\L_Graybox.umap`.
+   `D:\projects\combatforge\Content\Maps\L_Graybox.umap`.
 7. Restart the editor once and confirm it now opens straight into `L_Graybox` (the
    `EditorStartupMap` ini setting is already pointed at it).
 8. **Commit the map from this PC** (the only `.uasset`/`.umap` that will ever be committed in v1):
@@ -121,7 +121,7 @@ Exact clicks:
 
 ## 8. Editor preferences & PIE multiplayer settings
 
-PaintForge is server-authoritative multiplayer; **always test with 2+ players**, even for
+CombatForge is server-authoritative multiplayer; **always test with 2+ players**, even for
 "single-player" features. The host-works/client-breaks asymmetry is the #1 bug class (risk R5).
 
 1. **Editor Preferences → Level Editor → Play** (this backs the toolbar Play dropdown):
@@ -170,9 +170,9 @@ client uses the console command `open <host-ip>`.
 | 3 | Generate/build fails with MSBuild / .NET SDK / `dotnet` not found | **.NET desktop development** workload missing | VS Installer → Modify → add the workload → regenerate project files. |
 | 4 | `error C1083: Cannot open include file: '...generated.h'` | Stale or missing UnrealHeaderTool output | Close VS/editor, delete `Intermediate\` and `Binaries\`, regenerate project files (§4), rebuild. |
 | 5 | Hundreds of errors on the very first file compiled | Wrong configuration selected | Toolbar must read **Development Editor** + **Win64**. `Development` (no "Editor") or Win32/x86 will not build this project. |
-| 6 | `LNK2019: unresolved external symbol` in PaintForge code | Partial/incremental build confusion after switching configs or pulling | **Build → Rebuild Solution**; if it persists, do the full clean in row 4. |
-| 7 | Double-clicking `.uproject` says *"PaintForge could not be compiled. Try rebuilding from source manually."* | Editor launched before the module was built | Build in VS first (§5), then launch. Never accept the editor's own compile prompt for the first build — you want VS's error list. |
-| 8 | Build is glacially slow / disk thrashing | Windows Defender scanning every compile artifact | Add exclusions for `D:\projects\paintforge` and the `UE_5.6` engine folder (Windows Security → Virus & threat protection → Exclusions). |
+| 6 | `LNK2019: unresolved external symbol` in CombatForge code | Partial/incremental build confusion after switching configs or pulling | **Build → Rebuild Solution**; if it persists, do the full clean in row 4. |
+| 7 | Double-clicking `.uproject` says *"CombatForge could not be compiled. Try rebuilding from source manually."* | Editor launched before the module was built | Build in VS first (§5), then launch. Never accept the editor's own compile prompt for the first build — you want VS's error list. |
+| 8 | Build is glacially slow / disk thrashing | Windows Defender scanning every compile artifact | Add exclusions for `D:\projects\combatforge` and the `UE_5.6` engine folder (Windows Security → Virus & threat protection → Exclusions). |
 | 9 | Editor opens an untitled level; log warns startup map missing | `L_Graybox` not created yet | Expected before §7 — create and save the map. |
 | 10 | Editor boot shows `ensureMsgf` failure about BasicShapes / `Color` parameter | Engine content moved/renamed in your engine install | Verify the install is stock 5.6 via launcher (Library → dropdown on the tile → Verify). Do not silence the ensure. |
 | 11 | UBT complains the MSVC toolchain version is unsupported/too new | A newer v14.4x toolset than the engine supports | VS Installer → Individual components → install the exact **MSVC v143** version UBT names in its error output, or update to the latest UE 5.6 hotfix. |

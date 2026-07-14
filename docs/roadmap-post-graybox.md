@@ -2,7 +2,7 @@
 
 > Status snapshot (2026-07-10): v1 graybox **compiles & links clean** (VS 2022 Community + UE 5.6.1).
 > `L_Graybox.umap` created & committed. **First 2-player PIE playtest pending** (do this first, next session).
-> Formerly "PaintForge" — renaming to **Breachworks** (see naming notes below; not yet locked).
+> Formerly "CombatForge" — renaming to **Breachworks** (see naming notes below; not yet locked).
 
 This roadmap is the durable plan so work can resume fast across sessions. Detailed art-integration
 steps live in [`art-integration-playbook.md`](art-integration-playbook.md) (generated separately).
@@ -14,7 +14,7 @@ The graybox has **never been played**. Run the 2-player listen-server PIE test (
 Number of Players = 2, Net Mode = Play As Listen Server → walk Lobby→Build→Combat→Vote→Results.
 - **Success signal:** full loop completes + a match JSON lands in `Saved/Arenas/`.
 - **Watch for:** listen-server replication asymmetry (host works / client breaks — risk R5, the #1 bug class).
-  Tail `Saved/Logs/PaintForge.log` during play.
+  Tail `Saved/Logs/CombatForge.log` during play.
 - If bugs appear, fix them before any art work. Everything below assumes a green playtest.
 
 ## M1 — First-playable ART PASS (the big next step)
@@ -28,8 +28,8 @@ to get a "this looks like a real game" moment before going wide. Detailed steps 
 | Asset (owned/queued) | Source | Plugs into (code seam) |
 |---|---|---|
 | Quixel **Megascans** surfaces (concrete/metal) | Quixel Bridge (grab in-editor) | `PFBuildGrid` 7 ISMs + `APFArenaShell` — skin primitives; per-instance custom-data float already carries team → add tint/emissive accent for team readability |
-| **Lyra** rifle+pistol + FP/TP anims | Epic Launcher → Samples (grab) | `PFWeaponComponent`, `PaintForgeCharacter` (harvest assets, not the framework) |
-| **MetaHuman** bodies (2 teams) | MetaHuman Creator (grab) | `PaintForgeCharacter` skeletal mesh + anim BP; teams via material/faction variant |
+| **Lyra** rifle+pistol + FP/TP anims | Epic Launcher → Samples (grab) | `PFWeaponComponent`, `CombatForgeCharacter` (harvest assets, not the framework) |
+| **MetaHuman** bodies (2 teams) | MetaHuman Creator (grab) | `CombatForgeCharacter` skeletal mesh + anim BP; teams via material/faction variant |
 | **Game Animation Sample** + **Animation Starter Pack** | Fab library ✅ | character locomotion + rifle fire/ADS/reload (retarget to chosen skeleton) |
 | **Niagara Examples Pack** | Fab library ✅ | `PFSplatSubsystem` (stub) — recolor impacts → paint splat/decals |
 | **50 Free Game Sounds** + **UI SFX Free** | Fab library ✅ | `PFCombatAudio` (stub) + build-menu/HUD SFX |
@@ -41,7 +41,7 @@ identity to an **overlay** (emissive trim / player uniform) — don't tint the w
 ## M2 — Non-lethal wording + naming (small, quick)
 Only on-screen lethal word is **"SUDDEN DEATH"** (3 UI spots) → rename (Overtime / Final Round /
 Showdown). Optional internal renames (`corpse`, `death cam`) for consistency — low priority.
-Wire the chosen **display title** (Breachworks) — separate from the code module (`PaintForge`/`PF*`
+Wire the chosen **display title** (Breachworks) — separate from the code module (`CombatForge`/`PF*`
 prefixes can stay). **Do these AFTER the playtest** (don't change gameplay code before validating).
 
 ## M3 — Feel & balance tuning

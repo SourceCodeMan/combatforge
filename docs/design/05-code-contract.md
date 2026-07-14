@@ -1,7 +1,7 @@
-# PaintForge — Code Contract (v1 Graybox)
+# CombatForge — Code Contract (v1 Graybox)
 
 **Doc:** 05-code-contract.md · **Owner:** Tech lead · **Status:** LAW for the six parallel implementation packages
-**Engine:** Unreal Engine 5.6 · **Module:** `PaintForge` · **Target:** Win64 · C++-first, zero editor-authored assets.
+**Engine:** Unreal Engine 5.6 · **Module:** `CombatForge` · **Target:** Win64 · C++-first, zero editor-authored assets.
 
 This document supersedes any conflicting statement in docs 01–04. Where this doc is silent, the
 authority order is: **01 (game rules) → 03 (build system) → 04 (combat feel) → 02 (structure/netcode)**
@@ -51,7 +51,7 @@ Section map:
 | T6 | Round start: 01 = 5 s freeze, 04 = "3-2-1 lock" | **5 s freeze** (01 rules). Movement locked, look/ADS free, breakout horn stub `PlayBreakout()` at 0. Intermission **7 s** (01) over 04's 5 s. |
 | T7 | Ghost preview: 03 = 35 % translucent MID, 02 = "BasicShapeMaterial is opaque; color-only validity" | **Opaque ghost, color-only** (02 is authority on zero-asset feasibility; runtime blend-mode switching on an MID is impossible). 03's exact colors kept: valid green (0.1, 0.9, 0.2), invalid red (0.95, 0.1, 0.1), delete-highlight orange (1.0, 0.55, 0.1). Graybox concession, recorded. |
 | T8 | B8 says "7 ISMCs", 03 wanted per-instance custom-data team tint — but `BasicShapeMaterial` exposes no per-instance custom data | **7 ISMCs per team = 14 ISMCs total** on `APFBuildGrid`, each with its own team-tinted MID. Keeps B8's spirit (one actor, FastArray, ISM-per-piece-type) with a mechanism that actually renders team color. |
-| T9 | 02's `UPFBuildGridSubsystem` + `APFTeamSpawnZone` vs 03's `ABuildGrid` | **Folded into `APFBuildGrid`** (occupancy + validation live on the grid actor; clients mirror from FastArray callbacks). Spawn zones become constants in `PaintForgeTypes.h` + geometry on `APFArenaShell`. Neither 02 class exists. |
+| T9 | 02's `UPFBuildGridSubsystem` + `APFTeamSpawnZone` vs 03's `ABuildGrid` | **Folded into `APFBuildGrid`** (occupancy + validation live on the grid actor; clients mirror from FastArray callbacks). Spawn zones become constants in `CombatForgeTypes.h` + geometry on `APFArenaShell`. Neither 02 class exists. |
 | T10 | 02's `APFCosmeticTracer` vs 04's cosmetic projectile | **Superseded by `APFPaintballProjectile` in Cosmetic mode** (04's fake-and-verify needs a real ballistic cosmetic, not a straight-line tracer). Class `APFCosmeticTracer` does not exist. |
 | T11 | 02 §1.7 "25 UCLASSes, anything not listed does not exist" | **Superseded by §3 of this contract** — the class list below is the exhaustive one. |
 | T12 | 02 puts `PFHealthComponent` in `Player/` | **Moved to `Combat/` and owned by pkg-weapons** (hit/elimination pipeline is one package; folder follows package). |
@@ -66,7 +66,7 @@ Section map:
 | T21 | Fire gating across phases | Fire is server-valid only in **Lobby (warm-up pen)** and **Combat rounds in `Live` state**. BuildPhase weapons are dead (01 §2.3); Freeze/Intermission fire is rejected server-side. |
 | T22 | 01 gives no Ready/host-start bindings | **F = Ready toggle** (Lobby + BuildPhase), **Enter = host force-start** (Lobby, host only), **hold Tab in Lobby** shows roster overlay with cursor; host clicks a player row to cycle team (01's "drag-swap" simplified to click-cycle). |
 | T23 | Midline barrier must block traversal yet stay see-through with opaque-only materials | Barrier = **invisible full-height blocking volume** (blocks `Pawn` + `Paintball` during BuildPhase only) + **visible 40 uu-wide gray posts every 400 uu** + painted floor stripe. Reads as a barrier, occludes nothing. |
-| T24 | Voter identity | Per-install `FGuid` generated/persisted by `UPaintForgeGameInstance` at `Saved/PaintForge/Identity.json` (02); written into arena JSON as SHA1-hex of the GUID (03's "anonymized hash"). |
+| T24 | Voter identity | Per-install `FGuid` generated/persisted by `UCombatForgeGameInstance` at `Saved/CombatForge/Identity.json` (02); written into arena JSON as SHA1-hex of the GUID (03's "anonymized hash"). |
 | T25 | Prop Z on floors breaks 03's integer sub-grid (floor top was base+20) | **Floor slab top = level base Z** (slab occupies −20..0 relative). All support tops are exact 300-multiples → prop Z stays integer sub-grid. Level-0 floor sits flush in the ground slab; cosmetic only. |
 | T26 | Reload key vs rotate key (both "R") | Same physical key, different contexts: `IA_Reload` lives in `IMC_Combat`, `IA_RotatePiece` in `IMC_Build`. Contexts are never active simultaneously. |
 | T27 | Fingerprint definition (01 "canonical piece manifest" vs 02 "type+cell+rot") | `arenaId` = SHA1-hex over the grid header + pieces sorted by (Type, X, Y, Z, Rot, Team), **excluding PieceId/Owner** (identical rebuilds hash identically regardless of who placed). `halfHashA/B` = same algorithm over the team-filtered subset excluding Team. |
@@ -80,7 +80,7 @@ Section map:
 
 Rules: every file below is owned by **exactly one** package. A package may freely edit only its own
 files. Other packages' headers are consumed strictly through the §3 contract — if §3 doesn't show
-a member, you may not call it. `Source/PaintForge/` is abbreviated `Src/` below.
+a member, you may not call it. `Source/CombatForge/` is abbreviated `Src/` below.
 
 **Content/ note (explicit):** the `Content/` folder ships **EMPTY** in v1 — zero editor-authored
 assets. The only repo entry is `Content/Maps/.gitkeep`. `L_Graybox.umap` is created once on the
@@ -91,26 +91,26 @@ package may add any other `.uasset`/`.umap`.
 
 | File | Contents |
 |---|---|
-| `PaintForge.uproject` | EngineAssociation "5.6", module PaintForge, EnhancedInput enabled |
+| `CombatForge.uproject` | EngineAssociation "5.6", module CombatForge, EnhancedInput enabled |
 | `Config/DefaultEngine.ini` | Maps/GameMode defaults, net tick rate, collision channels (§4.6), motion blur off |
 | `Config/DefaultGame.ini` | Project name/ID, copyright notice |
 | `Config/DefaultInput.ini` | Empty guard file (5.6 defaults already Enhanced Input) |
-| `Source/PaintForge.Target.cs` | Game target, `BuildSettingsVersion.V5`, `Unreal5_6` include order |
-| `Source/PaintForgeEditor.Target.cs` | Editor target, same settings |
-| `Src/PaintForge.Build.cs` | Deps: Core, CoreUObject, Engine, InputCore, EnhancedInput, UMG, Slate, SlateCore, NetCore, Json, JsonUtilities |
-| `Src/PaintForge.h` / `.cpp` | Module impl, `PaintForgeLog` category, startup engine-asset `ensureMsgf` checks |
-| `Src/Core/PaintForgeTypes.h` / `.cpp` | ALL shared enums/structs/constants/delegates (§3.1) |
-| `Src/Core/PaintForgeGameInstance.h` / `.cpp` | Per-install GUID identity |
-| `Src/Core/PaintForgeGameMode.h` / `.cpp` | Server-only phase + round state machine, spawn logic, validation gates |
-| `Src/Core/PaintForgeGameState.h` / `.cpp` | Replicated match truth + UI delegates |
-| `Src/Core/PaintForgePlayerState.h` / `.cpp` | Team, ready, budgets, score, roster index |
-| `Src/Core/PaintForgePlayerController.h` / `.cpp` | Input-context/mode switching, HUD creation, vote/ready RPCs, spectate |
+| `Source/CombatForge.Target.cs` | Game target, `BuildSettingsVersion.V5`, `Unreal5_6` include order |
+| `Source/CombatForgeEditor.Target.cs` | Editor target, same settings |
+| `Src/CombatForge.Build.cs` | Deps: Core, CoreUObject, Engine, InputCore, EnhancedInput, UMG, Slate, SlateCore, NetCore, Json, JsonUtilities |
+| `Src/CombatForge.h` / `.cpp` | Module impl, `CombatForgeLog` category, startup engine-asset `ensureMsgf` checks |
+| `Src/Core/CombatForgeTypes.h` / `.cpp` | ALL shared enums/structs/constants/delegates (§3.1) |
+| `Src/Core/CombatForgeGameInstance.h` / `.cpp` | Per-install GUID identity |
+| `Src/Core/CombatForgeGameMode.h` / `.cpp` | Server-only phase + round state machine, spawn logic, validation gates |
+| `Src/Core/CombatForgeGameState.h` / `.cpp` | Replicated match truth + UI delegates |
+| `Src/Core/CombatForgePlayerState.h` / `.cpp` | Team, ready, budgets, score, roster index |
+| `Src/Core/CombatForgePlayerController.h` / `.cpp` | Input-context/mode switching, HUD creation, vote/ready RPCs, spectate |
 
 ### pkg-character (8 files) — pawn, movement, camera, Enhanced Input construction
 
 | File | Contents |
 |---|---|
-| `Src/Player/PaintForgeCharacter.h` / `.cpp` | The one pawn (build + combat), camera, FOV arbiter, input binding hub |
+| `Src/Player/CombatForgeCharacter.h` / `.cpp` | The one pawn (build + combat), camera, FOV arbiter, input binding hub |
 | `Src/Player/PFCharacterMovementComponent.h` / `.cpp` | Sprint/ADS compressed flags, `CMOVE_Slide`, `FSavedMove_PF` |
 | `Src/Player/PFCameraShakes.h` / `.cpp` | `UPFLandShake`, `UPFFireShake` (asset-free `UCameraShakeBase` subclasses) |
 | `Src/Input/PFInputConfig.h` / `.cpp` | All 22 native `UInputAction`s + 3 `UInputMappingContext`s, built in C++ |
@@ -173,12 +173,12 @@ is also the integration reviewer for JSON schema conformance (§3.6).
 
 Legend: everything shown here is **exact and binding** (names, types, specifiers, RPC flavors).
 Members marked *(intra)* are summarized — their package may shape them freely as long as the
-described behavior holds. Every UCLASS/USTRUCT below is `PAINTFORGE_API`. Every replicated
+described behavior holds. Every UCLASS/USTRUCT below is `COMBATFORGE_API`. Every replicated
 property must be registered in `GetLifetimeReplicatedProps` (§5). Delegates are **non-dynamic**
 C++ multicast delegates (no BP); subscribers bind with `AddUObject` and MUST unbind
 (`RemoveAll(this)`) in `NativeDestruct`/`EndPlay`.
 
-### 3.1 `Core/PaintForgeTypes.h` (pkg-core) — the one shared header
+### 3.1 `Core/CombatForgeTypes.h` (pkg-core) — the one shared header
 
 Everyone includes this. It includes only engine headers. No class in it — types, constants,
 delegates only.
@@ -226,7 +226,7 @@ enum class EPFThumbVote : uint8 { Abstained = 0, Up = 1, Down = 2 };
 
 // ---- Replication / gameplay structs ----
 USTRUCT()
-struct PAINTFORGE_API FPFBuildPieceRec : public FFastArraySerializerItem
+struct COMBATFORGE_API FPFBuildPieceRec : public FFastArraySerializerItem
 {
     GENERATED_BODY()
     UPROPERTY() uint16       PieceId  = 0;   // server-assigned, monotonic per match, never reused
@@ -235,12 +235,12 @@ struct PAINTFORGE_API FPFBuildPieceRec : public FFastArraySerializerItem
     UPROPERTY() int16        Y        = 0;
     UPROPERTY() int16        Z        = 0;   // sub-grid units. Structural: level*3 (0/3/6/9). Props: support-top (T25 keeps it integral).
     UPROPERTY() uint8        Rot      = 0;   // 0-3 = 90° yaw steps. Walls: canonical edge (0=N, 1=E). Floor/Roof: stored but render-invariant.
-    UPROPERTY() uint8        OwnerIdx = 0;   // roster index (APaintForgePlayerState::RosterIndex), for refunds/attribution
+    UPROPERTY() uint8        OwnerIdx = 0;   // roster index (ACombatForgePlayerState::RosterIndex), for refunds/attribution
     UPROPERTY() uint8        Team     = 0;   // 0 = A, 1 = B
 };
 
 USTRUCT()
-struct PAINTFORGE_API FPFShotPacket
+struct COMBATFORGE_API FPFShotPacket
 {
     GENERATED_BODY()
     UPROPERTY() FVector_NetQuantize100    Origin = FVector::ZeroVector;
@@ -250,10 +250,10 @@ struct PAINTFORGE_API FPFShotPacket
 };
 
 USTRUCT()
-struct PAINTFORGE_API FPFPaintHitInfo
+struct COMBATFORGE_API FPFPaintHitInfo
 {
     GENERATED_BODY()
-    UPROPERTY() TObjectPtr<class APaintForgePlayerState> ShooterPS = nullptr; // server-side only; not for wire
+    UPROPERTY() TObjectPtr<class ACombatForgePlayerState> ShooterPS = nullptr; // server-side only; not for wire
     UPROPERTY() uint8                     ShooterTeam  = 0;
     UPROPERTY() FVector_NetQuantize       ImpactPoint  = FVector::ZeroVector;
     UPROPERTY() FVector_NetQuantizeNormal ImpactNormal = FVector::UpVector;
@@ -263,7 +263,7 @@ struct PAINTFORGE_API FPFPaintHitInfo
 };
 
 USTRUCT()
-struct PAINTFORGE_API FPFElimEntry
+struct COMBATFORGE_API FPFElimEntry
 {
     GENERATED_BODY()
     UPROPERTY() FString ShooterName;  UPROPERTY() uint8 ShooterTeam = 0;
@@ -272,7 +272,7 @@ struct PAINTFORGE_API FPFElimEntry
 };
 
 USTRUCT()
-struct PAINTFORGE_API FPFVoteTally   // replicated on GameState for the Results screen
+struct COMBATFORGE_API FPFVoteTally   // replicated on GameState for the Results screen
 {
     GENERATED_BODY()
     UPROPERTY() uint8 Up = 0;
@@ -283,7 +283,7 @@ struct PAINTFORGE_API FPFVoteTally   // replicated on GameState for the Results 
 };
 
 USTRUCT()
-struct PAINTFORGE_API FPFVoteRecord  // server-side aggregation shape (rating subsystem input)
+struct COMBATFORGE_API FPFVoteRecord  // server-side aggregation shape (rating subsystem input)
 {
     GENERATED_BODY()
     UPROPERTY() FString       VoterGuidHash;         // SHA1-hex of install GUID (T24)
@@ -294,7 +294,7 @@ struct PAINTFORGE_API FPFVoteRecord  // server-side aggregation shape (rating su
 };
 
 USTRUCT()
-struct PAINTFORGE_API FPFMatchResult
+struct COMBATFORGE_API FPFMatchResult
 {
     GENERATED_BODY()
     UPROPERTY() uint8  WinnerTeam = 255;   // 0/1, 255 = draw
@@ -309,9 +309,9 @@ struct PAINTFORGE_API FPFMatchResult
 namespace PFVoteCategories
 {
     // Fixed IDs 1..8 — stable forever, never renumber. Index in All = ID - 1.
-    PAINTFORGE_API extern const TArray<FName>  All;      // layout, cover, verticality, flow, balance, sightlines, creativity, pacing
-    PAINTFORGE_API extern const TArray<FText>  HintText; // player-facing hints per 01 §4.1
-    PAINTFORGE_API FName FromId(uint8 Id);               // 1..8, NAME_None otherwise
+    COMBATFORGE_API extern const TArray<FName>  All;      // layout, cover, verticality, flow, balance, sightlines, creativity, pacing
+    COMBATFORGE_API extern const TArray<FText>  HintText; // player-facing hints per 01 §4.1
+    COMBATFORGE_API FName FromId(uint8 Id);               // 1..8, NAME_None otherwise
 }
 
 // ---- Grid & field constants (compile-time; grid math must be shareable and non-instance) ----
@@ -342,7 +342,7 @@ namespace PFColors
     inline const FLinearColor GhostValid{0.1f, 0.9f, 0.2f};
     inline const FLinearColor GhostInvalid{0.95f, 0.1f, 0.1f};
     inline const FLinearColor DeleteHighlight{1.0f, 0.55f, 0.1f};
-    PAINTFORGE_API FLinearColor ForTeam(uint8 Team);
+    COMBATFORGE_API FLinearColor ForTeam(uint8 Team);
 }
 
 // ---- Cross-package delegates (declared here, owned by the classes noted in §3.x) ----
@@ -366,40 +366,40 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnToolSelected, EPFBuildTool);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnSlideStateChanged, bool /*bSliding*/);
 ```
 
-**Log category (owned by pkg-core, declared in `Src/PaintForge.h`, defined in `Src/PaintForge.cpp`):**
+**Log category (owned by pkg-core, declared in `Src/CombatForge.h`, defined in `Src/CombatForge.cpp`):**
 
 ```cpp
-DECLARE_LOG_CATEGORY_EXTERN(PaintForgeLog, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
 ```
 
-Every package logs through `UE_LOG(PaintForgeLog, ...)`. No package declares another category.
+Every package logs through `UE_LOG(CombatForgeLog, ...)`. No package declares another category.
 
 ### 3.2 pkg-core classes
 
-#### `UPaintForgeGameInstance : UGameInstance`
+#### `UCombatForgeGameInstance : UGameInstance`
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPaintForgeGameInstance : public UGameInstance
+class COMBATFORGE_API UCombatForgeGameInstance : public UGameInstance
 {
     GENERATED_BODY()
 public:
     virtual void Init() override;                 // loads/creates identity file
     FGuid   GetLocalPlayerGuid() const;           // per-install identity (T24)
     FString GetLocalPlayerGuidHash() const;       // SHA1-hex of the GUID — what goes on the wire/disk
-    // (intra) persistence at Saved/PaintForge/Identity.json
+    // (intra) persistence at Saved/CombatForge/Identity.json
 };
 ```
 
-#### `APaintForgeGameMode : AGameModeBase` — server-only; THE phase/round writer
+#### `ACombatForgeGameMode : AGameModeBase` — server-only; THE phase/round writer
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APaintForgeGameMode : public AGameModeBase
+class COMBATFORGE_API ACombatForgeGameMode : public AGameModeBase
 {
     GENERATED_BODY()
 public:
-    APaintForgeGameMode();  // sets DefaultPawnClass=APaintForgeCharacter, PlayerControllerClass,
+    ACombatForgeGameMode();  // sets DefaultPawnClass=ACombatForgeCharacter, PlayerControllerClass,
                             // GameStateClass, PlayerStateClass
 
     // ---- Config (UPROPERTY(EditDefaultsOnly, Category="PF|Match") unless noted) ----
@@ -421,19 +421,19 @@ public:
 
     // ---- Cross-package server entry points ----
     // pkg-weapons calls when a player pawn's HP hits 0 (dummies do NOT route here):
-    void NotifyPawnEliminated(class APaintForgeCharacter* Victim, const FPFPaintHitInfo& FinalHit);
+    void NotifyPawnEliminated(class ACombatForgeCharacter* Victim, const FPFPaintHitInfo& FinalHit);
     // pkg-core PC calls after PlayerState ready flag flips (Lobby early-start / Build early-end):
     void NotifyReadyChanged();
     // pkg-core PC forwards votes here; GameMode validates, tallies to GameState, forwards to UPFRatingSubsystem:
-    void SubmitVote(class APaintForgePlayerController* Voter, EPFThumbVote Thumb,
+    void SubmitVote(class ACombatForgePlayerController* Voter, EPFThumbVote Thumb,
                     const TArray<uint8>& LikedIds, const TArray<uint8>& DislikedIds);
     // Host-only actions (from PC RPCs):
     void HostForceStart();                             // Lobby only
-    void HostCycleTeam(class APaintForgePlayerState* Target); // Lobby only (T22)
+    void HostCycleTeam(class ACombatForgePlayerState* Target); // Lobby only (T22)
     void HostReturnToLobby();                          // Results only
 
     // Spawn transform for a player in the current round (side swap: even rounds swapped — B1):
-    FTransform GetSpawnTransform(const class APaintForgePlayerState* PS) const;
+    FTransform GetSpawnTransform(const class ACombatForgePlayerState* PS) const;
 
 protected:
     // (intra) round loop: StartRound/EndRound/ResolveRoundOnTimer/CheckElimVictory/StartSuddenDeath,
@@ -451,11 +451,11 @@ protected:
 - `Vote→Results`: tally to GameState, `UPFRatingSubsystem::CommitMatchRecord(...)` writes JSON.
 - `Results→Lobby`: same roster kept; scores/budgets reset on next Build.
 
-#### `APaintForgeGameState : AGameStateBase` — replicated match truth
+#### `ACombatForgeGameState : AGameStateBase` — replicated match truth
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APaintForgeGameState : public AGameStateBase
+class COMBATFORGE_API ACombatForgeGameState : public AGameStateBase
 {
     GENERATED_BODY()
 public:
@@ -477,7 +477,7 @@ public:
     float GetRoundTimeRemaining() const;
     bool  IsFireAllowed()  const;          // Lobby || (Combat && Live)   (T21) — same predicate client & server
     bool  IsBuildAllowed() const;          // Build only
-    class APaintForgePlayerState* FindPlayerByRosterIndex(uint8 RosterIndex) const;
+    class ACombatForgePlayerState* FindPlayerByRosterIndex(uint8 RosterIndex) const;
 
     // ---- Server-side setters (set property + manually invoke OnRep on listen host — R7) ----
     void ServerSetPhase(EPFMatchPhase NewPhase, float EndServerTime);       // GameMode only
@@ -502,11 +502,11 @@ protected:
 };
 ```
 
-#### `APaintForgePlayerState : APlayerState`
+#### `ACombatForgePlayerState : APlayerState`
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APaintForgePlayerState : public APlayerState
+class COMBATFORGE_API ACombatForgePlayerState : public APlayerState
 {
     GENERATED_BODY()
 public:
@@ -537,11 +537,11 @@ protected:
 };
 ```
 
-#### `APaintForgePlayerController : APlayerController`
+#### `ACombatForgePlayerController : APlayerController`
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APaintForgePlayerController : public APlayerController
+class COMBATFORGE_API ACombatForgePlayerController : public APlayerController
 {
     GENERATED_BODY()
 public:
@@ -551,7 +551,7 @@ public:
                                     const TArray<uint8>& LikedIds, const TArray<uint8>& DislikedIds);
     UFUNCTION(Server, Reliable) void ServerSetPlayerGuidHash(const FString& GuidHash); // once, on join
     UFUNCTION(Server, Reliable) void ServerHostForceStart();      // ignored if not host
-    UFUNCTION(Server, Reliable) void ServerHostCycleTeam(APaintForgePlayerState* Target);
+    UFUNCTION(Server, Reliable) void ServerHostCycleTeam(ACombatForgePlayerState* Target);
     UFUNCTION(Server, Reliable) void ServerHostReturnToLobby();
     UFUNCTION(Server, Reliable) void ServerSpectateNext(bool bForward); // dead-only; server retargets ViewTarget
 
@@ -576,16 +576,16 @@ private:
 
 ### 3.3 pkg-character classes
 
-#### `APaintForgeCharacter : ACharacter` — the one pawn, both phases (no pawn swap)
+#### `ACombatForgeCharacter : ACharacter` — the one pawn, both phases (no pawn swap)
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APaintForgeCharacter : public ACharacter
+class COMBATFORGE_API ACombatForgeCharacter : public ACharacter
 {
     GENERATED_BODY()
 public:
     // MUST use ObjectInitializer ctor to swap in the custom CMC (§5):
-    APaintForgeCharacter(const FObjectInitializer& ObjectInitializer);
+    ACombatForgeCharacter(const FObjectInitializer& ObjectInitializer);
 
     // ---- Component accessors (cross-package; never null after construction) ----
     class UPFCharacterMovementComponent* GetPFMovement() const;
@@ -623,7 +623,7 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFCharacterMovementComponent : public UCharacterMovementComponent
+class COMBATFORGE_API UPFCharacterMovementComponent : public UCharacterMovementComponent
 {
     GENERATED_BODY()
 public:
@@ -667,11 +667,11 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFInputConfig : public UObject
+class COMBATFORGE_API UPFInputConfig : public UObject
 {
     GENERATED_BODY()
 public:
-    void Build(class APaintForgePlayerController* OuterPC);  // constructs ALL objects below; idempotent guard
+    void Build(class ACombatForgePlayerController* OuterPC);  // constructs ALL objects below; idempotent guard
 
     // ---- Actions (22). ALL UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> — GC-rooted (02 R1) ----
     // Common (IMC_Common, priority 0):
@@ -715,7 +715,7 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFWeaponComponent : public UActorComponent
+class COMBATFORGE_API UPFWeaponComponent : public UActorComponent
 {
     GENERATED_BODY()
 public:
@@ -767,7 +767,7 @@ public:
     //   MakeShotStream spread → UPFFireShake → predicted HopperCount-- → ServerFire(packet). Zero
     //   perceived latency (04 §5.1).
     // Server fire: token bucket cap 3 / refill 12 s⁻¹; Origin within 150 uu of server muzzle; Dir
-    //   within 4° of server view (silent reject + PaintForgeLog warn); phase gate
+    //   within 4° of server view (silent reject + CombatForgeLog warn); phase gate
     //   GameState->IsFireAllowed() (T21); then spawn Authoritative projectile with SAME stream.
     // Friendly fire (B12): server team-hit → MulticastImpactSplat only; no damage, no hit event,
     //   no ClientHitConfirm.
@@ -780,7 +780,7 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APFPaintballProjectile : public AActor
+class COMBATFORGE_API APFPaintballProjectile : public AActor
 {
     GENERATED_BODY()
 public:
@@ -808,7 +808,7 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFHealthComponent : public UActorComponent
+class COMBATFORGE_API UPFHealthComponent : public UActorComponent
 {
     GENERATED_BODY()
 public:
@@ -850,7 +850,7 @@ protected:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFSplatSubsystem : public UWorldSubsystem
+class COMBATFORGE_API UPFSplatSubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 public:
@@ -873,7 +873,7 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFCombatAudio : public UActorComponent
+class COMBATFORGE_API UPFCombatAudio : public UActorComponent
 {
     GENERATED_BODY()
 public:
@@ -887,7 +887,7 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APFTargetDummy : public AActor
+class COMBATFORGE_API APFTargetDummy : public AActor
 {
     GENERATED_BODY()
 public:
@@ -905,7 +905,7 @@ public:
 ```cpp
 // FastArray wrapper — lives in PFBuildGrid.h, only the grid uses it directly:
 USTRUCT()
-struct PAINTFORGE_API FPFBuildPieceArray : public FFastArraySerializer
+struct COMBATFORGE_API FPFBuildPieceArray : public FFastArraySerializer
 {
     GENERATED_BODY()
     UPROPERTY() TArray<FPFBuildPieceRec> Items;
@@ -923,7 +923,7 @@ template<> struct TStructOpsTypeTraits<FPFBuildPieceArray>
 
 // Placement query — one struct so client ghost and server validation share ONE predicate (03 §4):
 USTRUCT()
-struct PAINTFORGE_API FPFPlacementQuery
+struct COMBATFORGE_API FPFPlacementQuery
 {
     GENERATED_BODY()
     UPROPERTY() EPFPieceType Type = EPFPieceType::Wall;
@@ -933,7 +933,7 @@ struct PAINTFORGE_API FPFPlacementQuery
 };
 
 UCLASS()
-class PAINTFORGE_API APFBuildGrid : public AActor
+class COMBATFORGE_API APFBuildGrid : public AActor
 {
     GENERATED_BODY()
 public:
@@ -951,12 +951,12 @@ public:
         // neutral strip. Does NOT check budget/rate (server-only, in TryPlacePiece).
 
     // ---- Server-only mutation (called from UPFBuildComponent server RPCs) ----
-    EPFDenyReason TryPlacePiece(class APaintForgePlayerState* Placer, const FPFPlacementQuery& Q,
+    EPFDenyReason TryPlacePiece(class ACombatForgePlayerState* Placer, const FPFPlacementQuery& Q,
                                 uint16& OutPieceId);
         // QueryPlacement + Placer budget spend (ServerTrySpendBudget) + 10/s/player rate cap
         // (RateLimited) + assigns PieceId + MarkItemDirty. Never trusts client Team/Owner — reads
         // them from Placer.
-    EPFDenyReason TryDeletePiece(class APaintForgePlayerState* Requester, uint16 PieceId);
+    EPFDenyReason TryDeletePiece(class ACombatForgePlayerState* Requester, uint16 PieceId);
         // exists? same team? phase Build? → refund ORIGINAL builder via
         // GameState->FindPlayerByRosterIndex(rec.OwnerIdx)->ServerRefundBudget (T19), remove +
         // MarkArrayDirty
@@ -977,7 +977,7 @@ public:
 #### `FPFGridMath` — header-only statics (`PFGridMath.h`)
 
 ```cpp
-struct PAINTFORGE_API FPFGridMath   // all pure statics; NO state. The ONLY snap math in the game.
+struct COMBATFORGE_API FPFGridMath   // all pure statics; NO state. The ONLY snap math in the game.
 {
     // World → grid (03 §4 quantize rules; field origin = world origin):
     static FIntVector WorldToCell(const FVector& P);              // floor(P.xy/400), level = clamp(round(P.z/300),0,3)
@@ -1001,13 +1001,13 @@ struct PAINTFORGE_API FPFGridMath   // all pure statics; NO state. The ONLY snap
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFBuildComponent : public UActorComponent
+class COMBATFORGE_API UPFBuildComponent : public UActorComponent
 {
     GENERATED_BODY()
 public:
     UPFBuildComponent();   // SetIsReplicatedByDefault(true) — carries RPCs
 
-    // Called by APaintForgeCharacter::SetupPlayerInputComponent (§3.3) — binds ALL IMC_Build actions:
+    // Called by ACombatForgeCharacter::SetupPlayerInputComponent (§3.3) — binds ALL IMC_Build actions:
     void BindInput(class UEnhancedInputComponent* EIC, const class UPFInputConfig* Cfg);
 
     // ---- Equip state (client-local) ----
@@ -1047,7 +1047,7 @@ public:
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API APFArenaShell : public AActor
+class COMBATFORGE_API APFArenaShell : public AActor
 {
     GENERATED_BODY()
 public:
@@ -1072,7 +1072,7 @@ public:
 #### `FPFArenaSerialization` — statics (`PFArenaSerialization.h`)
 
 ```cpp
-struct PAINTFORGE_API FPFArenaSerialization
+struct COMBATFORGE_API FPFArenaSerialization
 {
     // T27 fingerprints — SHA1 hex lowercase:
     static FString ComputeArenaId(const TArray<FPFBuildPieceRec>& Pieces);       // grid header + sorted (t,x,y,z,r,team)
@@ -1094,7 +1094,7 @@ data wired in `NativeConstruct` (bind delegates), unbound in `NativeDestruct`. I
 default engine Roboto text + `FSlateColorBrush` panels only.
 
 ```cpp
-UCLASS() class PAINTFORGE_API UPFRootHUDWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFRootHUDWidget : public UUserWidget
 {
     GENERATED_BODY()
 public:
@@ -1108,7 +1108,7 @@ private:  // all UPROPERTY() TObjectPtr<...>, created in RebuildWidget:
     // VotePanel, ResultsPanel, WheelWidget, FeedbackWidget, ScoreboardWidget
 };
 
-UCLASS() class PAINTFORGE_API UPFLobbyWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFLobbyWidget : public UUserWidget
 {
     GENERATED_BODY()
     // Roster rows from GameState->PlayerArray (poll 0.5 s — PlayerArray has no delegate), per-row:
@@ -1116,7 +1116,7 @@ UCLASS() class PAINTFORGE_API UPFLobbyWidget : public UUserWidget
     // Footer hints: "F = Ready", host: "Enter = Start". Tab-hold toggles cursor (PC input mode).
 };
 
-UCLASS() class PAINTFORGE_API UPFBuildHUDWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFBuildHUDWidget : public UUserWidget
 {
     GENERATED_BODY()
     // Bottom-right "▦ N/30  ◆ N/6" (PlayerState OnFlagsChangedEvent) + equipped-piece name
@@ -1124,7 +1124,7 @@ UCLASS() class PAINTFORGE_API UPFBuildHUDWidget : public UUserWidget
     // at 30 s / 10 s — T2) + per-team ready counts "Ready 3/4 — 2/4" + deny flash on OnPlaceDeniedEvent.
 };
 
-UCLASS() class PAINTFORGE_API UPFBuildWheelWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFBuildWheelWidget : public UUserWidget
 {
     GENERATED_BODY()
 public:
@@ -1137,7 +1137,7 @@ public:
     // Selection math (atan2 of accumulated mouse delta) in NativeTick. Client-only, zero replication.
 };
 
-UCLASS() class PAINTFORGE_API UPFCombatHUDWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFCombatHUDWidget : public UUserWidget
 {
     GENERATED_BODY()
     // Crosshair: 4 lines + dot; gap px = 6 + tan(spreadHalfAngle)/tan(FOV/2)·(ViewportW/2), polls
@@ -1150,7 +1150,7 @@ UCLASS() class PAINTFORGE_API UPFCombatHUDWidget : public UUserWidget
     //   freeze/intermission/sudden-death banners (OnRoundStateChangedEvent).
 };
 
-UCLASS() class PAINTFORGE_API UPFCombatFeedbackWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFCombatFeedbackWidget : public UUserWidget
 {
     GENERATED_BODY()
     // Binds pawn's Weapon->OnHitConfirmedEvent → hitmarker (4 ticks, 0.15 s, elim variant ×1.4
@@ -1161,7 +1161,7 @@ UCLASS() class PAINTFORGE_API UPFCombatFeedbackWidget : public UUserWidget
     // "SPLATTED [name]" center text 0.9 s on own elim confirm.
 };
 
-UCLASS() class PAINTFORGE_API UPFVoteWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFVoteWidget : public UUserWidget
 {
     GENERATED_BODY()
     // Step 1: 👍/👎 buttons (required; advances instantly). Step 2: 8 chips from
@@ -1171,7 +1171,7 @@ UCLASS() class PAINTFORGE_API UPFVoteWidget : public UUserWidget
     // Abstained. Exactly one submission per player (widget disables after send).
 };
 
-UCLASS() class PAINTFORGE_API UPFResultsWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFResultsWidget : public UUserWidget
 {
     GENERATED_BODY()
     // Winner banner (TeamRoundWins), MVP = highest PlayerState MatchScore (elims tiebreak), thumb
@@ -1179,7 +1179,7 @@ UCLASS() class PAINTFORGE_API UPFResultsWidget : public UUserWidget
     // (OnVoteTallyChangedEvent). Host-only "Return to Lobby" button → PC->ServerHostReturnToLobby.
 };
 
-UCLASS() class PAINTFORGE_API UPFScoreboardWidget : public UUserWidget
+UCLASS() class COMBATFORGE_API UPFScoreboardWidget : public UUserWidget
 {
     GENERATED_BODY()
     // Hold-Tab overlay: rows per PlayerState (name, team, elims, deaths, score, alive dot).
@@ -1191,7 +1191,7 @@ UCLASS() class PAINTFORGE_API UPFScoreboardWidget : public UUserWidget
 
 ```cpp
 UCLASS()
-class PAINTFORGE_API UPFRatingSubsystem : public UGameInstanceSubsystem
+class COMBATFORGE_API UPFRatingSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 public:
@@ -1212,7 +1212,7 @@ public:
 ```jsonc
 {
   "schema": 1,                                    // ①
-  "game": "PaintForge",                           // ①
+  "game": "CombatForge",                           // ①
   "matchId": "8f3a2c1e-....",                     // ① full GUID string
   "createdUtc": "2026-07-09T21:14:03Z",           // ① ISO-8601 Z
   "teamSize": 4,                                  // ①
@@ -1248,14 +1248,14 @@ backend ingests this file unmodified.
 
 - **First line of every .h/.cpp:** `// Copyright (c) 2026 Tom Chapman. All rights reserved.`
   (`Config/DefaultGame.ini` `CopyrightNotice` uses the same string without slashes.)
-- **Include order in .cpp:** own header first, then module headers (`PaintForgeTypes.h` etc.), then
+- **Include order in .cpp:** own header first, then module headers (`CombatForgeTypes.h` etc.), then
   engine headers. **Headers:** `#pragma once`, `CoreMinimal.h` first, `*.generated.h` LAST (§5).
 - **IWYU strict:** headers include only what they use; **forward-declare every cross-package class
   in headers** (`class APFBuildGrid;`), include the real header only in the .cpp. This is
   load-bearing for the six-package parallel build and MSVC/clang portability (02 R8), not style.
-- **Naming (02 D8):** framework big-six spell out `PaintForge...`; everything else `PF` prefix
+- **Naming (02 D8):** framework big-six spell out `CombatForge...`; everything else `PF` prefix
   (`UPF`/`APF`/`FPF`/`EPF`). No new prefixes.
-- **Log:** `PaintForgeLog` only (§3.1). Verbosity: `Log` = state transitions, `Verbose` = per-shot/
+- **Log:** `CombatForgeLog` only (§3.1). Verbosity: `Log` = state transitions, `Verbose` = per-shot/
   per-placement, `Warning` = validation rejects, `Error` = contract violations.
 - **`.editorconfig` (pkg-meta):** tabs (width 4) for C++ (UE convention), UTF-8, LF, final newline.
 - **No platform-specific code**: no `__builtin_*`, no VLAs, `TEXT()` on every literal reaching
@@ -1284,7 +1284,7 @@ tint knob; verified by module-startup `ensureMsgf`).
 
 ### 4.3 The numbers table (contract values; owning class in parentheses)
 
-**Match loop (APaintForgeGameMode):** Lobby untimed, all-ready/force → 5 s countdown · Build 180 s
+**Match loop (ACombatForgeGameMode):** Lobby untimed, all-ready/force → 5 s countdown · Build 180 s
 (warnings 30/10 s; both-teams-all-ready → 5 s countdown early end; unspent budget discarded) ·
 Combat: freeze 5 s, round 90 s, intermission 7 s, first to 4, max 7 rounds; ≤2v2: first to 3, max 5,
 60 s rounds (T15) · sudden death on post-max deadlock: HP 1, 60 s, tie = match draw · Vote 20 s
@@ -1294,7 +1294,7 @@ Round win: enemy team eliminated, or more alive at 0:00; equal = draw round (no 
 **Scoring (T18, GameMode writes PlayerState):** elimination 100 · round survival 25 · round win 50
 (every teammate) · MVP = highest MatchScore.
 
-**Movement (UPFCharacterMovementComponent / APaintForgeCharacter):** walk 600 · sprint 830 ·
+**Movement (UPFCharacterMovementComponent / ACombatForgeCharacter):** walk 600 · sprint 830 ·
 crouch 300 · ADS ×0.55 · accel 4096 · ground friction 10 · braking 2500 · braking factor 1.0 ·
 JumpZ 630 · gravity ×1.5 · air control 0.9 · perch 15 · jump buffer 0.1 s, no coyote · crouch
 interp 0.2 s (88→58) · sprint-out 0.18 s · slide: enter ≥750, boost 1150, steer 15°/s, glide
@@ -1365,7 +1365,7 @@ unreliable multicast. No gameplay truth travels only by multicast.**
 
 Usage: pieces/shell/pawns/dummies block Paintball; pieces + field floor block BuildTrace; pawns and
 projectiles ignore BuildTrace; ghost meshes collide with nothing. Aliases `PF_ECC_Paintball` /
-`PF_ECC_BuildTrace` in `PaintForgeTypes.h` — never write `ECC_GameTraceChannel1` in gameplay code.
+`PF_ECC_BuildTrace` in `CombatForgeTypes.h` — never write `ECC_GameTraceChannel1` in gameplay code.
 
 ---
 
@@ -1382,12 +1382,12 @@ projectiles ignore BuildTrace; ghost meshes collide with nothing. Aliases `PF_EC
    collision setup, and config defaults happen ONLY in constructors (CDO-time). No `GetWorld()`,
    no `NewObject`, no timers in ctors. Runtime object creation (`NewObject`, `SpawnActor`,
    `CreateWidget`) happens in `BeginPlay`/`OnPossess`/`SetupInputComponent` or later.
-4. **Custom CMC swap:** `APaintForgeCharacter(const FObjectInitializer& OI) :
+4. **Custom CMC swap:** `ACombatForgeCharacter(const FObjectInitializer& OI) :
    Super(OI.SetDefaultSubobjectClass<UPFCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))`
    — the ONLY way to substitute the movement component.
 5. **`*.generated.h` is the LAST include** in every UCLASS/USTRUCT header, and the file's own
    generated header name must match the file name exactly.
-6. **`PAINTFORGE_API`** on every UCLASS/USTRUCT/exported free function. Single module today, but the
+6. **`COMBATFORGE_API`** on every UCLASS/USTRUCT/exported free function. Single module today, but the
    editor target and any future module split depend on it; it costs nothing.
 7. **Enhanced Input, native construction (02 R1 — the #1 bug source):** all `UInputAction`/
    `UInputMappingContext`/modifier/trigger objects are `NewObject`s created in

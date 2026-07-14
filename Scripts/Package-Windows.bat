@@ -12,8 +12,8 @@ REM ============================================================================
 setlocal
 
 set "UE=C:\Program Files\Epic Games\UE_5.6"
-set "PROJ=D:\projects\paintforge\PaintForge.uproject"
-set "OUT=D:\projects\paintforge\Packaged\Windows"
+set "PROJ=%~dp0..\CombatForge.uproject"
+set "OUT=%~dp0..\Packaged\Windows"
 
 set "CONFIG=%~1"
 if "%CONFIG%"=="" set "CONFIG=Development"

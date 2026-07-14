@@ -2,7 +2,7 @@
 
 ## What we know from host logs
 
-On the **host** (`D:\projects\paintforge\Saved\Logs`):
+On the **host** (`D:\projects\combatforge\Saved\Logs`):
 
 - No `Fatal error` / `Assertion failed` / access-violation stacks.
 - Client disconnects show as normal net cleanup, e.g.  
@@ -38,7 +38,7 @@ Every **30s** the host logs:
 CRASH_BC phase=… humans=… bots=… ghosts=… scores=… [names]
 ```
 
-After a kid disappears, open host `Saved/Logs/PaintForge.log` and search `CRASH_BC` for the last line before they vanished.
+After a kid disappears, open host `Saved/Logs/CombatForge.log` and search `CRASH_BC` for the last line before they vanished.
 
 ## Client → host log ship (preferred)
 
@@ -53,7 +53,7 @@ On the host after a bad session:
 
 ```powershell
 # open the latest files
-explorer D:\projects\paintforge\Saved\ClientLogs
+explorer D:\projects\combatforge\Saved\ClientLogs
 ```
 
 Or:
@@ -76,7 +76,7 @@ Listen-host’s own log stays in `Saved/Logs/` (not re-shipped).
 
 ```powershell
 # From the project machine, or copy this script onto a USB:
-.\Deploy\playtest\collect-crash-evidence.ps1 -ProjectRoot "C:\Games\PaintForge"
+.\Deploy\playtest\collect-crash-evidence.ps1 -ProjectRoot "C:\Games\CombatForge"
 ```
 
 If the script isn’t on the kid PC, manually zip:
@@ -88,7 +88,7 @@ If the script isn’t on the kid PC, manually zip:
 ### On the host after a bad match
 
 ```powershell
-cd D:\projects\paintforge
+cd D:\projects\combatforge
 .\Deploy\playtest\collect-crash-evidence.ps1
 ```
 

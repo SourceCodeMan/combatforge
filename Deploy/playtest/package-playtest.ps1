@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$UProject = Join-Path $ProjectRoot "PaintForge.uproject"
+$UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 $RunUAT = Join-Path $Engine "Engine\Build\BatchFiles\RunUAT.bat"
 if (-not $ArchiveDir) {
 	$ArchiveDir = Join-Path $ProjectRoot "Packaged\Playtest"
@@ -63,7 +63,7 @@ if ((Test-Path $ClientDir) -and (Test-Path $ConnectSrc)) {
 }
 
 Write-Host "OK: packaged under $ArchiveDir"
-Get-ChildItem $ArchiveDir -Recurse -Filter "PaintForge.exe" -ErrorAction SilentlyContinue |
+Get-ChildItem $ArchiveDir -Recurse -Filter "CombatForge.exe" -ErrorAction SilentlyContinue |
 	ForEach-Object { Write-Host "  CLIENT: $($_.FullName)" }
 
 Write-Host ""

@@ -5,15 +5,15 @@ function Get-ProjectRoot {
 	return (Resolve-Path (Join-Path $ScriptRoot "..\..")).Path
 }
 
-function Find-PaintForgeExe {
-	param([string]$Root, [string]$Name = "PaintForge.exe")
+function Find-CombatForgeExe {
+	param([string]$Root, [string]$Name = "CombatForge.exe")
 	foreach ($Rel in @(
 		"Binaries\Win64\$Name",
 		"Packaged\Playtest\Windows\$Name",
-		"Packaged\Playtest\Windows\PaintForge\Binaries\Win64\$Name",
+		"Packaged\Playtest\Windows\CombatForge\Binaries\Win64\$Name",
 		"Packaged\Playtest\WindowsServer\$Name",
 		"Saved\StagedBuilds\Windows\$Name",
-		"Saved\StagedBuilds\Windows\PaintForge\Binaries\Win64\$Name"
+		"Saved\StagedBuilds\Windows\CombatForge\Binaries\Win64\$Name"
 	)) {
 		$P = Join-Path $Root $Rel
 		if (Test-Path $P) { return (Resolve-Path $P).Path }
@@ -40,8 +40,8 @@ function Get-UnrealEditor {
 
 function Ensure-PlaytestFirewall {
 	param([int]$Port = 7777)
-	$RuleUdp = "PaintForge Playtest $Port UDP"
-	$RuleTcp = "PaintForge Playtest $Port TCP"
+	$RuleUdp = "CombatForge Playtest $Port UDP"
+	$RuleTcp = "CombatForge Playtest $Port TCP"
 	if (Get-NetFirewallRule -DisplayName $RuleUdp -ErrorAction SilentlyContinue) {
 		return
 	}

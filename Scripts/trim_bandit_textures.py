@@ -6,8 +6,8 @@
 # 1024 cooks to ~1/16 the pixels.
 #
 # Run headless (editor CLOSED):
-#   "<UE>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" D:\projects\paintforge\PaintForge.uproject
-#     -run=pythonscript -script="D:\projects\paintforge\Scripts\trim_bandit_textures.py"
+#   "<UE>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" D:\projects\combatforge\CombatForge.uproject
+#     -run=pythonscript -script="D:\projects\combatforge\Scripts\trim_bandit_textures.py"
 #
 # Re-run after re-downloading the pack on another machine (e.g. the Mac) to apply the same cap there.
 import unreal

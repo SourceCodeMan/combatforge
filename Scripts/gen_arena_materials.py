@@ -1,4 +1,4 @@
-# Generates arena SHELL materials for PaintForge (airsoft / CQB warehouse look).
+# Generates arena SHELL materials for CombatForge (airsoft / CQB warehouse look).
 #   /Game/Materials/M_PF_ArenaFloor  — triplanar scuffed concrete (large tiles)
 #   /Game/Materials/M_PF_ArenaWall   — triplanar concrete (finer tiles, cooler)
 #   /Game/Materials/M_PF_ArenaMetal  — dark scuffed metal (midline posts)

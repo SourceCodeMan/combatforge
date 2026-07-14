@@ -1,6 +1,6 @@
-# PaintForge — Technical Architecture (v1 Graybox)
+# CombatForge — Technical Architecture (v1 Graybox)
 
-**Doc:** 02-architecture.md · **Owner:** Lead engineering · **Engine:** Unreal Engine 5.6, C++-first · **Module:** `PaintForge` · **Target:** Win64 · **Status:** ⚠️ Partly superseded by `05-code-contract.md` — see the precedence note below.
+**Doc:** 02-architecture.md · **Owner:** Lead engineering · **Engine:** Unreal Engine 5.6, C++-first · **Module:** `CombatForge` · **Target:** Win64 · **Status:** ⚠️ Partly superseded by `05-code-contract.md` — see the precedence note below.
 
 This document is the coding spec for the v1 graybox milestone: server-authoritative multiplayer, zero editor-authored assets, single match loop `Lobby → BuildPhase → CombatPhase → VotePhase → Results`.
 
@@ -22,13 +22,13 @@ This document is the coding spec for the v1 graybox milestone: server-authoritat
 | # | Decision | Rationale (one line) |
 |---|----------|----------------------|
 | D1 | **Single persistent level + phase state machine** (GameMode drives, GameState replicates). No map travel between phases. | The arena the players build in BuildPhase *is* the combat arena — travel would destroy it; also avoids seamless-travel complexity and keeps PlayerState trivially persistent. |
-| D2 | **One GameMode class** (`APaintForgeGameMode`) for the whole match. | Phases share 90% of rules; per-phase behavior is a `switch` on one enum, not four half-empty classes. |
+| D2 | **One GameMode class** (`ACombatForgeGameMode`) for the whole match. | Phases share 90% of rules; per-phase behavior is a `switch` on one enum, not four half-empty classes. |
 | D3 | **Shooting is hitscan v1** (server line trace), with a client-side cosmetic tracer "projectile". | CoD-snappy feel is a locked requirement; real ballistic drop is a later realism knob, not a v1 need. |
 | D4 | **Paint splats v1 = pooled squashed-sphere mesh splats** (engine sphere scaled to a 2 cm disc, MID team color), not decals. | Engine ships no parameterized decal-domain material and materials cannot be authored at runtime — mesh splats are guaranteed-shippable with zero assets. |
 | D5 | **Sprint/slide/ADS replicate via custom CMC compressed flags** (`FSavedMove` pattern), not RPCs. | It's the only way movement-speed changes stay inside CMC prediction — RPC-set MaxWalkSpeed rubber-bands under latency. |
 | D6 | **Building: client requests via reliable Server RPC → server validates → server spawns replicated `APFBuildPiece` → piece goes dormant.** Ghost preview is 100% client-local. | Server authority with zero per-frame cost for a static arena. |
 | D7 | **Vote data persists as JSON files** under `Saved/ArenaRatings/` (not USaveGame). | The record shape is already backend-ready; JSON uploads to a future aggregation service without a translation layer. |
-| D8 | **Naming:** framework classes spell out `PaintForge` (`APaintForgeGameMode`, `APaintForgeCharacter`); everything else uses the short `PF` prefix (`UPFBuildComponent`, `APFBuildPiece`). | Matches UE convention of long names on the framework "big six", keeps the other 30 classes readable. |
+| D8 | **Naming:** framework classes spell out `CombatForge` (`ACombatForgeGameMode`, `ACombatForgeCharacter`); everything else uses the short `PF` prefix (`UPFBuildComponent`, `APFBuildPiece`). | Matches UE convention of long names on the framework "big six", keeps the other 30 classes readable. |
 | D9 | **One editor-created empty map, `L_Graybox.umap`, is the sole content file.** It contains zero authored actors; the floor, spawn zones, lighting, and bounds are all spawned by C++ at `InitGame`. | A `.umap` is a container the engine requires (world settings, PIE entry point); every alternative (`/Engine/Maps/Entry`) couples us to engine-internal content that can change. Create it once: File → New Level → Empty Level → Save As. |
 | D10 | **Engine assets are referenced with `ConstructorHelpers::FObjectFinder` in CDO constructors**, never lazy `LoadObject` at runtime. | Constructor-time references force the cooker to include the engine assets in a packaged build; runtime string loads silently fail after packaging. |
 | D11 | **Eliminations feed and vote tallies replicate as arrays on GameState (OnRep)**, not multicasts. | Late joiners and reconnects get correct state for free; multicasts are fire-and-forget and lie to anyone who wasn't connected. |
@@ -42,12 +42,12 @@ This document is the coding spec for the v1 graybox milestone: server-authoritat
 
 | Class | Base | Responsibility |
 |---|---|---|
-| `UPaintForgeGameInstance` | `UGameInstance` | Process-lifetime state: local player identity (GUID generated on first run, persisted), pending host/join parameters, owns nothing match-scoped. |
-| `APaintForgeGameMode` | `AGameModeBase` | **Server-only.** Phase state machine driver (timers, transition rules), spawns the runtime arena shell (floor, walls-of-the-world, team spawn zones), validates build/fire/vote requests delegated up from components, choose-spawn logic per team, elimination + respawn rules. |
-| `APaintForgeGameState` | `AGameStateBase` | Replicated match truth: current phase enum + server phase-end timestamp, team scores, elimination feed array, vote tally array, arena piece count. Fires `OnPhaseChanged` delegate from OnRep for UI. |
-| `APaintForgePlayerState` | `APlayerState` | Per-player replicated truth: `TeamId` (0/1), eliminations/times-eliminated, `BuildBudgetRemaining`, `bHasVoted`. |
-| `APaintForgePlayerController` | `APlayerController` | Owns input setup (constructs native Enhanced Input objects via `UPFInputConfig`), owns the widget stack (creates `UPFRootHUDWidget`), carries the player-facing Server RPCs that aren't pawn-bound: `ServerSubmitVote`, `ServerSetReady`. Handles input-mode switches (game vs UI) on phase change. |
-| `APaintForgeCharacter` | `ACharacter` | The pawn for Build and Combat phases (one pawn, two input contexts — no pawn swap). Composes `UPFCharacterMovementComponent`, `UPFWeaponComponent`, `UPFBuildComponent`, `UPFHealthComponent`. First-person camera (`UCameraComponent` at eye height, mesh hidden to owner). |
+| `UCombatForgeGameInstance` | `UGameInstance` | Process-lifetime state: local player identity (GUID generated on first run, persisted), pending host/join parameters, owns nothing match-scoped. |
+| `ACombatForgeGameMode` | `AGameModeBase` | **Server-only.** Phase state machine driver (timers, transition rules), spawns the runtime arena shell (floor, walls-of-the-world, team spawn zones), validates build/fire/vote requests delegated up from components, choose-spawn logic per team, elimination + respawn rules. |
+| `ACombatForgeGameState` | `AGameStateBase` | Replicated match truth: current phase enum + server phase-end timestamp, team scores, elimination feed array, vote tally array, arena piece count. Fires `OnPhaseChanged` delegate from OnRep for UI. |
+| `ACombatForgePlayerState` | `APlayerState` | Per-player replicated truth: `TeamId` (0/1), eliminations/times-eliminated, `BuildBudgetRemaining`, `bHasVoted`. |
+| `ACombatForgePlayerController` | `APlayerController` | Owns input setup (constructs native Enhanced Input objects via `UPFInputConfig`), owns the widget stack (creates `UPFRootHUDWidget`), carries the player-facing Server RPCs that aren't pawn-bound: `ServerSubmitVote`, `ServerSetReady`. Handles input-mode switches (game vs UI) on phase change. |
+| `ACombatForgeCharacter` | `ACharacter` | The pawn for Build and Combat phases (one pawn, two input contexts — no pawn swap). Composes `UPFCharacterMovementComponent`, `UPFWeaponComponent`, `UPFBuildComponent`, `UPFHealthComponent`. First-person camera (`UCameraComponent` at eye height, mesh hidden to owner). |
 
 ### 1.2 Movement
 
@@ -121,7 +121,7 @@ Category IDs are a fixed `FName` set: `Layout, Cover, Verticality, Flow, Balance
 
 | Class | Base | Responsibility |
 |---|---|---|
-| `UPFInputConfig` | `UObject` | Owns every native-constructed `UInputAction` and the three `UInputMappingContext`s (`IMC_Common`, `IMC_Combat`, `IMC_Build`) as `UPROPERTY` members (GC-rooted). Built once in `APaintForgePlayerController::SetupInputComponent`, outer = the PC. See §3.1. |
+| `UPFInputConfig` | `UObject` | Owns every native-constructed `UInputAction` and the three `UInputMappingContext`s (`IMC_Common`, `IMC_Combat`, `IMC_Build`) as `UPROPERTY` members (GC-rooted). Built once in `ACombatForgePlayerController::SetupInputComponent`, outer = the PC. See §3.1. |
 
 Total: **6 framework + 1 CMC + 4 combat + 4 building + 1 persistence subsystem + 8 widgets + 1 input config = 25 UCLASSes.** Anything not listed does not exist in v1.
 
@@ -133,8 +133,8 @@ Total: **6 framework + 1 CMC + 4 combat + 4 building + 1 persistence subsystem +
 
 | State | Home | Why |
 |---|---|---|
-| Match phase, phase-end server time, team scores, elimination feed, vote tallies, piece count | `APaintForgeGameState` | Match-truth every client needs, always relevant, survives player churn. |
-| Team, eliminations, build budget, has-voted | `APaintForgePlayerState` | Per-player, must survive pawn death/respawn. |
+| Match phase, phase-end server time, team scores, elimination feed, vote tallies, piece count | `ACombatForgeGameState` | Match-truth every client needs, always relevant, survives player churn. |
+| Team, eliminations, build budget, has-voted | `ACombatForgePlayerState` | Per-player, must survive pawn death/respawn. |
 | Position/velocity/movement flags, bEliminated, hopper count | Pawn (+components) | Pawn-lifetime state; dies with the pawn, which is correct. |
 | Ghost preview, selected piece, camera FOV, splat pool | Client-only, never replicated | Cosmetic/local intent; the server hears about it only via request RPCs. |
 
@@ -203,7 +203,7 @@ This is the one deliberately "expensive-to-write" system in v1, because RPC-driv
 | Elimination / feed | GameState replicated array OnRep | — (late-join correct) |
 | bEliminated on pawn | pawn property OnRep | — |
 | Sprint/slide/ADS | CMC compressed flags in the move stream | — |
-| Vote submit | Server RPC on `APaintForgePlayerController` | reliable |
+| Vote submit | Server RPC on `ACombatForgePlayerController` | reliable |
 | Vote tallies (Results screen) | GameState replicated array OnRep | — |
 | Ready-up (Lobby) | Server RPC on PC → PlayerState bool OnRep | reliable |
 
@@ -230,7 +230,7 @@ Listen server @ 60 Hz tick (`NetServerMaxTickRate=60` in DefaultEngine.ini), def
 All input objects are plain `NewObject`s owned by `UPFInputConfig` (UPROPERTY-rooted, outer = PlayerController). Built in `SetupInputComponent`; contexts applied in `OnPossess` (the `UEnhancedInputLocalPlayerSubsystem` needs a valid LocalPlayer, which is not guaranteed earlier on clients).
 
 ```cpp
-// UPFInputConfig::Build(APaintForgePlayerController* PC)
+// UPFInputConfig::Build(ACombatForgePlayerController* PC)
 IA_Move = NewObject<UInputAction>(PC, TEXT("IA_Move"));
 IA_Move->ValueType = EInputActionValueType::Axis2D;
 
@@ -274,7 +274,7 @@ TSharedRef<SWidget> UPFCombatHUDWidget::RebuildWidget()
 }
 ```
 
-- Instantiation: `CreateWidget<UPFRootHUDWidget>(PC, UPFRootHUDWidget::StaticClass())` → `AddToViewport()` in `APaintForgePlayerController::BeginPlayingState` (client-only guard: `IsLocalController()`).
+- Instantiation: `CreateWidget<UPFRootHUDWidget>(PC, UPFRootHUDWidget::StaticClass())` → `AddToViewport()` in `ACombatForgePlayerController::BeginPlayingState` (client-only guard: `IsLocalController()`).
 - Fonts/brushes: default UMG text works out of the box (Roboto embedded in engine slate content); solid-color panels use `UImage` + `SetColorAndOpacity` / `FSlateColorBrush` — no texture assets needed.
 - The build wheel is a `UCanvasPanel` with 6 text+background segments positioned by angle in C++; selection math (`atan2` of mouse delta) lives in `NativeTick`. Fancy radial materials come with the art pass, not v1.
 - Data binding: no property bindings (BP-ism); widgets subscribe to delegates (`GameState->OnPhaseChanged`, `OnElimFeedChanged`) in `NativeConstruct`, unsubscribe in `NativeDestruct`.
@@ -296,7 +296,7 @@ static ConstructorHelpers::FObjectFinder<UStaticMesh>
 MeshComp->SetStaticMesh(CubeFinder.Object);
 ```
 
-All finders live in one place: `FPFEngineAssets` (static struct populated by the CDOs that use them). At module startup (`FPaintForgeModule::StartupModule`) an `ensureMsgf` verifies `BasicShapeMaterial` exposes the `Color` parameter, so an engine rename fails loudly on boot, not silently as white-on-white.
+All finders live in one place: `FPFEngineAssets` (static struct populated by the CDOs that use them). At module startup (`FCombatForgeModule::StartupModule`) an `ensureMsgf` verifies `BasicShapeMaterial` exposes the `Color` parameter, so an engine rename fails loudly on boot, not silently as white-on-white.
 
 Team tinting everywhere: `UMaterialInstanceDynamic::Create(BasicShapeMaterial, this)` → `SetVectorParameterValue("Color", TeamColor)`. Team colors: Team 0 = `FLinearColor(0.05, 0.35, 1.0)` (blue paint), Team 1 = `FLinearColor(1.0, 0.25, 0.05)` (orange paint). Ghost preview tints: valid = team color @ 40% opacity flag via scalar? No — BasicShapeMaterial is opaque; ghost validity is shown by color (green `0.1,1,0.1` / red `1,0.1,0.1`) not translucency. Recorded as a graybox concession.
 
@@ -308,7 +308,7 @@ Team tinting everywhere: `UMaterialInstanceDynamic::Create(BasicShapeMaterial, t
 
 ### 3.5 The runtime-spawned arena shell
 
-`APaintForgeGameMode::InitGame` (server) spawns, in order: floor slab (cube scaled 60×30×0.3 m at Z=0), four boundary walls (5 m tall, cosmetic-blocking), two `APFTeamSpawnZone`s at the short ends, a `ADirectionalLight` + `ASkyLight` + `AExponentialHeightFog` (all spawnable natively, no assets), and sets `WorldSettings->KillZ = -1000`. Clients receive the floor/walls as replicated actors (they're `APFBuildPiece`s with `bSystemPiece=true`, exempt from budget/removal). One code path builds the world everywhere; `L_Graybox.umap` stays empty forever.
+`ACombatForgeGameMode::InitGame` (server) spawns, in order: floor slab (cube scaled 60×30×0.3 m at Z=0), four boundary walls (5 m tall, cosmetic-blocking), two `APFTeamSpawnZone`s at the short ends, a `ADirectionalLight` + `ASkyLight` + `AExponentialHeightFog` (all spawnable natively, no assets), and sets `WorldSettings->KillZ = -1000`. Clients receive the floor/walls as replicated actors (they're `APFBuildPiece`s with `bSystemPiece=true`, exempt from budget/removal). One code path builds the world everywhere; `L_Graybox.umap` stays empty forever.
 
 ---
 
@@ -316,19 +316,19 @@ Team tinting everywhere: `UMaterialInstanceDynamic::Create(BasicShapeMaterial, t
 
 ### 4.1 Single runtime module
 
-One runtime module `PaintForge` (+ auto editor target). No plugin split, no editor module in v1 — nothing needs editor customization.
+One runtime module `CombatForge` (+ auto editor target). No plugin split, no editor module in v1 — nothing needs editor customization.
 
 ```
-PaintForge/
-├── PaintForge.uproject          # EngineAssociation "5.6", module PaintForge, EnhancedInput plugin enabled (default in 5.6)
+CombatForge/
+├── CombatForge.uproject          # EngineAssociation "5.6", module CombatForge, EnhancedInput plugin enabled (default in 5.6)
 ├── Source/
-│   ├── PaintForge.Target.cs
-│   ├── PaintForgeEditor.Target.cs
-│   └── PaintForge/
-│       ├── PaintForge.Build.cs
-│       ├── PaintForge.h / .cpp              # module impl + startup asset verification
+│   ├── CombatForge.Target.cs
+│   ├── CombatForgeEditor.Target.cs
+│   └── CombatForge/
+│       ├── CombatForge.Build.cs
+│       ├── CombatForge.h / .cpp              # module impl + startup asset verification
 │       ├── Core/        # GameInstance, GameMode, GameState, PlayerState, PlayerController, EPFMatchPhase, PFTypes.h (shared structs/enums)
-│       ├── Player/      # PaintForgeCharacter, PFCharacterMovementComponent, PFHealthComponent
+│       ├── Player/      # CombatForgeCharacter, PFCharacterMovementComponent, PFHealthComponent
 │       ├── Combat/      # PFWeaponComponent, PFCosmeticTracer, PFSplatSubsystem
 │       ├── Building/    # PFBuildComponent, PFBuildPiece, PFBuildGridSubsystem, PFTeamSpawnZone
 │       ├── Voting/      # PFArenaRatingSubsystem, PFRatingTypes.h (JSON record structs)
@@ -344,12 +344,12 @@ PaintForge/
 
 Rule: headers include only what they use (IWYU); forward-declare in headers, include in .cpp. This is load-bearing for risk R8 (MSVC vs clang), not style preference.
 
-### 4.2 PaintForge.Build.cs
+### 4.2 CombatForge.Build.cs
 
 ```csharp
-public class PaintForge : ModuleRules
+public class CombatForge : ModuleRules
 {
-    public PaintForge(ReadOnlyTargetRules Target) : base(Target)
+    public CombatForge(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -366,7 +366,7 @@ public class PaintForge : ModuleRules
 }
 ```
 
-Targets: `PaintForge.Target.cs` → `TargetType.Game`; `PaintForgeEditor.Target.cs` → `TargetType.Editor`; both `DefaultBuildSettings = BuildSettingsVersion.V5; IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;`.
+Targets: `CombatForge.Target.cs` → `TargetType.Game`; `CombatForgeEditor.Target.cs` → `TargetType.Editor`; both `DefaultBuildSettings = BuildSettingsVersion.V5; IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;`.
 
 ### 4.3 Config files (the lines that matter)
 
@@ -376,7 +376,7 @@ Targets: `PaintForge.Target.cs` → `TargetType.Game`; `PaintForgeEditor.Target.
 [/Script/EngineSettings.GameMapsSettings]
 EditorStartupMap=/Game/Maps/L_Graybox.L_Graybox
 GameDefaultMap=/Game/Maps/L_Graybox.L_Graybox
-GlobalDefaultGameMode=/Script/PaintForge.PaintForgeGameMode
+GlobalDefaultGameMode=/Script/CombatForge.CombatForgeGameMode
 
 [/Script/OnlineSubsystemUtils.IpNetDriver]
 NetServerMaxTickRate=60
@@ -392,7 +392,7 @@ r.DefaultFeature.MotionBlur=False        ; graybox readability; everything else 
 ```ini
 [/Script/EngineSettings.GeneralProjectSettings]
 ProjectID=<generated>
-ProjectName=PaintForge
+ProjectName=CombatForge
 CopyrightNotice=Copyright Tom Chapman 2026
 ```
 
@@ -407,8 +407,8 @@ Checklist, in order:
 1. **Visual Studio 2022** (17.10+, Community fine). Workloads: **Game development with C++** (ensure "Unreal Engine installer" unchecked, "Windows 11 SDK" + "MSVC v143" checked) and **.NET desktop development** (UBT/UHT tooling). Optional but recommended component: "MSVC v143 – Address Sanitizer".
 2. **Epic Games Launcher → Unreal Engine 5.6.x** install (include "Engine Source" optional component OFF; debug symbols OFF to save 40 GB — add later if callstack digging is needed).
 3. Clone repo (code authored on the Mac; the `.uproject`, `Source/`, `Config/`, `Content/Maps/` all in git). `.gitignore`: `Binaries/ DerivedDataCache/ Intermediate/ Saved/ .vs/ *.sln`.
-4. Right-click `PaintForge.uproject` → **Generate Visual Studio project files**.
-5. Open `PaintForge.sln` → configuration **Development Editor | Win64** → Build → set as startup project → F5 launches the editor.
+4. Right-click `CombatForge.uproject` → **Generate Visual Studio project files**.
+5. Open `CombatForge.sln` → configuration **Development Editor | Win64** → Build → set as startup project → F5 launches the editor.
 6. First run: editor opens `L_Graybox`. **PIE net testing:** Editor Preferences → Play: Number of Players = 2–3, Net Mode = **Play as Listen Server**; periodically test with **Run Under One Process = OFF** (separate client processes surface real replication bugs one-process PIE hides).
 7. Iteration: prefer full editor restart over Live Coding for anything touching headers/UPROPERTYs (Live Coding + reinstancing on native-only projects causes ghost state); Live Coding (Ctrl+Alt+F11) is fine for .cpp-only tweaks.
 8. **Packaging (later, for the installable build):** Project Settings → Packaging → Use Pak File ✓, Use Io Store ✓ (defaults); List of maps to include: `L_Graybox`. Platforms → Windows → Package (Shipping). Engine assets referenced via `FObjectFinder` cook automatically (D10). Output folder zips + ships as v1's "installer"; NSIS/MSIX wrapper is a post-v1 nicety. Smoke-test a **Shipping** package on the first playable milestone, not the last week — packaging failures are the classic end-of-project landmine.
@@ -425,7 +425,7 @@ Checklist, in order:
 | R4 | **Replicated actor state visible before init data arrives** | Build pieces flash white/unscaled on clients for a frame, or OnRep fires with garbage | `SpawnActorDeferred` + fill `FPFPieceInitState` + `FinishSpawning` (§2.2) so init state rides the initial bunch; OnRep functions must tolerate being called once with final state only. |
 | R5 | **Listen-server host vs client asymmetry** | Feature works for the host, breaks for joining clients (or vice versa) — the classic | Host executes server+client paths in one process, so every feature is tested with a *second* PIE client from day one; all gameplay writes behind `HasAuthority()`; cosmetics keyed off OnRep/multicast (which also run on the host via direct calls). Add `IsLocallyControlled()` guards for owner-only cosmetics. |
 | R6 | **Custom CMC saved-move bugs** | Sprint/slide rubber-banding, "moving in molasses", or server/client position fights | Implement `FSavedMove_PF` completely (`Clear`, `GetCompressedFlags`, `CanCombineWith`, `SetMoveFor`, `PrepMoveFor`) and the CMC's `UpdateFromCompressedFlags`; change speeds ONLY inside CMC (`GetMaxSpeed()` override), never by poking `MaxWalkSpeed` externally; test at `p.NetShowCorrections 1` + emulated 100 ms lag (`Net PktLag=100` in PIE net emulation) before calling it done. |
-| R7 | **Phase state machine double-drives or skips on clients** | HUD stuck on BuildPhase, timers desync, vote screen never appears | Single writer: only `APaintForgeGameMode` mutates phase (server); clients react only in `OnRep_Phase`; host reacts via the same OnRep called manually after setting (standard listen-server OnRep-doesn't-fire-on-server gotcha). Phase timestamp pattern (§2.1) kills timer drift. |
+| R7 | **Phase state machine double-drives or skips on clients** | HUD stuck on BuildPhase, timers desync, vote screen never appears | Single writer: only `ACombatForgeGameMode` mutates phase (server); clients react only in `OnRep_Phase`; host reacts via the same OnRep called manually after setting (standard listen-server OnRep-doesn't-fire-on-server gotcha). Phase timestamp pattern (§2.1) kills timer drift. |
 | R8 | **Code authored on macOS/clang fails MSVC on the PC** | First Windows compile explodes with hundreds of errors | IWYU-strict headers (§4.1); no compiler extensions (VLA, statement expressions); `TEXT()` on every literal reaching TCHAR APIs; no case-sensitive include mismatches (clang on APFS is case-insensitive-ish too, but verify); avoid `__builtin_*`; keep `BuildSettingsVersion.V5` warnings-as-errors and fix warnings on Mac before pushing. Budget half a day for the first PC compile regardless. |
 
 ---

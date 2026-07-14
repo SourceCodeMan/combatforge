@@ -1,4 +1,4 @@
-# PaintForge — editor configuration (code contract §4.1)
+# CombatForge — editor configuration (code contract §4.1)
 root = true
 
 # Defaults for every file: UTF-8, LF, final newline.

@@ -1,4 +1,4 @@
-# PaintForge — Build System Spec (v1)
+# CombatForge — Build System Spec (v1)
 
 Doc: `03-build-system.md` · Owner: build-system designer-engineer · Status: **LOCKED for v1 graybox**
 Cross-refs: `02-match-loop.md` (phase timing), `04-combat.md` (movement/weapons), `05-voting.md` (vote tags).
@@ -95,7 +95,7 @@ pro-standard `Q = wall`).
 | Movement (WASD, Space, Shift, Ctrl/C) | Unchanged from combat spec; building never slows movement |
 
 Enhanced Input: all `UInputAction`/`UInputMappingContext` objects constructed natively in
-`UPaintForgeInputConfig` (per locked decision — no `.uasset`s). Two contexts: `IMC_Build`
+`UCombatForgeInputConfig` (per locked decision — no `.uasset`s). Two contexts: `IMC_Build`
 (priority 1, added on BuildPhase enter, removed on exit) layered over `IMC_Locomotion`.
 
 ### Build Wheel spec (C++ UMG, `UBuildWheelWidget`)
@@ -232,7 +232,7 @@ piece a choice (better arenas → better votes) and caps total replication load 
 | BuildPhase duration | Owned by `02-match-loop.md`; this system is tuned for **90–150 s** (30 + 6 placements at turbo cadence uses <20% of that — the time goes to thinking, which is the point) | |
 
 HUD (C++ UMG, bottom-right): `▦ 23/30   ◆ 4/6` + equipped-piece name. Budget lives on
-`APaintForgePlayerState` (2 replicated uint8s), server-mutated only.
+`ACombatForgePlayerState` (2 replicated uint8s), server-mutated only.
 
 ---
 
@@ -293,7 +293,7 @@ Vote block appended in place at VotePhase end.
 ```json
 {
   "schema": 1,
-  "game": "PaintForge",
+  "game": "CombatForge",
   "grid": { "cellUU": 400, "subUU": 100, "wallH": 300, "cellsX": 16, "cellsY": 10, "levels": 4 },
   "match": { "id": "8f3a2c1e", "createdUtc": "2026-07-09T21:14:03Z", "teamSize": 4 },
   "pieces": [

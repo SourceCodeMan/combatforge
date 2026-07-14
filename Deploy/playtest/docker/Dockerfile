@@ -1,8 +1,8 @@
-# Linux dedicated server image for PaintForge playtests (VPS / Docker Desktop Linux).
+# Linux dedicated server image for CombatForge playtests (VPS / Docker Desktop Linux).
 #
 # PREREQ: cook a LINUX dedicated server build and place it at:
 #   Deploy/playtest/docker/server-linux/
-# containing PaintForgeServer (or the staged LinuxServer tree).
+# containing CombatForgeServer (or the staged LinuxServer tree).
 #
 # Win64 server binaries will NOT run in this image.
 # For Windows host playtest, use ../run-server.ps1 instead.
@@ -20,9 +20,9 @@ WORKDIR /server
 COPY server-linux/ /server/
 
 # UE often needs execute bit on the binary and any .sh wrapper
-RUN chmod +x /server/PaintForgeServer 2>/dev/null || true; \
+RUN chmod +x /server/CombatForgeServer 2>/dev/null || true; \
 	chmod +x /server/*.sh 2>/dev/null || true; \
-	find /server -type f -name "PaintForgeServer" -exec chmod +x {} \; 2>/dev/null || true
+	find /server -type f -name "CombatForgeServer" -exec chmod +x {} \; 2>/dev/null || true
 
 EXPOSE 7777/udp 7777/tcp
 

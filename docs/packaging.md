@@ -2,7 +2,7 @@
 
 *How to produce standalone, playable builds. Written 2026‑07‑14 — stored for when we actually ship a build. Nothing here has been run end‑to‑end yet; the config + scripts are authored and ready.*
 
-The project is already set up for packaging: a **Game target** (`Source/PaintForge.Target.cs`), a **Server target**, pak/IoStore on, and a cook list in `Config/DefaultGame.ini`. This doc adds the Mac path, the package scripts, and the gotchas.
+The project is already set up for packaging: a **Game target** (`Source/CombatForge.Target.cs`), a **Server target**, pak/IoStore on, and a cook list in `Config/DefaultGame.ini`. This doc adds the Mac path, the package scripts, and the gotchas.
 
 ---
 
@@ -71,7 +71,7 @@ If you add new soft‑loaded content later, add its folder here or it won't ship
 The Bandit pack shipped with **4K textures (~8.7 GB)** — overkill for a graybox indie game. `Scripts/trim_bandit_textures.py` caps every Bandit texture's *Maximum Texture Size* to **1024** (tunable at the top; bump to 2048 if hero weapon/arms look soft up close). Run it headless after (re)adding the pack on any machine:
 
 ```
-"<UE>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" PaintForge.uproject -run=pythonscript -script="...\Scripts\trim_bandit_textures.py"
+"<UE>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" CombatForge.uproject -run=pythonscript -script="...\Scripts\trim_bandit_textures.py"
 ```
 
 - **Effect:** the **cooked package** uses ≤1K textures (~1/16 the pixels of 4K) → dramatically smaller build. Non‑destructive + reversible (set `max_texture_size` back to `0`).
@@ -126,4 +126,4 @@ That sequence surfaces ~80% of the real risk (clang portability, Metal rendering
 - `Config/DefaultGame.ini` — `[/Script/UnrealEd.ProjectPackagingSettings]` (build config, cook list).
 - `Config/DefaultEngine.ini` — Windows RHI (D3D12 SM5+SM6); Mac RHI to be generated on the Mac.
 - `Scripts/Package-Windows.bat` · `Scripts/Package-Mac.command` — the package commands.
-- `Source/PaintForge.Target.cs` (Game) · `Source/PaintForgeServer.Target.cs` (Server, for a future dedicated server).
+- `Source/CombatForge.Target.cs` (Game) · `Source/CombatForgeServer.Target.cs` (Server, for a future dedicated server).

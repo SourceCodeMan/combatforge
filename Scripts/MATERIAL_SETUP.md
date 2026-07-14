@@ -5,7 +5,7 @@ Two ways to create the build-piece master material. **Easiest: run the Python sc
 ## Option A — run the generator (recommended)
 
 1. In the editor: **Tools → Execute Python Script…** and pick `Scripts/create_build_material.py`
-   (or in the Output Log cmd line: `py "D:/projects/paintforge/Scripts/create_build_material.py"`).
+   (or in the Output Log cmd line: `py "D:/projects/combatforge/Scripts/create_build_material.py"`).
 2. It creates `/Game/Materials/M_PF_BuildPiece`. Works with **no textures** (concrete-gray + team trim);
    to go photoreal, paste a Megascans surface's texture paths into the CONFIG block at the top and re-run.
 3. It's idempotent — safe to re-run after tweaking CONFIG.

@@ -32,7 +32,7 @@
 
 ## 1. Where we are today (codebase diagnosis)
 
-`Source/PaintForge/AI/PFBotController.cpp` is a **reactive steering bot** ("boids‑style"), not a planner:
+`Source/CombatForge/AI/PFBotController.cpp` is a **reactive steering bot** ("boids‑style"), not a planner:
 
 - **Movement** (`Tick`, ~L200‑250): computes a flat direction toward the enemy/objective, adds a strafe offset and a range‑keeper (back off if closer than `MinRangeUU`, push in past `PreferredRangeUU`), then `Bot->AddMovementInput(MoveDir)`. No path, no waypoints.
 - **Obstacle handling** (`SteerAvoidingObstacles`, ~L460‑480): one forward `SweepSingleByChannel` of radius `AvoidProbeRadius=46` out to `AvoidProbeUU=420`. If the sweep hits, it nudges the heading. That's it.

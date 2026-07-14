@@ -2,9 +2,9 @@
 # ASCII-only so Windows PowerShell 5.1 parses cleanly.
 #
 # Priority:
-#   1) PaintForgeServer.exe
-#   2) Packaged/staged PaintForge.exe -server -nullrhi
-#   3) Development PaintForge.exe -server -nullrhi
+#   1) CombatForgeServer.exe
+#   2) Packaged/staged CombatForge.exe -server -nullrhi
+#   3) Development CombatForge.exe -server -nullrhi
 #   4) UnrealEditor.exe -server -nullrhi
 param(
 	[string]$ProjectRoot = "",
@@ -20,13 +20,13 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_common.ps1")
 if (-not $ProjectRoot) { $ProjectRoot = Get-ProjectRoot $PSScriptRoot }
 
-$UProject = Join-Path $ProjectRoot "PaintForge.uproject"
+$UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 if (-not (Test-Path $UProject)) { throw "Missing $UProject" }
 
 if (-not $NoFirewall) { Ensure-PlaytestFirewall -Port $Port }
 
-$ServerExe = Find-PaintForgeExe $ProjectRoot "PaintForgeServer.exe"
-$GameExe = Find-PaintForgeExe $ProjectRoot "PaintForge.exe"
+$ServerExe = Find-CombatForgeExe $ProjectRoot "CombatForgeServer.exe"
+$GameExe = Find-CombatForgeExe $ProjectRoot "CombatForge.exe"
 $Editor = Get-UnrealEditor $Engine
 
 $Exe = $null
@@ -66,12 +66,12 @@ elseif ($Editor) {
 	)
 }
 else {
-	throw "No server host available. Install UE 5.6 editor or place a PaintForge.exe build."
+	throw "No server host available. Install UE 5.6 editor or place a CombatForge.exe build."
 }
 
 if ($ExtraArgs) { $Args += $ExtraArgs }
 
-Write-Host "==> PaintForge playtest SERVER ($Mode)"
+Write-Host "==> CombatForge playtest SERVER ($Mode)"
 Write-Host "    Exe:  $Exe"
 Write-Host "    Map:  $Map"
 Write-Host "    Port: $Port"

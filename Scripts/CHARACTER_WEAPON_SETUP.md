@@ -1,10 +1,10 @@
 # Character + Weapon art loadout (M1 slice, steps 3–4)
 
-`APaintForgeCharacter` now has an optional **art loadout** that stays fully dormant until assets
+`ACombatForgeCharacter` now has an optional **art loadout** that stays fully dormant until assets
 are assigned — **unset = the exact graybox** (validated playtest behavior unchanged). Written on
 branch `feat/art-pass`; **compile-verify pending** (needs the editor closed to rebuild the module).
 
-## What the scaffold exposes (on `APaintForgeCharacter`)
+## What the scaffold exposes (on `ACombatForgeCharacter`)
 
 | Property | Type | Feeds |
 |---|---|---|
@@ -35,7 +35,7 @@ The project is native C++ (no BP), so the properties get set one of two ways —
 - **(a) I add `ConstructorHelpers::FObjectFinder` loads** to your imported asset paths (give me the
   paths, e.g. `/Game/Art/Characters/SK_Operator`, `/Game/Art/Weapons/SM_Rifle`). Matches the existing
   pattern (BasicShapes, `M_PF_BuildPiece`). Fastest for a solo native project.
-- **(b) I make a `BP_PaintForgeCharacter` subclass**, set the properties there, and point the GameMode
+- **(b) I make a `BP_CombatForgeCharacter` subclass**, set the properties there, and point the GameMode
   default pawn at it. More editor-native, easier for you to tweak later.
 
 Then: close the editor → I build → relaunch → your operator + rifle appear, team-tinted, in place of
