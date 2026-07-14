@@ -3,6 +3,7 @@
 #include "AI/PFBotController.h"
 
 #include "PaintForge.h"
+#include "AI/PFSquadSubsystem.h"
 #include "Player/PaintForgeCharacter.h"
 #include "Core/PaintForgeGameState.h"
 #include "Core/PaintForgePlayerState.h"
@@ -282,6 +283,14 @@ void APFBotController::Tick(float DeltaSeconds)
 	{
 		LastSeenPos = Target->GetActorLocation();
 		LastSeenTime = NowSec;
+		// Squad awareness: tell the team where this enemy is so teammates without a target converge on it.
+		if (PS != nullptr && PS->TeamId <= 1)
+		{
+			if (UPFSquadSubsystem* Squad = GetWorld()->GetSubsystem<UPFSquadSubsystem>())
+			{
+				Squad->ReportEnemy(PS->TeamId, Target, LastSeenPos, NowSec);
+			}
+		}
 	}
 
 	// Objective goal (Domination / Hardpoint / CTF): where this bot should push, even with no enemy in sight.
@@ -292,10 +301,25 @@ void APFBotController::Tick(float DeltaSeconds)
 	// bot that lost sight (you ducked behind cover) or was shot from behind goes to hunt/investigate, not idle.
 	const bool bSeenFresh = (NowSec - LastSeenTime) < SearchHoldSec;
 	const bool bNoiseFresh = (NowSec - InvestigateTime) < SearchHoldSec;
-	const bool bHaveSearch = bSeenFresh || bNoiseFresh;
-	const FVector SearchPos = bHaveSearch
+	bool bHaveSearch = bSeenFresh || bNoiseFresh;
+	FVector SearchPos = bHaveSearch
 		? ((bSeenFresh && (!bNoiseFresh || LastSeenTime >= InvestigateTime)) ? LastSeenPos : InvestigatePos)
 		: FVector::ZeroVector;
+
+	// Squad coordination: with no target and no personal lead, borrow the team's nearest fresh sighting — a
+	// teammate saw someone, so go help instead of wandering to centre. Team modes only (FFA bots are solo).
+	if (!bHaveSearch && Target == nullptr && PS != nullptr && PS->TeamId <= 1)
+	{
+		if (const UPFSquadSubsystem* Squad = GetWorld()->GetSubsystem<UPFSquadSubsystem>())
+		{
+			FVector Lead;
+			if (Squad->GetSharedLead(PS->TeamId, Bot->GetActorLocation(), NowSec, SearchHoldSec, nullptr, Lead))
+			{
+				SearchPos = Lead;
+				bHaveSearch = true;
+			}
+		}
+	}
 
 	const FVector BotLoc = Bot->GetActorLocation();
 
