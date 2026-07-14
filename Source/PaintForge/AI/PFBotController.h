@@ -64,6 +64,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimTurnRate = 2.5f;      // control-rotation ease speed (low = laggy aim, misses strafers)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimJitterInterval = 0.6f;// how often the random aim error is re-rolled
 
+	// Close-quarters engagement: a bot must reliably turn on + hit an enemy in its face. Inside PointBlankUU an
+	// enemy is force-targeted (overrides a sticky far target). Inside CloseAimRangeUU the aim tracks faster and
+	// tightens (scaled by proximity) so a point-blank foe circling the bot doesn't just walk around the flailing,
+	// wide-cone Rookie aim. Distance play is unchanged (still laggy + wide = beatable).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float PointBlankUU = 1200.f;      // "in your face" — force-target + snap reaction
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float CloseAimRangeUU = 1800.f;   // under this, aim tracking + accuracy ramp up toward contact
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float CloseAimTurnMult = 4.0f;    // turn-rate multiplier at contact (tracks a circling target)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float CloseAimErrorMult = 0.30f;  // aim-error multiplier at contact (point-blank shots connect)
+
 	// Navmesh pathfinding (replaces the old reactive whisker-steer): the bot picks a tactical GOAL POINT
 	// and the RecastNavMesh routes it there, so it walks AROUND the player-built fort instead of into it.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)

@@ -177,24 +177,37 @@ void APFBotController::Tick(float DeltaSeconds)
 		}
 	}
 
-	// Sticky targeting: keep the current enemy while it's still alive, in range and visible; only re-scan
-	// (throttled) when we have no engageable target. This stops the nearest-enemy rank from thrashing
-	// between two near-equidistant foes — which otherwise re-armed the reaction gap every 0.4s refresh and
-	// froze the trigger (fatal for Rookie, whose 0.6s notice gap exceeds the refresh). The aim error re-roll
-	// and the reaction "notice" gap are applied only on a genuine target change.
+	// Target selection: prefer the nearest VISIBLE enemy, but KEEP the current one unless a clearly-closer foe
+	// appears (20% hysteresis) so we don't thrash between two near-equidistant enemies — that used to re-arm the
+	// reaction gap every refresh and freeze the trigger. CRITICAL FIX: the old code only re-scanned when the
+	// current target went disengageable, so a bot locked on a FAR enemy ignored someone who ran up point-blank
+	// ("run right up and they don't shoot you"). Now we always re-scan, and an enemy inside PointBlankUU
+	// immediately becomes the target (a bot must turn on someone in its face) with a near-instant reaction gap.
 	TargetRefreshTimer -= DeltaSeconds;
 	FireHoldTimer -= DeltaSeconds;
 	NavWarnTimer -= DeltaSeconds;
-	if (!IsTargetEngageable(CurrentTarget.Get()) && TargetRefreshTimer <= 0.f)
+	if (TargetRefreshTimer <= 0.f)
 	{
 		TargetRefreshTimer = TargetRefreshInterval;
-		APaintForgeCharacter* PrevTarget = CurrentTarget.Get();
-		APaintForgeCharacter* NewTarget = AcquireNearestEnemy();   // nearest VISIBLE enemy (else nearest)
-		if (NewTarget != PrevTarget && NewTarget != nullptr)
+		APaintForgeCharacter* Curr = CurrentTarget.Get();
+		const bool bCurrOK = IsTargetEngageable(Curr);
+		APaintForgeCharacter* Best = AcquireNearestEnemy();   // nearest VISIBLE enemy (else nearest)
+		if (Best != nullptr && Best != Curr)
 		{
-			FireHoldTimer = ReactionDelay;   // notice gap only when we actually switch to a new target
+			const FVector BotAt = Bot->GetActorLocation();
+			const float BestD = FVector::Dist(BotAt, Best->GetActorLocation());
+			const float CurrD = bCurrOK ? FVector::Dist(BotAt, Curr->GetActorLocation()) : TNumericLimits<float>::Max();
+			// Switch if we have no valid target, OR the new one is clearly closer, OR it's point-blank.
+			if (!bCurrOK || BestD < CurrD * 0.8f || BestD < PointBlankUU)
+			{
+				FireHoldTimer = (BestD < PointBlankUU) ? (ReactionDelay * 0.35f) : ReactionDelay;
+				CurrentTarget = Best;
+			}
 		}
-		CurrentTarget = NewTarget;
+		else if (Best == nullptr && !bCurrOK)
+		{
+			CurrentTarget = nullptr;
+		}
 	}
 
 	APaintForgeCharacter* Target = CurrentTarget.Get();
@@ -220,19 +233,38 @@ void APFBotController::Tick(float DeltaSeconds)
 		const FVector ToTarget = TargetChest - BotEye;
 		const float Dist = ToTarget.Size();
 
+		// Aim quality scales with range: at distance the bot stays deliberately laggy + wide (beatable), but as
+		// the target closes it tracks faster and tightens up — so a point-blank enemy circling the bot actually
+		// gets tracked and hit instead of walking around a slow, 14°-wide Rookie aim.
+		const float CloseT = (Dist < CloseAimRangeUU) ? (1.f - Dist / CloseAimRangeUU) : 0.f;   // 0 at edge → 1 at contact
+		const float EffTurnRate = AimTurnRate * FMath::Lerp(1.f, CloseAimTurnMult, CloseT);
+		const float EffAimError = AimErrorDeg * FMath::Lerp(1.f, CloseAimErrorMult, CloseT);
+
 		AimJitterTimer -= DeltaSeconds;
 		if (AimJitterTimer <= 0.f)
 		{
-			AimJitterYaw = FMath::FRandRange(-AimErrorDeg, AimErrorDeg);
-			AimJitterPitch = FMath::FRandRange(-AimErrorDeg, AimErrorDeg) * 0.5f;
-			AimJitterTimer = AimJitterInterval;
+			AimJitterYaw = FMath::FRandRange(-EffAimError, EffAimError);
+			AimJitterPitch = FMath::FRandRange(-EffAimError, EffAimError) * 0.5f;
+			AimJitterTimer = AimJitterInterval * FMath::Lerp(1.f, 0.4f, CloseT);   // re-roll faster up close so the tighter cone applies quickly
 		}
 		FRotator DesiredAim = ToTarget.Rotation();
 		DesiredAim.Yaw += AimJitterYaw;
 		DesiredAim.Pitch = FMath::Clamp(DesiredAim.Pitch + AimJitterPitch, -80.f, 80.f);
-		SetControlRotation(FMath::RInterpTo(GetControlRotation(), DesiredAim, DeltaSeconds, AimTurnRate));
+		SetControlRotation(FMath::RInterpTo(GetControlRotation(), DesiredAim, DeltaSeconds, EffTurnRate));
 
-		SetFiring((Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && HasLineOfSight(Target));
+		const bool bLOS = HasLineOfSight(Target);
+		const bool bWantFire = (Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && bLOS;
+		SetFiring(bWantFire);
+
+		// Diagnostic: if an enemy is point-blank but we're NOT firing, log why (LOS / reaction gap / range) so a
+		// remaining "won't shoot in your face" case is pinpointed instead of guessed. Throttled (shares NavWarnTimer).
+		if (!bWantFire && Dist < PointBlankUU && NavWarnTimer <= 0.f)
+		{
+			NavWarnTimer = 3.f;
+			UE_LOG(PaintForgeLog, Warning,
+				TEXT("Bot NOT firing point-blank: dist=%.0f LOS=%d fireHold=%.2f inRange=%d"),
+				Dist, bLOS ? 1 : 0, FireHoldTimer, (Dist <= EngageRangeUU) ? 1 : 0);
+		}
 	}
 	else
 	{
