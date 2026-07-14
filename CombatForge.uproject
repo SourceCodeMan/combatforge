@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"EngineAssociation": "5.6",
 	"Category": "Game",
-	"Description": "CombatForge - build-then-battle paintball FPS (v1 graybox)",
+	"Description": "CombatForge - build-then-battle airsoft FPS (v1 graybox)",
 	"Modules": [
 		{
 			"Name": "CombatForge",
