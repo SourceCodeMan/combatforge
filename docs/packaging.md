@@ -66,6 +66,19 @@ The cook only includes what it can find. Structural pieces use engine primitives
 
 If you add new soft‑loaded content later, add its folder here or it won't ship.
 
+### Bandit pack: texture trim + tracking
+
+The Bandit pack shipped with **4K textures (~8.7 GB)** — overkill for a graybox indie game. `Scripts/trim_bandit_textures.py` caps every Bandit texture's *Maximum Texture Size* to **1024** (tunable at the top; bump to 2048 if hero weapon/arms look soft up close). Run it headless after (re)adding the pack on any machine:
+
+```
+"<UE>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" PaintForge.uproject -run=pythonscript -script="...\Scripts\trim_bandit_textures.py"
+```
+
+- **Effect:** the **cooked package** uses ≤1K textures (~1/16 the pixels of 4K) → dramatically smaller build. Non‑destructive + reversible (set `max_texture_size` back to `0`).
+- **What it does NOT do:** shrink the dev‑side `.uasset` files. UE keeps the full‑res *source* in the asset to re‑cook per platform, so `Content/Bandits` stays ~12 GB on disk. The cap only bites at cook time.
+
+**Tracking the 12 GB pack — recommendation:** because the sources stay 4K on disk and the pack is **re‑downloadable from Fab**, the pragmatic path is **don't commit it** — keep it local, back it up to the homelab, and re‑download or copy it to the Mac (then re‑run the trim script). It's not gitignored, and there's an LFS rule for `Content/Bandits/**` **as a safety net** (so if it's ever `git add`‑ed it goes to LFS, never bloats regular git). If you'd rather have a one‑clone setup, `git add Content/Bandits` + push tracks it via LFS (~12 GB → check your GitHub LFS data pack has room; you're already ~9 GB in).
+
 ---
 
 ## 5. Mac‑specific checklist
