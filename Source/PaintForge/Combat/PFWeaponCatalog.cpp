@@ -29,9 +29,9 @@ namespace PFWeapon
 			// Bandits AK meshes are authored larger than the Lyra rifle — scale WAY down (0.48 filled the screen)
 			// and pull toward center. Still a blind guess; live-tune with pf.WeaponFP.
 			{ TEXT("AK (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black"),
-			  nullptr, FVector(2.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(26.f, 2.5f, -4.f) },
+			  nullptr, FVector(-4.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f) },
 			{ TEXT("AK (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
-			  nullptr, FVector(2.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(26.f, 2.5f, -4.f) },
+			  nullptr, FVector(-4.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f) },
 		};
 		// SMG = burst or automatic (NO single); looser accuracy + shorter range than a rifle.
 		const FPFWeaponDef GSMGs[] = {
@@ -46,10 +46,12 @@ namespace PFWeapon
 		};
 		// Pistol = burst or single (NO auto). Sidearm hold; shortest range.
 		const FPFWeaponDef GPistols[] = {
+			// Pistol floated way out front — pull it back hard (base viewmodel already sits 26 uu forward). ADS was
+			// too high + aimed off the trigger not the sight: drop it and bring the front sight back toward center.
 			{ TEXT("Pistol"), TEXT("/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol"),
-			  nullptr, FVector(6.f, 3.f, -3.f), FRotator(-2.f, -90.f, 2.f), 0.40f, FVector(13.f, 2.f, -3.f),
-			  FVector(15.f, -3.f, -1.f), FRotator(1.5f, 0.f, -1.5f),
-			  (1 << 0) | (1 << 1), EPFFireMode::Single, 2.0f, 0.12f, 9000.f, 1.2f, 3 },
+			  nullptr, FVector(-12.f, 3.f, -4.f), FRotator(-2.f, -90.f, 2.f), 0.40f, FVector(6.f, 2.f, -3.f),
+			  FVector(9.f, -3.f, -4.f), FRotator(1.5f, 0.f, -1.5f),
+			  (1 << 0) | (1 << 1), EPFFireMode::Single, 2.0f, 0.12f, 9000.f, 1.2f, 3, /*MagSize*/ 18 },
 		};
 
 		struct FCatEntry { const TCHAR* Label; const FPFWeaponDef* Defs; int32 Count; };

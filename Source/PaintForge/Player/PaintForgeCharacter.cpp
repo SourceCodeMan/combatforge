@@ -1172,6 +1172,8 @@ void APaintForgeCharacter::ApplyWeaponLoadout()
 		WeaponComponent->MuzzleSpeedUU = Def.MuzzleSpeedUU;
 		WeaponComponent->ProjLifetime  = Def.ProjLifetimeSec;
 		WeaponComponent->BurstCount    = Def.ClassBurstCount;
+		WeaponComponent->HopperCapacity = Def.MagSize;   // per-weapon mag (pistol 18, else 30) — overrides marker preset
+		WeaponComponent->HopperCount    = Def.MagSize;   // start full at the new capacity
 		WeaponComponent->SetAllowedFireModes(Def.AllowedFireModes, Def.DefaultFireMode);
 	}
 

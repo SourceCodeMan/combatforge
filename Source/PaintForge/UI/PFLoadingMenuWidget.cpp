@@ -1128,7 +1128,7 @@ void UPFLoadingMenuWidget::NotifyCardSelected(int32 Kind, int32 Value)
 	{
 		SelectedTeamSize = (Value == 1) ? 6 : 4;
 	}
-	RefreshSetupCards();
+	RefreshSetupLabels();   // refreshes the cards AND the map-picker visibility (shows it for Improvement/Play-Only)
 	ApplySelectionsToHost();
 	if (NeedsCommunityMap())
 	{
