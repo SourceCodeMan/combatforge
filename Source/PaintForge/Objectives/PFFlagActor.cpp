@@ -9,6 +9,7 @@
 #include "Objectives/PFObjectiveLayout.h"
 #include "Player/PaintForgeCharacter.h"
 
+#include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -19,8 +20,7 @@
 
 namespace
 {
-	constexpr float FlagPickupRadius = 120.f;
-	const FVector FlagMeshScale(0.6f, 0.6f, 1.4f);
+	constexpr float FlagPickupRadius = 140.f;
 }
 
 APFFlagActor::APFFlagActor()
@@ -32,21 +32,38 @@ APFFlagActor::APFFlagActor()
 	SetReplicateMovement(true);
 	bAlwaysRelevant = true;
 
+	// A flag from engine primitives (graybox style, no art asset): a thin pole standing on the floor with a
+	// team-colored banner hanging off the top. Root is a plain scene node so the pole/banner can sit with the
+	// pole base on the actor origin (the floor), which a single centred-pivot mesh couldn't do.
+	FlagRoot = CreateDefaultSubobject<USceneComponent>(TEXT("FlagRoot"));
+	SetRootComponent(FlagRoot);
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
+
+	// Pole: thin tall cylinder. Engine cylinder is 100 uu tall with a centred pivot → scale Z 3.4 (~340 uu) and
+	// lift half so the base sits on the floor.
+	PoleMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PoleMesh"));
+	PoleMesh->SetupAttachment(FlagRoot);
+	if (CylFinder.Succeeded()) { PoleMesh->SetStaticMesh(CylFinder.Object); }
+	PoleMesh->SetRelativeScale3D(FVector(0.10f, 0.10f, 3.4f));
+	PoleMesh->SetRelativeLocation(FVector(0.f, 0.f, 170.f));
+	PoleMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PoleMesh->SetCastShadow(false);
+
+	// Banner: a flat, wide, tall quad hanging off the top of the pole (+X), team-coloured (ApplyTeamColor targets
+	// FlagMesh). Engine cube is 100 uu → ~130 wide x 6 thin x 80 tall, its inner edge on the pole.
 	FlagMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FlagMesh"));
-	SetRootComponent(FlagMesh);
-	FlagMesh->SetRelativeScale3D(FlagMeshScale);
+	FlagMesh->SetupAttachment(FlagRoot);
+	if (CubeFinder.Succeeded()) { FlagMesh->SetStaticMesh(CubeFinder.Object); }
+	FlagMesh->SetRelativeScale3D(FVector(1.3f, 0.06f, 0.8f));
+	FlagMesh->SetRelativeLocation(FVector(65.f, 0.f, 285.f));
 	FlagMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FlagMesh->SetCastShadow(false);
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(
-		TEXT("/Engine/BasicShapes/Cone.Cone"));
-	if (ConeFinder.Succeeded())
-	{
-		FlagMesh->SetStaticMesh(ConeFinder.Object);
-	}
-
 	PickupSphere = CreateDefaultSubobject<USphereComponent>(TEXT("PickupSphere"));
-	PickupSphere->SetupAttachment(FlagMesh);
+	PickupSphere->SetupAttachment(FlagRoot);
+	PickupSphere->SetRelativeLocation(FVector(0.f, 0.f, 100.f));   // centred on the flag body, not the pole base
 	PickupSphere->SetSphereRadius(FlagPickupRadius);
 	PickupSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	PickupSphere->SetCollisionObjectType(ECC_WorldDynamic);
@@ -68,6 +85,14 @@ void APFFlagActor::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyTeamColor();
+	// Pole is a neutral gray (BasicShapeMaterial carries a "Color" tint); only the banner is team-colored.
+	if (PoleMesh != nullptr)
+	{
+		if (UMaterialInstanceDynamic* PoleMID = PoleMesh->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			PoleMID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.18f, 0.18f, 0.20f, 1.f));
+		}
+	}
 	if (HasAuthority() && PickupSphere)
 	{
 		PickupSphere->OnComponentBeginOverlap.AddDynamic(this, &APFFlagActor::OnPickupOverlap);

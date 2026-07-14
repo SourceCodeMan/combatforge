@@ -9,6 +9,7 @@
 
 class APaintForgePlayerState;
 class UMaterialInstanceDynamic;
+class USceneComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 
@@ -61,7 +62,9 @@ private:
 	void ApplyTeamColor();
 	void ApplyVisualState();
 
-	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<UStaticMeshComponent> FlagMesh;
+	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<USceneComponent> FlagRoot;
+	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<UStaticMeshComponent> PoleMesh;   // gray flagpole
+	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<UStaticMeshComponent> FlagMesh;   // team-colored banner
 	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<USphereComponent> PickupSphere;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> FlagMID;
 
