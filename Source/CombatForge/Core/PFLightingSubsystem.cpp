@@ -74,10 +74,12 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		}
 	}
 
-	// Capture point raised to arena-center, just under the roofline — from here the real-time capture looks
-	// out through the roof skylights and sees sky (from the floor corner it mostly saw dark interior).
+	// Capture point ABOVE the roof (Z=3000, over the 1800 walls / 1500 roof) in open air — from here the
+	// real-time capture sees clean SKY, not the dark noisy interior. Without DFAO the captured sky-ambient
+	// lights the whole interior uniformly (the roof doesn't occlude it), so the up-facing floor finally
+	// gets fill. Inside the box (any Z below the walls) it captured darkness — that was the black floor.
 	if (ASkyLight* Sky = World.SpawnActor<ASkyLight>(ASkyLight::StaticClass(),
-			FTransform(FRotator::ZeroRotator, FVector(3200.f, 2000.f, 1300.f)), Params))
+			FTransform(FRotator::ZeroRotator, FVector(3200.f, 2000.f, 3000.f)), Params))
 	{
 		if (USkyLightComponent* SkyComp = Sky->GetLightComponent())
 		{
@@ -87,7 +89,9 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 			// shafts, so it has to be strong or those areas go black (playtest 4). 2.2 -> 4.5 now that the
 			// open roof lets the real-time capture see real sky. Lower hemisphere is a capture-independent
 			// constant floor (0.24 -> 0.38) so no surface can fall to pure black.
-			SkyComp->SetIntensity(4.5f);
+			// 2.5 now that the capture sees real (bright) sky from above the roof — 4.5 on a bright capture
+			// would blow out. This is the effective ambient floor lift; tune up if the interior's still dim.
+			SkyComp->SetIntensity(2.5f);
 			SkyComp->SetLowerHemisphereColor(FLinearColor(0.38f, 0.38f, 0.42f));
 		}
 	}
