@@ -56,11 +56,11 @@ namespace PFWeapon
 		};
 		// Pistol = burst or single (NO auto). Sidearm hold; shortest range.
 		const FPFWeaponDef GPistols[] = {
-			// Pistol floated way out front — pull it back hard (base viewmodel already sits 26 uu forward). ADS was
-			// too high + aimed off the trigger not the sight: drop it and bring the front sight back toward center.
+			// Pistol pose baked from Tom's in-game drag-tune (pf.WeaponFP/ADS log, 2026-07-15): pulled back +
+			// down for the sidearm hold; ADS raised the front sight toward center. Rot/scale/muzzle unchanged.
 			{ TEXT("Pistol"), TEXT("/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol"),
-			  nullptr, FVector(0.5f, 6.4f, -4.5f), FRotator(-2.f, -90.f, 2.f), 0.40f, FVector(7.f, 6.4f, 0.5f),
-			  FVector(21.1f, -6.4f, -1.6f), FRotator(2.f, 0.f, -2.f),
+			  nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.f, -90.f, 2.f), 0.40f, FVector(7.f, 6.4f, 0.5f),
+			  FVector(21.1f, -5.54f, 1.29f), FRotator(2.f, 0.f, -2.f),
 			  (1 << 0) | (1 << 1), EPFFireMode::Single, 2.0f, 0.12f, 9000.f, 1.2f, 3, /*MagSize*/ 18, /*Bps*/ 10.f },
 		};
 
