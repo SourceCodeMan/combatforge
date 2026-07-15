@@ -50,9 +50,9 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
 		{
 			SunComp->SetMobility(EComponentMobility::Movable);
-			// Playtest 3: still crushed-dark with no Lumen GI. Direct key up 6->8.5 (lit faces punchier);
-			// the real shadow fix is the SkyLight below (ambient is the ONLY indirect term without Lumen).
-			SunComp->SetIntensity(8.5f);
+			// Playtest 4: skylights work but 8.5 blew the floor pools pure-white. Pulled to 6.0 — still a
+			// clear sun shaft, recovers concrete detail in the pool. Fill now comes from the SkyLight.
+			SunComp->SetIntensity(6.0f);
 			SunComp->SetLightColor(FLinearColor(1.0f, 0.97f, 0.92f));
 			SunComp->SetAtmosphereSunLight(true);
 			SunComp->SetDynamicShadowDistanceMovableLight(16000.f);
@@ -80,12 +80,12 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		{
 			SkyComp->SetMobility(EComponentMobility::Movable);
 			SkyComp->SetRealTimeCapture(true);
-			// Ambient fill. The real fix for the dark interior is the ROOF SKYLIGHTS (PFArenaShell) letting
-			// the sun in + this real-time capture now seeing sky through them; this value only fills the
-			// covered bays. 1.30 (too dark, sealed roof) -> 2.2 (skylights carry the rest). Lower hemisphere
-			// lifted so floors/undersides aren't pitch black.
-			SkyComp->SetIntensity(2.2f);
-			SkyComp->SetLowerHemisphereColor(FLinearColor(0.24f, 0.24f, 0.26f));
+			// Ambient fill — with no GI bounce, this is the ONLY thing lighting the floor BETWEEN the sun
+			// shafts, so it has to be strong or those areas go black (playtest 4). 2.2 -> 4.5 now that the
+			// open roof lets the real-time capture see real sky. Lower hemisphere is a capture-independent
+			// constant floor (0.24 -> 0.38) so no surface can fall to pure black.
+			SkyComp->SetIntensity(4.5f);
+			SkyComp->SetLowerHemisphereColor(FLinearColor(0.38f, 0.38f, 0.42f));
 		}
 	}
 
@@ -121,10 +121,10 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.AutoExposureMinBrightness = 1.f;
 		PP.bOverride_AutoExposureMaxBrightness = true;
 		PP.AutoExposureMaxBrightness = 1.f;
-		// Overall lift. Pulled back 0.65 -> 0.50 now that the roof skylights admit real direct sun (the
-		// bright floor pools shouldn't blow out). Easy knob to re-tune after a look.
+		// Mild pull (0.50 -> 0.42) mostly to tame the sun pools; the SkyLight raise above does the real
+		// lifting of the dark areas. Independent knob — raise for brighter-overall, lower if pools blow.
 		PP.bOverride_AutoExposureBias = true;
-		PP.AutoExposureBias = 0.50f;
+		PP.AutoExposureBias = 0.42f;
 
 		// Clean industrial grade (original knobs + mild vignette/bloom).
 		PP.bOverride_BloomIntensity = true;
