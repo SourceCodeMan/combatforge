@@ -16,6 +16,7 @@ class UStaticMeshComponent;
 class UPFBuildComponent;
 class UPFCharacterMovementComponent;
 class UPFCombatAudio;
+class UPFCombatVFX;
 class UPFHealthComponent;
 class UPFWeaponComponent;
 class UNavigationInvokerComponent;
@@ -49,6 +50,7 @@ public:
 	UPFBuildComponent*   GetBuild()  const;
 	UPFHealthComponent*  GetHealth() const;
 	UPFCombatAudio*      GetCombatAudio() const;
+	UPFCombatVFX*        GetCombatVFX() const;
 	UCameraComponent*    GetFirstPersonCamera() const;
 
 	// ---- ADS (owned here; CMC + weapon read through these) ----
@@ -187,6 +189,7 @@ private:
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UPFBuildComponent> BuildComponent;
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UPFHealthComponent> HealthComponent;
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UPFCombatAudio> CombatAudioComponent;
+	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UPFCombatVFX> CombatVFXComponent;
 	UPROPERTY(Transient) TObjectPtr<UPFCharacterMovementComponent> PFMovement;
 	// Generates the runtime navmesh in a radius around this pawn (host players + server bots both carry one),
 	// so the dynamic mesh over the player-built arena exists wherever combatants actually are. See DefaultEngine.ini
@@ -298,7 +301,7 @@ private:
 	/** True when team meshes are multi-material human packs — never wash with a single team MI. */
 	bool bPreserveAuthoredMaterials = false;
 
-	// ---- Weapon cosmetics: FP viewmodel + TP hand/raise (airsoft — no muzzle flash) ----
+	// ---- Weapon cosmetics: FP viewmodel + TP hand/raise (+ CO₂ muzzle VFX via UPFCombatVFX) ----
 	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<USceneComponent> ViewModelRoot;   // FP marker anchor (on camera)
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> MarkerPartsFP;                            // owner-only-see marker parts
 	UPROPERTY(VisibleAnywhere, Category="PF|Weapon") TObjectPtr<UStaticMeshComponent> RifleFPMesh; // real FP rifle (replaces the marker gun)

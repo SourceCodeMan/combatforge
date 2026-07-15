@@ -15,6 +15,7 @@
 #include "Combat/PFWeaponComponent.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFCombatAudio.h"
+#include "Combat/PFCombatVFX.h"
 #include "Combat/PFAmmoBarrel.h"
 #include "Building/PFBuildComponent.h"
 #include "Core/PFUserPrefs.h"
@@ -481,6 +482,7 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	BuildComponent       = CreateDefaultSubobject<UPFBuildComponent>(TEXT("BuildComponent"));
 	HealthComponent      = CreateDefaultSubobject<UPFHealthComponent>(TEXT("HealthComponent"));
 	CombatAudioComponent = CreateDefaultSubobject<UPFCombatAudio>(TEXT("CombatAudioComponent"));
+	CombatVFXComponent   = CreateDefaultSubobject<UPFCombatVFX>(TEXT("CombatVFXComponent"));
 
 	bSprintKeyHeld = false;
 	bADSHeld = false;
@@ -497,6 +499,7 @@ UPFWeaponComponent*  ACombatForgeCharacter::GetWeapon() const      { return Weap
 UPFBuildComponent*   ACombatForgeCharacter::GetBuild() const       { return BuildComponent; }
 UPFHealthComponent*  ACombatForgeCharacter::GetHealth() const      { return HealthComponent; }
 UPFCombatAudio*      ACombatForgeCharacter::GetCombatAudio() const { return CombatAudioComponent; }
+UPFCombatVFX*        ACombatForgeCharacter::GetCombatVFX() const   { return CombatVFXComponent; }
 UCameraComponent*    ACombatForgeCharacter::GetFirstPersonCamera() const { return FirstPersonCamera; }
 
 // ---------------------------------------------------------------------------
@@ -2558,7 +2561,7 @@ void ACombatForgeCharacter::SetupWeaponMaterials()
 
 void ACombatForgeCharacter::OnFireCosmetic(float RecoilScale)
 {
-	// Airsoft marker: viewmodel recoil only — no muzzle flash. Kick scaled by ADS + mag-ramp (see FireOneShot).
+	// Marker: viewmodel recoil + CO₂ muzzle wisp (PlayMuzzle FX is driven from the weapon fire path).
 	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f) * RecoilScale;
 	RecoilPitch += RecoilKickPitchDeg * RecoilScale;
 	// Spring VELOCITY impulses (not position sets): the fast-out + one-bounce settle is what sells the shot.
@@ -2577,7 +2580,7 @@ void ACombatForgeCharacter::OnFireCosmetic(float RecoilScale)
 
 void ACombatForgeCharacter::OnRemoteFireCosmetic()
 {
-	// Airsoft: no flash. (No raised-pose swap here either — see OnFireCosmetic; it poisoned same-frame
-	// GetMuzzleLocation queries on viewers, e.g. the shot audio position.)
+	// No raised-pose swap (see OnFireCosmetic — it poisoned same-frame GetMuzzleLocation).
+	// Muzzle VFX/audio are spawned by MulticastShotFX / FireOneShot, not here.
 	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
 }

@@ -14,6 +14,7 @@ class UMaterialInstanceDynamic;
 class UDecalComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UNiagaraSystem;
 class APFPaintballProjectile;
 
 /**
@@ -73,6 +74,10 @@ private:
 	{
 		bool   bActive = false;
 		double HideAt = 0.0;
+		double SpawnTime = 0.0;
+		float  StartScale = 1.f;
+		float  EndScale = 1.f;
+		uint8  TeamIdx = 0;
 	};
 
 	bool  IsRenderingWorld() const;                  // false on dedicated servers
@@ -82,6 +87,7 @@ private:
 	void  PlaceSplat(int32 Index, const FVector& Loc, const FVector& Normal, uint8 Team,
 	                 bool bPending, uint32 ShotIndex);
 	void  SpawnImpactPuff(const FVector& Loc, const FVector& Normal, uint8 Team);
+	bool  TrySpawnNiagaraImpact(const FVector& Loc, const FVector& Normal, uint8 Team);
 	UStaticMeshComponent* GetOrCreatePuffComp(int32 Index);
 	void  TickPendingExpiry();
 	void  HandlePhaseChanged(EPFMatchPhase NewPhase);
@@ -90,21 +96,24 @@ private:
 	UPROPERTY() TObjectPtr<UMaterialInterface> BaseMaterial;
 	UPROPERTY() TObjectPtr<UMaterialInterface> DustMaterial;
 	UPROPERTY() TObjectPtr<UStaticMesh>        PuffMesh;
+	UPROPERTY() TObjectPtr<UNiagaraSystem>     ImpactFX;
 	UPROPERTY() TObjectPtr<AActor>             SplatHolder;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> ConfirmedMIDs;   // [teamIdx 0/1]
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> PendingMIDs;     // 60% brightness
 	UPROPERTY() TArray<TObjectPtr<UDecalComponent>> SplatComps;   // lazily filled to PoolSize
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> PuffComps;
-	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> PuffMIDs; // [teamIdx 0/1]
+	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> PuffSlotMIDs;      // per-pool-slot (fade-safe)
 
 	TArray<FSplatMeta> SplatMeta;
 	TArray<FPuffMeta>  PuffMeta;
 	int32 NextSlot = 0;
 	int32 NextPuffSlot = 0;
 	bool  bBoundToGameState = false;
+	bool  bTriedImpactNiagara = false;
 
-	static constexpr int32 PuffPoolSize = 48;
-	static constexpr float PuffLifetimeSec = 0.11f;
+	static constexpr int32 PuffPoolSize = 64;
+	static constexpr float PuffLifetimeSec = 0.16f;
+	static constexpr int32 PuffsPerImpact = 3;   // multi-wisp mesh burst when Niagara missing
 
 	UPROPERTY() TArray<TObjectPtr<APFPaintballProjectile>> CosmeticPool;
 	int32 NextCosmeticSlot = 0;

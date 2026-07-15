@@ -26,9 +26,9 @@ public class CombatForge : ModuleRules
 			"Json", "JsonUtilities",         // arena rating records
 			"RenderCore",                    // GShaderCompilingManager / loading-screen shader drain
 			"RHI",                           // shader pipeline cache helpers
-			"AssetRegistry"                  // UObjectLibrary part enumeration (PFCharacterCustomization)
+			"AssetRegistry",                 // UObjectLibrary part enumeration (PFCharacterCustomization)
+			"Niagara"                        // muzzle / impact VFX (soft-ref systems + mesh fallback)
 		});
-		// No private-only deps in v1. NOT needed: OnlineSubsystem (02 D12),
-		// Niagara (post-v1 art), GameplayAbilities (overkill).
+		// No private-only deps. NOT needed: OnlineSubsystem (02 D12), GameplayAbilities (overkill).
 	}
 }

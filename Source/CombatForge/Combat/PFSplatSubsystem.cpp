@@ -3,8 +3,11 @@
 #include "Combat/PFSplatSubsystem.h"
 
 #include "CombatForge.h"
+#include "Combat/PFCombatAudio.h"
 #include "Combat/PFPaintballProjectile.h"
 #include "Core/CombatForgeGameState.h"
+#include "Player/CombatForgeCharacter.h"
+#include "GameFramework/PlayerController.h"
 #include "Components/DecalComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -14,6 +17,9 @@
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/SoftObjectPtr.h"
@@ -31,14 +37,21 @@ namespace
 	constexpr float JitterMax = 1.35f;
 	constexpr float AspectMin = 0.72f;             // slight stretch → ricochet / scrape variety
 	constexpr float AspectMax = 1.28f;
-	constexpr float PuffSizeUU = 0.09f;            // sphere scale (~9 uu) for dust puff
-	constexpr float PuffNormalOffsetUU = 4.f;
+	constexpr float PuffSizeUU = 0.07f;            // sphere scale (~7 uu) per dust wisp
+	constexpr float PuffNormalOffsetUU = 3.f;
 
 	// Soft paths — CDO FObjectFinder is only reliable for /Engine content (playbook §2).
 	TSoftObjectPtr<UMaterialInterface> SplatDecalMatRef(
 		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ImpactMark.M_PF_ImpactMark")));
 	TSoftObjectPtr<UMaterialInterface> ImpactDustMatRef(
 		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ImpactDust.M_PF_ImpactDust")));
+	TSoftObjectPtr<UNiagaraSystem> ImpactFXRef(
+		FSoftObjectPath(TEXT("/Game/FX/NS_Impact.NS_Impact")));
+	// Fab NiagaraExamples pack (default install path under Content/NiagaraExamples).
+	TSoftObjectPtr<UNiagaraSystem> ImpactFXPackRef(
+		FSoftObjectPath(TEXT("/Game/NiagaraExamples/FX_Weapons/Impacts/NS_Impact_Concrete.NS_Impact_Concrete")));
+	TSoftObjectPtr<UNiagaraSystem> LyraImpactFXRef(
+		FSoftObjectPath(TEXT("/Game/FX/Lyra/NS_ImpactConcrete.NS_ImpactConcrete")));
 
 	int32 TeamIndex(uint8 Team)
 	{
@@ -266,6 +279,21 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 	{
 		DustMaterial = ImpactDustMatRef.LoadSynchronous();
 	}
+	if (!bTriedImpactNiagara)
+	{
+		bTriedImpactNiagara = true;
+		ImpactFX = ImpactFXRef.LoadSynchronous();
+		if (ImpactFX == nullptr)
+		{
+			ImpactFX = ImpactFXPackRef.LoadSynchronous();
+		}
+		if (ImpactFX == nullptr)
+		{
+			ImpactFX = LyraImpactFXRef.LoadSynchronous();
+		}
+		UE_LOG(CombatForgeLog, Log, TEXT("[VFX] Niagara impact=%s"),
+			ImpactFX ? TEXT("yes") : TEXT("mesh multi-puff"));
+	}
 
 	if (ConfirmedMIDs.Num() == 0 && BaseMaterial != nullptr)
 	{
@@ -281,23 +309,9 @@ void UPFSplatSubsystem::EnsureInfrastructure()
 		}
 	}
 
-	// Team-tinted dust puffs: warm dust * slight team color (airsoft scuff, not paint).
-	if (PuffMIDs.Num() == 0 && DustMaterial != nullptr)
+	if (PuffSlotMIDs.Num() != PuffPoolSize)
 	{
-		PuffMIDs.SetNum(2);
-		for (int32 T = 0; T < 2; ++T)
-		{
-			const FLinearColor Team = PFColors::ForTeam(static_cast<uint8>(T));
-			const FLinearColor Dust(
-				0.45f + Team.R * 0.25f,
-				0.40f + Team.G * 0.20f,
-				0.32f + Team.B * 0.15f,
-				1.f);
-			PuffMIDs[T] = UMaterialInstanceDynamic::Create(DustMaterial, this);
-			PuffMIDs[T]->SetVectorParameterValue(TEXT("EmissiveColor"), Dust);
-			PuffMIDs[T]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.85f);
-			PuffMIDs[T]->SetVectorParameterValue(TEXT("Color"), Dust);
-		}
+		PuffSlotMIDs.SetNum(PuffPoolSize);
 	}
 }
 
@@ -404,10 +418,59 @@ UStaticMeshComponent* UPFSplatSubsystem::GetOrCreatePuffComp(int32 Index)
 	return Comp;
 }
 
+bool UPFSplatSubsystem::TrySpawnNiagaraImpact(const FVector& Loc, const FVector& Normal, uint8 Team)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || ImpactFX == nullptr)
+	{
+		return false;
+	}
+	FVector SafeNormal = Normal.GetSafeNormal();
+	if (SafeNormal.IsNearlyZero())
+	{
+		SafeNormal = FVector::UpVector;
+	}
+	// Latch User.Color before activate so team tint sticks (playbook §3).
+	UNiagaraComponent* Burst = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		World, ImpactFX, Loc + SafeNormal * PuffNormalOffsetUU, SafeNormal.Rotation(),
+		FVector(0.55f), /*bAutoDestroy=*/true, /*bAutoActivate=*/false,
+		ENCPoolMethod::AutoRelease, /*bPreCullCheck=*/true);
+	if (Burst == nullptr)
+	{
+		return false;
+	}
+	const FLinearColor TeamColor = PFColors::ForTeam(Team);
+	Burst->SetVariableLinearColor(FName(TEXT("User.Color")), TeamColor);
+	Burst->SetVariableLinearColor(FName(TEXT("Color")), TeamColor);
+	Burst->Activate(true);
+	return true;
+}
+
 void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Normal, uint8 Team)
 {
-	const UWorld* World = GetWorld();
-	if (World == nullptr || DustMaterial == nullptr)
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	// Spatial impact thump (one per impact, via local pawn's audio component).
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (ACombatForgeCharacter* LocalChar = Cast<ACombatForgeCharacter>(PC->GetPawn()))
+		{
+			if (UPFCombatAudio* Audio = LocalChar->GetCombatAudio())
+			{
+				Audio->PlayImpactAt(Loc);
+			}
+		}
+	}
+
+	if (TrySpawnNiagaraImpact(Loc, Normal, Team))
+	{
+		return;
+	}
+	if (DustMaterial == nullptr)
 	{
 		return;
 	}
@@ -417,36 +480,68 @@ void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Norma
 		PuffComps.SetNum(PuffPoolSize);
 	}
 
-	const int32 Slot = NextPuffSlot;
-	NextPuffSlot = (NextPuffSlot + 1) % PuffPoolSize;
-
-	UStaticMeshComponent* Comp = GetOrCreatePuffComp(Slot);
-	if (Comp == nullptr)
-	{
-		return;
-	}
-
-	const int32 TIdx = TeamIndex(Team);
-	if (PuffMIDs.IsValidIndex(TIdx) && PuffMIDs[TIdx] != nullptr)
-	{
-		Comp->SetMaterial(0, PuffMIDs[TIdx]);
-	}
-
 	FVector SafeNormal = Normal.GetSafeNormal();
 	if (SafeNormal.IsNearlyZero())
 	{
 		SafeNormal = FVector::UpVector;
 	}
-	const float Size = PuffSizeUU * FMath::FRandRange(0.75f, 1.35f);
-	// Flatten slightly along the surface normal so it reads as a dust burst, not a ball.
 	const FQuat Align = FRotationMatrix::MakeFromZ(SafeNormal).ToQuat();
-	Comp->SetWorldLocationAndRotation(Loc + SafeNormal * PuffNormalOffsetUU, Align.Rotator());
-	Comp->SetWorldScale3D(FVector(Size * 1.4f, Size * 1.4f, Size * 0.55f));
-	Comp->SetVisibility(true);
+	const FVector Tangent = Align.GetAxisX();
+	const FVector Bitangent = Align.GetAxisY();
+	const int32 TIdx = TeamIndex(Team);
+	const double Now = World->GetTimeSeconds();
 
-	FPuffMeta& P = PuffMeta[Slot];
-	P.bActive = true;
-	P.HideAt = World->GetTimeSeconds() + PuffLifetimeSec;
+	// Multi-wisp burst: core dust + two lateral flecks along the surface (reads less "one sphere").
+	for (int32 W = 0; W < PuffsPerImpact; ++W)
+	{
+		const int32 Slot = NextPuffSlot;
+		NextPuffSlot = (NextPuffSlot + 1) % PuffPoolSize;
+
+		UStaticMeshComponent* Comp = GetOrCreatePuffComp(Slot);
+		if (Comp == nullptr)
+		{
+			continue;
+		}
+		if (DustMaterial)
+		{
+			if (!PuffSlotMIDs.IsValidIndex(Slot) || PuffSlotMIDs[Slot] == nullptr)
+			{
+				if (PuffSlotMIDs.Num() != PuffPoolSize)
+				{
+					PuffSlotMIDs.SetNum(PuffPoolSize);
+				}
+				PuffSlotMIDs[Slot] = UMaterialInstanceDynamic::Create(DustMaterial, this);
+			}
+			const FLinearColor TeamTint = PFColors::ForTeam(static_cast<uint8>(TIdx));
+			const FLinearColor Dust(
+				0.45f + TeamTint.R * 0.25f,
+				0.40f + TeamTint.G * 0.20f,
+				0.32f + TeamTint.B * 0.15f,
+				1.f);
+			PuffSlotMIDs[Slot]->SetVectorParameterValue(TEXT("EmissiveColor"), Dust);
+			PuffSlotMIDs[Slot]->SetVectorParameterValue(TEXT("Color"), Dust);
+			PuffSlotMIDs[Slot]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.95f);
+			Comp->SetMaterial(0, PuffSlotMIDs[Slot]);
+		}
+
+		const float Radial = (W == 0) ? 0.f : FMath::FRandRange(3.f, 8.f);
+		const float Angle = FMath::FRandRange(0.f, 2.f * UE_PI);
+		const FVector Lateral = (Tangent * FMath::Cos(Angle) + Bitangent * FMath::Sin(Angle)) * Radial;
+		const float Size = PuffSizeUU * FMath::FRandRange(0.7f, 1.35f) * (W == 0 ? 1.15f : 0.75f);
+		Comp->SetWorldLocationAndRotation(
+			Loc + SafeNormal * (PuffNormalOffsetUU + W * 1.5f) + Lateral, Align.Rotator());
+		// Flatten along surface normal so it reads as a dust burst, not a ball.
+		Comp->SetWorldScale3D(FVector(Size * 1.5f, Size * 1.5f, Size * 0.45f));
+		Comp->SetVisibility(true);
+
+		FPuffMeta& P = PuffMeta[Slot];
+		P.bActive = true;
+		P.SpawnTime = Now;
+		P.HideAt = Now + PuffLifetimeSec * FMath::FRandRange(0.85f, 1.15f);
+		P.StartScale = Size;
+		P.EndScale = Size * (W == 0 ? 2.4f : 1.8f);
+		P.TeamIdx = static_cast<uint8>(TIdx);
+	}
 }
 
 void UPFSplatSubsystem::TickPendingExpiry()
@@ -477,20 +572,36 @@ void UPFSplatSubsystem::TickPendingExpiry()
 		}
 	}
 
-	// Hide expired dust puffs (mesh pool, no fade needed — already a short flash).
+	// Animate + hide dust puffs (expand along surface, fade emissive, then recycle).
 	for (int32 i = 0; i < PuffMeta.Num(); ++i)
 	{
 		FPuffMeta& P = PuffMeta[i];
-		if (P.bActive && Now >= P.HideAt)
+		if (!P.bActive)
 		{
-			if (UStaticMeshComponent* Comp = PuffComps.IsValidIndex(i) ? PuffComps[i].Get() : nullptr)
-			{
-				if (IsValid(Comp))
-				{
-					Comp->SetVisibility(false);
-				}
-			}
+			continue;
+		}
+		UStaticMeshComponent* Comp = PuffComps.IsValidIndex(i) ? PuffComps[i].Get() : nullptr;
+		if (!IsValid(Comp))
+		{
 			P = FPuffMeta();
+			continue;
+		}
+		if (Now >= P.HideAt)
+		{
+			Comp->SetVisibility(false);
+			P = FPuffMeta();
+			continue;
+		}
+		const float Life = FMath::Max(0.001f, static_cast<float>(P.HideAt - P.SpawnTime));
+		const float T = FMath::Clamp(static_cast<float>(Now - P.SpawnTime) / Life, 0.f, 1.f);
+		const float S = FMath::Lerp(P.StartScale, P.EndScale, T);
+		Comp->SetWorldScale3D(FVector(S * 1.5f, S * 1.5f, S * 0.45f));
+		// Drift slightly off the surface.
+		Comp->AddWorldOffset(Comp->GetUpVector() * (12.f * 0.1f));
+		if (PuffSlotMIDs.IsValidIndex(i) && PuffSlotMIDs[i])
+		{
+			PuffSlotMIDs[i]->SetScalarParameterValue(TEXT("EmissiveStrength"),
+				0.95f * (1.f - T * T));
 		}
 	}
 }

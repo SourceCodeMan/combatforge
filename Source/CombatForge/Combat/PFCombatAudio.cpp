@@ -8,6 +8,7 @@
 
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "Components/AudioComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/ConfigCacheIni.h"
@@ -94,10 +95,28 @@ namespace
 		return Out;
 	}
 
-	TArray<int16> SynthMuzzle()
+	// Near-field transient: sharp mechanical "pop" (solenoid / valve).
+	TArray<int16> SynthMuzzleClose()
 	{
-		return MixAdd(SynthNoiseBurst(0.028f, 0.55f, 0.45f),
-			SynthSineBlip(1800.f, 0.012f, 0.22f, 0.001f, 0.008f));
+		return MixAdd(
+			SynthNoiseBurst(0.014f, 0.62f, 0.55f),
+			SynthSineBlip(2400.f, 0.008f, 0.28f, 0.0005f, 0.005f), 0.85f);
+	}
+
+	// Body: air + mid thump (gas dump).
+	TArray<int16> SynthMuzzleBody()
+	{
+		return MixAdd(
+			MixAdd(SynthNoiseBurst(0.038f, 0.48f, 0.42f),
+				SynthSineBlip(320.f, 0.04f, 0.28f, 0.001f, 0.025f), 0.75f),
+			SynthSineBlip(140.f, 0.05f, 0.22f, 0.002f, 0.035f), 0.55f);
+	}
+
+	// Distant tail: low muffled body for spatial distance layering.
+	TArray<int16> SynthMuzzleTail()
+	{
+		return MixAdd(SynthNoiseBurst(0.09f, 0.28f, 0.22f),
+			SynthSineBlip(95.f, 0.10f, 0.30f, 0.003f, 0.07f), 0.8f);
 	}
 
 	TArray<int16> SynthHitmarker()
@@ -107,8 +126,6 @@ namespace
 
 	TArray<int16> SynthElim()
 	{
-		// Low concussive "thunk" (non-lethal "he's out"), NOT a bright two-note coin chime: a filtered noise
-		// impact over a low ~160 Hz body, then a short lower downward tail so it reads as a soft thud, not a jingle.
 		return Concat(
 			MixAdd(SynthNoiseBurst(0.10f, 0.5f, 0.28f),
 				SynthSineBlip(160.f, 0.14f, 0.55f, 0.001f, 0.11f), 0.9f),
@@ -119,6 +136,13 @@ namespace
 	{
 		return MixAdd(SynthSineBlip(140.f, 0.08f, 0.5f, 0.003f, 0.05f),
 			SynthNoiseBurst(0.055f, 0.28f, 0.25f), 0.55f);
+	}
+
+	TArray<int16> SynthImpact()
+	{
+		// Hard surface BB strike: short click + dust body.
+		return MixAdd(SynthNoiseBurst(0.04f, 0.42f, 0.48f),
+			SynthSineBlip(780.f, 0.018f, 0.18f, 0.0005f, 0.012f), 0.7f);
 	}
 
 	TArray<int16> SynthBreakout()
@@ -135,7 +159,6 @@ namespace
 
 	TArray<int16> SynthReload()
 	{
-		// Soft mechanical click-clack for hopper flip.
 		return Concat(
 			SynthSineBlip(420.f, 0.04f, 0.28f, 0.001f, 0.02f),
 			SynthNoiseBurst(0.06f, 0.18f, 0.4f));
@@ -165,28 +188,24 @@ namespace
 
 	TArray<int16> SynthFireSelect()
 	{
-		// Crisp mechanical selector click.
 		return MixAdd(SynthNoiseBurst(0.012f, 0.28f, 0.5f),
 			SynthSineBlip(950.f, 0.018f, 0.22f, 0.001f, 0.012f), 0.8f);
 	}
 
 	TArray<int16> SynthGrenadeThrow()
 	{
-		// Airy whoosh with a falling body.
 		return MixAdd(SynthNoiseBurst(0.20f, 0.30f, 0.6f),
 			SynthSineBlip(300.f, 0.16f, 0.16f, 0.02f, 0.11f), 0.7f);
 	}
 
 	TArray<int16> SynthFragBurst()
 	{
-		// Deep concussive boom: low body + broadband crack.
 		return MixAdd(SynthSineBlip(72.f, 0.36f, 0.62f, 0.002f, 0.22f),
 			SynthNoiseBurst(0.30f, 0.55f, 0.5f), 0.85f);
 	}
 
 	TArray<int16> SynthSmokeHiss()
 	{
-		// Sustained low-amplitude release hiss.
 		return SynthNoiseBurst(0.7f, 0.22f, 0.75f);
 	}
 
@@ -212,6 +231,29 @@ namespace
 			GConfig->GetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), Sfx, GGameUserSettingsIni);
 		}
 		return FMath::Clamp(Sfx, 0.f, 1.f);
+	}
+
+	void ConfigureSpatialAttenuation(USoundAttenuation* Att, float InnerRadius, float Falloff,
+		float LpfMinFreq, float LpfMaxFreq)
+	{
+		if (Att == nullptr)
+		{
+			return;
+		}
+		FSoundAttenuationSettings& S = Att->Attenuation;
+		S.bAttenuate = true;
+		S.bSpatialize = true;
+		S.bAttenuateWithLPF = true;
+		S.DistanceAlgorithm = EAttenuationDistanceModel::NaturalSound;
+		S.AttenuationShape = EAttenuationShape::Sphere;
+		S.FalloffDistance = Falloff;
+		S.AttenuationShapeExtents = FVector(InnerRadius);
+		S.LPFRadiusMin = InnerRadius;
+		S.LPFRadiusMax = InnerRadius + Falloff;
+		S.LPFFrequencyAtMin = LpfMinFreq;
+		S.LPFFrequencyAtMax = LpfMaxFreq;
+		S.bEnableOcclusion = false;   // arena geometry occlusion later
+		S.SpatializationAlgorithm = ESoundSpatializationAlgorithm::SPATIALIZATION_Default;
 	}
 }
 
@@ -251,20 +293,38 @@ void UPFCombatAudio::EnsureSounds()
 	};
 
 	CueHitmarker = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_1-1_Cue.Interface_1-1_Cue"));
-	CueElim = nullptr;   // force the redesigned procedural "thunk" — the old cue was a coin/collectible chime
+	CueElim = nullptr;   // force procedural "thunk" — pack cue was a coin chime
+	// Layered muzzle: primary gunshot body + mechanical secondary + softer distant.
 	CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_7-1_Cue.Gunshot_7-1_Cue"));
 	if (CueMuzzle == nullptr)
 	{
 		CueMuzzle = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_1-1_Cue.Gunshot_1-1_Cue"));
 	}
+	CueMuzzleMech = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Draw_Weapon_Metal_1-1_Cue.Draw_Weapon_Metal_1-1_Cue"));
+	if (CueMuzzleMech == nullptr)
+	{
+		CueMuzzleMech = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Whoosh_1-1_Cue.Whoosh_1-1_Cue"));
+	}
+	// Reuse medium gunshot as spatial tail when available (pitch-down at play time).
+	CueMuzzleTail = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Gunshot_1-1_Cue.Gunshot_1-1_Cue"));
+	if (CueMuzzleTail == CueMuzzle)
+	{
+		// Prefer a distinct secondary if both resolved to the same asset.
+		CueMuzzleTail = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Fire_Whoosh_2-15_Cue.Fire_Whoosh_2-15_Cue"));
+	}
+
 	CueSplatIncoming = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Hit_Generic_5-1_Cue.Hit_Generic_5-1_Cue"));
 	if (CueSplatIncoming == nullptr)
 	{
 		CueSplatIncoming = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Hit_Generic_2-1_Cue.Hit_Generic_2-1_Cue"));
 	}
+	CueImpact = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Rock_Impact_37_Cue.Rock_Impact_37_Cue"));
+	if (CueImpact == nullptr)
+	{
+		CueImpact = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Rock_Impact_11_Cue.Rock_Impact_11_Cue"));
+	}
 	CueBreakout = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Whoosh_4-1_Cue.Whoosh_4-1_Cue"));
 	CueDenied = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_3-3_Cue.Interface_3-3_Cue"));
-	// Build / reload / ready — wood + metal pack pieces that read as physical without sci-fi lasers.
 	CueReload = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Sci-Fi_Gun_1_Reload_Cue.Sci-Fi_Gun_1_Reload_Cue"));
 	if (CueReload == nullptr)
 	{
@@ -296,16 +356,23 @@ void UPFCombatAudio::EnsureSounds()
 		CueAmbient = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Ambient_Birds_Loop_04_Cue.Ambient_Birds_Loop_04_Cue"));
 	}
 
-	// Fire selector + grenades — best-effort cues, procedural fallback covers a pack-less checkout.
-	CueFireSelect = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_3-1_Cue.Interface_3-1_Cue"));
+	// Fire selector + grenades — fixed paths that exist in Free_Sounds_Pack.
+	CueFireSelect = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Interface_3-3_Cue.Interface_3-3_Cue"));
 	CueGrenadeThrow = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Whoosh_4-1_Cue.Whoosh_4-1_Cue"));
-	CueFragBurst = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Explosion_1-1_Cue.Explosion_1-1_Cue"));
-	// CueSmokeHiss intentionally procedural-only (no matching pack cue).
+	CueFragBurst = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Explosion_Medium_2-1_Cue.Explosion_Medium_2-1_Cue"));
+	if (CueFragBurst == nullptr)
+	{
+		CueFragBurst = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Explosion_Large_1-1_Cue.Explosion_Large_1-1_Cue"));
+	}
+	// CueSmokeHiss intentionally procedural-only.
 
 	PcmHitmarker = PackPcm(SynthHitmarker());
 	PcmElim = PackPcm(SynthElim());
-	PcmMuzzle = PackPcm(SynthMuzzle());
+	PcmMuzzleClose = PackPcm(SynthMuzzleClose());
+	PcmMuzzle = PackPcm(SynthMuzzleBody());
+	PcmMuzzleTail = PackPcm(SynthMuzzleTail());
 	PcmSplatIncoming = PackPcm(SynthSplatIncoming());
+	PcmImpact = PackPcm(SynthImpact());
 	PcmBreakout = PackPcm(SynthBreakout());
 	PcmDenied = PackPcm(SynthDenied());
 	PcmReload = PackPcm(SynthReload());
@@ -318,49 +385,52 @@ void UPFCombatAudio::EnsureSounds()
 	PcmFragBurst = PackPcm(SynthFragBurst());
 	PcmSmokeHiss = PackPcm(SynthSmokeHiss());
 
+	// Spatial models: NaturalSound + distance LPF (AAA-ish distance mute without full MetaSounds).
 	CombatAttenuation = NewObject<USoundAttenuation>(this);
-	{
-		FSoundAttenuationSettings& S = CombatAttenuation->Attenuation;
-		S.bAttenuate = true;
-		S.bSpatialize = true;
-		S.DistanceAlgorithm = EAttenuationDistanceModel::Linear;
-		S.AttenuationShape = EAttenuationShape::Sphere;
-		S.FalloffDistance = 4500.f;
-		S.AttenuationShapeExtents = FVector(600.f);
-	}
+	ConfigureSpatialAttenuation(CombatAttenuation, /*Inner=*/450.f, /*Falloff=*/5200.f,
+		/*LPF near=*/18000.f, /*LPF far=*/900.f);
+
+	CloseAttenuation = NewObject<USoundAttenuation>(this);
+	ConfigureSpatialAttenuation(CloseAttenuation, /*Inner=*/120.f, /*Falloff=*/900.f,
+		/*LPF near=*/20000.f, /*LPF far=*/4000.f);
+
+	DistantAttenuation = NewObject<USoundAttenuation>(this);
+	ConfigureSpatialAttenuation(DistantAttenuation, /*Inner=*/900.f, /*Falloff=*/9000.f,
+		/*LPF near=*/6000.f, /*LPF far=*/400.f);
 
 	FootstepAttenuation = NewObject<USoundAttenuation>(this);
-	{
-		FSoundAttenuationSettings& S = FootstepAttenuation->Attenuation;
-		S.bAttenuate = true;
-		S.bSpatialize = true;
-		S.DistanceAlgorithm = EAttenuationDistanceModel::Linear;
-		S.AttenuationShape = EAttenuationShape::Sphere;
-		S.FalloffDistance = 2200.f;
-		S.AttenuationShapeExtents = FVector(200.f);
-	}
+	ConfigureSpatialAttenuation(FootstepAttenuation, /*Inner=*/180.f, /*Falloff=*/2400.f,
+		/*LPF near=*/14000.f, /*LPF far=*/800.f);
+
+	ImpactAttenuation = NewObject<USoundAttenuation>(this);
+	ConfigureSpatialAttenuation(ImpactAttenuation, /*Inner=*/200.f, /*Falloff=*/3200.f,
+		/*LPF near=*/16000.f, /*LPF far=*/700.f);
 
 	MuzzleConcurrency = NewObject<USoundConcurrency>(this);
 	{
 		FSoundConcurrencySettings& C = MuzzleConcurrency->Concurrency;
-		C.MaxCount = 8;
+		C.MaxCount = 10;
 		C.bLimitToOwner = false;
-		// StopOldest, NOT StopFarthestThenPreventNew: muzzle sounds are all co-located at the gun, so "farthest"
-		// can't pick a slot to free and the rule falls into "prevent new" — the fire sound goes permanently silent
-		// after the group fills (~30 s of auto fire), while kills (different path) keep playing. StopOldest always
-		// evicts the oldest shot to make room, so a new shot ALWAYS sounds. (Also caps leaked procedural voices.)
+		// StopOldest: co-located muzzle voices can't use "farthest" eviction (all at the gun).
 		C.ResolutionRule = EMaxConcurrentResolutionRule::StopOldest;
 		C.RetriggerTime = 0.f;
 	}
 
+	ImpactConcurrency = NewObject<USoundConcurrency>(this);
+	{
+		FSoundConcurrencySettings& C = ImpactConcurrency->Concurrency;
+		C.MaxCount = 12;
+		C.bLimitToOwner = false;
+		C.ResolutionRule = EMaxConcurrentResolutionRule::StopFarthestThenOldest;
+		C.RetriggerTime = 0.f;
+	}
+
 	UE_LOG(CombatForgeLog, Log,
-		TEXT("[Audio] cues: muzzle=%s hit=%s elim=%s splat=%s reload=%s place=%s"),
-		CueMuzzle ? TEXT("yes") : TEXT("proc"),
-		CueHitmarker ? TEXT("yes") : TEXT("proc"),
-		CueElim ? TEXT("yes") : TEXT("proc"),
-		CueSplatIncoming ? TEXT("yes") : TEXT("proc"),
-		CueReload ? TEXT("yes") : TEXT("proc"),
-		CuePlace ? TEXT("yes") : TEXT("proc"));
+		TEXT("[Audio] layered muzzle body=%s mech=%s tail=%s impact=%s"),
+		CueMuzzle ? TEXT("cue") : TEXT("proc"),
+		CueMuzzleMech ? TEXT("cue") : TEXT("proc"),
+		CueMuzzleTail ? TEXT("cue") : TEXT("proc"),
+		CueImpact ? TEXT("cue") : TEXT("proc"));
 }
 
 void UPFCombatAudio::PlayUI(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch)
@@ -386,13 +456,8 @@ void UPFCombatAudio::PlayUI(USoundBase* Preferred, const TArray<uint8>& Pcm, flo
 }
 
 void UPFCombatAudio::PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch,
-	USoundConcurrency* Concurrency)
+	USoundConcurrency* Concurrency, USoundAttenuation* AttenuationOverride)
 {
-	if (!CanPlay())
-	{
-		return;
-	}
-
 	FVector Loc = FVector::ZeroVector;
 	if (const ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwner()))
 	{
@@ -402,34 +467,11 @@ void UPFCombatAudio::PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, 
 	{
 		Loc = Owner->GetActorLocation();
 	}
-
-	USoundBase* ToPlay = Preferred;
-	if (ToPlay == nullptr)
-	{
-		if (Pcm.Num() == 0)
-		{
-			return;
-		}
-		const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
-		USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
-		QueuePcm(Wave, Pcm);
-		ToPlay = Wave;
-	}
-
-	const float Vol = Volume * ReadSfxVolumeScale();
-	if (CombatAttenuation)
-	{
-		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
-			Vol, Pitch, 0.f, CombatAttenuation, Concurrency);
-	}
-	else
-	{
-		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
-	}
+	PlayWorldAt(Preferred, Pcm, Loc, Volume, Pitch, Concurrency, AttenuationOverride);
 }
 
 void UPFCombatAudio::PlayWorldAt(USoundBase* Preferred, const TArray<uint8>& Pcm, const FVector& Loc,
-	float Volume, float Pitch, USoundConcurrency* Concurrency)
+	float Volume, float Pitch, USoundConcurrency* Concurrency, USoundAttenuation* AttenuationOverride)
 {
 	if (!CanPlay())
 	{
@@ -448,14 +490,42 @@ void UPFCombatAudio::PlayWorldAt(USoundBase* Preferred, const TArray<uint8>& Pcm
 		ToPlay = Wave;
 	}
 	const float Vol = Volume * ReadSfxVolumeScale();
-	if (CombatAttenuation)
+	USoundAttenuation* Att = AttenuationOverride ? AttenuationOverride : CombatAttenuation.Get();
+	if (Att)
 	{
 		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
-			Vol, Pitch, 0.f, CombatAttenuation, Concurrency);
+			Vol, Pitch, 0.f, Att, Concurrency);
 	}
 	else
 	{
 		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
+	}
+}
+
+void UPFCombatAudio::PlayLayeredMuzzle(const FVector& Loc, bool bLocalOwner)
+{
+	const float Pitch = FMath::FRandRange(0.94f, 1.06f);
+	const float PitchMech = FMath::FRandRange(0.97f, 1.08f);
+	const float PitchTail = FMath::FRandRange(0.82f, 0.92f);   // lower = distant body
+
+	if (bLocalOwner)
+	{
+		// Near-field punch as 2D so own shots never get buried by spatial distance.
+		PlayUI(nullptr, PcmMuzzleClose, 0.55f, PitchMech);
+		// Body still spatial at muzzle for stereo image when turning.
+		PlayWorldAt(CueMuzzle, PcmMuzzle, Loc, 0.58f, Pitch, MuzzleConcurrency, CombatAttenuation);
+		// Quiet mechanical layer (valve / bolt fiction).
+		if (CueMuzzleMech)
+		{
+			PlayWorldAt(CueMuzzleMech, PcmMuzzleClose, Loc, 0.22f, PitchMech, MuzzleConcurrency, CloseAttenuation);
+		}
+	}
+	else
+	{
+		// Remote: full spatial stack — close transient + body + low tail for distance.
+		PlayWorldAt(nullptr, PcmMuzzleClose, Loc, 0.45f, PitchMech, MuzzleConcurrency, CloseAttenuation);
+		PlayWorldAt(CueMuzzle, PcmMuzzle, Loc, 0.72f, Pitch, MuzzleConcurrency, CombatAttenuation);
+		PlayWorldAt(CueMuzzleTail, PcmMuzzleTail, Loc, 0.38f, PitchTail, MuzzleConcurrency, DistantAttenuation);
 	}
 }
 
@@ -474,13 +544,15 @@ void UPFCombatAudio::PlayGrenadeThrow()
 void UPFCombatAudio::PlayFragBurstAt(const FVector& Loc)
 {
 	EnsureSounds();
-	PlayWorldAt(CueFragBurst, PcmFragBurst, Loc, 1.2f, FMath::FRandRange(0.94f, 1.02f), nullptr);
+	PlayWorldAt(CueFragBurst, PcmFragBurst, Loc, 1.2f, FMath::FRandRange(0.94f, 1.02f),
+		nullptr, DistantAttenuation);
 }
 
 void UPFCombatAudio::PlaySmokeHissAt(const FVector& Loc)
 {
 	EnsureSounds();
-	PlayWorldAt(CueSmokeHiss, PcmSmokeHiss, Loc, 0.8f, FMath::FRandRange(0.98f, 1.04f), nullptr);
+	PlayWorldAt(CueSmokeHiss, PcmSmokeHiss, Loc, 0.8f, FMath::FRandRange(0.98f, 1.04f),
+		nullptr, CombatAttenuation);
 }
 
 void UPFCombatAudio::PlayHitmarker()
@@ -498,7 +570,35 @@ void UPFCombatAudio::PlayElim()
 void UPFCombatAudio::PlayMuzzle()
 {
 	EnsureSounds();
-	PlayWorld(CueMuzzle, PcmMuzzle, 0.72f, FMath::FRandRange(0.94f, 1.06f), MuzzleConcurrency);
+	if (!CanPlay())
+	{
+		return;
+	}
+
+	FVector Loc = FVector::ZeroVector;
+	bool bLocal = false;
+	if (const ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwner()))
+	{
+		bLocal = Char->IsLocallyControlled() && Char->IsPlayerControlled();
+		Loc = Char->GetMuzzleLocation(bLocal);
+	}
+	else if (const AActor* Owner = GetOwner())
+	{
+		Loc = Owner->GetActorLocation();
+		if (const APawn* Pawn = Cast<APawn>(Owner))
+		{
+			bLocal = Pawn->IsLocallyControlled();
+		}
+	}
+
+	PlayLayeredMuzzle(Loc, bLocal);
+}
+
+void UPFCombatAudio::PlayImpactAt(const FVector& Loc)
+{
+	EnsureSounds();
+	PlayWorldAt(CueImpact, PcmImpact, Loc, 0.55f, FMath::FRandRange(0.92f, 1.08f),
+		ImpactConcurrency, ImpactAttenuation);
 }
 
 void UPFCombatAudio::PlaySplatIncoming()
@@ -528,7 +628,6 @@ void UPFCombatAudio::PlayReload()
 void UPFCombatAudio::PlayPlace()
 {
 	EnsureSounds();
-	// World-ish feel but 2D so turbo-build doesn't need a location spam path.
 	PlayUI(CuePlace, PcmPlace, 0.7f, FMath::FRandRange(0.95f, 1.08f));
 }
 

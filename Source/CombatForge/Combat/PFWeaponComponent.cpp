@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "Combat/PFCombatAudio.h"
+#include "Combat/PFCombatVFX.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFPaintballProjectile.h"
 #include "Combat/PFGrenadeProjectile.h"
@@ -399,6 +400,12 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	{
 		Audio->PlayMuzzle();
 	}
+	if (UPFCombatVFX* Vfx = Char->GetCombatVFX())
+	{
+		// Local owner: FP-scale flash at cosmetic muzzle. Listen host uses FP barrel too.
+		const bool bFP = Char->IsLocallyControlled() && Char->IsPlayerControlled();
+		Vfx->PlayMuzzleFX(ShotOrigin, SpreadedDir, bFP);
+	}
 
 	FPFShotPacket Packet;
 	Packet.Origin = ShotOrigin;                        // FP barrel for the local host, TP muzzle otherwise
@@ -584,19 +591,20 @@ void UPFWeaponComponent::MulticastShotFX_Implementation(FVector_NetQuantize100 O
 	FVector_NetQuantizeNormal Dir, uint32 ShotIndex)
 {
 	AActor* Owner = GetOwner();
-	if (Owner == nullptr || Owner->HasAuthority())
+	if (Owner == nullptr)
 	{
-		return;   // server / listen host: the authoritative projectile is already the visual
+		return;
 	}
+	const UWorld* World = GetWorld();
+	if (World == nullptr || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;   // pure dedicated: no cosmetics / audio
+	}
+
 	APawn* OwnerPawn = Cast<APawn>(Owner);
 	if (OwnerPawn != nullptr && OwnerPawn->IsLocallyControlled())
 	{
-		return;   // owning client already fired its cosmetic (04 §5.1 step 4)
-	}
-	const UWorld* World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
+		return;   // owning client / listen-host local already fired cosmetics in FireOneShot
 	}
 
 	// Track the shooter's bloom on this viewer so the estimated cone stays honest. Remote viewers can't know the
@@ -619,15 +627,25 @@ void UPFWeaponComponent::MulticastShotFX_Implementation(FVector_NetQuantize100 O
 	const FVector SpreadedDir =
 		Stream.VRandCone(FVector(Dir).GetSafeNormal(), FMath::DegreesToRadians(HalfAngleDeg));
 
-	SpawnCosmeticProjectile(FVector(Origin), SpreadedDir, GetOwnerTeam(), ShotIndex);
+	// Listen host: authoritative ball is already the tracer — skip a second cosmetic ball.
+	// Pure clients: spawn the full cosmetic projectile.
+	if (!Owner->HasAuthority())
+	{
+		SpawnCosmeticProjectile(FVector(Origin), SpreadedDir, GetOwnerTeam(), ShotIndex);
+	}
 
+	// Muzzle report for every non-local viewer (including listen host watching bots / remotes).
 	if (ACombatForgeCharacter* Char = GetPFCharacter())
 	{
 		if (UPFCombatAudio* Audio = Char->GetCombatAudio())
 		{
 			Audio->PlayMuzzle();
 		}
-		Char->OnRemoteFireCosmetic();   // airsoft: no flash (hook reserved)
+		if (UPFCombatVFX* Vfx = Char->GetCombatVFX())
+		{
+			Vfx->PlayMuzzleFX(FVector(Origin), SpreadedDir, /*bFirstPerson=*/false);
+		}
+		Char->OnRemoteFireCosmetic();
 	}
 }
 

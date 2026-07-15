@@ -58,3 +58,7 @@ Scripts/__pycache__/
 UpgradeLog.htm
 *.pyc
 
+
+# Fab Niagara Examples pack (local install; soft-loaded from /Game/NiagaraExamples when present)
+Content/NiagaraExamples/
+

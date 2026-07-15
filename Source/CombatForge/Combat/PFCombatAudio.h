@@ -17,11 +17,18 @@ class USoundConcurrency;
  * already client-correct. Prefers Free_Sounds_Pack cues when present; falls back to
  * procedural one-shots so a checkout without the pack still has audio.
  *
+ * AAA-feel layering:
+ *   PlayMuzzle()     — close transient + body + optional tail (2D near / spatial far)
+ *   PlayImpactAt()   — world hit thump at splat location (spatial)
+ *   Attenuation      — natural falloff + distance LPF (not linear drop)
+ *   Concurrency      — muzzle voice cap (StopOldest) so auto-fire never goes silent
+ *
  * Call-site map:
  *   PlayHitmarker()     — feedback widget on hit confirm
  *   PlayElim()          — shooter elim confirm + victim death
  *   PlayMuzzle()        — weapon, per shot (local + remote cosmetic)
  *   PlaySplatIncoming() — health, owning client on paint hit taken
+ *   PlayImpactAt()      — splat subsystem world hit (optional juice)
  *   PlayBreakout()      — PC on round Live (T6 horn)
  *   PlayDenied()        — build placement denial
  *   PlayReload()        — weapon reload start (local)
@@ -41,6 +48,8 @@ public:
 	void PlayElim();
 	void PlayMuzzle();
 	void PlaySplatIncoming();
+	/** World impact thump at a splat location (spatial). Safe no-op if silent/dedi. */
+	void PlayImpactAt(const FVector& Loc);
 	void PlayBreakout();
 	void PlayDenied();
 	void PlayReload();
@@ -63,18 +72,23 @@ private:
 	/** Prefer imported cue; else procedural PCM. */
 	void PlayUI(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch);
 	void PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch,
-		USoundConcurrency* Concurrency);
+		USoundConcurrency* Concurrency, USoundAttenuation* AttenuationOverride = nullptr);
 	/** Like PlayWorld but at an explicit world location (detonations happen away from the owner). */
 	void PlayWorldAt(USoundBase* Preferred, const TArray<uint8>& Pcm, const FVector& Loc, float Volume,
-		float Pitch, USoundConcurrency* Concurrency);
+		float Pitch, USoundConcurrency* Concurrency, USoundAttenuation* AttenuationOverride = nullptr);
+	/** Layered muzzle: near-field 2D transient + spatial body (and optional tail). */
+	void PlayLayeredMuzzle(const FVector& Loc, bool bLocalOwner);
 
 	static void QueuePcm(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm);
 
 	// Imported Free_Sounds_Pack cues (null if pack missing).
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueHitmarker;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueElim;
-	UPROPERTY(Transient) TObjectPtr<USoundBase> CueMuzzle;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueMuzzle;          // primary body
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueMuzzleMech;      // secondary mechanical layer
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueMuzzleTail;      // distant/low tail
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueSplatIncoming;
+	UPROPERTY(Transient) TObjectPtr<USoundBase> CueImpact;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueBreakout;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueDenied;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueReload;
@@ -88,15 +102,22 @@ private:
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueFragBurst;
 	UPROPERTY(Transient) TObjectPtr<USoundBase> CueSmokeHiss;
 
-	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> CombatAttenuation;
+	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> CombatAttenuation;     // mid combat (muzzle body)
+	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> CloseAttenuation;      // near transient
+	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> DistantAttenuation;    // tail / boom
 	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> FootstepAttenuation;
+	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> ImpactAttenuation;
 	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> MuzzleConcurrency;
+	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> ImpactConcurrency;
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> AmbientComp;
 
 	TArray<uint8> PcmHitmarker;
 	TArray<uint8> PcmElim;
-	TArray<uint8> PcmMuzzle;
+	TArray<uint8> PcmMuzzle;           // mixed layered procedural (body)
+	TArray<uint8> PcmMuzzleClose;      // sharp near transient
+	TArray<uint8> PcmMuzzleTail;       // low distant body
 	TArray<uint8> PcmSplatIncoming;
+	TArray<uint8> PcmImpact;
 	TArray<uint8> PcmBreakout;
 	TArray<uint8> PcmDenied;
 	TArray<uint8> PcmReload;
