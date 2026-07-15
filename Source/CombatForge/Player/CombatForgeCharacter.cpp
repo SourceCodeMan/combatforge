@@ -57,6 +57,12 @@ static TAutoConsoleVariable<int32> CVarShowMuzzle(
 	TEXT("pf.ShowMuzzle"), 0,
 	TEXT("1 = draw a marker at the first-person muzzle + shot line (align pf.WeaponFP's last 3 args to the barrel)."));
 
+// Dev pose-tuning drag: hold MIDDLE MOUSE and move to slide the FP weapon in 3D (Shift = depth, Ctrl = rotate).
+// Off by default so middle-mouse does nothing in normal play; edits the held pose or the ADS pose by aim state.
+static TAutoConsoleVariable<int32> CVarWeaponDrag(
+	TEXT("pf.WeaponDrag"), 0,
+	TEXT("1 = middle-mouse-drag the FP weapon to reposition it (prints the pf.WeaponFP/ADS line on release)."));
+
 // Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
 // kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
 static void PFArmedAnimsSink()
@@ -649,6 +655,9 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 				HomeRot.Yaw + FeelRot.Yaw,
 				HomeRot.Roll + FeelRot.Roll));
 
+			// Dev pose drag (pf.WeaponDrag): apply the middle-mouse mouse delta to the held/ADS pose.
+			TickWeaponDrag();
+
 			// pf.ShowMuzzle 1: draw a marker at the cosmetic muzzle (where FP tracers spawn) + a short line
 			// along the shot direction, so the muzzle offset (last 3 args of pf.WeaponFP) can be aligned to
 			// the visible barrel by eye. Green sphere = origin; cyan line = shot path.
@@ -740,6 +749,11 @@ void ACombatForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	{
 		EIC->BindAction(Cfg->IA_ThrowSmoke, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnThrowSmokePressed);
 	}
+	if (Cfg->IA_WeaponDrag)
+	{
+		EIC->BindAction(Cfg->IA_WeaponDrag, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnWeaponDragPressed);
+		EIC->BindAction(Cfg->IA_WeaponDrag, ETriggerEvent::Completed, this, &ACombatForgeCharacter::OnWeaponDragReleased);
+	}
 
 	// pkg-building owns every IMC_Build action (§3.3 / §3.5).
 	if (BuildComponent != nullptr)
@@ -766,9 +780,108 @@ void ACombatForgeCharacter::OnMoveInput(const FInputActionValue& Value)
 
 void ACombatForgeCharacter::OnLookInput(const FInputActionValue& Value)
 {
+	// While dragging the weapon pose, the mouse moves the GUN, not the camera (TickWeaponDrag reads the raw
+	// mouse delta). Swallow the look input so the view doesn't spin under the drag.
+	if (bWeaponDragging)
+	{
+		return;
+	}
 	const FVector2D Axis = Value.Get<FVector2D>();
 	AddControllerYawInput(Axis.X);
 	AddControllerPitchInput(Axis.Y); // Y already negated + scaled by the mapping modifiers
+}
+
+void ACombatForgeCharacter::OnWeaponDragPressed()
+{
+	if (CVarWeaponDrag.GetValueOnGameThread() != 0 && IsLocallyControlled())
+	{
+		bWeaponDragging = true;
+	}
+}
+
+void ACombatForgeCharacter::OnWeaponDragReleased()
+{
+	if (bWeaponDragging)
+	{
+		bWeaponDragging = false;
+		PrintWeaponPoseLine();   // dump the paste-ready line for whichever pose was being edited
+	}
+}
+
+void ACombatForgeCharacter::TickWeaponDrag()
+{
+	if (!bWeaponDragging || RifleFPMesh == nullptr)
+	{
+		return;
+	}
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (PC == nullptr)
+	{
+		return;
+	}
+	float DX = 0.f, DY = 0.f;
+	PC->GetInputMouseDelta(DX, DY);   // raw mouse delta this frame (independent of look sensitivity)
+	if (FMath::IsNearlyZero(DX) && FMath::IsNearlyZero(DY))
+	{
+		return;
+	}
+
+	const bool bDepth  = PC->IsInputKeyDown(EKeys::LeftShift);     // mouse-Y → forward/back instead of up/down
+	const bool bRotate = PC->IsInputKeyDown(EKeys::LeftControl);   // rotate instead of translate
+	const bool bAds    = IsADS();                                  // ADS pose vs held pose
+	constexpr float MoveScale = 0.12f;   // cm per mouse unit
+	constexpr float RotScale  = 0.4f;    // deg per mouse unit
+
+	if (bRotate)
+	{
+		// mouse-X → yaw, mouse-Y → pitch (screen-up = muzzle up).
+		const FRotator Delta(DY * RotScale, DX * RotScale, 0.f);
+		if (bAds)
+		{
+			ViewModelAdsRot += Delta;
+		}
+		else
+		{
+			RifleFPMesh->SetRelativeRotation(RifleFPMesh->GetRelativeRotation() + Delta);
+		}
+	}
+	else
+	{
+		// Screen plane: mouse-X → gun right (+Y), mouse-Y → gun up (+Z). Shift swaps Z for depth (+X).
+		const float Right = DX * MoveScale;
+		const float Vert  = -DY * MoveScale;   // screen-up (negative DY) → gun up
+		const FVector Delta = bDepth ? FVector(Vert, Right, 0.f) : FVector(0.f, Right, Vert);
+		if (bAds)
+		{
+			ViewModelAdsLoc += Delta;
+		}
+		else
+		{
+			RifleFPMesh->SetRelativeLocation(RifleFPMesh->GetRelativeLocation() + Delta);
+		}
+	}
+}
+
+void ACombatForgeCharacter::PrintWeaponPoseLine() const
+{
+	auto V = [](const FVector& X) { return FString::Printf(TEXT("%.2f %.2f %.2f"), X.X, X.Y, X.Z); };
+	auto R = [](const FRotator& X) { return FString::Printf(TEXT("%.2f %.2f %.2f"), X.Pitch, X.Yaw, X.Roll); };
+	FString Line;
+	if (IsADS())
+	{
+		Line = FString::Printf(TEXT("pf.WeaponADS %s %s"), *V(ViewModelAdsLoc), *R(ViewModelAdsRot));
+	}
+	else if (RifleFPMesh != nullptr)
+	{
+		const float Scale = RifleFPMesh->GetRelativeScale3D().X;
+		Line = FString::Printf(TEXT("pf.WeaponFP %s %s %.3f %s"),
+			*V(RifleFPMesh->GetRelativeLocation()), *R(RifleFPMesh->GetRelativeRotation()), Scale, *V(MuzzleLocalFP));
+	}
+	UE_LOG(CombatForgeLog, Log, TEXT("%s"), *Line);
+	if (GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 12.f, FColor::Cyan, Line);
+	}
 }
 
 void ACombatForgeCharacter::OnJumpPressed()

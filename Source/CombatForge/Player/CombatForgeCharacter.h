@@ -101,6 +101,13 @@ protected:
 	void OnFireSelectPressed();    // V — cycle fire mode
 	void OnThrowFragPressed();     // E — throw frag
 	void OnThrowSmokePressed();    // Q — throw smoke
+	// Dev pose-tuning drag (gated by pf.WeaponDrag): hold MIDDLE MOUSE and move to slide the FP weapon in 3D.
+	// Not ADS = edits the held pose (FPLoc); ADS = edits the ADS pose. Shift = depth, Ctrl = rotate. On
+	// release, prints the pf.WeaponFP / pf.WeaponADS line to paste into PFWeaponCatalog.cpp.
+	void OnWeaponDragPressed();
+	void OnWeaponDragReleased();
+	void TickWeaponDrag();          // applies the mouse delta while dragging (called from the local Tick block)
+	void PrintWeaponPoseLine() const;
 
 	/** Sprint-out raise timer elapsed — release the buffered fire (04 §1.1). */
 	void OnSprintOutFinished();
@@ -325,6 +332,7 @@ private:
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
+	bool bWeaponDragging = false;                     // middle-mouse pose drag active (pf.WeaponDrag)
 
 	// Procedural reload dip — FP viewmodel lowers + tilts while reloading (no skeletal reload anim).
 	bool  bReloadDipActive = false;
