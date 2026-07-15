@@ -186,6 +186,7 @@ private:
 	bool NeedsCommunityMap() const;
 
 	UFUNCTION() void OnEnterClicked();
+	UFUNCTION() void OnDonateClicked();   // opens buymeacoffee.com/tomchapman in the system browser
 	UFUNCTION() void OnQuitDesktopClicked();
 	UFUNCTION() void OnModeClicked();
 	UFUNCTION() void OnTypeClicked();
@@ -220,6 +221,8 @@ private:
 	UPROPERTY() TObjectPtr<UProgressBar> ProgressBar;
 	UPROPERTY() TObjectPtr<UButton> EnterButton;
 	UPROPERTY() TObjectPtr<UTextBlock> EnterLabel;
+	UPROPERTY() TObjectPtr<UButton> DonateButton;
+	UPROPERTY() TObjectPtr<UTextBlock> DonateLabel;
 	UPROPERTY() TObjectPtr<UButton> QuitDesktopButton;
 	UPROPERTY() TObjectPtr<UTextBlock> QuitDesktopLabel;
 
