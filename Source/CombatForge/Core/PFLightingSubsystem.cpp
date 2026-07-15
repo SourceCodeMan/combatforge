@@ -3,6 +3,7 @@
 #include "Core/PFLightingSubsystem.h"
 
 #include "CombatForge.h"
+#include "Core/CombatForgeTypes.h"
 #include "Core/PFUserPrefs.h"
 
 #include "Components/DirectionalLightComponent.h"
@@ -60,6 +61,7 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 			SunComp->SetShadowBias(0.35f);
 			SunComp->SetSpecularScale(0.4f);
 		}
+		SunActor = Sun;   // per-map intensity retarget (ConfigureForMap) — values above stay the baseline
 	}
 
 	if (ASkyAtmosphere* Atmo = World.SpawnActor<ASkyAtmosphere>(
@@ -98,6 +100,7 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 			SkyComp->SetIntensity(2.5f);
 			SkyComp->SetLowerHemisphereColor(FLinearColor(0.38f, 0.38f, 0.42f));
 		}
+		SkyLightActor = Sky;   // per-map re-centre (ConfigureForMap) — intensity above stays frozen
 	}
 
 	if (AExponentialHeightFog* Fog = World.SpawnActor<AExponentialHeightFog>(
@@ -174,8 +177,46 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		GradedPPV = PPV;
 	}
 
+	// If the arena shell's BeginPlay already pushed a map def (spawn order differs between the
+	// listen host and joining clients), apply it now that the rig actors exist. For the default
+	// Warehouse this re-writes the exact values spawned above — a numeric no-op.
+	ApplyMapToRig();
+
 	UE_LOG(CombatForgeLog, Log, TEXT("PFLightingSubsystem: known-good CQB rig restored (netmode %d)"),
 		static_cast<int32>(World.GetNetMode()));
+}
+
+void UPFLightingSubsystem::ConfigureForMap(const FPFArenaMapDef& InMapDef)
+{
+	// Per-map knobs ONLY (lighting values frozen at 76e217d — everything else is off limits):
+	//  • SkyLight re-centres over the map's field so the real-time capture stays above mid-play
+	//    (the Yard's field centre is (3200, 4000); the old hard-coded (3200, 2000) was Warehouse).
+	//  • Sun intensity from the def: Warehouse 6.0 = today's exact value; the roofless Yard runs
+	//    4.0 because a 100%-sun-pool floor at 6.0 would blow out (see the 8.5 note above) and the
+	//    locked exposure means intensity is the only safe dial.
+	PendingSkyLightPos = FVector(InMapDef.FieldX * 0.5f, InMapDef.FieldY * 0.5f, 3000.f);
+	PendingSunIntensity = InMapDef.SunIntensity;
+	bHaveMapConfig = true;
+	ApplyMapToRig();
+}
+
+void UPFLightingSubsystem::ApplyMapToRig()
+{
+	if (!bHaveMapConfig)
+	{
+		return;   // rig spawned first — keep its baseline until a shell pushes a def
+	}
+	if (ASkyLight* Sky = SkyLightActor.Get())
+	{
+		Sky->SetActorLocation(PendingSkyLightPos);   // component is Movable (set at spawn)
+	}
+	if (ADirectionalLight* Sun = SunActor.Get())
+	{
+		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
+		{
+			SunComp->SetIntensity(PendingSunIntensity);
+		}
+	}
 }
 
 void UPFLightingSubsystem::SetUserGrade(float BrightnessEV, float ContrastScale)

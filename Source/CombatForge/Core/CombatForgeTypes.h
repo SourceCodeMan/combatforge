@@ -83,6 +83,17 @@ enum class EPFMatchType : uint8
 	MAX_Count = 6 UMETA(Hidden)
 };
 
+// Arena Map = the physical field the match plays on (the 4th host selector beside build mode /
+// match type / format). Map identity travels as the spawned shell's ACTOR CLASS — this enum only
+// replicates for UI seeding/labels (see FPFArenaMapDef below for the per-map parameters).
+UENUM(BlueprintType)
+enum class EPFArenaMap : uint8
+{
+	Warehouse = 0,    // 6400×4000 indoor CQB box (v1 arena)
+	Yard = 1,         // 6400×8000 open-air yard beside the warehouse (double width, no roof)
+	MAX_Count = 2 UMETA(Hidden)
+};
+
 UENUM()
 enum class EPFThumbVote : uint8 { Abstained = 0, Up = 1, Down = 2 };
 
@@ -207,6 +218,23 @@ namespace PFGrid
 	constexpr float FieldOriginX = 0.f, FieldOriginY = 0.f;  // field corner at world origin (03 §1)
 	constexpr float BuildReachUU = 1200.f;                    // ghost trace length
 }
+
+// ---- Per-map field parameters (task #40) ----
+// The build GRID stays PFGrid's 16×10 on EVERY map: the grid header is hashed into every arenaId
+// (PFArenaSerialization), sized into the connectivity guard's stack arrays (PFBuildGrid), and
+// baked into objectives/seeds — forking it per map would invalidate the whole community-map
+// space. A bigger map only widens the PLAYABLE field; the extra width is an open flanking lane.
+struct COMBATFORGE_API FPFArenaMapDef
+{
+	EPFArenaMap MapId = EPFArenaMap::Warehouse;
+	float   FieldX = static_cast<float>(PFGrid::CellsX * PFGrid::CellUU);   // 6400
+	float   FieldY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);   // 4000
+	bool    bRoof = true;               // roof deck + trusses + skylights (Warehouse); false = open air
+	bool    bWarehouseScenery = false;  // Yard: non-enterable warehouse facade along the north edge
+	float   SunIntensity = 6.f;         // per-map sun knob — exposure is LOCKED, this is the only safe dial
+	FString Label;                      // player-facing card label ("WAREHOUSE" / "THE YARD")
+};
+COMBATFORGE_API const FPFArenaMapDef& PFGetArenaMapDef(EPFArenaMap Map);
 
 // ---- Collision channels (must match DefaultEngine.ini, §4.6) ----
 constexpr ECollisionChannel PF_ECC_Paintball  = ECC_GameTraceChannel1; // projectile sweep/blocking

@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "AI/PFSquadSubsystem.h"
+#include "Building/PFArenaShell.h"
 #include "Combat/PFSmokeSubsystem.h"
 #include "Player/CombatForgeCharacter.h"
 #include "Core/CombatForgeGameState.h"
@@ -137,6 +138,16 @@ void APFBotController::OnPossess(APawn* InPawn)
 	if (const ACombatForgePlayerState* PS = GetPlayerState<ACombatForgePlayerState>())
 	{
 		SetGenericTeamId(FGenericTeamId(PS->TeamId <= 1 ? PS->TeamId : 2));
+	}
+	// Field centre from the live shell (map-dependent — see CachedFieldCenter). Re-resolved every
+	// possess: a lobby map switch respawns the shell, and bots are re-possessed at Lobby→Build.
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<APFArenaShell> It(World); It; ++It)
+		{
+			CachedFieldCenter = It->GetFieldCenter();
+			break;
+		}
 	}
 	ApplySkill();
 }
@@ -436,7 +447,7 @@ void APFBotController::Tick(float DeltaSeconds)
 	if (Target == nullptr && !bHasObjective && !bHaveSearch)
 	{
 		SetFiring(false);
-		const FVector ArenaCenter(3200.f, 2000.f, BotLoc.Z);
+		const FVector ArenaCenter(CachedFieldCenter.X, CachedFieldCenter.Y, BotLoc.Z);
 		if (FVector::Dist2D(BotLoc, ArenaCenter) > 800.f)
 		{
 			const FVector ToC = ArenaCenter - (BotLoc + FVector(0.f, 0.f, 60.f));
@@ -715,7 +726,7 @@ void APFBotController::MoveToGoal(const FVector& RawGoal, AActor* FallbackActor)
 			const FVector BotLoc = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
 			FNavLocation Here, Ctr;
 			const bool bHere = (Nav != nullptr) && Nav->ProjectPointToNavigation(BotLoc, Here, FVector(200.f, 200.f, 400.f));
-			const bool bCtr  = (Nav != nullptr) && Nav->ProjectPointToNavigation(FVector(3200.f, 2000.f, BotLoc.Z), Ctr, FVector(800.f, 800.f, 800.f));
+			const bool bCtr  = (Nav != nullptr) && Nav->ProjectPointToNavigation(FVector(CachedFieldCenter.X, CachedFieldCenter.Y, BotLoc.Z), Ctr, FVector(800.f, 800.f, 800.f));
 			UE_LOG(CombatForgeLog, Warning,
 				TEXT("Bot MoveTo FAILED. NavSys=%s BotOnMesh=%s GoalSnapped=%s ArenaCtrOnMesh=%s -> %s"),
 				Nav ? TEXT("yes") : TEXT("NULL"), bHere ? TEXT("yes") : TEXT("NO"),

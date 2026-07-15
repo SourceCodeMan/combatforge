@@ -49,3 +49,27 @@ namespace PFColors
 		return (Team == 0) ? TeamA : TeamB;
 	}
 }
+
+const FPFArenaMapDef& PFGetArenaMapDef(EPFArenaMap Map)
+{
+	// Compile-time truths per map (task #40). Warehouse values MUST reproduce the pre-selector
+	// arena exactly (field 6400×4000, sun 6.0 — the Tom-validated frozen rig); the Yard doubles the
+	// WIDTH only (same 6400 length, so plots/spawn columns/X-mirror math are untouched), drops the
+	// roof, and runs the sun at 4.0 because a roofless field is 100% sun pool — 6.0 open-air would
+	// blow the floor out with exposure locked (see the 8.5 regression note in PFLightingSubsystem).
+	static const FPFArenaMapDef Warehouse = {
+		EPFArenaMap::Warehouse,
+		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400
+		static_cast<float>(PFGrid::CellsY * PFGrid::CellUU),        // 4000
+		/*bRoof=*/true, /*bWarehouseScenery=*/false,
+		/*SunIntensity=*/6.f, TEXT("WAREHOUSE")
+	};
+	static const FPFArenaMapDef Yard = {
+		EPFArenaMap::Yard,
+		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400 — length unchanged
+		static_cast<float>(2 * PFGrid::CellsY * PFGrid::CellUU),    // 8000 — double width
+		/*bRoof=*/false, /*bWarehouseScenery=*/true,
+		/*SunIntensity=*/4.f, TEXT("THE YARD")
+	};
+	return (Map == EPFArenaMap::Yard) ? Yard : Warehouse;
+}

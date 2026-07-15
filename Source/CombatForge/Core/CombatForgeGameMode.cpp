@@ -14,6 +14,7 @@
 #include "Combat/PFTargetDummy.h"
 #include "Combat/PFAmmoBarrel.h"
 #include "Building/PFArenaShell.h"
+#include "Building/PFYardShell.h"
 #include "Building/PFBuildGrid.h"
 #include "Objectives/PFControlPointActor.h"
 #include "Objectives/PFFlagActor.h"
@@ -119,6 +120,7 @@ void ACombatForgeGameMode::BeginPlay()
 		GS->ServerSetFillWithBots(bFillWithBots);       // bots on by default; host can disable on boot menu
 		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks on boot menu
 		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
+		GS->ServerSetArenaMap(DefaultArenaMap);         // Warehouse default; must match SpawnArenaActors' pick
 	}
 
 #if !UE_BUILD_SHIPPING
@@ -283,6 +285,17 @@ void ACombatForgeGameMode::TickSmokeImprovement()
 }
 #endif
 
+namespace
+{
+	/** Map → shell class. Class identity IS how the map reaches clients (ctor-built geometry). */
+	UClass* PFShellClassForMap(EPFArenaMap Map)
+	{
+		return (Map == EPFArenaMap::Yard)
+			? APFYardShell::StaticClass()
+			: APFArenaShell::StaticClass();
+	}
+}
+
 void ACombatForgeGameMode::SpawnArenaActors()
 {
 	UWorld* World = GetWorld();
@@ -296,7 +309,8 @@ void ACombatForgeGameMode::SpawnArenaActors()
 
 	// Arena shell (floor slab, perimeter, midline barrier, spawn strips, warm-up pen) and the
 	// single replicated build-grid container (B8). Both replicate; geometry is ctor-built.
-	ArenaShell = World->SpawnActor<APFArenaShell>(APFArenaShell::StaticClass(), FTransform::Identity, Params);
+	// The shell class follows the selected map (HostSetArenaMap swaps it live in the lobby).
+	ArenaShell = World->SpawnActor<APFArenaShell>(PFShellClassForMap(DefaultArenaMap), FTransform::Identity, Params);
 	BuildGrid  = World->SpawnActor<APFBuildGrid>(APFBuildGrid::StaticClass(), FTransform::Identity, Params);
 
 	// The lighting rig is spawned per-machine by UPFLightingSubsystem (host AND every remote client) so
@@ -1078,6 +1092,53 @@ void ACombatForgeGameMode::HostSetMatchType(EPFMatchType NewType)
 		GS->ServerSetBuildMode(EPFBuildMode::PlayOnly);
 	}
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: host set match type %d"), static_cast<int32>(NewType));
+}
+
+void ACombatForgeGameMode::HostSetArenaMap(EPFArenaMap NewMap)
+{
+	ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Lobby || NewMap >= EPFArenaMap::MAX_Count)
+	{
+		return;   // the field can only change while nothing is built on it (same gate as the other HostSet*)
+	}
+	// ApplySelectionsToHost re-sends every selector on any card click — don't tear the arena down
+	// (and re-seat everyone) unless the map actually changed.
+	if (GS->ArenaMap == NewMap && ArenaShell)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	GS->ServerSetArenaMap(NewMap);
+
+	// Map identity travels as ACTOR CLASS: destroy the old shell and spawn the new map's class —
+	// the actor channel tears down / constructs the ctor-built geometry on every client, so the
+	// swap needs zero new replication machinery (the shell contract: "replicated for existence
+	// only, geometry ctor-built identically everywhere").
+	if (ArenaShell)
+	{
+		ArenaShell->Destroy();
+		ArenaShell = nullptr;
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ArenaShell = World->SpawnActor<APFArenaShell>(PFShellClassForMap(NewMap), FTransform::Identity, Params);
+
+	// Re-seat every combatant on the new field: a Yard→Warehouse shrink can leave lobby-warmup
+	// pawns standing outside the new perimeter. Same reseat path SetPhase(Lobby) uses — teleport
+	// a live pawn to its (new-shell) spawn, or RestartPlayer when it has none.
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		if (ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
+		{
+			RespawnCombatant(PS, 3);
+		}
+	}
+	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: host set arena map %d (%s) — shell respawned, players re-seated"),
+		static_cast<int32>(NewMap), *PFGetArenaMapDef(NewMap).Label);
 }
 
 void ACombatForgeGameMode::HostSetCommunityMap(const FString& FileName, const FString& Label)
@@ -2008,10 +2069,12 @@ void ACombatForgeGameMode::SpawnAmmoBarrels()
 			Spots.Add(Loc);
 		}
 	}
-	// Fallback fill if random clustering failed.
+	// Fallback fill if random clustering failed. Quarter-points of the LIVE field (The Yard is
+	// 6400×8000 — the old hard-coded 6400×4000 would cluster all four barrels in its south half).
 	while (Spots.Num() < Wanted)
 	{
-		const float Fx = 6400.f, Fy = 4000.f;
+		const FVector2D Field = ArenaShell->GetFieldSize();
+		const float Fx = Field.X, Fy = Field.Y;
 		const FVector Corners[4] = {
 			FVector(Fx * 0.25f, Fy * 0.25f, 0.f),
 			FVector(Fx * 0.75f, Fy * 0.25f, 0.f),

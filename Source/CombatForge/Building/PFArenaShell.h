@@ -17,10 +17,16 @@ class UStaticMeshComponent;
 
 /**
  * Static world geometry (T9, T23, T29), constructor-built identically everywhere from engine
- * primitives: field floor slab (6400×4000×30, top at Z=0), 4 perimeter walls (h=1200),
- * team-tinted spawn-strip floor tiles, the see-through midline (gray posts every 400 uu + floor
- * stripe + an invisible full-height blocking volume active during BuildPhase only), and the
- * south warm-up pen (20×20 m at Y=-3000) with 12 dummy slots.
+ * primitives: field floor slab (FieldX×FieldY×30, top at Z=0 — Warehouse 6400×4000), 4 perimeter
+ * walls (h=1200), team-tinted spawn-strip floor tiles, the see-through midline (gray posts every
+ * 400 uu + floor stripe + an invisible full-height blocking volume active during BuildPhase
+ * only), and the south warm-up pen (20×20 m at Y=-3000) with 12 dummy slots.
+ *
+ * Field dimensions come from an FPFArenaMapDef (task #40): the default ctor builds the Warehouse
+ * (byte-identical to the pre-selector arena); subclasses (APFYardShell) delegate the protected
+ * ctor with their own def. Map identity travels as ACTOR CLASS — spawning the right class IS the
+ * replication mechanism, keeping the "geometry ctor-built identically everywhere" contract.
+ * The build GRID is PFGrid's 16×10 on every map; a wider field is an open lane, not more plots.
  *
  * Art pass: per-role materials + Cosmetic warehouse dressing (ceiling, trusses, dock bays,
  * wall ribs) — all NoCollision and above HeightCap so they never block build/trace/play.
@@ -34,6 +40,11 @@ class COMBATFORGE_API APFArenaShell : public AActor
 
 public:
 	APFArenaShell();
+
+	// ---- Map/field queries (GameMode barrel corners, bot field-centre, stream gate) ----
+	const FPFArenaMapDef& GetMapDef() const { return MapDef; }
+	FVector2D GetFieldSize() const { return FVector2D(FieldX, FieldY); }
+	FVector GetFieldCenter() const { return FVector(FieldX * 0.5f, FieldY * 0.5f, 0.f); }
 
 	/**
 	 * BuildPhase: invisible blocker (Pawn + Paintball) ON. GameMode (server) drives; clients
@@ -57,10 +68,14 @@ public:
 	FTransform GetRandomFieldSpawnTransform(int32 Salt) const;
 
 protected:
+	/** Map-parameterized build (task #40): subclasses delegate with their own def (see APFYardShell). */
+	explicit APFArenaShell(const FPFArenaMapDef& InDef);
+
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-private:
+	// Protected (not private) below: APFYardShell reuses the part helpers / materials / dims to
+	// build its facade scenery in its own ctor with the exact same construction rules.
 	enum class EPFShellCollision : uint8
 	{
 		Solid,            // block Pawn / Visibility / Paintball
@@ -118,6 +133,16 @@ private:
 	void BindToGameState(ACombatForgeGameState* GS);
 	void OnGameStateSet(AGameStateBase* NewGameState);
 	void HandlePhaseChanged(EPFMatchPhase NewPhase);
+
+	// ---- Per-map field parameters (ctor init list, before any geometry is built) ----
+	// Same names the old file-scope constexprs had, so every geometry consumer reads identically;
+	// Warehouse values are numerically identical to the former constants (byte-identical arena).
+	FPFArenaMapDef MapDef;
+	float FieldX = 6400.f;              // MapDef.FieldX
+	float FieldY = 4000.f;              // MapDef.FieldY
+	float PenCenterX = 3200.f;          // FieldX * 0.5 (pen stays south at Y=-3000 on every map)
+	float TeamSpawnSpacingY = 4000.f / PFGrid::SpawnPointsPerTeam;
+	float PenSlotStartX = 0.f;          // derived from PenCenterX in the ctor init list
 
 	UPROPERTY() TObjectPtr<USceneComponent> ShellRoot;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> FieldFloor;

@@ -38,6 +38,7 @@ void ACombatForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(ACombatForgeGameState, RoundWinsToTake);
 	DOREPLIFETIME(ACombatForgeGameState, BuildMode);
 	DOREPLIFETIME(ACombatForgeGameState, MatchType);
+	DOREPLIFETIME(ACombatForgeGameState, ArenaMap);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapFile);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapLabel);
 	DOREPLIFETIME(ACombatForgeGameState, TeamScores);
@@ -283,6 +284,16 @@ void ACombatForgeGameState::ServerSetMatchType(EPFMatchType NewType)
 		return;
 	}
 	MatchType = NewType;
+	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::ServerSetArenaMap(EPFArenaMap NewMap)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	ArenaMap = NewMap;
 	ForceNetUpdate();
 }
 

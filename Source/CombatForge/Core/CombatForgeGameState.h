@@ -44,6 +44,9 @@ public:
 	UPROPERTY(Replicated)                       uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count reads this
 	UPROPERTY(Replicated)                       EPFBuildMode BuildMode = EPFBuildMode::Creative;  // build style
 	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Skirmish; // objective (Skirmish = respawn default)
+	/** Host-picked arena map. Geometry itself travels as the shell's ACTOR CLASS (GameMode respawns
+	 *  it on change) — this enum exists for UI seeding/labels only. */
+	UPROPERTY(Replicated)                       EPFArenaMap ArenaMap = EPFArenaMap::Warehouse;
 	/** Host-picked community arena filename under Saved/Arenas/ (Improvement / Play-only). Empty = auto top-ranked. */
 	UPROPERTY(Replicated)                       FString SelectedCommunityMapFile;
 	/** Host-facing / lobby label for the selected community map. */
@@ -77,6 +80,7 @@ public:
 	void ServerSetRoundWinsToTake(uint8 NewWins);            // resolved at Lobby→Build from the format
 	void ServerSetBuildMode(EPFBuildMode NewMode);           // Lobby only (GameMode gates)
 	void ServerSetMatchType(EPFMatchType NewType);           // Lobby only (GameMode gates)
+	void ServerSetArenaMap(EPFArenaMap NewMap);              // Lobby only (GameMode gates + respawns shell)
 	void ServerSetSelectedCommunityMap(const FString& FileName, const FString& Label);
 	void ServerSetCommunityBasePieces(uint16 Count);         // Lobby→Build inject result
 	void ServerResetMatchState();                            // Lobby→Build: wins/feed/tally/round wiped

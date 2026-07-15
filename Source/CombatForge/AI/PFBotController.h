@@ -144,6 +144,9 @@ private:
 	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)
 
 	TWeakObjectPtr<ACombatForgeCharacter> CurrentTarget;
+	// Seek-contact anchor = the live shell's field centre, cached at possess (The Yard is 6400×8000
+	// — the old hard-coded (3200,2000) would send its bots to a side lane). Fallback = Warehouse.
+	FVector CachedFieldCenter = FVector(3200.f, 2000.f, 0.f);
 	float TargetRefreshTimer = 0.f;
 	float FireHoldTimer = 0.f;   // counts down after acquiring a NEW target; fire is blocked until <= 0 (reaction gap)
 	float StrafeTimer = 0.f;

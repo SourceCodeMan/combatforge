@@ -735,29 +735,31 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 	const FLinearColor Dim(0.55f, 0.57f, 0.62f);
 
 	AddHowToLine(Box, TEXT("THE MATCH"), 15, true, Head);
-	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Host sets mode, type, format, and bots on the pre-game screen."), 13, false, Body);
+	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Host sets map, mode, type, format, and bots on the pre-game screen, then START GAME."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("MOVE & LOOK"), 15, true, Head);
 	AddHowToLine(Box, TEXT("WASD  move     ·     Mouse  look     ·     Space  jump"), 13, false, Key);
 	AddHowToLine(Box, TEXT("Shift  sprint     ·     Ctrl / C  crouch (slide while sprinting)"), 13, false, Key);
 
 	AddHowToLine(Box, TEXT("COMBAT"), 15, true, Head);
-	AddHowToLine(Box, TEXT("LMB  fire     ·     RMB  aim down sights     ·     R  reload"), 13, false, Key);
-	AddHowToLine(Box, TEXT("Tag opponents with BBs. Hits on body / mask take them out of the round (mode-dependent)."), 13, false, Body);
+	AddHowToLine(Box, TEXT("LMB  fire  ·  RMB  aim  ·  V  fire mode  ·  R  reload  ·  F  refill at ammo barrels"), 13, false, Key);
+	AddHowToLine(Box, TEXT("E  frag grenade  ·  Q  smoke grenade  ·  Rifle 30rd / SMG 25rd / Pistol 18rd, each with its own fire modes"), 13, false, Key);
+	AddHowToLine(Box, TEXT("You're OUT at 3 head, 5 chest, 8 limb, or 10 total hits — whichever comes first (HUD pips + H/C/L readout). Showdown rounds: one hit."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD PHASE"), 15, true, Head);
 	AddHowToLine(Box, TEXT("F1 Wall  ·  F2 Floor  ·  F3 Ramp  ·  F4 Roof  ·  cover: Barrel / Crate / Boxes  ·  X / F5 delete"), 13, false, Key);
 	AddHowToLine(Box, TEXT("LMB place  ·  R rotate  ·  Scroll cycle piece  ·  Hold Q build wheel  ·  Tap Q last piece"), 13, false, Key);
-	AddHowToLine(Box, TEXT("Build on your half only. Barrier down when combat starts."), 13, false, Body);
+	AddHowToLine(Box, TEXT("Build on your half only — placements that would wall off the map are denied. Barrier down when combat starts."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("LOBBY / MATCH"), 15, true, Head);
 	AddHowToLine(Box, TEXT("F  ready     ·     Enter  host start     ·     Tab  scoreboard     ·     Esc  options"), 13, false, Key);
-	AddHowToLine(Box, TEXT("Host can click a player in lobby to swap their team."), 13, false, Body);
+	AddHowToLine(Box, TEXT("Host can click a player in lobby to swap their team. While you're out, scroll to switch class for your next spawn."), 13, false, Body);
 
-	AddHowToLine(Box, TEXT("MODES (quick)"), 15, true, Head);
-	AddHowToLine(Box, TEXT("Creative / Improvement / Play-Only = what happens in Build."), 13, false, Body);
+	AddHowToLine(Box, TEXT("MAPS & MODES"), 15, true, Head);
+	AddHowToLine(Box, TEXT("MAP: Warehouse (indoor) or The Yard (open-air, double width)."), 13, false, Body);
+	AddHowToLine(Box, TEXT("Creative / Improvement / Play-Only = what happens in Build. Improvement & Play-Only load a community map — hosts can star up to 5 favorites."), 13, false, Body);
 	AddHowToLine(Box, TEXT("Elimination · Skirmish · FFA · CTF · Domination · Hardpoint = how you win combat."), 13, false, Body);
-	AddHowToLine(Box, TEXT("4v4 / 6v6 + bots checkbox fill empty slots when the match starts."), 13, false, Dim);
+	AddHowToLine(Box, TEXT("4v4 / 6v6 + bots checkbox fill empty slots. Rate the arena after the match — top maps float up the community list."), 13, false, Dim);
 }
 
 void UPFOptionsWidget::NativeConstruct()

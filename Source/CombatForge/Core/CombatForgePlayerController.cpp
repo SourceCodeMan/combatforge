@@ -772,6 +772,18 @@ void ACombatForgePlayerController::ServerHostSetMatchType_Implementation(uint8 T
 	}
 }
 
+void ACombatForgePlayerController::ServerHostSetArenaMap_Implementation(uint8 Map)
+{
+	if (!IsHostController())
+	{
+		return;
+	}
+	if (ACombatForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ACombatForgeGameMode>() : nullptr)
+	{
+		GM->HostSetArenaMap(static_cast<EPFArenaMap>(Map));
+	}
+}
+
 void ACombatForgePlayerController::ServerHostSetCommunityMap_Implementation(const FString& FileName,
 	const FString& Label)
 {

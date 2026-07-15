@@ -23,7 +23,9 @@
 namespace
 {
 	constexpr float FlagPickupRadius = 140.f;
-	const FLinearColor PoleBlack(0.02f, 0.02f, 0.02f, 1.f);
+	// "Flag" prefix: unity builds merge anonymous namespaces across the chunk's .cpps, and
+	// PFControlPointActor.cpp defines its own PoleBlack — a bare duplicate breaks the merged TU.
+	const FLinearColor FlagPoleBlack(0.02f, 0.02f, 0.02f, 1.f);
 }
 
 APFFlagActor::APFFlagActor()
@@ -105,7 +107,7 @@ void APFFlagActor::BeginPlay()
 		if (UMaterialInterface* PoleMaster = MetalMaterial ? MetalMaterial.Get() : FallbackBaseMaterial.Get())
 		{
 			PoleMID = UMaterialInstanceDynamic::Create(PoleMaster, this);
-			PoleMID->SetVectorParameterValue(TEXT("Color"), PoleBlack);
+			PoleMID->SetVectorParameterValue(TEXT("Color"), FlagPoleBlack);
 			PoleMesh->SetMaterial(0, PoleMID);
 		}
 	}

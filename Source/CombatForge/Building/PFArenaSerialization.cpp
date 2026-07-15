@@ -181,6 +181,24 @@ bool FPFArenaSerialization::ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
 	OutTeamSize = 0;
 	Root->TryGetNumberField(TEXT("teamSize"), OutTeamSize);
 
+	// Grid-header guard: the header is hashed into every arenaId (AppendGridHeader) but was never
+	// VALIDATED on load — a file saved against different grid dims would silently land its pieces
+	// on the wrong grid. All maps share PFGrid's one build grid by design (a wider map only widens
+	// the playable field), so any mismatch means a foreign/corrupt file → reject. A file with no
+	// grid block predates the header and is accepted as-is (per-piece clamps below still apply).
+	const TSharedPtr<FJsonObject>* GridObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("grid"), GridObj) && GridObj != nullptr && (*GridObj).IsValid())
+	{
+		int32 CellUU = PFGrid::CellUU, CellsX = PFGrid::CellsX, CellsY = PFGrid::CellsY;
+		(*GridObj)->TryGetNumberField(TEXT("cellUU"), CellUU);
+		(*GridObj)->TryGetNumberField(TEXT("cellsX"), CellsX);
+		(*GridObj)->TryGetNumberField(TEXT("cellsY"), CellsY);
+		if (CellUU != PFGrid::CellUU || CellsX != PFGrid::CellsX || CellsY != PFGrid::CellsY)
+		{
+			return false;
+		}
+	}
+
 	const TArray<TSharedPtr<FJsonValue>>* PieceArray = nullptr;
 	if (!Root->TryGetArrayField(TEXT("pieces"), PieceArray) || PieceArray == nullptr)
 	{

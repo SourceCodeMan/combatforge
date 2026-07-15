@@ -5,6 +5,7 @@
 #include "CombatForge.h"
 #include "Building/PFBuildPieceVisuals.h"
 #include "Core/CombatForgeGameState.h"
+#include "Core/PFLightingSubsystem.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -56,8 +57,9 @@ namespace
 
 namespace
 {
-	constexpr float FieldX = static_cast<float>(PFGrid::CellsX * PFGrid::CellUU);   // 6400
-	constexpr float FieldY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);   // 4000
+	// Map-INVARIANT constants only — FieldX/FieldY (and the Pen*/spacing values derived from them)
+	// moved onto the actor as ctor-initialized members (task #40) so APFYardShell can build the
+	// same shell at 6400×8000. Everything left here is identical on every map by definition.
 	// Perimeter must be taller than HeightCap + jump: players can stand on max-height floors
 	// (~1200) and jump over a wall that only reaches the height cap.
 	constexpr float PerimeterH = static_cast<float>(PFGrid::HeightCapUU) + 600.f;   // 1800
@@ -66,15 +68,13 @@ namespace
 	constexpr float EscapeLidThickness = 40.f;
 	constexpr float SpawnZ = 100.f;            // capsule half-height + clearance over the Z=0 floor
 
-	// Warm-up pen: 2000×2000 uu, centered south of the field at Y = -3000 (T29).
-	constexpr float PenCenterX = FieldX * 0.5f;   // 3200
+	// Warm-up pen: 2000×2000 uu, centered south of the field at Y = -3000 (T29) — every map keeps
+	// the pen south (which is why the Yard's facade scenery goes on the NORTH long edge).
 	constexpr float PenCenterY = -3000.f;
 	constexpr float PenHalf = 1000.f;
 	constexpr float PenWallH = 300.f;          // full cover height — unjumpable (03 §1)
 
-	constexpr float TeamSpawnSpacingY = FieldY / PFGrid::SpawnPointsPerTeam;   // 666.67
 	constexpr float PenSlotSpacingX = 160.f;
-	constexpr float PenSlotStartX = PenCenterX - PenSlotSpacingX * (PFGrid::MaxRosterSlots - 1) * 0.5f;
 
 	// Warehouse dressing — well above HeightCap so build volume stays clean (playbook Z ≥ 1400–1600).
 	constexpr float CeilingZ = 1500.f;
@@ -83,6 +83,19 @@ namespace
 }
 
 APFArenaShell::APFArenaShell()
+	: APFArenaShell(PFGetArenaMapDef(EPFArenaMap::Warehouse))
+{
+	// Default = the Warehouse, byte-identical to the pre-selector arena. Map-specific shells are
+	// SUBCLASSES delegating the protected ctor below (class identity is the replication channel).
+}
+
+APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
+	: MapDef(InDef)
+	, FieldX(InDef.FieldX)
+	, FieldY(InDef.FieldY)
+	, PenCenterX(InDef.FieldX * 0.5f)
+	, TeamSpawnSpacingY(InDef.FieldY / PFGrid::SpawnPointsPerTeam)
+	, PenSlotStartX(InDef.FieldX * 0.5f - PenSlotSpacingX * (PFGrid::MaxRosterSlots - 1) * 0.5f)
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -145,25 +158,27 @@ APFArenaShell::APFArenaShell()
 		: (WhDemoMetalFinder.Succeeded() ? WhDemoMetalFinder.Object.Get() : GenMetal);
 	MarkMaterial = MarkFinder.Succeeded() ? MarkFinder.Object.Get() : Basic;
 
-	// --- Field floor slab: 6400×4000×30, top at Z = 0 (T25: level-0 floors sit flush inside it) ---
+	// --- Field floor slab: FieldX×FieldY×30, top at Z = 0 (T25: level-0 floors sit flush inside it) ---
+	// Cube is 100 uu → scale = size/100. FieldX/100.f is EXACT for both maps (6400/100=64, 8000/100=80),
+	// so the Warehouse slab keeps its historical (64, 40, 0.3) scale bit-for-bit.
 	FieldFloor = MakeShapePart(TEXT("FieldFloor"),
-		FVector(FieldX * 0.5f, FieldY * 0.5f, -15.f), FVector(64.f, 40.f, 0.3f),
+		FVector(FieldX * 0.5f, FieldY * 0.5f, -15.f), FVector(FieldX / 100.f, FieldY / 100.f, 0.3f),
 		EPFShellCollision::SolidBuildable, FloorMaterial);
 
 	// --- 4 perimeter walls (taller than height cap so max-deck + jump can't clear them) ---
-	// Cube is 100 uu; scale Z = PerimeterH/100. Slightly long to close corners.
+	// Cube is 100 uu; scale Z = PerimeterH/100. Slightly long (+0.4) to close corners.
 	const float WallScaleZ = PerimeterH * 0.01f;
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallN"),
-		FVector(FieldX * 0.5f, FieldY + 10.f, PerimeterH * 0.5f), FVector(64.4f, 0.2f, WallScaleZ),
+		FVector(FieldX * 0.5f, FieldY + 10.f, PerimeterH * 0.5f), FVector(FieldX / 100.f + 0.4f, 0.2f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallS"),
-		FVector(FieldX * 0.5f, -10.f, PerimeterH * 0.5f), FVector(64.4f, 0.2f, WallScaleZ),
+		FVector(FieldX * 0.5f, -10.f, PerimeterH * 0.5f), FVector(FieldX / 100.f + 0.4f, 0.2f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallW"),
-		FVector(-10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, 40.4f, WallScaleZ),
+		FVector(-10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, FieldY / 100.f + 0.4f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
 	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallE"),
-		FVector(FieldX + 10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, 40.4f, WallScaleZ),
+		FVector(FieldX + 10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, FieldY / 100.f + 0.4f, WallScaleZ),
 		EPFShellCollision::Solid, WallMaterial));
 
 	// Invisible escape lid: blocks pawns from hopping over the build volume rim.
@@ -171,7 +186,7 @@ APFArenaShell::APFArenaShell()
 	{
 		UStaticMeshComponent* Lid = MakeShapePart(TEXT("EscapeLid"),
 			FVector(FieldX * 0.5f, FieldY * 0.5f, EscapeLidZ + EscapeLidThickness * 0.5f),
-			FVector(64.4f, 40.4f, EscapeLidThickness * 0.01f),
+			FVector(FieldX / 100.f + 0.4f, FieldY / 100.f + 0.4f, EscapeLidThickness * 0.01f),
 			EPFShellCollision::Solid, WallMaterial);
 		if (Lid)
 		{
@@ -187,16 +202,20 @@ APFArenaShell::APFArenaShell()
 	}
 
 	// --- Team-tinted spawn-strip floor tiles over the spawn columns (x = 0 and x = 15) ---
+	// Full field width on every map (the Yard's wider strip still reads "my side" at a glance).
 	SpawnStrips.Add(MakeShapePart(TEXT("SpawnStripA"),
-		FVector(PFGrid::CellUU * 0.5f, FieldY * 0.5f, 1.f), FVector(4.f, 40.f, 0.02f),
+		FVector(PFGrid::CellUU * 0.5f, FieldY * 0.5f, 1.f), FVector(4.f, FieldY / 100.f, 0.02f),
 		EPFShellCollision::Cosmetic, MarkMaterial));
 	SpawnStrips.Add(MakeShapePart(TEXT("SpawnStripB"),
-		FVector(FieldX - PFGrid::CellUU * 0.5f, FieldY * 0.5f, 1.f), FVector(4.f, 40.f, 0.02f),
+		FVector(FieldX - PFGrid::CellUU * 0.5f, FieldY * 0.5f, 1.f), FVector(4.f, FieldY / 100.f, 0.02f),
 		EPFShellCollision::Cosmetic, MarkMaterial));
 
 	// --- Midline (T23): 40 uu gray posts every 400 uu + painted floor stripe; occludes nothing ---
 	const float MidX = FieldX * 0.5f;   // 3200, center of the neutral strip (cells 7..8)
-	for (int32 PostIdx = 0; PostIdx <= PFGrid::CellsY; ++PostIdx)
+	// Post count follows the FIELD width (not PFGrid::CellsY) so the see-through fence spans the
+	// Yard's open lane too — Warehouse still gets the same 11 posts at the same 400 uu spots.
+	const int32 MidlinePostCount = FMath::RoundToInt(FieldY / PFGrid::CellUU);
+	for (int32 PostIdx = 0; PostIdx <= MidlinePostCount; ++PostIdx)
 	{
 		// Z-scale tied to PerimeterH (like the walls) so the base stays on the floor. A hardcoded 12 was the
 		// old height-cap value; when the cap rose the posts kept their height but their center tracked
@@ -206,7 +225,7 @@ APFArenaShell::APFArenaShell()
 			EPFShellCollision::Solid, MetalMaterial));
 	}
 	MidlineStripe = MakeShapePart(TEXT("MidlineStripe"),
-		FVector(MidX, FieldY * 0.5f, 1.5f), FVector(0.4f, 40.f, 0.02f),
+		FVector(MidX, FieldY * 0.5f, 1.5f), FVector(0.4f, FieldY / 100.f, 0.02f),
 		EPFShellCollision::Cosmetic, MarkMaterial);
 
 	// --- The invisible full-height midline blocker (Pawn + Paintball, BuildPhase only) ---
@@ -245,6 +264,9 @@ void APFArenaShell::BuildWarehouseDressing()
 {
 	// All Cosmetic / NoCollision. Nothing enters the buildable volume (Z < 1200) as solid.
 	// Cube mesh is 100 uu; scale = world size / 100.
+	// Open-air maps (MapDef.bRoof == false, e.g. The Yard) skip everything that hangs FROM the
+	// roof — panels, trusses, purlins, catwalks, bay lights. Wall-mounted / floor-level dressing
+	// (ribs, docks, pads, lane marks, bollards) is FieldX/FieldY-relative and kept on every map.
 
 	// Roof deck as a panel GRID with SKYLIGHT openings instead of one solid slab. With Lumen unavailable
 	// (no mesh distance fields project-wide), a sealed roof left the interior black — the dynamic sun was
@@ -252,11 +274,12 @@ void APFArenaShell::BuildWarehouseDressing()
 	// (real direct light, zero GI cost) and lets the real-time SkyLight capture finally see sky. Openings
 	// are diagonally staggered so light reaches every bay including both spawn ends; the trusses/purlins
 	// below read as the glazing bars. Tunable: RoofCols/Rows + the skip rule set the open fraction.
+	if (MapDef.bRoof)
 	{
 		constexpr int32 RoofCols = 8;                       // along X: 6400/8 = 800 uu panels
-		constexpr int32 RoofRows = 5;                       // along Y: 4000/5 = 800 uu panels
-		constexpr float PanelW = FieldX / RoofCols;
-		constexpr float PanelH = FieldY / RoofRows;
+		const int32 RoofRows = FMath::RoundToInt(FieldY / 800.f);   // along Y: 800 uu panels (5 on Warehouse)
+		const float PanelW = FieldX / RoofCols;
+		const float PanelH = FieldY / RoofRows;
 		for (int32 Col = 0; Col < RoofCols; ++Col)
 		{
 			for (int32 Row = 0; Row < RoofRows; ++Row)
@@ -276,36 +299,39 @@ void APFArenaShell::BuildWarehouseDressing()
 		}
 	}
 
-	// Primary roof trusses — span N–S (along Y) every 800 uu along X. Metal I-beam look.
-	const float TrussSpanY = FieldY + 80.f;
-	int32 TrussIdx = 0;
-	for (float X = 400.f; X < FieldX; X += 800.f)
+	if (MapDef.bRoof)
 	{
-		const int32 Idx = TrussIdx++;
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussMain%d"), Idx),
-			FVector(X, FieldY * 0.5f, TrussZ),
-			FVector(0.35f, TrussSpanY * 0.01f, 0.55f),
-			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
-		// Vertical hangers from truss up to ceiling (reads as warehouse structure).
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussHangerN%d"), Idx),
-			FVector(X, 200.f, (TrussZ + CeilingZ) * 0.5f),
-			FVector(0.15f, 0.15f, (CeilingZ - TrussZ) * 0.01f),
-			EPFShellCollision::Cosmetic, MetalMaterial));
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussHangerS%d"), Idx),
-			FVector(X, FieldY - 200.f, (TrussZ + CeilingZ) * 0.5f),
-			FVector(0.15f, 0.15f, (CeilingZ - TrussZ) * 0.01f),
-			EPFShellCollision::Cosmetic, MetalMaterial));
-	}
+		// Primary roof trusses — span N–S (along Y) every 800 uu along X. Metal I-beam look.
+		const float TrussSpanY = FieldY + 80.f;
+		int32 TrussIdx = 0;
+		for (float X = 400.f; X < FieldX; X += 800.f)
+		{
+			const int32 Idx = TrussIdx++;
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussMain%d"), Idx),
+				FVector(X, FieldY * 0.5f, TrussZ),
+				FVector(0.35f, TrussSpanY * 0.01f, 0.55f),
+				EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+			// Vertical hangers from truss up to ceiling (reads as warehouse structure).
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussHangerN%d"), Idx),
+				FVector(X, 200.f, (TrussZ + CeilingZ) * 0.5f),
+				FVector(0.15f, 0.15f, (CeilingZ - TrussZ) * 0.01f),
+				EPFShellCollision::Cosmetic, MetalMaterial));
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("TrussHangerS%d"), Idx),
+				FVector(X, FieldY - 200.f, (TrussZ + CeilingZ) * 0.5f),
+				FVector(0.15f, 0.15f, (CeilingZ - TrussZ) * 0.01f),
+				EPFShellCollision::Cosmetic, MetalMaterial));
+		}
 
-	// Cross purlins — span E–W (along X) every 800 uu along Y.
-	const float PurlinSpanX = FieldX + 80.f;
-	int32 PurlinIdx = 0;
-	for (float Y = 400.f; Y < FieldY; Y += 800.f)
-	{
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("Purlin%d"), PurlinIdx++),
-			FVector(FieldX * 0.5f, Y, PurlinZ),
-			FVector(PurlinSpanX * 0.01f, 0.22f, 0.22f),
-			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+		// Cross purlins — span E–W (along X) every 800 uu along Y.
+		const float PurlinSpanX = FieldX + 80.f;
+		int32 PurlinIdx = 0;
+		for (float Y = 400.f; Y < FieldY; Y += 800.f)
+		{
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("Purlin%d"), PurlinIdx++),
+				FVector(FieldX * 0.5f, Y, PurlinZ),
+				FVector(PurlinSpanX * 0.01f, 0.22f, 0.22f),
+				EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+		}
 	}
 
 	// Exterior wall ribs / pilasters on the long N/S walls (outside play volume).
@@ -369,35 +395,42 @@ void APFArenaShell::BuildWarehouseDressing()
 			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
 	}
 
-	// High catwalk rail hints along long walls just under the trusses (outside play).
-	DressingParts.Add(MakeShapePart(TEXT("CatwalkRailN"),
-		FVector(FieldX * 0.5f, FieldY + 55.f, 1100.f),
-		FVector(64.f, 0.12f, 0.12f),
-		EPFShellCollision::Cosmetic, MetalMaterial));
-	DressingParts.Add(MakeShapePart(TEXT("CatwalkRailS"),
-		FVector(FieldX * 0.5f, -55.f, 1100.f),
-		FVector(64.f, 0.12f, 0.12f),
-		EPFShellCollision::Cosmetic, MetalMaterial));
+	if (MapDef.bRoof)
+	{
+		// High catwalk rail hints along long walls just under the trusses (outside play).
+		DressingParts.Add(MakeShapePart(TEXT("CatwalkRailN"),
+			FVector(FieldX * 0.5f, FieldY + 55.f, 1100.f),
+			FVector(FieldX / 100.f, 0.12f, 0.12f),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+		DressingParts.Add(MakeShapePart(TEXT("CatwalkRailS"),
+			FVector(FieldX * 0.5f, -55.f, 1100.f),
+			FVector(FieldX / 100.f, 0.12f, 0.12f),
+			EPFShellCollision::Cosmetic, MetalMaterial));
+	}
 
 	// ---- Playtest polish: more "warehouse arena" silhouette without solid collision ----
 
 	// High-bay light fixtures under the ceiling (emissive-looking metal boxes + glow cores).
-	int32 LightIdx = 0;
-	for (float X = 800.f; X < FieldX; X += 1600.f)
+	// Roofed maps only — with no ceiling there is nothing for them to hang from.
+	if (MapDef.bRoof)
 	{
-		for (float Y = 800.f; Y < FieldY; Y += 1200.f)
+		int32 LightIdx = 0;
+		for (float X = 800.f; X < FieldX; X += 1600.f)
 		{
-			const int32 Idx = LightIdx++;
-			// Housing
-			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("BayLightH%d"), Idx),
-				FVector(X, Y, CeilingZ - 40.f),
-				FVector(2.2f, 1.0f, 0.25f),
-				EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
-			// Warm "lamp" core (Mark material reads brighter under the lighting rig)
-			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("BayLightC%d"), Idx),
-				FVector(X, Y, CeilingZ - 55.f),
-				FVector(1.8f, 0.7f, 0.08f),
-				EPFShellCollision::Cosmetic, MarkMaterial));
+			for (float Y = 800.f; Y < FieldY; Y += 1200.f)
+			{
+				const int32 Idx = LightIdx++;
+				// Housing
+				DressingParts.Add(MakeShapePart(FString::Printf(TEXT("BayLightH%d"), Idx),
+					FVector(X, Y, CeilingZ - 40.f),
+					FVector(2.2f, 1.0f, 0.25f),
+					EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+				// Warm "lamp" core (Mark material reads brighter under the lighting rig)
+				DressingParts.Add(MakeShapePart(FString::Printf(TEXT("BayLightC%d"), Idx),
+					FVector(X, Y, CeilingZ - 55.f),
+					FVector(1.8f, 0.7f, 0.08f),
+					EPFShellCollision::Cosmetic, MarkMaterial));
+			}
 		}
 	}
 
@@ -660,7 +693,10 @@ void APFArenaShell::BuildWarehouseBackdropDrape()
 	int32 Spawned = 0;
 
 	// ---- 1) Roof beams under ceiling (replace cube trusses when beam mesh exists) ----
-	if (PropBeamMesh)
+	// Open-air maps have no ceiling: skip the roof-hung drapes (beams, hanging lights) but keep
+	// every ground-level exterior prop below — positions are FieldX/FieldY-relative and read as
+	// venue clutter stacked against the perimeter on any field size.
+	if (MapDef.bRoof && PropBeamMesh)
 	{
 		const FBoxSphereBounds BB = PropBeamMesh->GetBounds();
 		const float MeshLen = FMath::Max(BB.BoxExtent.X, BB.BoxExtent.Y) * 2.f;
@@ -685,7 +721,7 @@ void APFArenaShell::BuildWarehouseBackdropDrape()
 	}
 
 	// ---- 2) Real hanging bay lights (replace cube BayLight*) ----
-	if (PropCeilingLightMesh)
+	if (MapDef.bRoof && PropCeilingLightMesh)
 	{
 		int32 Idx = 0;
 		for (float X = 1000.f; X < FieldX; X += 1600.f)
@@ -981,6 +1017,18 @@ void APFArenaShell::BeginPlay()
 	// Soft-load Scene_Warehouse meshes and drape exterior props (NoCollision, outside play volume).
 	// Cube dressing from the ctor remains as fallback / structure when the pack is missing.
 	BuildWarehouseBackdropDrape();
+
+	// Per-map lighting knobs (task #40): the rig is spawned per-machine by UPFLightingSubsystem and
+	// the shell exists on every machine too (replicated for existence), so pushing the def here
+	// retunes host AND clients with zero extra replication — including a mid-lobby map switch,
+	// where the freshly spawned shell class re-runs this on everyone.
+	if (UWorld* World = GetWorld())
+	{
+		if (UPFLightingSubsystem* Lighting = World->GetSubsystem<UPFLightingSubsystem>())
+		{
+			Lighting->ConfigureForMap(MapDef);
+		}
+	}
 
 	// Clients mirror the barrier from the replicated phase; the server is driven by the GameMode.
 	if (!HasAuthority())

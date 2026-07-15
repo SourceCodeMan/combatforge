@@ -263,23 +263,25 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	const FLinearColor Dim(0.55f, 0.57f, 0.62f);
 
 	AddHowToLine(Box, TEXT("THE MATCH"), 14, true, Head);
-	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Pick mode, type, format, and bots here, then Enter Lobby."), 12, false, Body);
+	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Pick map, mode, type, format, and bots here, then START GAME."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("MOVE & LOOK"), 14, true, Head);
-	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump · Shift sprint · Ctrl/C crouch"), 12, false, Key);
+	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump · Shift sprint · Ctrl/C crouch (slide while sprinting)"), 12, false, Key);
 
 	AddHowToLine(Box, TEXT("COMBAT"), 14, true, Head);
-	AddHowToLine(Box, TEXT("LMB fire · RMB aim · R reload · Tag opponents with BBs"), 12, false, Key);
+	AddHowToLine(Box, TEXT("LMB fire · RMB aim · V fire mode · R reload · F refill at barrels · E frag · Q smoke"), 12, false, Key);
+	AddHowToLine(Box, TEXT("OUT at 3 head, 5 chest, 8 limb, or 10 total hits (HUD pips + H/C/L). Showdown: one hit."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD"), 14, true, Head);
-	AddHowToLine(Box, TEXT("F1–F4 structure · barrel/crate/boxes cover · LMB place · R rotate · X delete · Hold Q wheel"), 12, false, Key);
+	AddHowToLine(Box, TEXT("F1–F4 structure · barrel/crate/boxes cover · LMB place · R rotate · scroll cycle · X/F5 delete · Hold Q wheel"), 12, false, Key);
+	AddHowToLine(Box, TEXT("Your half only — placements that would wall off the map are denied."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("LOBBY"), 14, true, Head);
-	AddHowToLine(Box, TEXT("F ready · Enter host start · Tab scoreboard · Esc options (How to Play anytime)"), 12, false, Key);
+	AddHowToLine(Box, TEXT("F ready · Enter host start · Tab scoreboard · Esc options · scroll = switch class while out"), 12, false, Key);
 
-	AddHowToLine(Box, TEXT("MODE vs TYPE"), 14, true, Head);
-	AddHowToLine(Box, TEXT("Mode = build style (Creative / Improvement / Play-Only). Type = win condition (Elim, Skirmish, CTF…)."), 12, false, Dim);
-	AddHowToLine(Box, TEXT("Improvement & Play-Only: pick a community map (top 100, 10 per page) on Match Setup."), 12, false, Dim);
+	AddHowToLine(Box, TEXT("MAP · MODE · TYPE"), 14, true, Head);
+	AddHowToLine(Box, TEXT("Map = arena (Warehouse indoor / The Yard open-air). Mode = build style (Creative / Improvement / Play-Only). Type = win condition (Elim, Skirmish, CTF…)."), 12, false, Dim);
+	AddHowToLine(Box, TEXT("Improvement & Play-Only: pick a community map (top 100, 10 per page) — hosts can star up to 5 favorites."), 12, false, Dim);
 	AddHowToLine(Box, TEXT("QUICK START: Play-Only Skirmish 4v4 with bots on a starter fort — best first session."), 12, false, Dim);
 }
 
@@ -1137,6 +1139,8 @@ void UPFLoadingMenuWidget::BuildSetupCards(UVerticalBox* Col)
 		[](int32 i) { return MatchTypeLabel(static_cast<EPFMatchType>(i)); }, TypeCards);
 	MakeCardRow(TEXT("FORMAT"), 2, 2,
 		[](int32 i) { return FString(i == 0 ? TEXT("4 v 4") : TEXT("6 v 6")); }, FormatCards);
+	MakeCardRow(TEXT("MAP"), 3, static_cast<int32>(EPFArenaMap::MAX_Count),
+		[](int32 i) { return PFGetArenaMapDef(static_cast<EPFArenaMap>(i)).Label; }, MapArenaCards);
 
 	RefreshSetupCards();
 }
@@ -1157,6 +1161,13 @@ void UPFLoadingMenuWidget::RefreshSetupCards()
 		if (TypeCards[i] != nullptr)
 		{
 			TypeCards[i]->SetBackgroundColor(i == static_cast<int32>(SelectedMatchType) ? Hot : Cold);
+		}
+	}
+	for (int32 i = 0; i < MapArenaCards.Num(); ++i)
+	{
+		if (MapArenaCards[i] != nullptr)
+		{
+			MapArenaCards[i]->SetBackgroundColor(i == static_cast<int32>(SelectedArenaMap) ? Hot : Cold);
 		}
 	}
 	const int32 FmtSel = (SelectedTeamSize == 6) ? 1 : 0;
@@ -1210,6 +1221,11 @@ void UPFLoadingMenuWidget::NotifyCardSelected(int32 Kind, int32 Value)
 	else if (Kind == 2)
 	{
 		SelectedTeamSize = (Value == 1) ? 6 : 4;
+	}
+	else if (Kind == 3)
+	{
+		SelectedArenaMap = static_cast<EPFArenaMap>(
+			FMath::Clamp(Value, 0, static_cast<int32>(EPFArenaMap::MAX_Count) - 1));
 	}
 	RefreshSetupLabels();   // refreshes the cards AND the map-picker visibility (shows it for Improvement/Play-Only)
 	ApplySelectionsToHost();
@@ -1776,6 +1792,7 @@ void UPFLoadingMenuWidget::SeedFromGameState()
 	{
 		SelectedBuildMode = GS->BuildMode;
 		SelectedMatchType = GS->MatchType;
+		SelectedArenaMap = GS->ArenaMap;
 		SelectedTeamSize = (GS->TargetTeamSize >= 6) ? 6 : 4;
 		bSelectedFillBots = GS->bFillWithBots;
 		// Mirror host map pick when we have a catalog match.
@@ -2298,6 +2315,9 @@ void UPFLoadingMenuWidget::ApplySelectionsToHost()
 		PC->ServerHostSetMatchType(static_cast<uint8>(SelectedMatchType));
 		PC->ServerHostSetFormat(SelectedTeamSize);
 		PC->ServerHostSetFillWithBots(bSelectedFillBots);
+		// Re-sent on every apply like the rest; the GameMode no-ops unless the map actually changed
+		// (a shell respawn re-seats everyone — don't churn it from unrelated card clicks).
+		PC->ServerHostSetArenaMap(static_cast<uint8>(SelectedArenaMap));
 	}
 	if (NeedsCommunityMap())
 	{

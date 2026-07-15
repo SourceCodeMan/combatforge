@@ -114,7 +114,9 @@ void APFAmmoBarrel::OrientLabels()
 	// side toward the near team's spawn (the field half this barrel sits in): that team can read it, the far
 	// side is reversed (acceptable per design). UTextRenderComponent's readable face is -X, so we point +X
 	// AWAY from the reader. If it reads backwards in-game, swap the two yaw values (one 180° flip).
-	constexpr float HalfFieldX = 3200.f;   // FieldX / 2 (arena is 6400 uu wide)
+	// FieldX / 2 = PFGrid::CellsX * CellUU / 2. X (length) is identical on EVERY map — The Yard
+	// only doubles Y — so this label-facing heuristic stays a constant on purpose.
+	constexpr float HalfFieldX = PFGrid::CellsX * PFGrid::CellUU * 0.5f;   // 3200
 	// TextRender's readable face pointed the wrong way in playtest — flipped so it reads toward the near spawn.
 	const float Yaw = (GetActorLocation().X < HalfFieldX) ? 180.f : 0.f;
 	const FRotator Face(0.f, Yaw, 0.f);

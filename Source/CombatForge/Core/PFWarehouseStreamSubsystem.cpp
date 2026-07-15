@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "Building/PFArenaShell.h"
+#include "Core/CombatForgeGameState.h"
 
 #include "Engine/LevelStreamingDynamic.h"
 #include "Engine/World.h"
@@ -100,6 +101,19 @@ void UPFWarehouseStreamSubsystem::TryStreamWarehouse(UWorld& World)
 		return;
 	}
 
+	// The stream places Industrial_Warehouse at identity over the WAREHOUSE field (0..6400 ×
+	// 0..4000). On any other map (The Yard is open-air and twice as wide) it would intersect the
+	// field, so skip. Boot default is Warehouse; map switches happen later in the lobby.
+	if (const ACombatForgeGameState* GS = World.GetGameState<ACombatForgeGameState>())
+	{
+		if (GS->ArenaMap != EPFArenaMap::Warehouse)
+		{
+			UE_LOG(CombatForgeLog, Log,
+				TEXT("WarehouseStream: active map is not the Warehouse — skipping environment stream."));
+			return;
+		}
+	}
+
 	// Package may be absent (gitignored Fab dump) — soft fail keeps L_Graybox playable.
 	if (!FPackageName::DoesPackageExist(WarehouseMapPath))
 	{
@@ -150,6 +164,10 @@ void UPFWarehouseStreamSubsystem::ApplyShellBackdrop(UWorld& World)
 	bool bFound = false;
 	for (TActorIterator<APFArenaShell> It(&World); It; ++It)
 	{
+		if (It->GetMapDef().MapId != EPFArenaMap::Warehouse)
+		{
+			continue;   // never hide a non-Warehouse shell behind the warehouse stream
+		}
 		It->SetMapBackdropActive(true);
 		bFound = true;
 	}

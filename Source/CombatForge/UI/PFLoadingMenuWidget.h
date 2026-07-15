@@ -111,7 +111,7 @@ private:
 	int32 Dir = 1;
 };
 
-/** A clickable match-setup card (CoD-style): Kind 0 = build mode, 1 = game mode, 2 = format. */
+/** A clickable match-setup card (CoD-style): Kind 0 = build mode, 1 = game mode, 2 = format, 3 = arena map. */
 UCLASS()
 class COMBATFORGE_API UPFModeCardButton : public UButton
 {
@@ -161,7 +161,7 @@ public:
 	/** Weapon picker step: Kind 0 = category, 1 = weapon; Dir -1/+1. Persists + re-applies to the pawn. */
 	void NotifyWeaponStep(int32 Kind, int32 Dir);
 
-	/** Match-setup card clicked: Kind 0 = build mode, 1 = game mode, 2 = format; Value = enum/team-size. */
+	/** Match-setup card clicked: Kind 0 = build mode, 1 = game mode, 2 = format, 3 = arena map; Value = enum/team-size. */
 	void NotifyCardSelected(int32 Kind, int32 Value);
 
 protected:
@@ -285,6 +285,7 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UPFModeCardButton>> ModeCards;    // index = EPFBuildMode
 	UPROPERTY() TArray<TObjectPtr<UPFModeCardButton>> TypeCards;    // index = EPFMatchType
 	UPROPERTY() TArray<TObjectPtr<UPFModeCardButton>> FormatCards;  // 0 = 4v4, 1 = 6v6
+	UPROPERTY() TArray<TObjectPtr<UPFModeCardButton>> MapArenaCards; // index = EPFArenaMap
 
 	UPROPERTY() TObjectPtr<UButton> ModeButton;
 	UPROPERTY() TObjectPtr<UTextBlock> ModeValueText;
@@ -317,6 +318,7 @@ private:
 
 	EPFBuildMode SelectedBuildMode = EPFBuildMode::Creative;
 	EPFMatchType SelectedMatchType = EPFMatchType::Skirmish;
+	EPFArenaMap SelectedArenaMap = EPFArenaMap::Warehouse;
 	uint8 SelectedTeamSize = 4;   // 4 or 6
 	bool bSelectedFillBots = true;
 	int32 ActiveMenuTab = 0;

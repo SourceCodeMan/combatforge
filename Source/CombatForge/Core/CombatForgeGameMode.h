@@ -52,6 +52,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") bool  bFillWithBots        = true;    // top each team up to the format size
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFBuildMode DefaultBuildMode = EPFBuildMode::Creative;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFMatchType DefaultMatchType = EPFMatchType::Skirmish; // kids' default
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFArenaMap  DefaultArenaMap  = EPFArenaMap::Warehouse; // boot map (host repicks in lobby)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 SkirmishTagTarget = 50; // first team/player to N tags wins (≤255; shared by Skirmish + FFA + Dom/HP)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period (Skirmish + FFA + objectives)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 CaptureFlagTarget = 3; // CTF: first team to N captures
@@ -81,6 +82,7 @@ public:
 	void HostSetFillWithBots(bool bFill);              // Lobby only: top teams with bots at Lobby→Build
 	void HostSetBuildMode(EPFBuildMode NewMode);       // Lobby only: Creative / Improvement / Play-only
 	void HostSetMatchType(EPFMatchType NewType);       // Lobby only: Elimination / FFA / Skirmish / …
+	void HostSetArenaMap(EPFArenaMap NewMap);          // Lobby only: respawn the shell as the map's class
 	void HostSetCommunityMap(const FString& FileName, const FString& Label); // Lobby: Improvement/PlayOnly
 
 	// Objective actors → GameMode (server). Carrier state is stamped on PlayerState.
