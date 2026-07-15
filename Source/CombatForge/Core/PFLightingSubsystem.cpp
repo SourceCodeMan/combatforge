@@ -50,8 +50,8 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
 		{
 			SunComp->SetMobility(EComponentMobility::Movable);
-			// ~40% up from the post-washout dim pass (3.6), still under the pure-white multi-light era.
-			SunComp->SetIntensity(5.0f);
+			// Playtest: +~20% from 5.0 (was still a bit dark); keep well under multi-light washout era.
+			SunComp->SetIntensity(6.0f);
 			SunComp->SetLightColor(FLinearColor(1.0f, 0.97f, 0.92f));
 			SunComp->SetAtmosphereSunLight(true);
 			SunComp->SetDynamicShadowDistanceMovableLight(16000.f);
@@ -79,8 +79,8 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		{
 			SkyComp->SetMobility(EComponentMobility::Movable);
 			SkyComp->SetRealTimeCapture(true);
-			// Fill lift so bunkers aren't muddy; still below the old 1.15 wash risk with stacked lights.
-			SkyComp->SetIntensity(1.10f);
+			// Fill lift so bunkers aren't muddy (+~20% from 1.10 playtest).
+			SkyComp->SetIntensity(1.30f);
 			SkyComp->SetLowerHemisphereColor(FLinearColor(0.11f, 0.11f, 0.10f));
 		}
 	}
@@ -115,9 +115,9 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.AutoExposureMinBrightness = 1.f;
 		PP.bOverride_AutoExposureMaxBrightness = true;
 		PP.AutoExposureMaxBrightness = 1.f;
-		// Near-neutral bias — dim pass used -0.35 which read ~40% too dark in playtest.
+		// Slight positive bias — playtest asked ~20% brighter after 0.05.
 		PP.bOverride_AutoExposureBias = true;
-		PP.AutoExposureBias = 0.05f;
+		PP.AutoExposureBias = 0.30f;
 
 		// Clean industrial grade (original knobs + mild vignette/bloom).
 		PP.bOverride_BloomIntensity = true;
