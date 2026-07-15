@@ -7,6 +7,8 @@
 #include "Player/CombatForgeCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
@@ -17,8 +19,48 @@
 
 namespace
 {
-	constexpr float MaskBandFromCapsuleTopUU = 35.f;   // T1
+	constexpr float MaskBandFromCapsuleTopUU = 35.f;   // T1 (legacy Z-band fallback)
 	constexpr float CorpseBlockSeconds = 0.5f;         // 04 §2.4
+
+	/** Bucket a Manny-family bone name into a hit region. Checked in order: head wins over
+	 *  chest wins over limbs; anything unrecognized counts as CHEST (locked default). Covers
+	 *  the actual SKM_Body skeleton: head/neck_01/02 → Head; pelvis/spine_01..05/clavicle_l/r
+	 *  → Chest; upperarm/lowerarm(+twists)/hand + fingers / thigh/calf(+twists)/foot/ball → Limbs. */
+	EPFBodyRegion BucketBoneName(const FName& Bone)
+	{
+		const FString Name = Bone.ToString().ToLower();
+		static const TCHAR* HeadPats[]  = { TEXT("head"), TEXT("neck"), TEXT("face"), TEXT("jaw") };
+		static const TCHAR* ChestPats[] = { TEXT("pelvis"), TEXT("spine"), TEXT("clavicle"), TEXT("scap"),
+		                                    TEXT("hip"), TEXT("chest"), TEXT("torso") };
+		static const TCHAR* LimbPats[]  = { TEXT("arm"), TEXT("hand"), TEXT("thumb"), TEXT("index"),
+		                                    TEXT("middle"), TEXT("ring"), TEXT("pinky"), TEXT("finger"),
+		                                    TEXT("wrist"), TEXT("elbow"), TEXT("thigh"), TEXT("calf"),
+		                                    TEXT("foot"), TEXT("ball"), TEXT("knee"), TEXT("leg"),
+		                                    TEXT("ankle"), TEXT("toe") };
+		for (const TCHAR* P : HeadPats)  { if (Name.Contains(P)) { return EPFBodyRegion::Head; } }
+		for (const TCHAR* P : ChestPats) { if (Name.Contains(P)) { return EPFBodyRegion::Chest; } }
+		for (const TCHAR* P : LimbPats)  { if (Name.Contains(P)) { return EPFBodyRegion::Limbs; } }
+		return EPFBodyRegion::Chest;
+	}
+
+	/** Helper/IK bones the nearest-bone scan must never pick. */
+	bool IsHelperBone(const FString& LowerName)
+	{
+		return LowerName == TEXT("root")
+			|| LowerName.StartsWith(TEXT("ik_"))
+			|| LowerName.Contains(TEXT("interaction"))
+			|| LowerName.Contains(TEXT("center_of_mass"));
+	}
+
+	const TCHAR* RegionName(EPFBodyRegion R)
+	{
+		switch (R)
+		{
+		case EPFBodyRegion::Head:  return TEXT("Head");
+		case EPFBodyRegion::Limbs: return TEXT("Limbs");
+		default:                   return TEXT("Chest");
+		}
+	}
 }
 
 UPFHealthComponent::UPFHealthComponent()
@@ -33,8 +75,10 @@ void UPFHealthComponent::BeginPlay()
 
 	if (GetOwnerRole() == ROLE_Authority)
 	{
-		HP = DefaultRoundHP;
-		OnHPChangedEvent.Broadcast(HP);   // host UI (R9)
+		HeadHits = ChestHits = LimbHits = TotalHits = 0;
+		bOneHitMode = (DefaultRoundHP <= 1);   // warm-up dummies configure DefaultRoundHP=1
+		OnHitsChangedEvent.Broadcast(HeadHits, ChestHits, LimbHits, TotalHits);
+		OnHPChangedEvent.Broadcast(NearestRemaining());   // host UI (R9)
 	}
 }
 
@@ -51,7 +95,11 @@ void UPFHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(UPFHealthComponent, HP);
+	DOREPLIFETIME(UPFHealthComponent, HeadHits);
+	DOREPLIFETIME(UPFHealthComponent, ChestHits);
+	DOREPLIFETIME(UPFHealthComponent, LimbHits);
+	DOREPLIFETIME(UPFHealthComponent, TotalHits);
+	DOREPLIFETIME(UPFHealthComponent, bOneHitMode);
 	DOREPLIFETIME(UPFHealthComponent, bEliminated);
 }
 
@@ -65,22 +113,34 @@ void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate)
 	}
 	// Corpse rule (04 §2.4): eliminated bodies still block paintballs briefly but never
 	// generate hit events.
-	if (bEliminated || HP == 0)
+	if (bEliminated)
 	{
 		return;
 	}
 
 	FPFPaintHitInfo Hit = HitTemplate;
-	Hit.Region = ComputeRegion(FVector(Hit.ImpactPoint));
-	Hit.Damage = (Hit.Region == EPFBodyRegion::Mask) ? 2 : 1;   // B2 / T1
+	Hit.Region = ResolveHitRegion(Hit.HitBone, FVector(Hit.ImpactPoint));
+	Hit.Damage = 1;   // every BB = 1 hit; lethality lives in the per-region thresholds
 
-	HP = (HP > Hit.Damage) ? static_cast<uint8>(HP - Hit.Damage) : 0;
-	OnHPChangedEvent.Broadcast(HP);   // manual host broadcast (§5.9)
+	++TotalHits;
+	switch (Hit.Region)
+	{
+	case EPFBodyRegion::Head:  ++HeadHits;  break;
+	case EPFBodyRegion::Limbs: ++LimbHits;  break;
+	default:                   ++ChestHits; break;
+	}
+	const bool bOut = bOneHitMode
+		? (TotalHits >= 1)
+		: (HeadHits >= HeadOut || ChestHits >= ChestOut || LimbHits >= LimbOut || TotalHits >= TotalOut);
 
-	UE_LOG(CombatForgeLog, Verbose, TEXT("PaintHit on %s: region=%s dmg=%u hp=%u"),
-		*GetNameSafe(GetOwner()),
-		Hit.Region == EPFBodyRegion::Mask ? TEXT("Mask") : TEXT("Body"),
-		static_cast<uint32>(Hit.Damage), static_cast<uint32>(HP));
+	OnHitsChangedEvent.Broadcast(HeadHits, ChestHits, LimbHits, TotalHits);
+	OnHPChangedEvent.Broadcast(bOut ? 0 : NearestRemaining());   // manual host broadcast (§5.9)
+
+	UE_LOG(CombatForgeLog, Verbose, TEXT("PaintHit on %s: region=%s bone=%s h=%u c=%u l=%u tot=%u%s"),
+		*GetNameSafe(GetOwner()), RegionName(Hit.Region), *Hit.HitBone.ToString(),
+		static_cast<uint32>(HeadHits), static_cast<uint32>(ChestHits),
+		static_cast<uint32>(LimbHits), static_cast<uint32>(TotalHits),
+		bOut ? TEXT(" -> OUT") : TEXT(""));
 
 	// Victim-side feedback (owning client): direction arc + mask splats need the shooter's
 	// world position; fall back to the impact point if the shooter pawn is gone.
@@ -100,10 +160,10 @@ void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate)
 	if (OwnerPawn != nullptr &&
 		(OwnerPawn->IsLocallyControlled() || OwnerPawn->GetNetConnection() != nullptr))
 	{
-		ClientPaintHitTaken(ShooterLoc, Hit.ShooterTeam, HP);
+		ClientPaintHitTaken(ShooterLoc, Hit.ShooterTeam, bOut ? 0 : NearestRemaining());
 	}
 
-	if (HP == 0)
+	if (bOut)
 	{
 		bEliminated = true;
 		ApplyEliminatedAppearance(true);   // server/host visual; clients via OnRep_Eliminated
@@ -128,13 +188,14 @@ void UPFHealthComponent::ApplyFallDeath()
 	{
 		return;
 	}
-	if (bEliminated || HP == 0)
+	if (bEliminated)
 	{
 		return;
 	}
 
-	HP = 0;
-	OnHPChangedEvent.Broadcast(HP);
+	TotalHits = FMath::Max<uint8>(TotalOut, 1);   // fall = instantly out, whatever the counters said
+	OnHitsChangedEvent.Broadcast(HeadHits, ChestHits, LimbHits, TotalHits);
+	OnHPChangedEvent.Broadcast(0);
 
 	bEliminated = true;
 	ApplyEliminatedAppearance(true);
@@ -152,8 +213,8 @@ void UPFHealthComponent::ApplyFallDeath()
 		Hit.ImpactPoint = Owner->GetActorLocation();
 	}
 	Hit.ImpactNormal = FVector::UpVector;
-	Hit.Region = EPFBodyRegion::Body;
-	Hit.Damage = 3;
+	Hit.Region = EPFBodyRegion::Chest;
+	Hit.Damage = TotalOut;
 	if (const UWorld* World = GetWorld())
 	{
 		Hit.ServerTime = World->GetTimeSeconds();
@@ -175,11 +236,15 @@ void UPFHealthComponent::ResetForRound(uint8 RoundHP)
 		World->GetTimerManager().ClearTimer(CorpseCollisionTimer);
 	}
 
-	HP = RoundHP;
+	HeadHits = ChestHits = LimbHits = TotalHits = 0;
+	// Sudden-death showdown (GameMode passes 1) and warm-up dummies = one-hit mode; any RoundHP
+	// >= 2 means the full locational thresholds (3/5/8/10) — the parameter is a mode, not a pool.
+	bOneHitMode = (RoundHP <= 1);
 	bEliminated = false;
 	RestoreCorpseCollision();
 	ApplyEliminatedAppearance(false);
-	OnHPChangedEvent.Broadcast(HP);   // manual host broadcast (§5.9)
+	OnHitsChangedEvent.Broadcast(HeadHits, ChestHits, LimbHits, TotalHits);
+	OnHPChangedEvent.Broadcast(NearestRemaining());   // manual host broadcast (§5.9)
 }
 
 EPFBodyRegion UPFHealthComponent::ComputeRegion(const FVector& ImpactPoint) const
@@ -187,12 +252,12 @@ EPFBodyRegion UPFHealthComponent::ComputeRegion(const FVector& ImpactPoint) cons
 	const AActor* Owner = GetOwner();
 	if (Owner == nullptr)
 	{
-		return EPFBodyRegion::Body;
+		return EPFBodyRegion::Chest;
 	}
 
-	// Mask iff impact Z ≥ capsule-top − 35 uu (T1; works standing and crouched because the
-	// capsule top follows the crouch interp). Non-character owners (target dummies) use
-	// their bounds top for the same 35 uu band.
+	// Legacy Z-band: Head iff impact Z ≥ capsule-top − 35 uu (T1; works standing and crouched
+	// because the capsule top follows the crouch interp). Non-character owners (target dummies)
+	// use their bounds top for the same 35 uu band. Everything else counts as Chest.
 	float TopZ = 0.f;
 	if (const ACharacter* OwnerChar = Cast<ACharacter>(Owner))
 	{
@@ -204,7 +269,74 @@ EPFBodyRegion UPFHealthComponent::ComputeRegion(const FVector& ImpactPoint) cons
 		TopZ = Owner->GetComponentsBoundingBox().Max.Z;
 	}
 
-	return (ImpactPoint.Z >= TopZ - MaskBandFromCapsuleTopUU) ? EPFBodyRegion::Mask : EPFBodyRegion::Body;
+	return (ImpactPoint.Z >= TopZ - MaskBandFromCapsuleTopUU) ? EPFBodyRegion::Head : EPFBodyRegion::Chest;
+}
+
+EPFBodyRegion UPFHealthComponent::ResolveHitRegion(const FName& HitBone, const FVector& ImpactPoint) const
+{
+	// (a) A real bone name from the hit result wins outright (only happens if the skeletal mesh
+	// intercepted before the capsule — rare, but then it is the ground truth).
+	if (!HitBone.IsNone())
+	{
+		return BucketBoneName(HitBone);
+	}
+
+	// (b) Capsule hits carry BoneName=None (the capsule IS the authoritative hit surface —
+	// see CombatForgeCharacter collision setup). Derive the bone by scanning the visual
+	// skeleton for the closest bone to the impact point, skipping root/ik_/helper bones.
+	if (const ACharacter* OwnerChar = Cast<ACharacter>(GetOwner()))
+	{
+		if (const USkeletalMeshComponent* Mesh = OwnerChar->GetMesh())
+		{
+			const USkeletalMesh* MeshAsset = Mesh->GetSkeletalMeshAsset();
+			const TArray<FTransform>& Pose = Mesh->GetComponentSpaceTransforms();
+			if (MeshAsset != nullptr && Pose.Num() > 0)
+			{
+				const FReferenceSkeleton& RefSkel = MeshAsset->GetRefSkeleton();
+				const FVector LocalPt = Mesh->GetComponentTransform().InverseTransformPosition(ImpactPoint);
+				const int32 NumBones = FMath::Min(Pose.Num(), RefSkel.GetNum());
+				float BestDistSq = TNumericLimits<float>::Max();
+				int32 BestBone = INDEX_NONE;
+				for (int32 i = 0; i < NumBones; ++i)
+				{
+					const FString LowerName = RefSkel.GetBoneName(i).ToString().ToLower();
+					if (IsHelperBone(LowerName))
+					{
+						continue;
+					}
+					const float DistSq = FVector::DistSquared(Pose[i].GetLocation(), LocalPt);
+					if (DistSq < BestDistSq)
+					{
+						BestDistSq = DistSq;
+						BestBone = i;
+					}
+				}
+				if (BestBone != INDEX_NONE)
+				{
+					return BucketBoneName(RefSkel.GetBoneName(BestBone));
+				}
+			}
+		}
+	}
+
+	// (c) No skeleton (target dummies, edge cases): the old Z-band keeps working.
+	return ComputeRegion(ImpactPoint);
+}
+
+uint8 UPFHealthComponent::NearestRemaining() const
+{
+	if (bEliminated)
+	{
+		return 0;
+	}
+	if (bOneHitMode)
+	{
+		return (TotalHits > 0) ? 0 : 1;
+	}
+	const int32 Remaining = FMath::Min(
+		FMath::Min<int32>(HeadOut - HeadHits, ChestOut - ChestHits),
+		FMath::Min<int32>(LimbOut - LimbHits, TotalOut - TotalHits));
+	return static_cast<uint8>(FMath::Max(0, Remaining));
 }
 
 void UPFHealthComponent::ClientPaintHitTaken_Implementation(FVector_NetQuantize ShooterLoc,
@@ -226,9 +358,10 @@ void UPFHealthComponent::ClientPaintHitTaken_Implementation(FVector_NetQuantize 
 	}
 }
 
-void UPFHealthComponent::OnRep_HP()
+void UPFHealthComponent::OnRep_Hits()
 {
-	OnHPChangedEvent.Broadcast(HP);
+	OnHitsChangedEvent.Broadcast(HeadHits, ChestHits, LimbHits, TotalHits);
+	OnHPChangedEvent.Broadcast(NearestRemaining());
 }
 
 void UPFHealthComponent::OnRep_Eliminated()

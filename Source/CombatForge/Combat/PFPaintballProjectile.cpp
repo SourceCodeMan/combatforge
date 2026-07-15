@@ -265,8 +265,10 @@ void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 		PaintHit.ShooterTeam = TeamId;
 		PaintHit.ImpactPoint = ImpactPoint;
 		PaintHit.ImpactNormal = ImpactNormal;
-		PaintHit.Region = VictimHealth->ComputeRegion(ImpactPoint);
-		PaintHit.Damage = (PaintHit.Region == EPFBodyRegion::Mask) ? 2 : 1;
+		// Forward the hit bone (None for capsule hits — ApplyPaintHit derives the region via
+		// nearest-bone scan; a real bone name from a mesh intercept wins outright). Region and
+		// Damage are filled by ApplyPaintHit — single source of truth, no duplicate fill here.
+		PaintHit.HitBone = Hit.BoneName;
 		PaintHit.ServerTime = static_cast<float>(GetWorld()->GetTimeSeconds());
 
 		VictimHealth->ApplyPaintHit(PaintHit);

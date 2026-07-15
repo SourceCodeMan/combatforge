@@ -55,7 +55,7 @@ private:
 	// Pawn component handlers.
 	void HandleHopperChanged(int32 NewCount);
 	void HandleReloadStateChanged(bool bNowReloading);
-	void HandleHPChanged(uint8 NewHP);
+	void HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint8 LimbHits, uint8 TotalHits);
 	void HandleFireModeChanged(EPFFireMode NewMode);
 	void HandleGrenadeCountChanged(uint8 Frag, uint8 Smoke);
 
@@ -107,6 +107,7 @@ private:
 	UPROPERTY() TArray<TObjectPtr<USizeBox>> PipSizersA;
 	UPROPERTY() TArray<TObjectPtr<USizeBox>> PipSizersB;
 	UPROPERTY() TArray<TObjectPtr<UImage>> HPDots;
+	UPROPERTY() TObjectPtr<UTextBlock> RegionHitsText;   // "H 1/3 · C 2/5 · L 0/8" under the pip row
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> FeedLines;
 
 	TWeakObjectPtr<ACombatForgeCharacter> BoundPawn;
@@ -125,7 +126,8 @@ private:
 	/** <=2v2 (<=4 players) plays first-to-3 (T15) — GameMode config isn't replicated, so infer. */
 	static constexpr int32 SmallFormatPips = 3;
 	static constexpr int32 SmallFormatMaxPlayers = 4;
-	static constexpr int32 MaxHP = 3;
+	// Locational hit model: 10 total-hit pips (out at 10 anywhere; 3 head / 5 chest / 8 limbs first).
+	static constexpr int32 MaxHitPips = 10;
 	static constexpr int32 FeedLineCount = 4;
 	static constexpr float CrosshairBaseGapPx = 6.f;
 	static constexpr float CrossLineLengthPx = 12.f;

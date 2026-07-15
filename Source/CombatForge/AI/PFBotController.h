@@ -193,8 +193,7 @@ private:
 	float   ReposTimer = 0.f;
 
 	// ---- Suppression / injury state: detect taking a hit (HP drop) to widen aim + break for cover. ----
-	uint8 LastKnownHP = 255;         // 255 = uninitialised (first tick this life)
-	uint8 RoundMaxHP = 1;            // highest HP seen this life → the injury denominator
+	uint8 LastKnownTotalHits = 255;  // 255 = uninitialised (first tick this life); injury = TotalHits/TotalOut
 	float SuppressedUntil = -1000.f; // world time until which the bot is "under fire"
 
 	// Combat continuity: the reaction "notice" delay only re-arms when the bot has been OUT of combat for a

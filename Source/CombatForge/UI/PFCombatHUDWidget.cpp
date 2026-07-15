@@ -259,22 +259,32 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetAutoSize(true);
 	}
 
-	// ---- Own HP: 3 paint dots — bottom left ----
+	// ---- Own hits: 10 total-hit pips + region readout — bottom left (locational model) ----
+	UVerticalBox* HitsBox = WidgetTree->ConstructWidget<UVerticalBox>();
 	UHorizontalBox* HPRow = WidgetTree->ConstructWidget<UHorizontalBox>();
-	for (int32 i = 0; i < MaxHP; ++i)
+	for (int32 i = 0; i < MaxHitPips; ++i)
 	{
 		UImage* Dot = MakeSolidImage(WidgetTree, FLinearColor(0.95f, 0.95f, 0.95f));
 		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
-		Sizer->SetWidthOverride(18.f);
-		Sizer->SetHeightOverride(18.f);
+		Sizer->SetWidthOverride(12.f);   // 10 pips need a tighter cell than the old 3×18 dots
+		Sizer->SetHeightOverride(12.f);
 		Sizer->SetContent(Dot);
 		if (UHorizontalBoxSlot* HSlot = HPRow->AddChildToHorizontalBox(Sizer))
 		{
-			HSlot->SetPadding(FMargin(4.f, 0.f));
+			HSlot->SetPadding(FMargin(3.f, 0.f));
 		}
 		HPDots.Add(Dot);
 	}
-	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(HPRow))
+	HitsBox->AddChildToVerticalBox(HPRow);
+	RegionHitsText = WidgetTree->ConstructWidget<UTextBlock>();
+	RegionHitsText->SetFont(PFCombatFont(13, false));
+	RegionHitsText->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.85f, 0.85f)));
+	RegionHitsText->SetText(FText::GetEmpty());
+	if (UVerticalBoxSlot* VSlot = HitsBox->AddChildToVerticalBox(RegionHitsText))
+	{
+		VSlot->SetPadding(FMargin(3.f, 4.f, 0.f, 0.f));
+	}
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(HitsBox))
 	{
 		CSlot->SetAnchors(FAnchors(0.f, 1.f));
 		CSlot->SetAlignment(FVector2D(0.f, 1.f));
@@ -456,8 +466,8 @@ void UPFCombatHUDWidget::BindToPawn(ACombatForgeCharacter* NewPawn)
 		if (UPFHealthComponent* Health = NewPawn->GetHealth())
 		{
 			BoundHealth = Health;
-			Health->OnHPChangedEvent.AddUObject(this, &UPFCombatHUDWidget::HandleHPChanged);
-			HandleHPChanged(Health->HP);
+			Health->OnHitsChangedEvent.AddUObject(this, &UPFCombatHUDWidget::HandleHitsChanged);
+			HandleHitsChanged(Health->HeadHits, Health->ChestHits, Health->LimbHits, Health->TotalHits);
 		}
 	}
 }
@@ -473,7 +483,7 @@ void UPFCombatHUDWidget::UnbindPawn()
 	}
 	if (BoundHealth.IsValid())
 	{
-		BoundHealth->OnHPChangedEvent.RemoveAll(this);
+		BoundHealth->OnHitsChangedEvent.RemoveAll(this);
 	}
 	BoundWeapon.Reset();
 	BoundHealth.Reset();
@@ -709,15 +719,44 @@ void UPFCombatHUDWidget::HandleGrenadeCountChanged(uint8 Frag, uint8 Smoke)
 	GrenadeText->SetText(FText::FromString(FString::Printf(TEXT("FRAG %d   SMOKE %d"), Frag, Smoke)));
 }
 
-void UPFCombatHUDWidget::HandleHPChanged(uint8 NewHP)
+void UPFCombatHUDWidget::HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint8 LimbHits, uint8 TotalHits)
 {
-	for (int32 i = 0; i < MaxHP; ++i)
+	const UPFHealthComponent* Health = BoundHealth.Get();
+	const bool bOneHit = (Health != nullptr && Health->bOneHitMode);
+
+	// Pips = total hits you can still take (out at 10 anywhere). Showdown collapses to a single pip.
+	const int32 PipCount = bOneHit ? 1 : MaxHitPips;
+	const int32 Remaining = bOneHit
+		? (TotalHits > 0 ? 0 : 1)
+		: FMath::Max(0, MaxHitPips - static_cast<int32>(TotalHits));
+	for (int32 i = 0; i < HPDots.Num(); ++i)
 	{
-		if (HPDots.IsValidIndex(i) && HPDots[i])
+		if (!HPDots[i])
 		{
-			HPDots[i]->SetColorAndOpacity(i < NewHP
-				? FLinearColor(0.95f, 0.95f, 0.95f)
-				: FLinearColor(0.1f, 0.1f, 0.1f, 0.6f));
+			continue;
+		}
+		HPDots[i]->SetVisibility(i < PipCount ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		HPDots[i]->SetColorAndOpacity(i < Remaining
+			? FLinearColor(0.95f, 0.95f, 0.95f)
+			: FLinearColor(0.1f, 0.1f, 0.1f, 0.6f));
+	}
+
+	if (RegionHitsText)
+	{
+		if (bOneHit)
+		{
+			RegionHitsText->SetText(FText::FromString(TEXT("SHOWDOWN — 1 HIT")));
+		}
+		else
+		{
+			const uint8 HeadOut  = Health ? Health->HeadOut  : 3;
+			const uint8 ChestOut = Health ? Health->ChestOut : 5;
+			const uint8 LimbOut  = Health ? Health->LimbOut  : 8;
+			RegionHitsText->SetText(FText::FromString(FString::Printf(
+				TEXT("H %u/%u   C %u/%u   L %u/%u"),
+				static_cast<uint32>(HeadHits), static_cast<uint32>(HeadOut),
+				static_cast<uint32>(ChestHits), static_cast<uint32>(ChestOut),
+				static_cast<uint32>(LimbHits), static_cast<uint32>(LimbOut))));
 		}
 	}
 }

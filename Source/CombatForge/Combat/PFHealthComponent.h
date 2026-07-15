@@ -11,9 +11,12 @@
 class UPrimitiveComponent;
 
 /**
- * 3-HP paint model + elimination broadcast (B2, T1, contract §3.4).
+ * Locational hit model + elimination broadcast (Tom 2026-07-15; supersedes the 3-HP model).
  *
- * Server-only mutation via ApplyPaintHit; HP/bEliminated replicate with OnReps.
+ * A combatant is OUT at 3 head hits, 5 chest hits, 8 limb hits, or 10 total hits —
+ * whichever threshold is crossed first. Sudden-death/showdown (ResetForRound(1)) and
+ * warm-up dummies use one-hit mode instead. Server-only mutation via ApplyPaintHit;
+ * the four counters + bEliminated replicate with OnReps.
  * Does NOT call the GameMode — the GameMode subscribes to OnEliminatedEvent for
  * player pawns; APFTargetDummy subscribes to its own component (T29 decoupling).
  *
@@ -30,21 +33,35 @@ class COMBATFORGE_API UPFHealthComponent : public UActorComponent
 public:
 	UPFHealthComponent();   // SetIsReplicatedByDefault(true)
 
-	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 DefaultRoundHP = 3;   // B2
+	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 DefaultRoundHP = 3;   // legacy knob: <=1 → one-hit mode
 
-	UPROPERTY(ReplicatedUsing=OnRep_HP)         uint8 HP = 3;
+	// Out thresholds (Tom 2026-07-15): whichever is crossed first eliminates.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 HeadOut  = 3;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 ChestOut = 5;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 LimbOut  = 8;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 TotalOut = 10;
+
+	UPROPERTY(ReplicatedUsing=OnRep_Hits)       uint8 HeadHits  = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_Hits)       uint8 ChestHits = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_Hits)       uint8 LimbHits  = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_Hits)       uint8 TotalHits = 0;
+	UPROPERTY(Replicated)                       bool  bOneHitMode = false;   // showdown / warm-up dummies
 	UPROPERTY(ReplicatedUsing=OnRep_Eliminated) bool  bEliminated = false;
 
 	// ---- Server API ----
 	void ApplyPaintHit(const FPFPaintHitInfo& HitTemplate);
-		// fills Damage from region (Body 1 / Mask 2 — T1), decrements HP, fires
-		// ClientPaintHitTaken; at 0 → bEliminated, OnEliminatedEvent broadcast, corpse blocks
-		// paintballs 0.5 s then collision off (04 §2.4), owner SetEliminatedAppearance(true).
+		// resolves the body region (bone name → nearest-bone scan → Z-band), bumps the region +
+		// total counters, fires ClientPaintHitTaken; when a threshold crosses → bEliminated,
+		// OnEliminatedEvent broadcast, corpse blocks paintballs 0.5 s then collision off (04 §2.4).
 	/** Instant lethal elim (fall from height, etc.). ShooterTeam=255, no shooter credit. */
 	void ApplyFallDeath();
-	void ResetForRound(uint8 RoundHP);   // server: restore HP (3, or 1 in sudden death), un-eliminate,
-	                                     // restore collision/appearance
-	EPFBodyRegion ComputeRegion(const FVector& ImpactPoint) const;  // Mask iff Z ≥ capsule-top − 35 uu (T1)
+	void ResetForRound(uint8 RoundHP);   // server: zero counters, un-eliminate, restore collision/
+	                                     // appearance; RoundHP<=1 → one-hit mode (showdown)
+	EPFBodyRegion ComputeRegion(const FVector& ImpactPoint) const;  // legacy Z-band: Head iff Z ≥ capsule-top − 35 uu
+	/** Bone name (if any) wins; else nearest-bone scan on the owner's skeletal mesh; else Z-band. */
+	EPFBodyRegion ResolveHitRegion(const FName& HitBone, const FVector& ImpactPoint) const;
+	/** min per-region remaining — the legacy "HP" number for feedback widgets/stingers (0 = out). */
+	uint8 NearestRemaining() const;
 
 	// ---- Victim-side feedback (owning client) ----
 	UFUNCTION(Client, Reliable) void ClientPaintHitTaken(FVector_NetQuantize ShooterLoc,
@@ -53,7 +70,8 @@ public:
 
 	// ---- Subscription points ----
 	FPFOnEliminated         OnEliminatedEvent;         // SERVER-side broadcast (GameMode, dummy)
-	FPFOnHPChanged          OnHPChangedEvent;          // both sides via OnRep + server set
+	FPFOnHPChanged          OnHPChangedEvent;          // both sides via OnRep + server set (NearestRemaining)
+	FPFOnHitsChanged        OnHitsChangedEvent;        // both sides: per-region + total counters (HUD)
 	FPFOnLocalPaintHitTaken OnLocalPaintHitTakenEvent; // owning client only
 
 protected:
@@ -61,7 +79,7 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	UFUNCTION() void OnRep_HP();
+	UFUNCTION() void OnRep_Hits();        // shared OnRep for all four counters
 	UFUNCTION() void OnRep_Eliminated();  // hides pawn locally, no ragdoll (02 §1.3)
 
 private:

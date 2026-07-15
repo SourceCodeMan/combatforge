@@ -52,8 +52,10 @@ enum class EPFDenyReason : uint8
 	SealsMap   // would sever cross-map passage / wall off an objective (connectivity guard)
 };
 
+// Locational hit model (Tom 2026-07-15): out at 3 head / 5 chest / 8 limb / 10 total hits.
+// Numeric layout preserved from the old {Body, Mask, Legs} enum — no wire-format churn.
 UENUM()
-enum class EPFBodyRegion : uint8 { Body = 0, Mask = 1, Legs = 2 };  // Mask ≡ head; Legs reserved (T1)
+enum class EPFBodyRegion : uint8 { Chest = 0, Head = 1, Limbs = 2 };
 
 UENUM()
 enum class EPFRespawnMode : uint8 { RoundElimination = 0, Respawn = 1 };  // B1: RoundElimination is v1
@@ -131,8 +133,9 @@ struct COMBATFORGE_API FPFPaintHitInfo
 	UPROPERTY() uint8                     ShooterTeam  = 0;
 	UPROPERTY() FVector_NetQuantize       ImpactPoint  = FVector::ZeroVector;
 	UPROPERTY() FVector_NetQuantizeNormal ImpactNormal = FVector::UpVector;
-	UPROPERTY() EPFBodyRegion             Region       = EPFBodyRegion::Body;
-	UPROPERTY() uint8                     Damage       = 1;    // 1 body, 2 mask (server fills)
+	UPROPERTY() FName                     HitBone      = NAME_None;   // FHitResult.BoneName (usually None — capsule hit); server-side
+	UPROPERTY() EPFBodyRegion             Region       = EPFBodyRegion::Chest;
+	UPROPERTY() uint8                     Damage       = 1;    // every BB = 1 hit; lethality = per-region thresholds
 	UPROPERTY() float                     ServerTime   = 0.f;
 };
 
@@ -235,7 +238,8 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnFireModeChanged, EPFFireMode /*Mode*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FPFOnGrenadeCountChanged, uint8 /*Frag*/, uint8 /*Smoke*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FPFOnLocalPaintHitTaken, FVector /*ShooterLoc*/, uint8 /*ShooterTeam*/, uint8 /*NewHP*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FPFOnEliminated, class UPFHealthComponent*, const FPFPaintHitInfo&); // server-side
-DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnHPChanged, uint8 /*NewHP*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnHPChanged, uint8 /*NearestRemaining — legacy "HP" for feedback/stingers*/);
+DECLARE_MULTICAST_DELEGATE_FourParams(FPFOnHitsChanged, uint8 /*Head*/, uint8 /*Chest*/, uint8 /*Limbs*/, uint8 /*Total*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnEquippedToolChanged, EPFBuildTool);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnPlaceDenied, EPFDenyReason);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnBuildWheelRequested, bool /*bOpen*/);

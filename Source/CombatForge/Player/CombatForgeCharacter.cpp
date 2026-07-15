@@ -1290,7 +1290,7 @@ void ACombatForgeCharacter::Landed(const FHitResult& Hit)
 	{
 		if (UPFHealthComponent* HPComp = GetHealth())
 		{
-			if (!HPComp->bEliminated && HPComp->HP > 0)
+			if (!HPComp->bEliminated)
 			{
 				// Only during live combat so lobby/build falls are free.
 				if (const UWorld* World = GetWorld())
@@ -2285,9 +2285,17 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 	{
 		const FRotator Aim = GetBaseAimRotation();
 		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
-		// Lift toward the shoulder so firing doesn't read as hip-fire. (A true shouldered grip — cheek on
-		// stock, arms tracking — needs the aim-pose animation pass; this is the best procedural stand-in.)
-		WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, 30.f));
+		// Shoulder lift belongs ONLY to the unarmed hip-carry anim set. With pf.ArmedAnims (default 1)
+		// everyone idles in MF_Rifle_Idle_ADS — hands already at shoulder/cheek — so the old
+		// unconditional +30uu stacked a second raise on top and planted the rifle at the EYE line:
+		// that was the "bot guns come out of their forehead" bug (bots hold ADS/fire continuously on
+		// the listen host, so they showed it constantly while remote humans only flashed it per shot).
+		const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
+		if (!bArmedIdleActive)
+		{
+			// Hip-carry fallback set: small lift so the barrel clears the thigh (was 30 — tuned down).
+			WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, 10.f));
+		}
 	}
 }
 
