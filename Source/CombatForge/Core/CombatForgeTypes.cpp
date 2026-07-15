@@ -61,14 +61,16 @@ const FPFArenaMapDef& PFGetArenaMapDef(EPFArenaMap Map)
 		EPFArenaMap::Warehouse,
 		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400
 		static_cast<float>(PFGrid::CellsY * PFGrid::CellUU),        // 4000
-		/*bRoof=*/true, /*bWarehouseScenery=*/false,
+		/*bRoof=*/true, /*bPerimeter=*/true, /*bWarehouseScenery=*/false,
 		/*SunIntensity=*/6.f, TEXT("WAREHOUSE")
 	};
+	// Tom 2026-07-15: the Yard is a WIDE-OPEN desert field — no walls, no lid, nothing. The
+	// concrete pad sits in the open with the warehouse next door and desert to the horizon.
 	static const FPFArenaMapDef Yard = {
 		EPFArenaMap::Yard,
 		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400 — length unchanged
 		static_cast<float>(2 * PFGrid::CellsY * PFGrid::CellUU),    // 8000 — double width
-		/*bRoof=*/false, /*bWarehouseScenery=*/true,
+		/*bRoof=*/false, /*bPerimeter=*/false, /*bWarehouseScenery=*/true,
 		/*SunIntensity=*/4.f, TEXT("THE YARD")
 	};
 	return (Map == EPFArenaMap::Yard) ? Yard : Warehouse;

@@ -230,7 +230,8 @@ struct COMBATFORGE_API FPFArenaMapDef
 	float   FieldX = static_cast<float>(PFGrid::CellsX * PFGrid::CellUU);   // 6400
 	float   FieldY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);   // 4000
 	bool    bRoof = true;               // roof deck + trusses + skylights (Warehouse); false = open air
-	bool    bWarehouseScenery = false;  // Yard: non-enterable warehouse facade along the north edge
+	bool    bPerimeter = true;          // arena walls + escape lid + wall dressing; false = wide-open field
+	bool    bWarehouseScenery = false;  // Yard: non-enterable warehouse building beside the field
 	float   SunIntensity = 6.f;         // per-map sun knob — exposure is LOCKED, this is the only safe dial
 	FString Label;                      // player-facing card label ("WAREHOUSE" / "THE YARD")
 };

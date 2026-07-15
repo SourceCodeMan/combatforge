@@ -167,23 +167,26 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 
 	// --- 4 perimeter walls (taller than height cap so max-deck + jump can't clear them) ---
 	// Cube is 100 uu; scale Z = PerimeterH/100. Slightly long (+0.4) to close corners.
+	// Open-field maps (bPerimeter=false, The Yard) build NONE of this: no walls, no escape lid —
+	// Tom's spec is a wide-open desert field where you can simply walk off the pad.
 	const float WallScaleZ = PerimeterH * 0.01f;
-	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallN"),
-		FVector(FieldX * 0.5f, FieldY + 10.f, PerimeterH * 0.5f), FVector(FieldX / 100.f + 0.4f, 0.2f, WallScaleZ),
-		EPFShellCollision::Solid, WallMaterial));
-	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallS"),
-		FVector(FieldX * 0.5f, -10.f, PerimeterH * 0.5f), FVector(FieldX / 100.f + 0.4f, 0.2f, WallScaleZ),
-		EPFShellCollision::Solid, WallMaterial));
-	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallW"),
-		FVector(-10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, FieldY / 100.f + 0.4f, WallScaleZ),
-		EPFShellCollision::Solid, WallMaterial));
-	PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallE"),
-		FVector(FieldX + 10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, FieldY / 100.f + 0.4f, WallScaleZ),
-		EPFShellCollision::Solid, WallMaterial));
-
-	// Invisible escape lid: blocks pawns from hopping over the build volume rim.
-	// Paintballs pass through (Ignore) so high shots still work; build trace ignores it too.
+	if (MapDef.bPerimeter)
 	{
+		PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallN"),
+			FVector(FieldX * 0.5f, FieldY + 10.f, PerimeterH * 0.5f), FVector(FieldX / 100.f + 0.4f, 0.2f, WallScaleZ),
+			EPFShellCollision::Solid, WallMaterial));
+		PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallS"),
+			FVector(FieldX * 0.5f, -10.f, PerimeterH * 0.5f), FVector(FieldX / 100.f + 0.4f, 0.2f, WallScaleZ),
+			EPFShellCollision::Solid, WallMaterial));
+		PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallW"),
+			FVector(-10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, FieldY / 100.f + 0.4f, WallScaleZ),
+			EPFShellCollision::Solid, WallMaterial));
+		PerimeterWalls.Add(MakeShapePart(TEXT("PerimeterWallE"),
+			FVector(FieldX + 10.f, FieldY * 0.5f, PerimeterH * 0.5f), FVector(0.2f, FieldY / 100.f + 0.4f, WallScaleZ),
+			EPFShellCollision::Solid, WallMaterial));
+
+		// Invisible escape lid: blocks pawns from hopping over the build volume rim.
+		// Paintballs pass through (Ignore) so high shots still work; build trace ignores it too.
 		UStaticMeshComponent* Lid = MakeShapePart(TEXT("EscapeLid"),
 			FVector(FieldX * 0.5f, FieldY * 0.5f, EscapeLidZ + EscapeLidThickness * 0.5f),
 			FVector(FieldX / 100.f + 0.4f, FieldY / 100.f + 0.4f, EscapeLidThickness * 0.01f),
@@ -229,10 +232,14 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 		EPFShellCollision::Cosmetic, MarkMaterial);
 
 	// --- The invisible full-height midline blocker (Pawn + Paintball, BuildPhase only) ---
+	// On open-field maps there are no perimeter walls to seal the barrier's ends, so it extends
+	// 20000 uu into the desert on both sides — otherwise a player could stroll around it and
+	// cross into the enemy half during the Build phase.
+	const float BarrierHalfY = MapDef.bPerimeter ? FieldY * 0.5f : FieldY * 0.5f + 20000.f;
 	MidlineBarrier = CreateDefaultSubobject<UBoxComponent>(TEXT("MidlineBarrier"));
 	MidlineBarrier->SetupAttachment(ShellRoot);
 	MidlineBarrier->SetRelativeLocation(FVector(MidX, FieldY * 0.5f, PerimeterH * 0.5f));
-	MidlineBarrier->InitBoxExtent(FVector(20.f, FieldY * 0.5f, PerimeterH * 0.5f));
+	MidlineBarrier->InitBoxExtent(FVector(20.f, BarrierHalfY, PerimeterH * 0.5f));
 	MidlineBarrier->SetCollisionObjectType(ECC_WorldStatic);
 	MidlineBarrier->SetCollisionResponseToAllChannels(ECR_Ignore);
 	MidlineBarrier->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
@@ -334,65 +341,70 @@ void APFArenaShell::BuildWarehouseDressing()
 		}
 	}
 
-	// Exterior wall ribs / pilasters on the long N/S walls (outside play volume).
-	int32 RibIdx = 0;
-	for (float X = 200.f; X < FieldX; X += 400.f)
+	// Wall-mounted exterior dressing — ribs, dock doors, corner columns all decorate the arena's
+	// own perimeter walls; on open-field maps (no walls) they'd float in the desert, so skip.
+	if (MapDef.bPerimeter)
 	{
-		// North exterior face (Y = FieldY + 30)
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("RibN%d"), RibIdx),
-			FVector(X, FieldY + 30.f, PerimeterH * 0.5f),
-			FVector(0.35f, 0.25f, 12.2f),
-			EPFShellCollision::Cosmetic, WallMaterial));
-		// South exterior face
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("RibS%d"), RibIdx),
-			FVector(X, -30.f, PerimeterH * 0.5f),
-			FVector(0.35f, 0.25f, 12.2f),
-			EPFShellCollision::Cosmetic, WallMaterial));
-		++RibIdx;
-	}
+		// Exterior wall ribs / pilasters on the long N/S walls (outside play volume).
+		int32 RibIdx = 0;
+		for (float X = 200.f; X < FieldX; X += 400.f)
+		{
+			// North exterior face (Y = FieldY + 30)
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("RibN%d"), RibIdx),
+				FVector(X, FieldY + 30.f, PerimeterH * 0.5f),
+				FVector(0.35f, 0.25f, 12.2f),
+				EPFShellCollision::Cosmetic, WallMaterial));
+			// South exterior face
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("RibS%d"), RibIdx),
+				FVector(X, -30.f, PerimeterH * 0.5f),
+				FVector(0.35f, 0.25f, 12.2f),
+				EPFShellCollision::Cosmetic, WallMaterial));
+			++RibIdx;
+		}
 
-	// Dock-bay doors on spawn walls (west = Team A, east = Team B) — exterior only.
-	// Three roll-up bays per side, reading as loading docks over the spawn strips.
-	const float DoorH = 7.f;     // 700 uu tall
-	const float DoorW = 5.f;     // 500 uu wide
-	const float DoorZ = DoorH * 50.f;   // center at half height of door (scale z * 100 / 2)
-	const float BayYs[3] = { FieldY * 0.25f, FieldY * 0.5f, FieldY * 0.75f };
-	for (int32 i = 0; i < 3; ++i)
-	{
-		// West exterior (x ≈ -40)
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockDoorW%d"), i),
-			FVector(-40.f, BayYs[i], DoorZ),
-			FVector(0.15f, DoorW, DoorH),
-			EPFShellCollision::Cosmetic, MetalMaterial));
-		// Header bar above door
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockHdrW%d"), i),
-			FVector(-40.f, BayYs[i], DoorH * 100.f + 40.f),
-			FVector(0.25f, DoorW + 0.4f, 0.35f),
-			EPFShellCollision::Cosmetic, MetalMaterial));
+		// Dock-bay doors on spawn walls (west = Team A, east = Team B) — exterior only.
+		// Three roll-up bays per side, reading as loading docks over the spawn strips.
+		const float DoorH = 7.f;     // 700 uu tall
+		const float DoorW = 5.f;     // 500 uu wide
+		const float DoorZ = DoorH * 50.f;   // center at half height of door (scale z * 100 / 2)
+		const float BayYs[3] = { FieldY * 0.25f, FieldY * 0.5f, FieldY * 0.75f };
+		for (int32 i = 0; i < 3; ++i)
+		{
+			// West exterior (x ≈ -40)
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockDoorW%d"), i),
+				FVector(-40.f, BayYs[i], DoorZ),
+				FVector(0.15f, DoorW, DoorH),
+				EPFShellCollision::Cosmetic, MetalMaterial));
+			// Header bar above door
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockHdrW%d"), i),
+				FVector(-40.f, BayYs[i], DoorH * 100.f + 40.f),
+				FVector(0.25f, DoorW + 0.4f, 0.35f),
+				EPFShellCollision::Cosmetic, MetalMaterial));
 
-		// East exterior (x ≈ FieldX + 40)
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockDoorE%d"), i),
-			FVector(FieldX + 40.f, BayYs[i], DoorZ),
-			FVector(0.15f, DoorW, DoorH),
-			EPFShellCollision::Cosmetic, MetalMaterial));
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockHdrE%d"), i),
-			FVector(FieldX + 40.f, BayYs[i], DoorH * 100.f + 40.f),
-			FVector(0.25f, DoorW + 0.4f, 0.35f),
-			EPFShellCollision::Cosmetic, MetalMaterial));
-	}
+			// East exterior (x ≈ FieldX + 40)
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockDoorE%d"), i),
+				FVector(FieldX + 40.f, BayYs[i], DoorZ),
+				FVector(0.15f, DoorW, DoorH),
+				EPFShellCollision::Cosmetic, MetalMaterial));
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("DockHdrE%d"), i),
+				FVector(FieldX + 40.f, BayYs[i], DoorH * 100.f + 40.f),
+				FVector(0.25f, DoorW + 0.4f, 0.35f),
+				EPFShellCollision::Cosmetic, MetalMaterial));
+		}
 
-	// Corner columns (exterior, visual weight at field corners).
-	const FVector Corners[4] = {
-		FVector(-50.f, -50.f, PerimeterH * 0.5f),
-		FVector(FieldX + 50.f, -50.f, PerimeterH * 0.5f),
-		FVector(-50.f, FieldY + 50.f, PerimeterH * 0.5f),
-		FVector(FieldX + 50.f, FieldY + 50.f, PerimeterH * 0.5f),
-	};
-	for (int32 i = 0; i < 4; ++i)
-	{
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("CornerCol%d"), i),
-			Corners[i], FVector(0.7f, 0.7f, 12.5f),
-			EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+		// Corner columns (exterior, visual weight at field corners).
+		const FVector Corners[4] = {
+			FVector(-50.f, -50.f, PerimeterH * 0.5f),
+			FVector(FieldX + 50.f, -50.f, PerimeterH * 0.5f),
+			FVector(-50.f, FieldY + 50.f, PerimeterH * 0.5f),
+			FVector(FieldX + 50.f, FieldY + 50.f, PerimeterH * 0.5f),
+		};
+		for (int32 i = 0; i < 4; ++i)
+		{
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("CornerCol%d"), i),
+				Corners[i], FVector(0.7f, 0.7f, 12.5f),
+				EPFShellCollision::Cosmetic, MetalMaterial, FRotator::ZeroRotator, true));
+		}
 	}
 
 	if (MapDef.bRoof)
@@ -435,19 +447,23 @@ void APFArenaShell::BuildWarehouseDressing()
 	}
 
 	// Interior wall pads / bounce panels just inside the perimeter (cosmetic only, thin).
-	// Read as airsoft field padding without blocking movement (NoCollision).
-	int32 PadIdx = 0;
-	for (float X = 400.f; X < FieldX; X += 800.f)
+	// Read as airsoft field padding without blocking movement (NoCollision). Wall-mounted →
+	// perimeter maps only.
+	if (MapDef.bPerimeter)
 	{
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("PadN%d"), PadIdx),
-			FVector(X, FieldY - 25.f, 150.f),
-			FVector(3.5f, 0.18f, 3.0f),
-			EPFShellCollision::Cosmetic, WallMaterial));
-		DressingParts.Add(MakeShapePart(FString::Printf(TEXT("PadS%d"), PadIdx),
-			FVector(X, 25.f, 150.f),
-			FVector(3.5f, 0.18f, 3.0f),
-			EPFShellCollision::Cosmetic, WallMaterial));
-		++PadIdx;
+		int32 PadIdx = 0;
+		for (float X = 400.f; X < FieldX; X += 800.f)
+		{
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("PadN%d"), PadIdx),
+				FVector(X, FieldY - 25.f, 150.f),
+				FVector(3.5f, 0.18f, 3.0f),
+				EPFShellCollision::Cosmetic, WallMaterial));
+			DressingParts.Add(MakeShapePart(FString::Printf(TEXT("PadS%d"), PadIdx),
+				FVector(X, 25.f, 150.f),
+				FVector(3.5f, 0.18f, 3.0f),
+				EPFShellCollision::Cosmetic, WallMaterial));
+			++PadIdx;
+		}
 	}
 
 	// Floor court rings — dashed lane markers along the long axis (reads as a real field).

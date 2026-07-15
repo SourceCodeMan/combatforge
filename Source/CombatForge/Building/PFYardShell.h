@@ -7,16 +7,18 @@
 #include "PFYardShell.generated.h"
 
 /**
- * "THE YARD" (task #40): same 6400 length, DOUBLE width (8000), open air. The base ctor builds
- * the entire functional field from PFGetArenaMapDef(Yard) — floor, perimeter, escape lid,
- * full-width spawn strips / midline / barrier, and the unchanged south warm-up pen — so this
- * subclass adds scenery only: a NON-ENTERABLE warehouse facade along the NORTH long edge (the
- * pen owns the south exterior at Y=-3000), selling "playing in the yard beside the warehouse".
+ * "THE YARD" v2 (task #44, Tom's spec): a WIDE-OPEN desert field. Same 6400 length, DOUBLE
+ * width (8000), open air, and — unlike the Warehouse box — NO perimeter walls, NO escape lid
+ * (bPerimeter=false in the def gates them out of the base ctor). The concrete pad sits in the
+ * open: you can simply walk off it onto the sand. The warehouse building stands next door
+ * along the north edge, and a giant sand plane + distant mesas sell the desert horizon.
  *
- * The facade sits outside the perimeter wall, which already blocks entry — so every facade part
- * is Cosmetic (NoCollision), with bCastShadow on the big slabs so the sun (pitch -52°) throws the
- * building's shadow onto the field. Sun runs at 4.0 here (def) — open-air at the Warehouse's 6.0
- * would blow the floor out with exposure locked (UPFLightingSubsystem::ConfigureForMap).
+ * Build-phase halves stay honest because the base ctor extends the invisible midline barrier
+ * 20000 uu into the desert on open-field maps (you can't stroll around it).
+ *
+ * Desert parts are deliberately NOT registered in DressingParts — the cohesion palette pass
+ * would rebind them to warehouse concrete. They keep their own sand-tinted MIDs (BeginPlay;
+ * BasicShapeMaterial "Color" param — the proven tintable engine material).
  *
  * Map identity travels as ACTOR CLASS: the GameMode spawns this class and ordinary actor-channel
  * replication makes every client construct the identical ctor-built geometry (base-class contract).
@@ -29,7 +31,18 @@ class COMBATFORGE_API APFYardShell : public APFArenaShell
 public:
 	APFYardShell();
 
+protected:
+	virtual void BeginPlay() override;
+
 private:
 	/** Cube-primitive warehouse building north of the field (ctor-time; MakeShapePart parts). */
 	void BuildWarehouseFacade();
+	/** Sand ground plane + distant mesa/dune forms (ctor-time; kept OUT of DressingParts). */
+	void BuildDesert();
+
+	/** /Engine/BasicShapes/BasicShapeMaterial — hard CDO ref (reliable for /Engine content). */
+	UPROPERTY() TObjectPtr<UMaterialInterface> SandBaseMaterial;
+	/** Desert parts awaiting their sand MIDs (index-parallel with SandTints). */
+	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SandParts;
+	TArray<FLinearColor> SandTints;
 };
