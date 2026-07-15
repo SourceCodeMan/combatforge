@@ -1138,14 +1138,26 @@ bool APFBotController::HasLineOfSight(const ACombatForgeCharacter* Target, bool 
 	FVector End = TargetChest;
 	if (bAlongCurrentAim)
 	{
-		// FIRE-GATE check: trace where the BB ACTUALLY goes right now, not an idealized muzzle→chest line. The
-		// real ball (PFWeaponComponent::FireOneShot) spawns at the muzzle and flies along the CURRENT control
-		// rotation — so a muzzle→chest ray could graze over a cover lip that the real (flatter/lower) ball then
-		// splats on, and the bot keeps firing into cover. Tracing the true centerline fails the gate on those
-		// shots so the bot holds fire + repositions. Only valid when control rotation IS aimed at Target (the
-		// fire gate) — NOT for selection tests of a target the bot hasn't turned to yet.
-		const float Reach = FMath::Max(FVector::Dist(Start, TargetChest), 1.f);
-		End = Start + GetControlRotation().Vector() * Reach;
+		// FIRE-GATE check: trace where the BB ACTUALLY goes, not an idealized muzzle→chest line. The real ball
+		// (PFWeaponComponent::FireOneShot) spawns at the muzzle and CONVERGES on the bot's eye-aim point — it
+		// does NOT fly parallel to control rotation. Mirror that convergence (eye ray → hit, clamped ahead of
+		// the muzzle, matching PFConvergedShotDir) so the gate tests the true shot path: a flat muzzle ray
+		// would pass while the real shot — rising from the lower muzzle toward the eye line — clips an overhang
+		// (or vice versa). Only valid when control rotation IS aimed at Target (the fire gate).
+		const FVector Eye = Bot->GetEyeWorldLocation();
+		const FVector AimFwd = Bot->GetBaseAimRotation().Vector();
+		FVector Converge = Eye + AimFwd * 100000.f;
+		FHitResult EyeHit;
+		FCollisionQueryParams EyeQ(FName(TEXT("BotConverge")), /*bTraceComplex=*/false, Bot);
+		if (World->LineTraceSingleByChannel(EyeHit, Eye, Converge, ECC_Visibility, EyeQ))
+		{
+			Converge = EyeHit.ImpactPoint;
+		}
+		if (((Converge - Start) | AimFwd) < 120.f)   // clamp min convergence, matching the weapon
+		{
+			Converge = Start + AimFwd * 120.f;
+		}
+		End = Converge;
 	}
 
 	// Smoke conceals: a live smoke cloud on the line breaks sight exactly like world geometry (the bot then

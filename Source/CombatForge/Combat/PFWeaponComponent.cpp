@@ -26,7 +26,8 @@ namespace
 {
 	// Slightly forgiving for high-latency kids / listen-host (still rejects cheats).
 	constexpr float ServerOriginToleranceUU = 200.f;   // 04 §5.1 anti-teleport-fire
-	constexpr float ServerDirToleranceDeg = 5.5f;      // 04 §5.1 — ADS micro-desync + jitter
+	constexpr float ServerDirToleranceDeg = 9.f;       // 04 §5.1 — ADS micro-desync + jitter; wider since crosshair
+	                                                   // convergence amplifies small client/server aim skew at close range
 	constexpr float FireTokenCap = 3.f;                // 04 §2.1 token bucket
 }
 
@@ -258,6 +259,44 @@ void UPFWeaponComponent::TryFire(double Now)
 	NextFireTime = (Now - NextFireTime > Interval) ? (Now + Interval) : (NextFireTime + Interval);
 }
 
+// Where the CROSSHAIR points in the world: trace from the shooter's eye along their aim to the first hit
+// (or a far point if none). Shots converge on THIS so they land on the reticle instead of flying parallel
+// from an offset muzzle. Uses GetBaseAimRotation() (= control rotation for a possessed pawn) so the client
+// and server compute the same point for the shot's owner.
+static FVector PFAimConvergePoint(UWorld* World, ACombatForgeCharacter* Char)
+{
+	const FVector Eye = Char->GetEyeWorldLocation();
+	FVector End = Eye + Char->GetBaseAimRotation().Vector() * 100000.f;
+	if (World != nullptr)
+	{
+		FHitResult Hit;
+		FCollisionQueryParams Q(FName(TEXT("PFAimConverge")), /*bTraceComplex=*/false, Char);
+		if (World->LineTraceSingleByChannel(Hit, Eye, End, ECC_Visibility, Q))
+		{
+			End = Hit.ImpactPoint;
+		}
+	}
+	return End;
+}
+
+// The converged shot direction: from the muzzle toward the crosshair's world target. The convergence point is
+// clamped to at least MinConvergeDist AHEAD of the muzzle (along the aim) so extreme point-blank (a wall closer
+// than the muzzle) can't produce a degenerate or wildly-angled dir. That clamp is deterministic — client and
+// server compute it identically — so the anti-cheat dir-gate stays aligned, and it also bounds the max
+// convergence angle so close-range client/server aim skew can't blow up past the gate tolerance.
+static FVector PFConvergedShotDir(UWorld* World, ACombatForgeCharacter* Char, const FVector& Origin)
+{
+	const FVector AimFwd = Char->GetBaseAimRotation().Vector();
+	FVector AimPoint = PFAimConvergePoint(World, Char);
+	constexpr float MinConvergeDist = 120.f;
+	const float Ahead = (AimPoint - Origin) | AimFwd;   // signed distance of the aim point ahead of the muzzle
+	if (Ahead < MinConvergeDist)
+	{
+		AimPoint = Origin + AimFwd * MinConvergeDist;
+	}
+	return (AimPoint - Origin).GetSafeNormal();
+}
+
 void UPFWeaponComponent::FireOneShot(double Now)
 {
 	ACombatForgeCharacter* Char = GetPFCharacter();
@@ -269,10 +308,17 @@ void UPFWeaponComponent::FireOneShot(double Now)
 
 	++ShotIndexCounter;
 
-	const AController* Controller = Char->GetController();
-	const FVector BaseDir = (Controller != nullptr)
-		? Controller->GetControlRotation().Vector()
-		: Char->GetBaseAimRotation().Vector();
+	// Origin: the listen host's OWN shots spawn from the first-person barrel it actually sees (tracers come
+	// from the visible gun, not the hidden hand weapon). Everyone else uses the server-reproducible TP muzzle
+	// so the client-sent origin and the server's validation agree.
+	// IsPlayerControlled excludes bots: an AI controller is "locally controlled" too, but a bot has no real FP
+	// viewmodel — it must keep the TP hand muzzle its own LOS/fire checks use.
+	const bool bLocalAuth = Char->HasAuthority() && Char->IsLocallyControlled() && Char->IsPlayerControlled();
+	const FVector ShotOrigin = bLocalAuth ? Char->GetMuzzleLocation(true) : Char->GetMuzzleLocation(false);
+	// Converge on the crosshair: the muzzle sits below/right of the camera, so flying PARALLEL to the aim (the
+	// old BaseDir = camera forward) splatted low-right of the reticle. Aim from the muzzle THROUGH the
+	// crosshair's world target so shots land on the reticle regardless of the muzzle offset.
+	const FVector BaseDir = PFConvergedShotDir(GetWorld(), Char, ShotOrigin);
 
 	// DO-NOT-TOUCH (B3, §5.15): exactly ONE VRandCone pull per shot from the shared
 	// deterministic stream. Any extra pull on either side desyncs every later shot.
@@ -309,10 +355,12 @@ void UPFWeaponComponent::FireOneShot(double Now)
 
 	if (!Char->HasAuthority())
 	{
-		// Owning-client cosmetic: instant tracer from the camera muzzle (04 §5.1). A listen
-		// host skips this — its authoritative projectile spawns this same frame and IS the
-		// visual (no double tracer).
-		SpawnCosmeticProjectile(Char->GetMuzzleLocation(true), SpreadedDir, GetOwnerTeam(),
+		// Owning-client cosmetic: instant tracer (04 §5.1). Spawn from ShotOrigin — the SAME point the server's
+		// authoritative ball spawns from — with the SAME converged dir, so the predicted tracer overlays where
+		// the hit actually lands. (Spawning from the FP barrel instead would streak the tracer to a point offset
+		// from the reticle while the splat registered on it.) A listen host skips this — its authoritative
+		// projectile spawns this same frame and IS the visual (no double tracer).
+		SpawnCosmeticProjectile(ShotOrigin, SpreadedDir, GetOwnerTeam(),
 			ShotIndexCounter);
 
 		// Predicted hopper; COND_OwnerOnly replication corrects any divergence.
@@ -353,7 +401,7 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	}
 
 	FPFShotPacket Packet;
-	Packet.Origin = Char->GetMuzzleLocation(false);   // server-muzzle convention (04 §2.2)
+	Packet.Origin = ShotOrigin;                        // FP barrel for the local host, TP muzzle otherwise
 	Packet.Dir = BaseDir;                              // BASE dir — server applies the same spread
 	Packet.ShotIndex = ShotIndexCounter;
 	Packet.ClientTime = StampT;                        // the bloom/spread clock — server reuses it (see ServerFire)
@@ -458,8 +506,11 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 		return;
 	}
 
-	// Origin within 150 uu of the server-side muzzle (anti-teleport-fire).
-	const FVector ServerMuzzle = Char->GetMuzzleLocation(false);
+	// Origin within 150 uu of the server-side muzzle (anti-teleport-fire). Match the client's muzzle choice:
+	// the local host uses its FP barrel, everyone else the TP muzzle (see FireOneShot). Evaluated the same on
+	// each machine — the host's pawn is HasAuthority && IsLocallyControlled here; a remote pawn is not.
+	const bool bLocalAuth = Char->HasAuthority() && Char->IsLocallyControlled() && Char->IsPlayerControlled();
+	const FVector ServerMuzzle = bLocalAuth ? Char->GetMuzzleLocation(true) : Char->GetMuzzleLocation(false);
 	if (FVector::DistSquared(FVector(Shot.Origin), ServerMuzzle) >
 		FMath::Square(ServerOriginToleranceUU))
 	{
@@ -468,13 +519,16 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 		return;
 	}
 
-	// Dir within 4° of the server's view of the client aim.
+	// Dir gate: with crosshair convergence the shot dir is muzzle→reticle (NOT camera-forward), so validate
+	// against the server's OWN converged expectation — the ball aims from the (already-validated) origin
+	// toward where the server sees this pawn looking. For the host these match exactly; for a remote shooter
+	// they differ only by replicated-aim quantization + trace-state skew, covered by the tolerance.
 	const FVector BaseDir = FVector(Shot.Dir).GetSafeNormal();
-	const FVector ServerView = Char->GetBaseAimRotation().Vector();
-	if (FVector::DotProduct(BaseDir, ServerView) <
+	const FVector ExpectedDir = PFConvergedShotDir(World, Char, FVector(Shot.Origin));
+	if (FVector::DotProduct(BaseDir, ExpectedDir) <
 		FMath::Cos(FMath::DegreesToRadians(ServerDirToleranceDeg)))
 	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("ServerFire reject (%s): dir outside %g deg of server view"),
+		UE_LOG(CombatForgeLog, Warning, TEXT("ServerFire reject (%s): dir outside %g deg of server aim"),
 			*GetNameSafe(Char), ServerDirToleranceDeg);
 		return;
 	}
