@@ -338,7 +338,12 @@ namespace
 		case EPFSurfaceRole::WallConcrete:
 			return GMasterWall ? GMasterWall : GMasterFloor;
 		case EPFSurfaceRole::FloorConcrete:
-			return GMasterFloor ? GMasterFloor : GMasterWall;
+			// WORKAROUND: M_PF_ArenaFloor renders BLACK — its base-color graph is mis-wired (separate from
+			// the roughness Clamp), unlike M_PF_ArenaWall which is correct. Drive the floor through the
+			// working WALL master + the floor-concrete textures (world-aligned projection is orientation-
+			// agnostic, so it lands right on a horizontal surface). Revert to GMasterFloor once the floor
+			// material's base-color path is repaired in-editor.
+			return GMasterWall ? GMasterWall : GMasterFloor;
 		case EPFSurfaceRole::MetalRusty:
 		case EPFSurfaceRole::MetalRoof:
 			// Rebind metal maps onto floor triplanar (has BaseColorTex/NormalTex/RoughTex params).
