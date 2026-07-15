@@ -175,6 +175,35 @@ void APFBotController::ApplySkill()
 	}
 }
 
+void APFBotController::UpdateControlRotation(float DeltaTime, bool bUpdatePawn)
+{
+	// Copy of AAIController::UpdateControlRotation with the pitch-zeroing REMOVED. The engine base
+	// (Engine/Source/Runtime/AIModule/Private/AIController.cpp:444-448, "Don't pitch view unless looking at
+	// another pawn") force-zeroes control-rotation PITCH every tick whenever no focus ACTOR is set — and it
+	// runs from AAIController::Tick, i.e. via our Super::Tick BEFORE the aim code below. We aim by
+	// SetControlRotation (including pitch at elevated/low targets) and never SetFocus, so the base zeroed our
+	// pitch every frame: RInterpTo restarted from 0 each tick and never converged, so bot shots came out
+	// nearly level ("perfectly level splat line") and bots literally could not shoot up or down. Keep the
+	// pitch our aim set; the pawn body still faces our YAW via FaceRotation (which respects the character's
+	// bUseControllerRotationPitch=false, so the body stays upright while control rotation carries the pitch
+	// purely as the shot direction).
+	APawn* const MyPawn = GetPawn();
+	if (MyPawn == nullptr)
+	{
+		return;
+	}
+	FRotator NewControlRotation = GetControlRotation();
+	if (bSetControlRotationFromPawnOrientation)   // false for us; kept faithful to the base in case it flips
+	{
+		NewControlRotation = MyPawn->GetActorRotation();
+	}
+	SetControlRotation(NewControlRotation);
+	if (bUpdatePawn && !MyPawn->GetActorRotation().Equals(NewControlRotation, 1e-3f))
+	{
+		MyPawn->FaceRotation(NewControlRotation, DeltaTime);
+	}
+}
+
 void APFBotController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -280,7 +309,14 @@ void APFBotController::Tick(float DeltaSeconds)
 			// attacker, but it won't ping-pong between two enemies already in its face.
 			const bool bClearlyCloser = BestD < CurrD * 0.8f;
 			const bool bPointBlankThreat = (BestD < PointBlankUU) && (CurrD > PointBlankUU);
-			if (!bCurrOK || bClearlyCloser || bPointBlankThreat)
+			// TRADE UP TO A KILLABLE TARGET: acquisition/retention run on EYE line-of-sight, so a bot can stay
+			// locked on an enemy it can SEE but not HIT (head over low cover, muzzle blocked) while ignoring a
+			// closer, fully-exposed one — the "kept shooting my covered teammates, never turned to shoot me"
+			// bug. If the current target isn't cleanly shootable (muzzle LOS) and the new one IS, switch even
+			// inside the distance hysteresis. Both false / both true falls back to the distance rules below.
+			const bool bCurrHittable = bCurrOK && HasLineOfSight(Curr, /*bBodiesBlock=*/true);
+			const bool bTradeUpToHittable = !bCurrHittable && HasLineOfSight(Best, /*bBodiesBlock=*/true);
+			if (!bCurrOK || bClearlyCloser || bPointBlankThreat || bTradeUpToHittable)
 			{
 				// Re-arm the "notice" reaction gap ONLY when the bot has genuinely been OUT of combat for
 				// CombatMemorySec. Re-arming on any lesser condition (every switch, or even every acquire-from-
@@ -462,8 +498,10 @@ void APFBotController::Tick(float DeltaSeconds)
 		SetControlRotation(FMath::RInterpTo(GetControlRotation(), DesiredAim, DeltaSeconds, EffTurnRate));
 
 		// Firing check is the STRICT one (bBodiesBlock): geometry blocks, a friendly in the line of fire holds the
-		// trigger, but a hostile in the way is fine to shoot. Target RETENTION elsewhere stays body-transparent.
-		const bool bLOS = HasLineOfSight(Target, /*bBodiesBlock=*/true);
+		// trigger, but a hostile in the way is fine to shoot. bAlongCurrentAim traces the ACTUAL BB path (the aim
+		// is on Target here) so the bot won't fire when its rounds would splat on cover it can see the enemy over.
+		// Target RETENTION elsewhere stays body-transparent.
+		const bool bLOS = HasLineOfSight(Target, /*bBodiesBlock=*/true, /*bAlongCurrentAim=*/true);
 		const bool bWantFire = (Dist <= EngageRangeUU) && (FireHoldTimer <= 0.f) && bLOS;
 		SetFiring(bWantFire);
 		if (bWantFire)
@@ -730,6 +768,12 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 	FCollisionQueryParams Q(FName(TEXT("BotTactic")), /*bTraceComplex=*/false, Bot);
 	Q.AddIgnoredActor(Target);
 
+	// Score the firing-position LOS from roughly the bot's MUZZLE height, not the eye — the fire gate traces
+	// from GetMuzzleLocation(false) (lower than the +60 eye), so an eye-only score picked spots where the eye
+	// clears a wall lip but the leveled barrel does not, and the bot then held a position it couldn't shoot
+	// from. Constant offset sampled at the current pose (per-candidate muzzle would need a pose the bot isn't in).
+	const float MuzzleProbeZ = FMath::Clamp(Bot->GetMuzzleLocation(false).Z - BotLoc.Z, 20.f, 60.f);
+
 	auto Evaluate = [&](const FVector& Raw)
 	{
 		FVector P = Raw;
@@ -751,8 +795,9 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 		float Score = 0.f;
 
 		// (1) Can we SHOOT from here? A firing position needs LOS; no-LOS spots are only retreats → penalised.
+		//     Trace from muzzle height (see MuzzleProbeZ) so a "good" spot can actually land a shot.
 		FHitResult Hit;
-		const bool bLOS = !World->LineTraceSingleByChannel(Hit, P + FVector(0.f, 0.f, 60.f), EnemyEye, ECC_Visibility, Q);
+		const bool bLOS = !World->LineTraceSingleByChannel(Hit, P + FVector(0.f, 0.f, MuzzleProbeZ), EnemyEye, ECC_Visibility, Q);
 		Score += bLOS ? 3.f : -2.5f;
 
 		// AGGRESSION MODEL (playtest: "bots happy to stay behind cover on their side"): an UNHURT bot presses
@@ -820,6 +865,19 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 		const FVector Dir = FRotator(0.f, i * 45.f, 0.f).Vector();
 		Evaluate(BotLoc + Dir * ReposSampleNearUU);
 		Evaluate(BotLoc + Dir * ReposSampleFarUU);
+	}
+
+	// VERTICAL PURSUIT: the ring above is all horizontal offsets from the bot, so ProjectPointToNavigation
+	// always snaps back to the bot's OWN floor — a bot below an enemy on an upper level never sampled a spot
+	// up there and just parked below. Seed candidates at the ENEMY's elevation (its footing + a ring on its
+	// level) so ProjectPointToNavigation lands them on the enemy's floor; MoveToGoal then paths UP the ramp
+	// that connects the levels (and the knee/head jump code carries a lip). These go through the same scorer,
+	// so cover/flank/spread still apply — they're just reachable options the bot never had before.
+	Evaluate(EnemyLoc);
+	for (int32 i = 0; i < 8; ++i)
+	{
+		const FVector Dir = FRotator(0.f, i * 45.f, 0.f).Vector();
+		Evaluate(EnemyLoc + Dir * ReposSampleNearUU);
 	}
 	return BestPos;
 }
@@ -1061,7 +1119,7 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 	return false;
 }
 
-bool APFBotController::HasLineOfSight(const ACombatForgeCharacter* Target, bool bBodiesBlock) const
+bool APFBotController::HasLineOfSight(const ACombatForgeCharacter* Target, bool bBodiesBlock, bool bAlongCurrentAim) const
 {
 	const ACombatForgeCharacter* Bot = GetBotCharacter();
 	UWorld* World = GetWorld();
@@ -1076,7 +1134,19 @@ bool APFBotController::HasLineOfSight(const ACombatForgeCharacter* Target, bool 
 	const FVector Start = bBodiesBlock
 		? Bot->GetMuzzleLocation(false)
 		: Bot->GetActorLocation() + FVector(0.f, 0.f, 60.f);
-	const FVector End = Target->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+	const FVector TargetChest = Target->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+	FVector End = TargetChest;
+	if (bAlongCurrentAim)
+	{
+		// FIRE-GATE check: trace where the BB ACTUALLY goes right now, not an idealized muzzle→chest line. The
+		// real ball (PFWeaponComponent::FireOneShot) spawns at the muzzle and flies along the CURRENT control
+		// rotation — so a muzzle→chest ray could graze over a cover lip that the real (flatter/lower) ball then
+		// splats on, and the bot keeps firing into cover. Tracing the true centerline fails the gate on those
+		// shots so the bot holds fire + repositions. Only valid when control rotation IS aimed at Target (the
+		// fire gate) — NOT for selection tests of a target the bot hasn't turned to yet.
+		const float Reach = FMath::Max(FVector::Dist(Start, TargetChest), 1.f);
+		End = Start + GetControlRotation().Vector() * Reach;
+	}
 
 	// Smoke conceals: a live smoke cloud on the line breaks sight exactly like world geometry (the bot then
 	// falls back to last-known-position hunting — pop smoke and RUN, it works on bots now).

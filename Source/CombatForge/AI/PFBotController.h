@@ -52,6 +52,9 @@ public:
 	virtual void OnPossess(APawn* InPawn) override;
 	virtual void OnUnPossess() override;
 	virtual void OnMoveCompleted(FAIRequestID RequestID, const FPathFollowingResult& Result) override;
+	// The engine base zeroes control-rotation PITCH every tick when no focus actor is set — we override to
+	// keep the pitch our aim code sets, or bots can never shoot up/down (see the .cpp comment).
+	virtual void UpdateControlRotation(float DeltaTime, bool bUpdatePawn = true) override;
 
 	// Friend/foe for AI Perception (the #1 perception gotcha). AAIController implements IGenericTeamAgentInterface;
 	// we override the attitude to use the GAME's team rules directly (PlayerState TeamId + FFA), so the sight/
@@ -123,7 +126,10 @@ private:
 	bool IsHostilePlayerState(const class ACombatForgePlayerState* OtherPS) const;   // game team rules (mirrors GetTeamAttitudeTowards)
 	// bBodiesBlock=false (tracking/acquisition): only world geometry breaks sight — bodies crossing the line
 	// don't make the bot "forget" a target. bBodiesBlock=true (firing): a FRIENDLY body in the way holds fire.
-	bool HasLineOfSight(const ACombatForgeCharacter* Target, bool bBodiesBlock = false) const;
+	// bBodiesBlock: firing-quality check (traces from the muzzle, a hostile body is shootable, a friendly holds
+	// fire). bAlongCurrentAim: trace the ACTUAL shot centerline along the current control rotation (fire gate
+	// only — the aim must already be on Target); default traces muzzle→target-chest ("could I hit if I aimed").
+	bool HasLineOfSight(const ACombatForgeCharacter* Target, bool bBodiesBlock = false, bool bAlongCurrentAim = false) const;
 
 	// Perception callback (must be UFUNCTION — OnTargetPerceptionUpdated is a dynamic delegate). Hearing stimuli
 	// become an "investigate this noise" goal; sight is polled directly in the target scan.
