@@ -419,7 +419,9 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 				L->SetLightFunctionFadeDistance(12000.f);
 				// Slight temperature shift if the property path is available via color already.
 			}
-			Key->SetActorLabel(TEXT("PF_KeySun"));
+#if WITH_EDITOR
+			Key->SetActorLabel(TEXT("PF_KeySun"));   // editor-outliner name only; absent in packaged builds
+#endif
 		}
 	}
 
@@ -442,7 +444,9 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 					/*Spec=*/0.15f,
 					/*Indirect=*/0.4f);
 			}
-			Fill->SetActorLabel(TEXT("PF_FillBounce"));
+#if WITH_EDITOR
+			Fill->SetActorLabel(TEXT("PF_FillBounce"));   // editor-only outliner name
+#endif
 		}
 	}
 
