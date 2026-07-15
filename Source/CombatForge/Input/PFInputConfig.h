@@ -60,6 +60,7 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Ready;       // F, tap toggle (T22)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Scoreboard;  // Tab, hold
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_MenuBack;    // Escape
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_CycleClass;  // Mouse wheel while dead: switch class
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_HostStart;   // Enter (host-only effect)
 
 	// ---- Combat (IMC_Combat, priority 1) ----

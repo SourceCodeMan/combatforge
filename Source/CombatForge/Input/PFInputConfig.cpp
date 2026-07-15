@@ -71,6 +71,7 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IA_Ready       = MakeAction(Outer, TEXT("IA_Ready"),       EInputActionValueType::Boolean);
 	IA_Scoreboard  = MakeAction(Outer, TEXT("IA_Scoreboard"),  EInputActionValueType::Boolean);
 	IA_MenuBack    = MakeAction(Outer, TEXT("IA_MenuBack"),    EInputActionValueType::Boolean);
+	IA_CycleClass  = MakeAction(Outer, TEXT("IA_CycleClass"),  EInputActionValueType::Axis1D);
 	IA_HostStart   = MakeAction(Outer, TEXT("IA_HostStart"),   EInputActionValueType::Boolean);
 
 	IA_Fire        = MakeAction(Outer, TEXT("IA_Fire"),        EInputActionValueType::Boolean);
@@ -154,6 +155,9 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IMC_Common->MapKey(IA_Scoreboard,  EKeys::Tab);
 	IMC_Common->MapKey(IA_MenuBack,    EKeys::Escape);
 	IMC_Common->MapKey(IA_HostStart,   EKeys::Enter);
+	// Wheel = class switch, but ONLY while dead (handler gates on OutKind==1). Build mode also maps the wheel
+	// (IA_CyclePiece) — no clash: you can't be out while building, so this mapping is inert there.
+	IMC_Common->MapKey(IA_CycleClass,  EKeys::MouseWheelAxis);
 
 	// ================= IMC_Combat =================
 

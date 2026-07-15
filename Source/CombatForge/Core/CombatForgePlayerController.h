@@ -123,6 +123,7 @@ protected:
 	void OnMenuBack();
 	void OnFireWhileDead();                   // dead-only spectate cycle: Fire = next (T5)
 	void OnADSWhileDead();                    // ADS = previous
+	void OnCycleClassWhileDead(const struct FInputActionValue& Value); // wheel on the respawn countdown = switch class
 
 	// ---- (intra) spectate (server side) ----
 	void SpectateNearestTeammate();

@@ -9,6 +9,7 @@
 #include "Core/CombatForgePlayerState.h"
 #include "Core/PFClientLogShip.h"
 #include "Player/CombatForgeCharacter.h"
+#include "Player/PFCharacterCustomization.h"   // dead-time class cycle: active save slot
 #include "Input/PFInputConfig.h"
 #include "UI/PFRootHUDWidget.h"
 #include "UI/PFLoadingMenuWidget.h"
@@ -23,6 +24,7 @@
 #include "GameFramework/InputSettings.h"
 #include "HAL/FileManager.h"
 #include "InputAction.h"
+#include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "Misc/DateTime.h"
 #include "Misc/FileHelper.h"
@@ -83,6 +85,7 @@ void ACombatForgePlayerController::SetupInputComponent()
 	EIC->BindAction(InputConfig->IA_MenuBack,   ETriggerEvent::Started,   this, &ACombatForgePlayerController::OnMenuBack);
 	EIC->BindAction(InputConfig->IA_Fire,       ETriggerEvent::Started,   this, &ACombatForgePlayerController::OnFireWhileDead);
 	EIC->BindAction(InputConfig->IA_ADS,        ETriggerEvent::Started,   this, &ACombatForgePlayerController::OnADSWhileDead);
+	EIC->BindAction(InputConfig->IA_CycleClass, ETriggerEvent::Triggered, this, &ACombatForgePlayerController::OnCycleClassWhileDead);
 }
 
 UPFInputConfig* ACombatForgePlayerController::GetInputConfig() const
@@ -549,6 +552,22 @@ void ACombatForgePlayerController::OnFireWhileDead()
 	{
 		ServerSpectateNext(true);
 	}
+}
+
+void ACombatForgePlayerController::OnCycleClassWhileDead(const FInputActionValue& Value)
+{
+	// Wheel on the respawn-countdown screen cycles the ACTIVE class slot. Purely local: the respawned pawn
+	// pushes its kit at PawnClientRestart, so whatever slot is active when the timer hits zero is what you
+	// spawn wearing — no pawn or RPC needed while dead (the old pawn may already be destroyed).
+	const float Dir = Value.Get<float>();
+	const ACombatForgePlayerState* PS = GetPlayerState<ACombatForgePlayerState>();
+	if (FMath::IsNearlyZero(Dir) || PS == nullptr || PS->OutKind != 1)
+	{
+		return;
+	}
+	const int32 N = PFChar::SaveSlotCount();
+	const int32 Slot = (PFChar::GetActiveSaveSlot() + (Dir > 0.f ? 1 : -1) + N) % N;
+	PFChar::SetActiveSaveSlot(Slot);
 }
 
 void ACombatForgePlayerController::OnADSWhileDead()

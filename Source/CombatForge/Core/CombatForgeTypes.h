@@ -108,6 +108,20 @@ struct COMBATFORGE_API FPFShotPacket
 	UPROPERTY() float                     ClientTime = 0.f; // reserved for post-v1 rewind (04 §5.2)
 };
 
+/**
+ * A player's full class kit: weapon choice + clothing part picks. Class configs live in each player's LOCAL
+ * GameUserSettings, so the owning client pushes this up (ServerSetKit) and it replicates to every machine —
+ * everyone sees your outfit, and the SERVER runs your weapon's authoritative stats (not the host's saved gun).
+ */
+USTRUCT()
+struct COMBATFORGE_API FPFKitRep
+{
+	GENERATED_BODY()
+	UPROPERTY() uint8 WeaponCategory = 0;
+	UPROPERTY() uint8 WeaponIndex = 0;
+	UPROPERTY() TArray<int16> CharParts;   // one per PFChar customization slot; -1 = none. Empty = not set yet.
+};
+
 USTRUCT()
 struct COMBATFORGE_API FPFPaintHitInfo
 {

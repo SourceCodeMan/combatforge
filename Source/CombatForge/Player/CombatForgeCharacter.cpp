@@ -34,12 +34,20 @@
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NavigationInvokerComponent.h"
+#include "Net/UnrealNetwork.h"            // DOREPLIFETIME (KitRep)
 #include "Perception/AISense_Hearing.h"   // running footsteps → AI can hear a sprinter 360°
 #include "InputActionValue.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+
+// Rifle-hold locomotion kill-switch: the armed set plays AnimStarterPack sequences on the Bandit skeleton via
+// a compatible-skeletons entry — visually unverifiable headless, so keep a live revert (`pf.ArmedAnims 0` +
+// respawn) in case the retarget T-poses or slides on some machine.
+static TAutoConsoleVariable<int32> CVarArmedAnims(
+	TEXT("pf.ArmedAnims"), 1,
+	TEXT("1 = rifle-hold locomotion from AnimStarterPack (default), 0 = original unarmed Bandit anims."));
 
 ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPFCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
@@ -279,6 +287,70 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	if (BanditIdleFinder.Succeeded()) { BanditIdleAnim = BanditIdleFinder.Object; }
 	if (BanditWalkFinder.Succeeded()) { BanditWalkAnim = BanditWalkFinder.Object; }
 	if (BanditRunFinder.Succeeded())  { BanditRunAnim  = BanditRunFinder.Object; }
+
+	// Rifle-hold locomotion from the UE5 template rifle kit (/Game/Characters, SK_Mannequin — Manny-family
+	// bone names, same family as the Bandit skeleton, so FSkeletonRemapping plays them cleanly; registered
+	// compatible by Scripts/add_compatible_skeleton.py). 8-directional walk + jog sets: strafing characters
+	// actually sidestep instead of moonwalking a forward loop. Sprint borrows AnimStarterPack's
+	// Sprint_Fwd_Rifle (UE4 mannequin — shared bones remap, UE5-only twist bones hold ref pose).
+	// Missing packs = null finders = automatic unarmed fallback.
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedIdleFinder(
+		TEXT("/Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS.MF_Rifle_Idle_ADS"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedRunFinder(
+		TEXT("/Game/AnimStarterPack/Sprint_Fwd_Rifle.Sprint_Fwd_Rifle"));
+	if (ArmedIdleFinder.Succeeded()) { ArmedIdleAnim = ArmedIdleFinder.Object; }
+	if (ArmedRunFinder.Succeeded())  { ArmedRunAnim  = ArmedRunFinder.Object; }
+
+	// 8-direction sets, index = round(atan2(right,fwd)/45°) & 7: 0=Fwd 1=FwdRight 2=Right 3=BwdRight 4=Bwd
+	// 5=BwdLeft 6=Left 7=FwdLeft.
+	{
+		static const TCHAR* WalkDirPaths[8] = {
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd.MF_Rifle_Walk_Fwd"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Right.MF_Rifle_Walk_Fwd_Right"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Right.MF_Rifle_Walk_Right"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Right.MF_Rifle_Walk_Bwd_Right"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd.MF_Rifle_Walk_Bwd"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Left.MF_Rifle_Walk_Bwd_Left"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Left.MF_Rifle_Walk_Left"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Left.MF_Rifle_Walk_Fwd_Left"),
+		};
+		static const TCHAR* JogDirPaths[8] = {
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd.MF_Rifle_Jog_Fwd"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Right.MF_Rifle_Jog_Fwd_Right"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Right.MF_Rifle_Jog_Right"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Right.MF_Rifle_Jog_Bwd_Right"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd.MF_Rifle_Jog_Bwd"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Left.MF_Rifle_Jog_Bwd_Left"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Left.MF_Rifle_Jog_Left"),
+			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Left.MF_Rifle_Jog_Fwd_Left"),
+		};
+		ArmedWalkDir.SetNum(8);
+		ArmedJogDir.SetNum(8);
+		for (int32 i = 0; i < 8; ++i)
+		{
+			ConstructorHelpers::FObjectFinder<UAnimSequence> W(WalkDirPaths[i]);
+			ConstructorHelpers::FObjectFinder<UAnimSequence> J(JogDirPaths[i]);
+			if (W.Succeeded()) { ArmedWalkDir[i] = W.Object; }
+			if (J.Succeeded()) { ArmedJogDir[i] = J.Object; }
+		}
+		if (ArmedJogDir[0] != nullptr) { ArmedWalkAnim = ArmedJogDir[0]; }   // legacy fwd fallback
+	}
+
+	// Directional "he's out" reactions (played on elimination before the body hides — see SetEliminatedAppearance).
+	{
+		static const TCHAR* DeathPaths[4] = {
+			TEXT("/Game/Characters/Mannequins/Anims/Death/MM_Death_Front_01.MM_Death_Front_01"),   // shot from front
+			TEXT("/Game/Characters/Mannequins/Anims/Death/MM_Death_Right_01.MM_Death_Right_01"),
+			TEXT("/Game/Characters/Mannequins/Anims/Death/MM_Death_Back_01.MM_Death_Back_01"),
+			TEXT("/Game/Characters/Mannequins/Anims/Death/MM_Death_Left_01.MM_Death_Left_01"),
+		};
+		DeathDirAnims.SetNum(4);
+		for (int32 i = 0; i < 4; ++i)
+		{
+			ConstructorHelpers::FObjectFinder<UAnimSequence> D(DeathPaths[i]);
+			if (D.Succeeded()) { DeathDirAnims[i] = D.Object; }
+		}
+	}
 
 	// Config-driven modular slot components (base skin head/legs + one per PFChar customization slot). Part
 	// meshes are assigned at assembly time from the active FPFCharacterConfig via the registry — no hardcoded
@@ -536,9 +608,17 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 			const float Ads = 1.f - FMath::Cube(1.f - RawAds);
 			const FVector Home = FMath::Lerp(ViewModelHomeLoc, ViewModelAdsLoc, Ads);
 			const FRotator HomeRot = FMath::Lerp(FRotator::ZeroRotator, ViewModelAdsRot, Ads);
-			ViewModelRoot->SetRelativeLocation(Home + RecoilOffset + ReloadLoc);
-			ViewModelRoot->SetRelativeRotation(
-				FRotator(RecoilPitch + HomeRot.Pitch + ReloadPitch, HomeRot.Yaw, HomeRot.Roll));
+
+			// Procedural feel: look-lag sway, movement bob, idle breath, fire-kick springs, landing dip.
+			FVector FeelLoc = FVector::ZeroVector;
+			FRotator FeelRot = FRotator::ZeroRotator;
+			UpdateViewmodelFeel(DeltaSeconds, FeelLoc, FeelRot);
+
+			ViewModelRoot->SetRelativeLocation(Home + RecoilOffset + ReloadLoc + FeelLoc);
+			ViewModelRoot->SetRelativeRotation(FRotator(
+				RecoilPitch + HomeRot.Pitch + ReloadPitch + FeelRot.Pitch,
+				HomeRot.Yaw + FeelRot.Yaw,
+				HomeRot.Roll + FeelRot.Roll));
 		}
 
 		// Footsteps — local only, grounded movement.
@@ -888,6 +968,96 @@ void ACombatForgeCharacter::UpdateADSAlpha(float DeltaSeconds)
 	ADSAlpha = FMath::FInterpConstantTo(ADSAlpha, Target, DeltaSeconds, Rate);
 }
 
+void ACombatForgeCharacter::UpdateViewmodelFeel(float DeltaSeconds, FVector& OutLoc, FRotator& OutRot)
+{
+	// Procedural viewmodel motion (owner only): everything a static gun-glued-to-camera lacks. Constants from
+	// the CoD-style procedural-viewmodel literature (spring k 200-400, zeta 0.7-0.85, figure-8 bob with the
+	// vertical at 2x the lateral frequency, ADS suppressing all of it). ViewModelRoot space: +X fwd, +Y right,
+	// +Z up.
+	const float Dt = FMath::Clamp(DeltaSeconds, 0.0001f, 0.05f);
+	const float RawAds = FMath::Clamp(ADSAlpha, 0.f, 1.f);
+	const float AdsSuppress = FMath::Lerp(1.f, 0.3f, RawAds);    // sway/kick at 30% while sighted
+	const float BobSuppress = FMath::Lerp(1.f, 0.12f, RawAds);   // bob nearly gone while sighted
+
+	// ---- Look-lag sway: the gun trails the camera and settles with a slight overshoot ----
+	{
+		float CamYaw = PrevCamYaw, CamPitch = PrevCamPitch;
+		if (const AController* C = GetController())
+		{
+			const FRotator CR = C->GetControlRotation();
+			CamYaw = CR.Yaw;
+			CamPitch = CR.Pitch;
+		}
+		if (!bCamRotInit)
+		{
+			PrevCamYaw = CamYaw;
+			PrevCamPitch = CamPitch;
+			bCamRotInit = true;
+		}
+		const float DYaw = FMath::UnwindDegrees(CamYaw - PrevCamYaw);
+		const float DPitch = FMath::UnwindDegrees(CamPitch - PrevCamPitch);
+		PrevCamYaw = CamYaw;
+		PrevCamPitch = CamPitch;
+
+		const float YawRate = DYaw / Dt;     // deg/s
+		const float PitchRate = DPitch / Dt;
+		const float MaxSway = 5.f * AdsSuppress;
+		SwayYaw.Update(FMath::Clamp(-YawRate * 0.014f, -MaxSway, MaxSway) * AdsSuppress, Dt, 260.f, 0.8f);
+		SwayPitch.Update(FMath::Clamp(-PitchRate * 0.012f, -MaxSway * 0.75f, MaxSway * 0.75f) * AdsSuppress, Dt, 260.f, 0.8f);
+		SwayX.Update(FMath::Clamp(-YawRate * 0.0035f, -1.8f, 1.8f) * AdsSuppress, Dt, 220.f, 0.8f);
+		SwayZ.Update(FMath::Clamp(-PitchRate * 0.003f, -1.4f, 1.4f) * AdsSuppress, Dt, 220.f, 0.8f);
+	}
+
+	// ---- Movement bob (grounded): figure-8, speeds up with pace; breath takes over when still ----
+	float BobLat = 0.f, BobVert = 0.f, BobRoll = 0.f, BreathZ = 0.f, BreathPitch = 0.f;
+	{
+		const float Speed = GetVelocity().Size2D();
+		const bool bGrounded = PFMovement != nullptr && !PFMovement->IsFalling();
+		const float TargetAlpha = (bGrounded && Speed > 30.f) ? FMath::Min(Speed / 600.f, 1.15f) : 0.f;
+		BobAlpha = FMath::FInterpTo(BobAlpha, TargetAlpha, Dt, 7.f);
+		if (BobAlpha > 0.02f)
+		{
+			// ~2.7 Hz at jog (600 uu/s), capped so sprint doesn't blur into a vibration.
+			const float Hz = FMath::Min(Speed / 220.f, 3.2f);
+			BobPhase += Hz * 2.f * PI * Dt;
+			const float A = BobAlpha * BobSuppress;
+			BobLat  = 0.9f * A * FMath::Sin(BobPhase);
+			BobVert = 0.5f * A * FMath::Sin(2.f * BobPhase);
+			BobRoll = 0.9f * A * FMath::Sin(BobPhase);
+		}
+		else
+		{
+			BobPhase = 0.f;
+		}
+		// Idle breathing: slow rise/fall so a still gun is never a screenshot.
+		const float BreathAlpha = (1.f - FMath::Min(Speed / 150.f, 1.f)) * FMath::Lerp(1.f, 0.4f, RawAds);
+		BreathPhase += 0.42f * 2.f * PI * Dt;
+		BreathZ = 0.14f * BreathAlpha * FMath::Sin(BreathPhase);
+		BreathPitch = 0.06f * BreathAlpha * FMath::Sin(BreathPhase + 0.6f);
+	}
+
+	// ---- Fire-kick + landing springs settle toward zero ----
+	KickBack.Update(0.f, Dt, 320.f, 0.72f);
+	KickUp.Update(0.f, Dt, 320.f, 0.72f);
+	KickPitch.Update(0.f, Dt, 340.f, 0.7f);
+	KickYaw.Update(0.f, Dt, 300.f, 0.75f);
+	KickRoll.Update(0.f, Dt, 300.f, 0.75f);
+	LandDipSpring.Update(0.f, Dt, 180.f, 0.75f);
+
+	// Kick accumulation clamp: full-auto stacks up to ~2x a single shot, then rides there.
+	const float KickBackPos = FMath::Clamp(KickBack.Pos, -3.5f, 1.f);
+	const float KickPitchPos = FMath::Clamp(KickPitch.Pos, -2.f, 4.5f);
+
+	OutLoc = FVector(
+		KickBackPos + SwayX.Pos * 0.f,                     // back/forward: kick only (sway X reads better on Y)
+		SwayX.Pos + BobLat,                                // right
+		SwayZ.Pos + BobVert + BreathZ + KickUp.Pos + FMath::Clamp(LandDipSpring.Pos, -6.f, 1.5f));  // up
+	OutRot = FRotator(
+		KickPitchPos + SwayPitch.Pos + BreathPitch + FMath::Clamp(LandDipSpring.Pos, -6.f, 1.5f) * 0.4f,
+		SwayYaw.Pos + FMath::Clamp(KickYaw.Pos, -1.5f, 1.5f),
+		SwayYaw.Pos * 0.5f + BobRoll + FMath::Clamp(KickRoll.Pos, -2.5f, 2.5f));
+}
+
 void ACombatForgeCharacter::UpdateTargetFOV(float DeltaSeconds)
 {
 	if (FirstPersonCamera == nullptr)
@@ -943,6 +1113,9 @@ void ACombatForgeCharacter::Landed(const FHitResult& Hit)
 	const float FallDistance = FallStartPeakZ - GetActorLocation().Z;
 	if (FallDistance > LandingDipMinFallUU && IsLocallyControlled())
 	{
+		// Viewmodel absorbs the landing too (springs back over ~0.3s) — the camera shake alone left the gun
+		// rigidly glued to the view, which reads weightless.
+		LandDipSpring.Vel -= FMath::Clamp(FallDistance / 55.f, 5.f, 24.f);
 		if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		{
 			if (PC->PlayerCameraManager != nullptr)
@@ -1013,8 +1186,20 @@ void ACombatForgeCharacter::AssembleBanditCharacter()
 	}
 
 	// Route the Bandit sequences through the existing sequence-loco path (both teams — global test toggle).
-	Team0IdleAnim = BanditIdleAnim; Team0WalkAnim = BanditWalkAnim; Team0RunAnim = BanditRunAnim;
-	Team1IdleAnim = BanditIdleAnim; Team1WalkAnim = BanditWalkAnim; Team1RunAnim = BanditRunAnim;
+	// Prefer the RIFLE-HOLD set (soldiers should look like they're holding the gun, not walking empty-handed);
+	// pf.ArmedAnims 0 reverts to the unarmed A_MM_* set if the cross-skeleton playback misbehaves.
+	UAnimSequence* IdleSeq = BanditIdleAnim;
+	UAnimSequence* WalkSeq = BanditWalkAnim;
+	UAnimSequence* RunSeq  = BanditRunAnim;
+	if (CVarArmedAnims.GetValueOnGameThread() != 0
+		&& ArmedIdleAnim != nullptr && ArmedWalkAnim != nullptr && ArmedRunAnim != nullptr)
+	{
+		IdleSeq = ArmedIdleAnim;
+		WalkSeq = ArmedWalkAnim;
+		RunSeq  = ArmedRunAnim;
+	}
+	Team0IdleAnim = IdleSeq; Team0WalkAnim = WalkSeq; Team0RunAnim = RunSeq;
+	Team1IdleAnim = IdleSeq; Team1WalkAnim = WalkSeq; Team1RunAnim = RunSeq;
 
 	// Base body carries the skeleton + animation (single-node + UpdateSequenceLocomotion, like Quantum).
 	Base->SetSkeletalMeshAsset(BanditBodyMesh);
@@ -1025,16 +1210,22 @@ void ACombatForgeCharacter::AssembleBanditCharacter()
 	SeqLocoState = 0;
 	bSequenceLocoActive = true;
 	bUsingArtBody = true;
-	if (BanditIdleAnim != nullptr)
+	if (IdleSeq != nullptr)
 	{
-		Base->PlayAnimation(BanditIdleAnim, /*bLooping=*/true);
+		Base->PlayAnimation(IdleSeq, /*bLooping=*/true);
 		SeqLocoState = 1;
 	}
 
 	// Modular parts assembled from the player's saved character (SKM_Bandit_Skeleton -> Leader Pose).
-	// Only the LOCAL human player wears the saved custom character; bots and other players get the standard
-	// default look. (Per-player replicated configs are a later phase — the local config is per-machine for now.)
-	if (ActiveCharConfig.Slots.Num() == 0)
+	// Kit-first: the replicated kit (pushed by the owning client at PawnClientRestart) dresses this pawn on
+	// EVERY machine. Until a kit arrives: the local human wears its saved config; bots and not-yet-replicated
+	// remotes get the default look (OnRep_Kit re-dresses them the moment the kit lands).
+	if (HasValidKit())
+	{
+		ActiveCharConfig.Slots.Reset(KitRep.CharParts.Num());
+		for (const int16 Part : KitRep.CharParts) { ActiveCharConfig.Slots.Add(Part); }
+	}
+	else if (ActiveCharConfig.Slots.Num() == 0)
 	{
 		const bool bLocalHuman = (GetController() != nullptr) && GetController()->IsLocalPlayerController();
 		ActiveCharConfig = bLocalHuman ? PFChar::LoadConfig() : PFChar::DefaultConfig();
@@ -1151,6 +1342,13 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 
 void ACombatForgeCharacter::ReapplyCharacterConfig()
 {
+	// Menu edits on a locally owned pawn: rebuild the kit from prefs and push it, so the change shows up on
+	// the server and every other machine too — not just this screen.
+	if (GetController() != nullptr && GetController()->IsLocalPlayerController())
+	{
+		PushLocalKit();
+		return;
+	}
 	if (!bBanditAssembled)
 	{
 		return;   // only meaningful once the modular character is mounted (pf.BanditChar)
@@ -1161,7 +1359,18 @@ void ACombatForgeCharacter::ReapplyCharacterConfig()
 
 void ACombatForgeCharacter::ApplyWeaponLoadout()
 {
-	ActiveWeaponConfig = PFWeapon::LoadConfig();
+	// Kit-first: the replicated kit carries the OWNER's weapon choice, so the server runs the owner's stats
+	// (mag/ROF/spread) and remote machines render the owner's gun — not whatever THIS machine has saved.
+	// Fallback (no kit yet / bots): this machine's saved config, exactly as before.
+	if (HasValidKit())
+	{
+		ActiveWeaponConfig.Category = KitRep.WeaponCategory;
+		ActiveWeaponConfig.Index    = KitRep.WeaponIndex;
+	}
+	else
+	{
+		ActiveWeaponConfig = PFWeapon::LoadConfig();
+	}
 	const FPFWeaponDef& Def = PFWeapon::Weapon(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
 	UStaticMesh* WpnMesh = PFWeapon::LoadMesh(Def);
 #if !UE_BUILD_SHIPPING
@@ -1220,7 +1429,82 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 
 void ACombatForgeCharacter::ReapplyWeaponLoadout()
 {
+	if (GetController() != nullptr && GetController()->IsLocalPlayerController())
+	{
+		PushLocalKit();   // menu edit: replicate the new weapon choice, don't just re-read local prefs
+		return;
+	}
 	ApplyWeaponLoadout();
+}
+
+// ---------------------------------------------------------------------------
+// Replicated kit — clothing + weapon travel with the pawn, not the machine.
+// The class configs live in each player's LOCAL GameUserSettings, so the server can't read them: the owning
+// client pushes its active class up (ServerSetKit) and the server replicates it to everyone. Before this,
+// LAN clients ran with the HOST's weapon stats and showed default outfits on remote screens.
+// ---------------------------------------------------------------------------
+
+void ACombatForgeCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ACombatForgeCharacter, KitRep);
+}
+
+void ACombatForgeCharacter::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+	// Fires on the OWNING machine when possession lands (initial spawn AND every respawn) — the moment this
+	// pawn knows whose it is. Push that player's ACTIVE class so everyone dresses it; this is also what makes
+	// the dead-time class switch stick: whatever slot the wheel left active is what the fresh pawn pushes.
+	PushLocalKit();
+}
+
+void ACombatForgeCharacter::PushLocalKit()
+{
+	if (GetController() == nullptr || !GetController()->IsLocalPlayerController())
+	{
+		return;   // owning human machines only — bots keep the host-side fallback config
+	}
+	FPFKitRep Kit;
+	const FPFCharacterConfig CharCfg = PFChar::LoadConfig();
+	Kit.CharParts.Reserve(CharCfg.Slots.Num());
+	for (const int32 Part : CharCfg.Slots) { Kit.CharParts.Add((int16)Part); }
+	const FPFWeaponConfig WpnCfg = PFWeapon::LoadConfig();
+	Kit.WeaponCategory = (uint8)WpnCfg.Category;
+	Kit.WeaponIndex    = (uint8)WpnCfg.Index;
+
+	KitRep = Kit;   // listen host: this IS the replicated copy; pure client: local preview until the RPC lands
+	ApplyKit();
+	if (!HasAuthority())
+	{
+		ServerSetKit(Kit);
+	}
+}
+
+void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
+{
+	KitRep = NewKit;
+	ApplyKit();   // server runs the owner's weapon stats; other clients re-dress via OnRep_Kit
+}
+
+void ACombatForgeCharacter::OnRep_Kit()
+{
+	ApplyKit();
+}
+
+void ACombatForgeCharacter::ApplyKit()
+{
+	if (!HasValidKit())
+	{
+		return;
+	}
+	ActiveCharConfig.Slots.Reset(KitRep.CharParts.Num());
+	for (const int16 Part : KitRep.CharParts) { ActiveCharConfig.Slots.Add(Part); }
+	if (bBanditAssembled)
+	{
+		ApplyCharacterConfig();   // re-dress the modular character (no-op pre-assembly; Assemble reads the kit)
+	}
+	ApplyWeaponLoadout();         // kit-first read inside picks up KitRep's weapon on every machine
 }
 
 void ACombatForgeCharacter::SetCharSlot(int32 Slot, int32 Index)
@@ -1628,22 +1912,45 @@ void ACombatForgeCharacter::UpdateSequenceLocomotion()
 	}
 
 	// Prefer CMC velocity (replicates on proxies); actor velocity can lag for bots.
-	float Speed = 0.f;
+	FVector Vel = FVector::ZeroVector;
 	if (const UCharacterMovementComponent* Move = GetCharacterMovement())
 	{
-		Speed = Move->Velocity.Size2D();
+		Vel = Move->Velocity;
 	}
 	else
 	{
-		Speed = GetVelocity().Size2D();
+		Vel = GetVelocity();
 	}
+	const float Speed = Vel.Size2D();
 
-	// walk ~600, sprint ~830 on our CMC — pick idle / walk / run.
+	// 8-direction armed locomotion when the rifle sets loaded (strafing plays real sidestep/backpedal anims —
+	// the single biggest "mannequins sliding around" tell). Falls back to the fwd-only 3-state set otherwise.
+	const bool bDirectional = ArmedWalkDir.Num() == 8 && ArmedJogDir.Num() == 8
+		&& ArmedWalkDir[0] != nullptr && ArmedJogDir[0] != nullptr
+		&& Idle == ArmedIdleAnim;   // only when the armed set is what's routed (pf.ArmedAnims on)
+
 	uint8 Want = 1;
-	if (Speed > 500.f && Run != nullptr)       { Want = 3; }
-	else if (Speed > 30.f && Walk != nullptr)  { Want = 2; }
-	else if (Speed > 30.f && Run != nullptr)   { Want = 3; }
-	else                                       { Want = 1; }
+	int32 Dir = 0;
+	if (Speed > 30.f)
+	{
+		if (bDirectional)
+		{
+			// Velocity direction relative to facing, 45° buckets, clockwise from forward.
+			const float LocalYawDeg = FMath::UnwindDegrees(
+				FMath::RadiansToDegrees(FMath::Atan2(Vel.Y, Vel.X)) - GetActorRotation().Yaw);
+			Dir = FMath::RoundToInt(LocalYawDeg / 45.f) & 7;
+			// Sprint (>700) only has a forward anim; sideways sprinting reads better as fast jog.
+			if (Speed > 700.f && Dir == 0 && Run != nullptr) { Want = 3; }
+			else if (Speed > 300.f)                          { Want = static_cast<uint8>(20 + Dir); }
+			else                                             { Want = static_cast<uint8>(10 + Dir); }
+		}
+		else
+		{
+			if (Speed > 500.f && Run != nullptr)      { Want = 3; }
+			else if (Walk != nullptr)                 { Want = 2; }
+			else if (Run != nullptr)                  { Want = 3; }
+		}
+	}
 
 	if (Want == SeqLocoState)
 	{
@@ -1654,6 +1961,8 @@ void ACombatForgeCharacter::UpdateSequenceLocomotion()
 	UAnimSequence* Seq = Idle;
 	if (Want == 2) { Seq = Walk ? Walk : (Run ? Run : Idle); }
 	else if (Want == 3) { Seq = Run ? Run : (Walk ? Walk : Idle); }
+	else if (Want >= 20) { Seq = ArmedJogDir[Want - 20] ? ArmedJogDir[Want - 20].Get() : Walk; }
+	else if (Want >= 10) { Seq = ArmedWalkDir[Want - 10] ? ArmedWalkDir[Want - 10].Get() : Walk; }
 	if (Seq == nullptr)
 	{
 		return;
@@ -1924,9 +2233,34 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	}
 	if (bUsingArtBody && GetMesh() != nullptr)
 	{
-		// Propagate to children so the modular character parts (CharBaseComps/CharSlotComps) + armband hide with
-		// the base body — otherwise an eliminated pawn leaves its clothing/head/legs frozen in the idle pose.
-		GetMesh()->SetHiddenInGame(bEliminated, /*bPropagateToChildren=*/true);
+		if (bEliminated && bSequenceLocoActive && DeathDirAnims.Num() == 4 && DeathDirAnims[0] != nullptr)
+		{
+			// "He's out": play a directional fall (random pick — the shot direction isn't plumbed here and the
+			// read at gameplay distance is 'body drops', not which way), THEN hide when the anim lands. Beats
+			// the old vanish-in-place. Weapon/viewmodel still hide instantly below.
+			UAnimSequence* Death = DeathDirAnims[FMath::RandRange(0, 3)].Get();
+			if (Death == nullptr) { Death = DeathDirAnims[0].Get(); }
+			GetMesh()->PlayAnimation(Death, /*bLooping=*/false);
+			SeqLocoState = 0;   // force locomotion re-arm on respawn
+			GetWorldTimerManager().SetTimer(DeathHideTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (GetMesh() != nullptr)
+				{
+					GetMesh()->SetHiddenInGame(true, /*bPropagateToChildren=*/true);
+				}
+			}), FMath::Max(0.2f, Death->GetPlayLength() - 0.05f), false);
+		}
+		else
+		{
+			// Propagate to children so the modular character parts (CharBaseComps/CharSlotComps) + armband hide with
+			// the base body — otherwise an eliminated pawn leaves its clothing/head/legs frozen in the idle pose.
+			GetWorldTimerManager().ClearTimer(DeathHideTimer);
+			GetMesh()->SetHiddenInGame(bEliminated, /*bPropagateToChildren=*/true);
+			if (!bEliminated)
+			{
+				SeqLocoState = 0;   // back alive: next UpdateSequenceLocomotion re-picks the right anim
+			}
+		}
 	}
 	if (WeaponMeshComp != nullptr)
 	{
@@ -2036,6 +2370,13 @@ void ACombatForgeCharacter::OnFireCosmetic(float RecoilScale)
 	// Airsoft marker: viewmodel recoil only — no muzzle flash. Kick scaled by ADS + mag-ramp (see FireOneShot).
 	RecoilOffset += FVector(-RecoilKickUU, 0.f, RecoilKickUU * 0.35f) * RecoilScale;
 	RecoilPitch += RecoilKickPitchDeg * RecoilScale;
+	// Spring VELOCITY impulses (not position sets): the fast-out + one-bounce settle is what sells the shot.
+	// Random yaw/roll per shot keeps auto fire alive instead of metronomic.
+	KickBack.Vel  -= 55.f * RecoilScale;                                   // cm/s straight back
+	KickUp.Vel    += 14.f * RecoilScale;
+	KickPitch.Vel += 140.f * RecoilScale;                                  // deg/s muzzle-up
+	KickYaw.Vel   += FMath::FRandRange(-45.f, 45.f) * RecoilScale;
+	KickRoll.Vel  += FMath::FRandRange(-80.f, 80.f) * RecoilScale;
 	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
 	// Do NOT ApplyRaisedWeaponPose() here. It re-parented the TP rifle to the capsule AT EYE HEIGHT for exactly
 	// the one frame in which FireOneShot samples GetMuzzleLocation(false) → the hand-rifle gate failed and every

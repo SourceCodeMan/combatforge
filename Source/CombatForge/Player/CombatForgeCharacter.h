@@ -7,6 +7,7 @@
 #include "Engine/TimerHandle.h"
 #include "Player/PFCharacterCustomization.h"   // FPFCharacterConfig
 #include "Combat/PFWeaponCatalog.h"            // FPFWeaponConfig
+#include "Core/CombatForgeTypes.h"             // FPFKitRep
 #include "CombatForgeCharacter.generated.h"
 
 class UCameraComponent;
@@ -76,6 +77,8 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+	virtual void PawnClientRestart() override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Landed(const FHitResult& Hit) override;
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
@@ -210,6 +213,18 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditIdleAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditWalkAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> BanditRunAnim = nullptr;
+	// Rifle-hold locomotion borrowed from AnimStarterPack (the Bandit pack ships no armed anims). Plays on the
+	// Bandit skeleton via a compatible-skeletons entry (Scripts/add_compatible_skeleton.py); pf.ArmedAnims 0
+	// reverts to the unarmed A_MM_* set if the cross-skeleton playback looks wrong.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> ArmedIdleAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> ArmedWalkAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bandit") TObjectPtr<UAnimSequence> ArmedRunAnim = nullptr;
+	// 8-direction rifle sets (0=Fwd, clockwise 45° steps) — strafing plays real sidestep anims.
+	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> ArmedWalkDir;
+	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> ArmedJogDir;
+	// Directional elimination reactions (0=front 1=right 2=back 3=left, relative to the shot).
+	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> DeathDirAnims;
+	FTimerHandle DeathHideTimer;   // plays the fall, then hides the body
 	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharBaseComps;   // fixed base skin parts (head/legs)
 	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharSlotComps;   // one per PFChar customization slot
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> ArmbandMesh;              // team-colored band, left arm (team distinction)
@@ -219,6 +234,16 @@ private:
 	FPFCharacterConfig ActiveCharConfig;                                   // current per-slot selection
 	bool bBanditAssembled = false;
 	FPFWeaponConfig ActiveWeaponConfig;                                    // current weapon selection
+
+	// ---- Replicated kit (clothing + weapon). The class configs live in each player's LOCAL GameUserSettings,
+	//      so the server can't read them — the owning client pushes its active class up (ServerSetKit) and the
+	//      server replicates it to everyone. Fixes LAN: clients used to spawn with the HOST's weapon stats and
+	//      default outfits on remote screens. Also powers the death-screen class switch.
+	UPROPERTY(ReplicatedUsing=OnRep_Kit) FPFKitRep KitRep;
+	UFUNCTION(Server, Reliable) void ServerSetKit(const FPFKitRep& NewKit);
+	UFUNCTION() void OnRep_Kit();
+	void ApplyKit();          // apply KitRep → ActiveCharConfig/ActiveWeaponConfig → visuals + weapon stats
+	bool HasValidKit() const { return KitRep.CharParts.Num() > 0; }
 
 	/** Phase-1 spike: mount the modular Bandit body + sequence-loco anims on GetMesh(). */
 	void AssembleBanditCharacter();
@@ -231,6 +256,8 @@ public:
 	const FPFCharacterConfig& GetCharConfig() const { return ActiveCharConfig; }
 	/** Reload the saved config from prefs and re-apply the overlay parts (menu edits an already-spawned pawn). */
 	void ReapplyCharacterConfig();
+	/** Owning client: build the kit from the ACTIVE class slot's saved prefs and push it to the server. */
+	void PushLocalKit();
 
 	/** Apply the saved weapon selection: swap the FP viewmodel + TP weapon mesh/material/pose. */
 	void ApplyWeaponLoadout();
@@ -303,6 +330,32 @@ private:
 	float ReloadDipDuration = 1.f;
 	FVector RecoilOffset = FVector::ZeroVector;       // decays to zero each tick (owner)
 	float   RecoilPitch = 0.f;                        // deg, decays to zero
+
+	// ---- Procedural viewmodel feel (owner only): sway / bob / breath / fire-kick / landing dip ----
+	// Damped spring per channel (semi-implicit Euler). Slight underdamping (zeta < 1) gives the one-bounce
+	// settle that reads as weapon WEIGHT; velocity impulses (not position sets) give fire kicks their snap.
+	struct FPFSpring
+	{
+		float Pos = 0.f;
+		float Vel = 0.f;
+		void Update(float Target, float Dt, float Stiffness, float Zeta)
+		{
+			const float Omega = FMath::Sqrt(FMath::Max(Stiffness, 1.f));
+			const float Accel = -Stiffness * (Pos - Target) - 2.f * Zeta * Omega * Vel;
+			Vel += Accel * Dt;
+			Pos += Vel * Dt;
+		}
+	};
+	FPFSpring SwayYaw, SwayPitch, SwayX, SwayZ;             // look-lag rotation + translation
+	FPFSpring KickBack, KickUp, KickPitch, KickYaw, KickRoll; // fire impulses
+	FPFSpring LandDipSpring;                                  // landing dip (viewmodel; camera shake is separate)
+	float BobPhase = 0.f;
+	float BobAlpha = 0.f;      // smoothed 0..1 "moving & grounded" gate
+	float BreathPhase = 0.f;
+	float PrevCamYaw = 0.f;
+	float PrevCamPitch = 0.f;
+	bool  bCamRotInit = false;
+	void UpdateViewmodelFeel(float DeltaSeconds, FVector& OutLoc, FRotator& OutRot);   // adds sway/bob/breath/kick/land terms
 	float   WeaponRaiseHoldSec = 0.f;                 // countdown while briefly raised after shot
 	float   FootstepDistanceAccum = 0.f;              // ground travel since last step (local)
 	/** Sequence-driven locomotion (0=none, 1=idle, 2=walk, 3=run). */
