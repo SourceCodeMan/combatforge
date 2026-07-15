@@ -80,12 +80,12 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		{
 			SkyComp->SetMobility(EComponentMobility::Movable);
 			SkyComp->SetRealTimeCapture(true);
-			// ⭐ MAIN DARKNESS FIX: with Lumen dropped (7fd5b86), this SkyLight is the ONLY indirect/ambient
-			// light — every surface out of the sun's line goes to this value. 1.30 left bunkers near-black.
-			// 1.30 -> 3.0 (~2.3x ambient fill). Lower hemisphere (floor-up bounce sim) lifted too so floors
-			// and undersides aren't pitch black. Exposure/contrast/vignette below also target shadows.
-			SkyComp->SetIntensity(3.0f);
-			SkyComp->SetLowerHemisphereColor(FLinearColor(0.26f, 0.26f, 0.28f));
+			// Ambient fill. The real fix for the dark interior is the ROOF SKYLIGHTS (PFArenaShell) letting
+			// the sun in + this real-time capture now seeing sky through them; this value only fills the
+			// covered bays. 1.30 (too dark, sealed roof) -> 2.2 (skylights carry the rest). Lower hemisphere
+			// lifted so floors/undersides aren't pitch black.
+			SkyComp->SetIntensity(2.2f);
+			SkyComp->SetLowerHemisphereColor(FLinearColor(0.24f, 0.24f, 0.26f));
 		}
 	}
 
@@ -100,7 +100,9 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 			FogComp->SetFogInscatteringColor(FLinearColor(0.45f, 0.48f, 0.52f));
 			FogComp->SetFogMaxOpacity(0.28f);
 			FogComp->SetStartDistance(1000.f);
-			FogComp->SetVolumetricFog(false);
+			// Volumetric ON so the sun through the roof skylights throws visible light shafts (god rays) —
+			// the payoff that sells the openings. Density stays low (0.008) so it's shafts, not soup.
+			FogComp->SetVolumetricFog(true);
 		}
 	}
 
@@ -119,10 +121,10 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.AutoExposureMinBrightness = 1.f;
 		PP.bOverride_AutoExposureMaxBrightness = true;
 		PP.AutoExposureMaxBrightness = 1.f;
-		// Overall lift on top of the light-rig boost. 0.30 -> 0.65 (~+0.35 EV, ~1.27x). Kept moderate on
-		// purpose so the newly-filled shadows brighten more than the already-lit faces (avoid blow-out).
+		// Overall lift. Pulled back 0.65 -> 0.50 now that the roof skylights admit real direct sun (the
+		// bright floor pools shouldn't blow out). Easy knob to re-tune after a look.
 		PP.bOverride_AutoExposureBias = true;
-		PP.AutoExposureBias = 0.65f;
+		PP.AutoExposureBias = 0.50f;
 
 		// Clean industrial grade (original knobs + mild vignette/bloom).
 		PP.bOverride_BloomIntensity = true;

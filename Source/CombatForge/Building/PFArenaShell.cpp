@@ -246,11 +246,32 @@ void APFArenaShell::BuildWarehouseDressing()
 	// All Cosmetic / NoCollision. Nothing enters the buildable volume (Z < 1200) as solid.
 	// Cube mesh is 100 uu; scale = world size / 100.
 
-	// Ceiling deck over the whole field (slightly oversized for clean perimeter join).
-	DressingParts.Add(MakeShapePart(TEXT("CeilingDeck"),
-		FVector(FieldX * 0.5f, FieldY * 0.5f, CeilingZ),
-		FVector(65.f, 41.f, 0.25f),
-		EPFShellCollision::Cosmetic, WallMaterial, FRotator::ZeroRotator, /*bCastShadow=*/true));
+	// Roof deck as a panel GRID with SKYLIGHT openings instead of one solid slab. With Lumen unavailable
+	// (no mesh distance fields project-wide), a sealed roof left the interior black — the dynamic sun was
+	// fully shadowed out. Leaving ~1/3 of the bays open lets the sun pour straight through onto the floor
+	// (real direct light, zero GI cost) and lets the real-time SkyLight capture finally see sky. Openings
+	// are diagonally staggered so light reaches every bay including both spawn ends; the trusses/purlins
+	// below read as the glazing bars. Tunable: RoofCols/Rows + the skip rule set the open fraction.
+	{
+		constexpr int32 RoofCols = 8;                       // along X: 6400/8 = 800 uu panels
+		constexpr int32 RoofRows = 5;                       // along Y: 4000/5 = 800 uu panels
+		constexpr float PanelW = FieldX / RoofCols;
+		constexpr float PanelH = FieldY / RoofRows;
+		for (int32 Col = 0; Col < RoofCols; ++Col)
+		{
+			for (int32 Row = 0; Row < RoofRows; ++Row)
+			{
+				if (((Col + 2 * Row) % 3) == 1)
+				{
+					continue;                               // skylight opening — leave this bay open
+				}
+				DressingParts.Add(MakeShapePart(FString::Printf(TEXT("CeilingPanel%d_%d"), Col, Row),
+					FVector((Col + 0.5f) * PanelW, (Row + 0.5f) * PanelH, CeilingZ),
+					FVector(PanelW * 0.01f + 0.03f, PanelH * 0.01f + 0.03f, 0.25f),   // +3uu overlap: no seams
+					EPFShellCollision::Cosmetic, WallMaterial, FRotator::ZeroRotator, /*bCastShadow=*/true));
+			}
+		}
+	}
 
 	// Primary roof trusses — span N–S (along Y) every 800 uu along X. Metal I-beam look.
 	const float TrussSpanY = FieldY + 80.f;
