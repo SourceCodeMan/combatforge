@@ -203,6 +203,7 @@ private:
 	UFUNCTION() void OnQuickStartClicked();
 	UFUNCTION() void OnHostLanClicked();   // relaunch this map as a LISTEN server (LAN/VPN friends can join)
 	UFUNCTION() void OnJoinLanClicked();   // connect to the host IP typed in the join box
+	UFUNCTION() void OnStopHostingClicked();   // back to standalone (drops joined clients; frees hosting)
 
 	/** Apply Play-Only + Skirmish + 4v4 + bots + auto map (first-session default). */
 	void ApplyQuickStartPreset();

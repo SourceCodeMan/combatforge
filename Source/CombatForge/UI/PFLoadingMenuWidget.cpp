@@ -1244,8 +1244,9 @@ void UPFLoadingMenuWidget::BuildTree()
 			}
 
 			JoinIpBox = WidgetTree->ConstructWidget<UEditableTextBox>();
-			JoinIpBox->SetHintText(FText::FromString(TEXT("host IP — e.g. 192.168.1.50")));
+			JoinIpBox->SetHintText(FText::FromString(TEXT("host IP")));
 			JoinIpBox->SetText(FText::FromString(FPFUserPrefs::GetLastJoinIp()));
+			JoinIpBox->WidgetStyle.SetFont(PFLoadFont(13, false));   // default editable-text font is comically large
 			USizeBox* IpSizer = WidgetTree->ConstructWidget<USizeBox>();
 			IpSizer->SetWidthOverride(210.f);
 			IpSizer->SetContent(JoinIpBox);
@@ -1276,7 +1277,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			NetLab->SetJustification(ETextJustify::Center);
 			if (Net == NM_ListenServer)
 			{
-				NetLab->SetText(FText::FromString(FString::Printf(TEXT("HOSTING — friends join:  %s"), *GetLocalLanIp())));
+				NetLab->SetText(FText::FromString(FString::Printf(TEXT("HOSTING — friends join:  %s  "), *GetLocalLanIp())));
 				NetLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.9f, 0.5f)));
 			}
 			else
@@ -1285,6 +1286,24 @@ void UPFLoadingMenuWidget::BuildTree()
 				NetLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.75f, 1.f)));
 			}
 			MpRow->AddChildToHorizontalBox(NetLab);
+			if (Net == NM_ListenServer)
+			{
+				// Way back out: return to a private standalone session (disconnects any joined friends, who
+				// can then host their own game).
+				UButton* StopBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StopHostBtn"));
+				StopBtn->SetBackgroundColor(FLinearColor(0.42f, 0.18f, 0.16f, 1.f));
+				StopBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnStopHostingClicked);
+				UTextBlock* StopLab = WidgetTree->ConstructWidget<UTextBlock>();
+				StopLab->SetText(FText::FromString(TEXT("  STOP HOSTING  ")));
+				StopLab->SetFont(PFLoadFont(12, true));
+				StopLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				StopBtn->AddChild(StopLab);
+				if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(StopBtn))
+				{
+					H->SetPadding(FMargin(10.f, 0.f, 0.f, 0.f));
+					H->SetVerticalAlignment(VAlign_Center);
+				}
+			}
 		}
 		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MpRow))
 		{
@@ -1934,6 +1953,17 @@ void UPFLoadingMenuWidget::OnHostLanClicked()
 	{
 		UE_LOG(CombatForgeLog, Log, TEXT("Menu: hosting LAN listen server (join at %s)"), *GetLocalLanIp());
 		PC->ConsoleCommand(TEXT("open L_Graybox?listen"));
+	}
+}
+
+void UPFLoadingMenuWidget::OnStopHostingClicked()
+{
+	// Travel back to a plain standalone session: the net driver shuts down, joined clients are returned to
+	// their own menus, and the multiplayer row shows HOST/JOIN again — anyone can host next.
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("Menu: stop hosting — returning to standalone"));
+		PC->ConsoleCommand(TEXT("open L_Graybox"));
 	}
 }
 
