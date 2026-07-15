@@ -48,7 +48,8 @@ UENUM()
 enum class EPFDenyReason : uint8
 {
 	None = 0, WrongPhase, OutOfBudget, SlotOccupied, Overlapping, OutOfPlot,
-	NoAnchor, HeightCap, RateLimited, NotYourTeam, InvalidPiece, NotFound
+	NoAnchor, HeightCap, RateLimited, NotYourTeam, InvalidPiece, NotFound,
+	SealsMap   // would sever cross-map passage / wall off an objective (connectivity guard)
 };
 
 UENUM()

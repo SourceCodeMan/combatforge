@@ -5,6 +5,7 @@
 #include "CombatForge.h"
 #include "Building/PFBuildPieceVisuals.h"
 #include "Building/PFGridMath.h"
+#include "Objectives/PFObjectiveLayout.h"   // connectivity guard: control-point cells
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
 
@@ -417,7 +418,72 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		return EPFDenyReason::NoAnchor;
 	}
 
+	// --- Connectivity guard (last / most expensive) --- a wall may not seal the map or an objective off.
+	if (WouldSealMap(Q))
+	{
+		return EPFDenyReason::SealsMap;
+	}
+
 	return EPFDenyReason::None;
+}
+
+bool APFBuildGrid::WouldSealMap(const FPFPlacementQuery& Q) const
+{
+	// Only a GROUND-LEVEL WALL can sever the cross-map ground path. Floors/ramps/roofs are walkable, and
+	// upper-level walls don't block the floor. (Spawn columns + neutral strip are no-build, so those cells
+	// always stay open — the flood-fill depends on that to seed + cross.)
+	if (Q.Type != EPFPieceType::Wall || (Q.Z / 3) != 0)
+	{
+		return false;
+	}
+
+	const FIntVector NewEdge = WallEdgeKey(Q.X / PFGrid::SubPerCell, Q.Y / PFGrid::SubPerCell, 0, Q.Rot);
+	auto EdgeBlocked = [this, &NewEdge](int32 Cx, int32 Cy, uint8 EdgeNE) -> bool
+	{
+		const FIntVector Key = WallEdgeKey(Cx, Cy, 0, EdgeNE);
+		return Key == NewEdge || WallEdges.Contains(Key);
+	};
+
+	constexpr int32 GW = PFGrid::CellsX;   // columns (X)
+	constexpr int32 GH = PFGrid::CellsY;   // rows (Y)
+	bool Visited[GW * GH] = {};
+	int32 Queue[GW * GH];
+	int32 Tail = 0;
+
+	// Seed at team A's spawn column, field mid-Y.
+	const int32 StartIdx = 0 * GH + (GH / 2);
+	Visited[StartIdx] = true;
+	Queue[Tail++] = StartIdx;
+
+	auto TryVisit = [&](int32 NX, int32 NY)
+	{
+		const int32 NI = NX * GH + NY;
+		if (!Visited[NI]) { Visited[NI] = true; Queue[Tail++] = NI; }
+	};
+	for (int32 Head = 0; Head < Tail; ++Head)
+	{
+		const int32 Cx = Queue[Head] / GH;
+		const int32 Cy = Queue[Head] % GH;
+		if (Cx + 1 < GW && !EdgeBlocked(Cx, Cy, 1))     { TryVisit(Cx + 1, Cy); }   // E: E-edge of (Cx,Cy)
+		if (Cx - 1 >= 0 && !EdgeBlocked(Cx - 1, Cy, 1)) { TryVisit(Cx - 1, Cy); }   // W: E-edge of (Cx-1,Cy)
+		if (Cy + 1 < GH && !EdgeBlocked(Cx, Cy, 0))     { TryVisit(Cx, Cy + 1); }   // N: N-edge of (Cx,Cy)
+		if (Cy - 1 >= 0 && !EdgeBlocked(Cx, Cy - 1, 0)) { TryVisit(Cx, Cy - 1); }   // S: N-edge of (Cx,Cy-1)
+	}
+
+	// Cross-map: team B's spawn column must remain reachable.
+	bool bReachB = false;
+	for (int32 Y = 0; Y < GH; ++Y) { if (Visited[PFGrid::SpawnColB * GH + Y]) { bReachB = true; break; } }
+	if (!bReachB) { return true; }
+
+	// Objectives: every control point must remain reachable (CTF flag homes sit in spawn columns → covered).
+	for (int32 i = 0; i < PFObjectiveLayout::ControlPointCount; ++i)
+	{
+		const FVector Loc = PFObjectiveLayout::ControlPointLocation(i);
+		const int32 Ox = FMath::Clamp(FMath::FloorToInt32(Loc.X / static_cast<float>(PFGrid::CellUU)), 0, GW - 1);
+		const int32 Oy = FMath::Clamp(FMath::FloorToInt32(Loc.Y / static_cast<float>(PFGrid::CellUU)), 0, GH - 1);
+		if (!Visited[Ox * GH + Oy]) { return true; }
+	}
+	return false;
 }
 
 bool APFBuildGrid::HasAnchor(const FPFPlacementQuery& Q, const FBox& Bounds) const

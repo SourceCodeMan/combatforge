@@ -54,6 +54,7 @@ const TCHAR* UPFBuildHUDWidget::DenyReasonText(EPFDenyReason Reason)
 	case EPFDenyReason::HeightCap:    return TEXT("HEIGHT CAP");
 	case EPFDenyReason::RateLimited:  return TEXT("TOO FAST");
 	case EPFDenyReason::NotYourTeam:  return TEXT("NOT YOUR TEAM'S PIECE");
+	case EPFDenyReason::SealsMap:     return TEXT("LEAVE A LANE — CAN'T SEAL THE MAP");
 	case EPFDenyReason::InvalidPiece: return TEXT("INVALID PIECE");
 	case EPFDenyReason::NotFound:     return TEXT("PIECE NOT FOUND");
 	default:                          return TEXT("DENIED");
