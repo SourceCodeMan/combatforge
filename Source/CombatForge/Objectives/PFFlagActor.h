@@ -9,6 +9,7 @@
 
 class ACombatForgePlayerState;
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class USceneComponent;
 class USphereComponent;
 class UStaticMeshComponent;
@@ -61,12 +62,20 @@ protected:
 private:
 	void ApplyTeamColor();
 	void ApplyVisualState();
+	void EnsureFlagMaterials();   // soft-resolve the /Game masters once (BeginPlay / first apply)
 
 	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<USceneComponent> FlagRoot;
-	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<UStaticMeshComponent> PoleMesh;   // gray flagpole
+	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<UStaticMeshComponent> PoleMesh;   // near-black flagpole
 	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<UStaticMeshComponent> FlagMesh;   // team-colored banner
 	UPROPERTY(VisibleAnywhere, Category="PF|Flag") TObjectPtr<USphereComponent> PickupSphere;
+	// MID masters: MIDs are ALWAYS created from these (never from whatever sits in the mesh slot —
+	// CreateAndSetMaterialInstanceDynamic re-parents to the slot's current MID, see 8f631b5).
+	UPROPERTY() TObjectPtr<UMaterialInterface> MarkMaterial;           // M_PF_ArenaMark — cloth
+	UPROPERTY() TObjectPtr<UMaterialInterface> MetalMaterial;          // M_PF_ArenaMetal — pole
+	UPROPERTY() TObjectPtr<UMaterialInterface> FallbackBaseMaterial;   // /Engine BasicShapeMaterial (ctor hard ref)
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> FlagMID;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> PoleMID;
+	bool bTriedFlagMaterials = false;
 
 	UPROPERTY(ReplicatedUsing=OnRep_VisualState) uint8 OwnerTeam = 0;
 	UPROPERTY(ReplicatedUsing=OnRep_VisualState) bool bAtHome = true;

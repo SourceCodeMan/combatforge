@@ -22,22 +22,16 @@
 namespace
 {
 	// Preferred short paths (manual renames) — then NiagaraExamples pack (Fab default install).
+	// Airsoft: shots produce NO smoke — flash core + light only (the smoke path was removed in Batch C).
 	TSoftObjectPtr<UNiagaraSystem> MuzzleFlashNSRef(
 		FSoftObjectPath(TEXT("/Game/FX/NS_MuzzleFlash.NS_MuzzleFlash")));
 	TSoftObjectPtr<UNiagaraSystem> MuzzleFlashPackRef(
 		FSoftObjectPath(TEXT("/Game/NiagaraExamples/FX_Weapons/MuzzleFlashes/NS_MuzzleFlash.NS_MuzzleFlash")));
-	TSoftObjectPtr<UNiagaraSystem> MuzzleSmokeNSRef(
-		FSoftObjectPath(TEXT("/Game/FX/NS_MuzzleSmoke.NS_MuzzleSmoke")));
-	// No dedicated CO₂ system in the pack — light smoke puff doubles as gas dump.
-	TSoftObjectPtr<UNiagaraSystem> MuzzleSmokePackRef(
-		FSoftObjectPath(TEXT("/Game/NiagaraExamples/Utilities/SpriteGeneration/SmokePuffLight/NS_SmokePuffLight.NS_SmokePuffLight")));
 	TSoftObjectPtr<UNiagaraSystem> LyraMuzzleNSRef(
 		FSoftObjectPath(TEXT("/Game/FX/Lyra/NS_WeaponFire_MuzzleFlash_Rifle.NS_WeaponFire_MuzzleFlash_Rifle")));
 
 	TSoftObjectPtr<UMaterialInterface> FlashMatRef(
 		FSoftObjectPath(TEXT("/Game/Materials/M_PF_Flash.M_PF_Flash")));
-	TSoftObjectPtr<UMaterialInterface> SmokeMatRef(
-		FSoftObjectPath(TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke")));
 }
 
 UPFCombatVFX::UPFCombatVFX()
@@ -61,7 +55,6 @@ void UPFCombatVFX::EnsureAssets()
 	bAssetsReady = true;
 
 	FlashMat = FlashMatRef.LoadSynchronous();
-	SmokeMat = SmokeMatRef.LoadSynchronous();
 	SphereMesh = Cast<UStaticMesh>(
 		FSoftObjectPath(TEXT("/Engine/BasicShapes/Sphere.Sphere")).TryLoad());
 
@@ -77,14 +70,8 @@ void UPFCombatVFX::EnsureAssets()
 		{
 			NS_MuzzleFlash = LyraMuzzleNSRef.LoadSynchronous();
 		}
-		NS_MuzzleSmoke = MuzzleSmokeNSRef.LoadSynchronous();
-		if (NS_MuzzleSmoke == nullptr)
-		{
-			NS_MuzzleSmoke = MuzzleSmokePackRef.LoadSynchronous();
-		}
-		UE_LOG(CombatForgeLog, Log, TEXT("[VFX] Niagara muzzle flash=%s smoke=%s (mesh fallback always ready)"),
-			NS_MuzzleFlash ? TEXT("yes") : TEXT("no"),
-			NS_MuzzleSmoke ? TEXT("yes") : TEXT("no"));
+		UE_LOG(CombatForgeLog, Log, TEXT("[VFX] Niagara muzzle flash=%s (mesh fallback always ready)"),
+			NS_MuzzleFlash ? TEXT("yes") : TEXT("no"));
 	}
 }
 
@@ -111,7 +98,6 @@ void UPFCombatVFX::EnsureMeshPool()
 
 	PoolMeshes.SetNum(PoolSize);
 	PoolFlashMIDs.SetNum(PoolSize);
-	PoolSmokeMIDs.SetNum(PoolSize);
 	PoolMeta.SetNum(PoolSize);
 
 	for (int32 i = 0; i < PoolSize; ++i)
@@ -136,13 +122,6 @@ void UPFCombatVFX::EnsureMeshPool()
 				FLinearColor(6.5f, 4.2f, 2.0f, 1.f));
 			PoolFlashMIDs[i]->SetScalarParameterValue(TEXT("EmissiveStrength"), 2.2f);
 		}
-		if (SmokeMat)
-		{
-			PoolSmokeMIDs[i] = UMaterialInstanceDynamic::Create(SmokeMat, this);
-			PoolSmokeMIDs[i]->SetVectorParameterValue(TEXT("EmissiveColor"),
-				FLinearColor(0.62f, 0.64f, 0.68f, 1.f));
-			PoolSmokeMIDs[i]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.65f);
-		}
 	}
 
 	MuzzleLight = NewObject<UPointLightComponent>(VfxHolder);
@@ -160,7 +139,7 @@ void UPFCombatVFX::EnsureMeshPool()
 bool UPFCombatVFX::TrySpawnNiagaraMuzzle(const FVector& Loc, const FVector& Dir, bool bFirstPerson)
 {
 	UWorld* World = GetWorld();
-	if (World == nullptr || (NS_MuzzleFlash == nullptr && NS_MuzzleSmoke == nullptr))
+	if (World == nullptr || NS_MuzzleFlash == nullptr)
 	{
 		return false;
 	}
@@ -168,29 +147,11 @@ bool UPFCombatVFX::TrySpawnNiagaraMuzzle(const FVector& Loc, const FVector& Dir,
 	const FVector SafeDir = Dir.GetSafeNormal();
 	const FRotator Rot = SafeDir.IsNearlyZero() ? FRotator::ZeroRotator : SafeDir.Rotation();
 	const float Scale = bFirstPerson ? 0.55f : 1.f;
-	bool bAny = false;
 
-	if (NS_MuzzleFlash)
-	{
-		if (UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-				World, NS_MuzzleFlash, Loc, Rot, FVector(Scale),
-				/*bAutoDestroy=*/true, /*bAutoActivate=*/true,
-				ENCPoolMethod::AutoRelease, /*bPreCullCheck=*/true))
-		{
-			bAny = true;
-		}
-	}
-	if (NS_MuzzleSmoke)
-	{
-		if (UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-				World, NS_MuzzleSmoke, Loc, Rot, FVector(Scale * 1.15f),
-				/*bAutoDestroy=*/true, /*bAutoActivate=*/true,
-				ENCPoolMethod::AutoRelease, /*bPreCullCheck=*/true))
-		{
-			bAny = true;
-		}
-	}
-	return bAny;
+	return UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		World, NS_MuzzleFlash, Loc, Rot, FVector(Scale),
+		/*bAutoDestroy=*/true, /*bAutoActivate=*/true,
+		ENCPoolMethod::AutoRelease, /*bPreCullCheck=*/true) != nullptr;
 }
 
 void UPFCombatVFX::SpawnMeshMuzzle(const FVector& Loc, const FVector& Dir, bool bFirstPerson)
@@ -212,7 +173,7 @@ void UPFCombatVFX::SpawnMeshMuzzle(const FVector& Loc, const FVector& Dir, bool 
 	const double Now = World->GetTimeSeconds();
 	const float FP = bFirstPerson ? 0.55f : 1.f;
 
-	auto Place = [&](uint8 Kind, const FVector& At, float StartS, float EndS, float Life)
+	auto Place = [&](const FVector& At, float StartS, float EndS, float Life)
 	{
 		const int32 Slot = NextPoolSlot;
 		NextPoolSlot = (NextPoolSlot + 1) % PoolSize;
@@ -221,51 +182,27 @@ void UPFCombatVFX::SpawnMeshMuzzle(const FVector& Loc, const FVector& Dir, bool 
 		{
 			return;
 		}
-		if (Kind == 0 && PoolFlashMIDs.IsValidIndex(Slot) && PoolFlashMIDs[Slot])
+		if (PoolFlashMIDs.IsValidIndex(Slot) && PoolFlashMIDs[Slot])
 		{
 			PoolFlashMIDs[Slot]->SetScalarParameterValue(TEXT("EmissiveStrength"), 2.2f);
 			Comp->SetMaterial(0, PoolFlashMIDs[Slot]);
 		}
-		else if (Kind == 1 && PoolSmokeMIDs.IsValidIndex(Slot) && PoolSmokeMIDs[Slot])
-		{
-			PoolSmokeMIDs[Slot]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.65f);
-			Comp->SetMaterial(0, PoolSmokeMIDs[Slot]);
-		}
 
 		FMuzzlePartMeta& M = PoolMeta[Slot];
 		M.bActive = true;
-		M.Kind = Kind;
 		M.StartScale = StartS;
 		M.EndScale = EndS;
 		M.HideAt = Now + Life;
 		Comp->SetWorldLocationAndRotation(At, Align.Rotator());
-		if (Kind == 0)
-		{
-			Comp->SetWorldScale3D(FVector(StartS * 1.8f, StartS, StartS));
-		}
-		else
-		{
-			Comp->SetWorldScale3D(FVector(StartS));
-		}
+		Comp->SetWorldScale3D(FVector(StartS * 1.8f, StartS, StartS));
 		Comp->SetVisibility(true);
 	};
 
-	// Hot flash core — brief, small, slightly ahead of the barrel tip.
-	Place(0, Loc + Aim * (4.f * FP),
+	// Hot flash core — brief, small, slightly ahead of the barrel tip. Airsoft: no muzzle smoke, ever.
+	Place(Loc + Aim * (4.f * FP),
 		0.035f * FP * FMath::FRandRange(0.85f, 1.15f),
 		0.055f * FP,
 		FlashLifeSec);
-
-	// Two CO₂ wisps drifting along the shot axis + slight lateral scatter.
-	for (int32 W = 0; W < 2; ++W)
-	{
-		const float Lateral = FMath::FRandRange(-6.f, 6.f) * FP;
-		const float Up = FMath::FRandRange(0.f, 5.f) * FP;
-		const FVector Side = FVector::CrossProduct(Aim, FVector::UpVector).GetSafeNormal();
-		const FVector Offset = Aim * (8.f + W * 6.f) * FP + Side * Lateral + FVector::UpVector * Up;
-		const float S0 = 0.05f * FP * FMath::FRandRange(0.8f, 1.2f);
-		Place(1, Loc + Offset, S0, S0 * 2.8f, SmokeLifeSec * FMath::FRandRange(0.85f, 1.1f));
-	}
 
 	if (MuzzleLight)
 	{
@@ -283,7 +220,6 @@ void UPFCombatVFX::TickMuzzleParts()
 		return;
 	}
 	const double Now = World->GetTimeSeconds();
-	const float Dt = 0.016f;
 
 	if (MuzzleLight && MuzzleLight->IsVisible())
 	{
@@ -319,25 +255,12 @@ void UPFCombatVFX::TickMuzzleParts()
 			M.bActive = false;
 			continue;
 		}
-		const float Life = (M.Kind == 0) ? FlashLifeSec : SmokeLifeSec;
-		const float T = 1.f - FMath::Clamp(Remain / FMath::Max(Life, 0.001f), 0.f, 1.f);
+		const float T = 1.f - FMath::Clamp(Remain / FMath::Max(FlashLifeSec, 0.001f), 0.f, 1.f);
 		const float Scale = FMath::Lerp(M.StartScale, M.EndScale, T);
-		if (M.Kind == 0)
+		Comp->SetWorldScale3D(FVector(Scale * 1.8f, Scale, Scale));
+		if (PoolFlashMIDs.IsValidIndex(i) && PoolFlashMIDs[i])
 		{
-			Comp->SetWorldScale3D(FVector(Scale * 1.8f, Scale, Scale));
-			if (PoolFlashMIDs.IsValidIndex(i) && PoolFlashMIDs[i])
-			{
-				PoolFlashMIDs[i]->SetScalarParameterValue(TEXT("EmissiveStrength"), 2.2f * (1.f - T));
-			}
-		}
-		else
-		{
-			Comp->SetWorldScale3D(FVector(Scale));
-			Comp->AddWorldOffset(FVector(0.f, 0.f, 8.f * Dt) + Comp->GetForwardVector() * (18.f * Dt));
-			if (PoolSmokeMIDs.IsValidIndex(i) && PoolSmokeMIDs[i])
-			{
-				PoolSmokeMIDs[i]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.65f * (1.f - T * T));
-			}
+			PoolFlashMIDs[i]->SetScalarParameterValue(TEXT("EmissiveStrength"), 2.2f * (1.f - T));
 		}
 	}
 }
@@ -366,7 +289,7 @@ void UPFCombatVFX::PlayMuzzleFX(const FVector& MuzzleLoc, const FVector& ShotDir
 		return;
 	}
 
-	if (FlashMat == nullptr && SmokeMat == nullptr)
+	if (FlashMat == nullptr)
 	{
 		return;
 	}

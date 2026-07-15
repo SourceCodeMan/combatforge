@@ -7,6 +7,7 @@
 #include "PFControlPointActor.generated.h"
 
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class USphereComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
@@ -77,6 +78,7 @@ protected:
 
 private:
 	void ApplyVisualState();
+	void EnsureObjectiveMaterials();   // soft-resolve the /Game masters once (BeginPlay / first apply)
 	FLinearColor CurrentTeamColor() const;
 
 	UPROPERTY() TObjectPtr<USceneComponent> SceneRoot;   // uniform-scale root so the sphere isn't squashed by the pad
@@ -91,9 +93,16 @@ private:
 	// Zone-boundary pillars: short glow posts ringing the capture radius so the zone edge reads in-world
 	// (BO6 marks its larger zones on the ground the same way). Team-colored with the pad.
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> RingPillars;
+	// MID masters: MIDs are ALWAYS created from these (never from whatever sits in the mesh slot —
+	// CreateAndSetMaterialInstanceDynamic re-parents to the slot's current MID, see 8f631b5).
+	UPROPERTY() TObjectPtr<UMaterialInterface> MarkMaterial;           // M_PF_ArenaMark — pad/pillars/flag
+	UPROPERTY() TObjectPtr<UMaterialInterface> MetalMaterial;          // M_PF_ArenaMetal — pole
+	UPROPERTY() TObjectPtr<UMaterialInterface> FallbackBaseMaterial;   // /Engine BasicShapeMaterial (ctor hard ref)
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> PadMID;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> FlagMID;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> PoleMID;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> PillarMIDs;
+	bool bTriedObjectiveMaterials = false;
 
 	UPROPERTY(ReplicatedUsing=OnRep_VisualState) int32 PointIndex = 0;
 	UPROPERTY(ReplicatedUsing=OnRep_VisualState) uint8 ControllingTeam = 255; // 255 = neutral

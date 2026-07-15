@@ -15,11 +15,12 @@ class UStaticMeshComponent;
 class UPointLightComponent;
 
 /**
- * Client-side combat VFX (muzzle CO₂ / flash + soft-ref Niagara).
+ * Client-side combat VFX (muzzle flash + soft-ref Niagara).
  *
- * Soft-loads /Game/FX Niagara systems when present (Fab pack or Lyra migrate); otherwise
- * spawns pooled mesh flash + CO₂ wisps from M_PF_Flash / M_PF_MuzzleSmoke so fire still
- * reads "juicy" without marketplace content.
+ * Soft-loads the /Game/FX Niagara flash when present (Fab pack or Lyra migrate); otherwise
+ * spawns a pooled mesh flash core + muzzle point light from M_PF_Flash so fire still reads
+ * "juicy" without marketplace content. Airsoft guns don't smoke — there is deliberately NO
+ * muzzle smoke path (grenade smoke clouds live on APFGrenadeProjectile).
  *
  * Non-replicated — call only on rendering clients (same sites as PlayMuzzle).
  * Muzzle is neutral white/warm (not team-tinted). Impacts live on UPFSplatSubsystem.
@@ -45,7 +46,6 @@ private:
 		double HideAt = 0.0;
 		float StartScale = 1.f;
 		float EndScale = 1.f;
-		uint8 Kind = 0;   // 0 = flash core, 1 = smoke wisp
 	};
 
 	bool CanPlay() const;
@@ -57,17 +57,14 @@ private:
 
 	// Soft Niagara (optional content under /Game/FX).
 	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> NS_MuzzleFlash;
-	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> NS_MuzzleSmoke;
 
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> FlashMat;
-	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> SmokeMat;
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> SphereMesh;
 
-	// World-space pool (not parented to the gun — free-floating wisps).
+	// World-space pool (not parented to the gun — free-floating flash cores).
 	UPROPERTY(Transient) TObjectPtr<AActor> VfxHolder;
 	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> PoolMeshes;
 	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> PoolFlashMIDs;
-	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInstanceDynamic>> PoolSmokeMIDs;
 	UPROPERTY(Transient) TObjectPtr<UPointLightComponent> MuzzleLight;
 
 	TArray<FMuzzlePartMeta> PoolMeta;
@@ -79,5 +76,4 @@ private:
 
 	static constexpr int32 PoolSize = 24;
 	static constexpr float FlashLifeSec = 0.045f;
-	static constexpr float SmokeLifeSec = 0.22f;
 };

@@ -39,6 +39,7 @@ namespace
 	constexpr float AspectMax = 1.28f;
 	constexpr float PuffSizeUU = 0.07f;            // sphere scale (~7 uu) per dust wisp
 	constexpr float PuffNormalOffsetUU = 3.f;
+	constexpr float PuffEmissiveStrength = 0.35f;  // was 0.95 — dust reads as dust, not a glowing orange blob
 
 	// Soft paths — CDO FObjectFinder is only reliable for /Engine content (playbook §2).
 	TSoftObjectPtr<UMaterialInterface> SplatDecalMatRef(
@@ -466,8 +467,22 @@ void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Norma
 		}
 	}
 
+	// Per-frame puff budget: a 90-BB frag burst lands dozens of impacts on one frame — decals and the
+	// impact audio above still play per hit, but the dust wisps cap out so the storm collapses gracefully
+	// instead of churning the whole pool. Single-shot impacts never hit the cap.
+	if (GFrameCounter != PuffBudgetFrame)
+	{
+		PuffBudgetFrame = GFrameCounter;
+		PuffPlacementsThisFrame = 0;
+	}
+	if (PuffPlacementsThisFrame > MaxPuffPlacementsPerFrame)
+	{
+		return;
+	}
+
 	if (TrySpawnNiagaraImpact(Loc, Normal, Team))
 	{
+		PuffPlacementsThisFrame += PuffsPerImpact;   // Niagara bursts spend the same budget
 		return;
 	}
 	if (DustMaterial == nullptr)
@@ -502,6 +517,7 @@ void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Norma
 		{
 			continue;
 		}
+		++PuffPlacementsThisFrame;
 		if (DustMaterial)
 		{
 			if (!PuffSlotMIDs.IsValidIndex(Slot) || PuffSlotMIDs[Slot] == nullptr)
@@ -512,15 +528,17 @@ void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Norma
 				}
 				PuffSlotMIDs[Slot] = UMaterialInstanceDynamic::Create(DustMaterial, this);
 			}
+			// Neutral concrete grey + a whisper of team tint (≤0.05) — the old R-dominant mix turned
+			// every Team B impact into an orange blob.
 			const FLinearColor TeamTint = PFColors::ForTeam(static_cast<uint8>(TIdx));
 			const FLinearColor Dust(
-				0.45f + TeamTint.R * 0.25f,
-				0.40f + TeamTint.G * 0.20f,
-				0.32f + TeamTint.B * 0.15f,
+				0.42f + TeamTint.R * 0.05f,
+				0.42f + TeamTint.G * 0.05f,
+				0.44f + TeamTint.B * 0.05f,
 				1.f);
 			PuffSlotMIDs[Slot]->SetVectorParameterValue(TEXT("EmissiveColor"), Dust);
 			PuffSlotMIDs[Slot]->SetVectorParameterValue(TEXT("Color"), Dust);
-			PuffSlotMIDs[Slot]->SetScalarParameterValue(TEXT("EmissiveStrength"), 0.95f);
+			PuffSlotMIDs[Slot]->SetScalarParameterValue(TEXT("EmissiveStrength"), PuffEmissiveStrength);
 			Comp->SetMaterial(0, PuffSlotMIDs[Slot]);
 		}
 
@@ -601,7 +619,7 @@ void UPFSplatSubsystem::TickPendingExpiry()
 		if (PuffSlotMIDs.IsValidIndex(i) && PuffSlotMIDs[i])
 		{
 			PuffSlotMIDs[i]->SetScalarParameterValue(TEXT("EmissiveStrength"),
-				0.95f * (1.f - T * T));
+				PuffEmissiveStrength * (1.f - T * T));
 		}
 	}
 }

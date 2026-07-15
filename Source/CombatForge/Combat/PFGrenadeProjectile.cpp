@@ -53,6 +53,14 @@ APFGrenadeProjectile::APFGrenadeProjectile()
 	{
 		Mesh->SetStaticMesh(SphereFinder.Object);
 	}
+	// Guaranteed ball-skin fallback — hard CDO refs are only reliable for /Engine content (playbook §2);
+	// the preferred /Game master soft-resolves later in ApplyBallSkin.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MaterialFinder(
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (MaterialFinder.Succeeded())
+	{
+		BallBaseMaterial = MaterialFinder.Object;
+	}
 
 	Movement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Movement"));
 	Movement->UpdatedComponent = Collision;
@@ -75,6 +83,55 @@ void APFGrenadeProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APFGrenadeProjectile, DetonatePoint);
 }
 
+void APFGrenadeProjectile::BeginPlay()
+{
+	Super::BeginPlay();
+	// Clients may begin play before KindRep's initial value lands (defaults to Frag); OnRep_Kind re-tints.
+	ApplyBallSkin();
+}
+
+void APFGrenadeProjectile::OnRep_Kind()
+{
+	ApplyBallSkin();
+}
+
+void APFGrenadeProjectile::ApplyBallSkin()
+{
+	if (Mesh == nullptr)
+	{
+		return;
+	}
+	if (BallMID == nullptr)
+	{
+		// Prefer the proven cooked arena master (carries the "Color" param); fall back to the ctor-loaded
+		// /Engine BasicShapeMaterial so the ball can never ride the checkerboard default slot.
+		UMaterialInterface* Master = Cast<UMaterialInterface>(
+			FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaMetal.M_PF_ArenaMetal")).TryLoad());
+		if (Master == nullptr)
+		{
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("[Grenade] M_PF_ArenaMetal missing (run Scripts/gen_arena_materials.py) — ball skin falls back to BasicShapeMaterial"));
+			Master = BallBaseMaterial;
+		}
+		if (Master == nullptr)
+		{
+			UE_LOG(CombatForgeLog, Warning, TEXT("[Grenade] no ball material available — thrown ball will render the default slot"));
+			return;
+		}
+		BallMID = UMaterialInstanceDynamic::Create(Master, this);
+	}
+	if (BallMID == nullptr)
+	{
+		return;
+	}
+	// Frag = dark olive-black shell, smoke = steel grey canister.
+	const bool bSmokeKind = (static_cast<EPFGrenadeType>(KindRep) == EPFGrenadeType::Smoke);
+	BallMID->SetVectorParameterValue(TEXT("Color"), bSmokeKind
+		? FLinearColor(0.7f, 0.73f, 0.78f, 1.f)
+		: FLinearColor(0.05f, 0.07f, 0.05f, 1.f));
+	Mesh->SetMaterial(0, BallMID);   // explicit — never rely on the default slot
+}
+
 void APFGrenadeProjectile::ServerInit(const FVector& AimDir, uint8 Team, EPFGrenadeType Type,
 	UPFWeaponComponent* Thrower)
 {
@@ -86,6 +143,7 @@ void APFGrenadeProjectile::ServerInit(const FVector& AimDir, uint8 Team, EPFGren
 	Kind = Type;
 	KindRep = static_cast<uint8>(Type);
 	ThrowerWeak = Thrower;
+	ApplyBallSkin();   // listen host never gets the OnRep
 
 	FVector Launch = (AimDir + FVector(0.f, 0.f, 0.35f)).GetSafeNormal();   // original toss arc (spawns from the eyes now)
 	if (Launch.IsNearlyZero())
@@ -265,8 +323,18 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 	const bool bVolumetric = (SmokeMat != nullptr);
 	if (SmokeMat == nullptr)
 	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[Grenade] M_PF_SmokeVolume missing (run Scripts/gen_combat_fx.py) — smoke cloud falls back to M_PF_MuzzleSmoke"));
 		SmokeMat = Cast<UMaterialInterface>(
 			FSoftObjectPath(TEXT("/Game/Materials/M_PF_MuzzleSmoke.M_PF_MuzzleSmoke")).TryLoad());
+	}
+	// Third guaranteed fallback: the ctor-hard-ref BasicShapeMaterial tinted grey, so puffs can never
+	// ride the checkerboard default slot even with zero generated content.
+	if (SmokeMat == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[Grenade] M_PF_MuzzleSmoke missing too — smoke cloud falls back to tinted BasicShapeMaterial"));
+		SmokeMat = BallBaseMaterial;
 	}
 	bSmokeVolumetric = bVolumetric;
 	SmokeStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
@@ -274,11 +342,15 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 	PuffTargetScale.Reset();
 	PuffMaxDensity.Reset();
 	PuffDissolveWindow.Reset();
+	PuffYawRateDeg.Reset();
+	PuffDriftRate.Reset();
+	PuffWobblePhase.Reset();
 
 	// Engine sphere is 50 uu radius; scale so the main puff radius ~= SmokeRadius. A denser overlapping cluster
-	// of varied spheres reads as a billowing cloud (not a few hard balls) and conceals better.
+	// of smaller varied spheres reads as a billowing cloud (not a few hard balls) and conceals better.
+	constexpr int32 NumPuffs = 12;
 	const float BaseScale = SmokeRadius / 50.f;
-	const FVector Offsets[9] = {
+	const FVector Offsets[NumPuffs] = {
 		FVector(0.f, 0.f, SmokeRadius * 0.35f),
 		FVector(SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.1f),
 		FVector(-SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.15f),
@@ -288,10 +360,13 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		FVector(-SmokeRadius * 0.32f, SmokeRadius * 0.3f, SmokeRadius * 0.05f),
 		FVector(SmokeRadius * 0.28f, -SmokeRadius * 0.34f, SmokeRadius * 0.4f),
 		FVector(-SmokeRadius * 0.3f, -SmokeRadius * 0.28f, SmokeRadius * 0.45f),
+		FVector(SmokeRadius * 0.15f, SmokeRadius * 0.55f, SmokeRadius * 0.5f),
+		FVector(-SmokeRadius * 0.5f, -SmokeRadius * 0.15f, SmokeRadius * 0.35f),
+		FVector(SmokeRadius * 0.05f, -SmokeRadius * 0.5f, SmokeRadius * 0.55f),
 	};
-	const float Scales[9] = { 1.05f, 0.72f, 0.75f, 0.7f, 0.72f, 0.6f, 0.66f, 0.62f, 0.58f };
+	const float Scales[NumPuffs] = { 0.95f, 0.66f, 0.68f, 0.64f, 0.66f, 0.55f, 0.6f, 0.57f, 0.53f, 0.5f, 0.52f, 0.48f };
 
-	for (int32 i = 0; i < 9; ++i)
+	for (int32 i = 0; i < NumPuffs; ++i)
 	{
 		UStaticMeshComponent* Puff = NewObject<UStaticMeshComponent>(this);
 		if (Puff == nullptr)
@@ -311,7 +386,7 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		UMaterialInstanceDynamic* PuffMID = nullptr;
 		if (SmokeMat != nullptr)
 		{
-			PuffMID = Puff->CreateDynamicMaterialInstance(0, SmokeMat);
+			PuffMID = UMaterialInstanceDynamic::Create(SmokeMat, this);
 			if (PuffMID != nullptr)
 			{
 				const FLinearColor Grey(0.6f, 0.6f, 0.62f, 1.f);
@@ -325,6 +400,7 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 					PuffMID->SetVectorParameterValue(TEXT("EmissiveColor"), Grey);
 					PuffMID->SetVectorParameterValue(TEXT("Color"), Grey);
 				}
+				Puff->SetMaterial(0, PuffMID);   // explicit — never rely on the default slot
 			}
 		}
 
@@ -333,8 +409,13 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		SmokePuffs.Add(Puff);
 		SmokeMIDs.Add(PuffMID);
 		PuffTargetScale.Add(TargetScale);
-		PuffMaxDensity.Add(1.3f);   // denser — smoke must read as a real view-blocker (it now blocks bot sight too)
-		PuffDissolveWindow.Add(FMath::Lerp(2.6f, 0.7f, static_cast<float>(i) / 8.f));
+		PuffMaxDensity.Add(0.9f);   // clamped from 1.3 — the unlit volume material reads denser per unit
+		PuffDissolveWindow.Add(FMath::Lerp(2.6f, 0.7f, static_cast<float>(i) / static_cast<float>(NumPuffs - 1)));
+		// Per-puff life: a lazy signed swirl, a slow rise, and an out-of-phase scale wobble (Tick applies them)
+		// keep the cluster from reading as a static bunch of soap bubbles.
+		PuffYawRateDeg.Add(FMath::FRandRange(3.f, 8.f) * (FMath::RandBool() ? 1.f : -1.f));
+		PuffDriftRate.Add(FMath::FRandRange(4.f, 8.f));
+		PuffWobblePhase.Add(FMath::FRandRange(0.f, 2.f * UE_PI));
 	}
 	SetActorTickEnabled(true);   // begin the appear/dissolve animation
 }
@@ -363,7 +444,19 @@ void APFGrenadeProjectile::Tick(float DeltaSeconds)
 		// so shrink it away instead.
 		const float FadeScaleTarget = bSmokeVolumetric ? 0.85f : 0.05f;
 		const float ScaleFactor = FMath::Lerp(0.2f, 1.f, Appear) * FMath::Lerp(1.f, FadeScaleTarget, Fade);
-		SmokePuffs[i]->SetRelativeScale3D(PuffTargetScale[i] * ScaleFactor);
+		// ±8% breathing on a per-puff phase — the cloud shimmers instead of sitting like glued-together bubbles.
+		const float Phase = PuffWobblePhase.IsValidIndex(i) ? PuffWobblePhase[i] : 0.f;
+		const float Wobble = 1.f + 0.08f * FMath::Sin(Elapsed * 1.7f + Phase);
+		SmokePuffs[i]->SetRelativeScale3D(PuffTargetScale[i] * ScaleFactor * Wobble);
+		// Lazy signed swirl + slow rise (rise gated by Appear so the cloud doesn't climb while still forming).
+		if (PuffYawRateDeg.IsValidIndex(i))
+		{
+			SmokePuffs[i]->AddLocalRotation(FRotator(0.f, PuffYawRateDeg[i] * DeltaSeconds, 0.f));
+		}
+		if (PuffDriftRate.IsValidIndex(i))
+		{
+			SmokePuffs[i]->AddRelativeLocation(FVector(0.f, 0.f, PuffDriftRate[i] * Appear * DeltaSeconds));
+		}
 		if (bSmokeVolumetric && SmokeMIDs.IsValidIndex(i) && SmokeMIDs[i] != nullptr && PuffMaxDensity.IsValidIndex(i))
 		{
 			SmokeMIDs[i]->SetScalarParameterValue(TEXT("Density"), PuffMaxDensity[i] * Appear * (1.f - Fade));

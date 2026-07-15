@@ -12,15 +12,20 @@
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/SoftObjectPath.h"
 
 namespace
 {
 	constexpr float CaptureRadiusUU = 525.f;   // 3x the old visible pad (was 175 uu); the visual pad matches it
 	// Engine cylinder is h=100,r=50. XY scale 10.5 → radius 525 uu (matches the capture zone); Z=0.12 → thin pad.
 	const FVector PadScale(10.5f, 10.5f, 0.12f);
-	const FLinearColor NeutralGray(0.45f, 0.45f, 0.5f);
+	// Bright white-grey — ArenaMark multiplies BaseColor x0.55, so 0.45 rendered as mud; 0.85 reads "unclaimed".
+	const FLinearColor NeutralGray(0.85f, 0.85f, 0.88f);
+	const FLinearColor NeutralFlagRed(1.f, 0.05f, 0.05f);   // neutral zone flies a red "take me" cloth
+	const FLinearColor PoleBlack(0.02f, 0.02f, 0.02f);
 	constexpr int32 NumRingPillars = 12;
 	constexpr int32 MaxCaptureContributors = 3;   // CoD: more teammates = faster, capped so a stack can't insta-cap
 }
@@ -42,6 +47,15 @@ APFControlPointActor::APFControlPointActor()
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(
 		TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+
+	// Guaranteed material fallback — hard CDO refs are only reliable for /Engine content (playbook §2);
+	// the /Game masters soft-resolve in EnsureObjectiveMaterials once the world is up.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BaseMatFinder(
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BaseMatFinder.Succeeded())
+	{
+		FallbackBaseMaterial = BaseMatFinder.Object;
+	}
 
 	PadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PadMesh"));
 	PadMesh->SetupAttachment(SceneRoot);
@@ -141,7 +155,36 @@ void APFControlPointActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 void APFControlPointActor::BeginPlay()
 {
 	Super::BeginPlay();
+	EnsureObjectiveMaterials();
 	ApplyVisualState();
+}
+
+void APFControlPointActor::EnsureObjectiveMaterials()
+{
+	if (bTriedObjectiveMaterials)
+	{
+		return;
+	}
+	bTriedObjectiveMaterials = true;
+	MarkMaterial = Cast<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaMark.M_PF_ArenaMark")).TryLoad());
+	if (MarkMaterial == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[CP] M_PF_ArenaMark missing (run Scripts/gen_arena_materials.py) — pad/pillars/flag fall back to BasicShapeMaterial"));
+	}
+	MetalMaterial = Cast<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaMetal.M_PF_ArenaMetal")).TryLoad());
+	if (MetalMaterial == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[CP] M_PF_ArenaMetal missing (run Scripts/gen_arena_materials.py) — pole falls back to BasicShapeMaterial"));
+	}
+	if (FallbackBaseMaterial == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[CP] BasicShapeMaterial fallback missing — objective meshes may render the default checker"));
+	}
 }
 
 void APFControlPointActor::ServerInit(int32 InPointIndex, const FVector& WorldLoc, bool bInitiallyActive)
@@ -349,9 +392,15 @@ void APFControlPointActor::ApplyVisualState()
 	{
 		return;
 	}
-	if (PadMID == nullptr && PadMesh->GetMaterial(0) != nullptr)
+	// All MIDs come from the BeginPlay-loaded MASTERS with an explicit SetMaterial —
+	// CreateAndSetMaterialInstanceDynamic(0) re-parents to whatever already sits in the slot
+	// (MID-of-MID, silently dead params; see 8f631b5) and trusts the engine checker default.
+	EnsureObjectiveMaterials();
+	UMaterialInterface* MarkMaster = MarkMaterial ? MarkMaterial.Get() : FallbackBaseMaterial.Get();
+	if (PadMID == nullptr && MarkMaster != nullptr)
 	{
-		PadMID = PadMesh->CreateAndSetMaterialInstanceDynamic(0);
+		PadMID = UMaterialInstanceDynamic::Create(MarkMaster, this);
+		PadMesh->SetMaterial(0, PadMID);
 	}
 	const FLinearColor Color = CurrentTeamColor();
 	if (PadMID)
@@ -359,14 +408,28 @@ void APFControlPointActor::ApplyVisualState()
 		PadMID->SetVectorParameterValue(TEXT("Color"), Color);
 	}
 
-	// Team-color the flag to match the pad (SetActorHiddenInGame above already hides the whole marker when inactive).
-	if (FlagMID == nullptr && FlagMesh != nullptr && FlagMesh->GetMaterial(0) != nullptr)
+	// Flag cloth: bright RED while neutral (a "take me" marker readable across the arena), owner color once
+	// captured (SetActorHiddenInGame above already hides the whole marker when inactive).
+	if (FlagMID == nullptr && FlagMesh != nullptr && MarkMaster != nullptr)
 	{
-		FlagMID = FlagMesh->CreateAndSetMaterialInstanceDynamic(0);
+		FlagMID = UMaterialInstanceDynamic::Create(MarkMaster, this);
+		FlagMesh->SetMaterial(0, FlagMID);
 	}
 	if (FlagMID)
 	{
-		FlagMID->SetVectorParameterValue(TEXT("Color"), Color);
+		FlagMID->SetVectorParameterValue(TEXT("Color"),
+			(ControllingTeam <= 1) ? PFColors::ForTeam(ControllingTeam) : NeutralFlagRed);
+	}
+
+	// Pole: near-black metal. It previously got NO material at all — the checkerboard default slot in cooked builds.
+	if (PoleMID == nullptr && PoleMesh != nullptr)
+	{
+		if (UMaterialInterface* PoleMaster = MetalMaterial ? MetalMaterial.Get() : FallbackBaseMaterial.Get())
+		{
+			PoleMID = UMaterialInstanceDynamic::Create(PoleMaster, this);
+			PoleMID->SetVectorParameterValue(TEXT("Color"), PoleBlack);
+			PoleMesh->SetMaterial(0, PoleMID);
+		}
 	}
 
 	// Ring pillars share the ownership color; the capture pulse (Tick) brightens them toward the capper's color.
@@ -382,9 +445,10 @@ void APFControlPointActor::ApplyVisualState()
 			continue;
 		}
 		P->SetVisibility(bActive);
-		if (PillarMIDs[i] == nullptr && P->GetMaterial(0) != nullptr)
+		if (PillarMIDs[i] == nullptr && MarkMaster != nullptr)
 		{
-			PillarMIDs[i] = P->CreateAndSetMaterialInstanceDynamic(0);
+			PillarMIDs[i] = UMaterialInstanceDynamic::Create(MarkMaster, this);
+			P->SetMaterial(0, PillarMIDs[i]);
 		}
 		if (PillarMIDs[i])
 		{

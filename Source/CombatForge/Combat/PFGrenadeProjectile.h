@@ -12,6 +12,8 @@ class USphereComponent;
 class UStaticMeshComponent;
 class UProjectileMovementComponent;
 class UPFWeaponComponent;
+class UMaterialInterface;
+class UMaterialInstanceDynamic;
 
 /**
  * Thrown grenade (frag or smoke). Unlike the paintball this is GENUINELY replicated + movement-replicated
@@ -42,13 +44,16 @@ public:
 	virtual void Tick(float DeltaSeconds) override;   // animates the smoke cloud (billow-in + staggered dissolve)
 
 protected:
+	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION() void OnRep_Detonated();
+	UFUNCTION() void OnRep_Kind();
 
 	void ServerDetonate();
 	void OnDestroyTimer();
 	void HandleDetonateVisualsLocal();
+	void ApplyBallSkin();                                         // tint the thrown ball by KindRep (never the default slot)
 	void SpawnFragBurst(const FVector& At, uint32 Seed);          // server: authoritative BBs (damage)
 	void SpawnCosmeticFragBurst(const FVector& At, uint32 Seed);  // non-host clients: cosmetic tracers
 	void StartSmokeVisual(const FVector& At);
@@ -57,18 +62,25 @@ protected:
 	UPROPERTY() TObjectPtr<USphereComponent>             Collision;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent>         Mesh;
 	UPROPERTY() TObjectPtr<UProjectileMovementComponent> Movement;
+	// Ball skin: MID from M_PF_ArenaMetal (preferred) or the ctor-hard-ref BasicShapeMaterial fallback,
+	// tinted by KindRep so both grenade types read instead of riding the checkerboard default slot.
+	UPROPERTY() TObjectPtr<UMaterialInterface>           BallBaseMaterial;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic>     BallMID;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> SmokePuffs;
 	// Per-puff smoke animation state (billow-in over SmokeAppearDur, then each fades on its own window).
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> SmokeMIDs;
 	TArray<FVector> PuffTargetScale;
 	TArray<float>   PuffMaxDensity;
 	TArray<float>   PuffDissolveWindow;   // seconds-before-end at which this puff starts fading
+	TArray<float>   PuffYawRateDeg;       // per-puff lazy swirl, deg/s (signed)
+	TArray<float>   PuffDriftRate;        // per-puff upward drift, uu/s (scaled by the billow-in)
+	TArray<float>   PuffWobblePhase;      // per-puff sin phase for the ±8% scale wobble
 	float SmokeStartTime = -1.f;
 	float SmokeAppearDur = 0.6f;
 	bool  bSmokeVolumetric = false;       // true when M_PF_SmokeVolume is in use (drives the Density param)
 
 	UPROPERTY(ReplicatedUsing=OnRep_Detonated) bool bDetonated = false;
-	UPROPERTY(Replicated) uint8  KindRep = 0;      // EPFGrenadeType, so clients build the right FX
+	UPROPERTY(ReplicatedUsing=OnRep_Kind) uint8  KindRep = 0;      // EPFGrenadeType, so clients build the right FX + skin
 	UPROPERTY(Replicated) uint32 BurstSeed = 0;    // shared frag spread seed (server + client tracers agree)
 	UPROPERTY(Replicated) FVector_NetQuantize100 DetonatePoint = FVector::ZeroVector;
 

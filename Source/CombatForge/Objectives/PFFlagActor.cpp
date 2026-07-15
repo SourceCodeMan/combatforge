@@ -14,13 +14,16 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/SoftObjectPath.h"
 
 namespace
 {
 	constexpr float FlagPickupRadius = 140.f;
+	const FLinearColor PoleBlack(0.02f, 0.02f, 0.02f, 1.f);
 }
 
 APFFlagActor::APFFlagActor()
@@ -40,6 +43,15 @@ APFFlagActor::APFFlagActor()
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
+
+	// Guaranteed material fallback — hard CDO refs are only reliable for /Engine content (playbook §2);
+	// the /Game masters soft-resolve in EnsureFlagMaterials once the world is up.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BaseMatFinder(
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BaseMatFinder.Succeeded())
+	{
+		FallbackBaseMaterial = BaseMatFinder.Object;
+	}
 
 	// Pole: thin tall cylinder. Engine cylinder is 100 uu tall with a centred pivot → scale Z 3.4 (~340 uu) and
 	// lift half so the base sits on the floor.
@@ -84,18 +96,50 @@ void APFFlagActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 void APFFlagActor::BeginPlay()
 {
 	Super::BeginPlay();
+	EnsureFlagMaterials();
 	ApplyTeamColor();
-	// Pole is a neutral gray (BasicShapeMaterial carries a "Color" tint); only the banner is team-colored.
-	if (PoleMesh != nullptr)
+	// Pole: near-black metal MID from the loaded MASTER + explicit SetMaterial — the old
+	// CreateAndSetMaterialInstanceDynamic path trusted the default slot (checkerboard when cooked).
+	if (PoleMesh != nullptr && PoleMID == nullptr)
 	{
-		if (UMaterialInstanceDynamic* PoleMID = PoleMesh->CreateAndSetMaterialInstanceDynamic(0))
+		if (UMaterialInterface* PoleMaster = MetalMaterial ? MetalMaterial.Get() : FallbackBaseMaterial.Get())
 		{
-			PoleMID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.18f, 0.18f, 0.20f, 1.f));
+			PoleMID = UMaterialInstanceDynamic::Create(PoleMaster, this);
+			PoleMID->SetVectorParameterValue(TEXT("Color"), PoleBlack);
+			PoleMesh->SetMaterial(0, PoleMID);
 		}
 	}
 	if (HasAuthority() && PickupSphere)
 	{
 		PickupSphere->OnComponentBeginOverlap.AddDynamic(this, &APFFlagActor::OnPickupOverlap);
+	}
+}
+
+void APFFlagActor::EnsureFlagMaterials()
+{
+	if (bTriedFlagMaterials)
+	{
+		return;
+	}
+	bTriedFlagMaterials = true;
+	MarkMaterial = Cast<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaMark.M_PF_ArenaMark")).TryLoad());
+	if (MarkMaterial == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[Flag] M_PF_ArenaMark missing (run Scripts/gen_arena_materials.py) — cloth falls back to BasicShapeMaterial"));
+	}
+	MetalMaterial = Cast<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaMetal.M_PF_ArenaMetal")).TryLoad());
+	if (MetalMaterial == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[Flag] M_PF_ArenaMetal missing (run Scripts/gen_arena_materials.py) — pole falls back to BasicShapeMaterial"));
+	}
+	if (FallbackBaseMaterial == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("[Flag] BasicShapeMaterial fallback missing — flag meshes may render the default checker"));
 	}
 }
 
@@ -241,9 +285,16 @@ void APFFlagActor::ApplyTeamColor()
 	{
 		return;
 	}
-	if (FlagMID == nullptr && FlagMesh->GetMaterial(0) != nullptr)
+	EnsureFlagMaterials();
+	// Cloth MID from the loaded MASTER + explicit SetMaterial (never the default slot / never MID-of-MID).
+	// CTF cloth stays TEAM-colored — unlike Domination, a CTF flag is never neutral.
+	if (FlagMID == nullptr)
 	{
-		FlagMID = FlagMesh->CreateAndSetMaterialInstanceDynamic(0);
+		if (UMaterialInterface* ClothMaster = MarkMaterial ? MarkMaterial.Get() : FallbackBaseMaterial.Get())
+		{
+			FlagMID = UMaterialInstanceDynamic::Create(ClothMaster, this);
+			FlagMesh->SetMaterial(0, FlagMID);
+		}
 	}
 	if (FlagMID)
 	{

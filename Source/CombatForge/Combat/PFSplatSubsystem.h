@@ -110,10 +110,14 @@ private:
 	int32 NextPuffSlot = 0;
 	bool  bBoundToGameState = false;
 	bool  bTriedImpactNiagara = false;
+	// Per-frame puff budget (frag storms collapse gracefully; decals/audio unaffected).
+	uint64 PuffBudgetFrame = 0;           // GFrameCounter of the last counted placement
+	int32  PuffPlacementsThisFrame = 0;
 
 	static constexpr int32 PuffPoolSize = 64;
 	static constexpr float PuffLifetimeSec = 0.16f;
 	static constexpr int32 PuffsPerImpact = 3;   // multi-wisp mesh burst when Niagara missing
+	static constexpr int32 MaxPuffPlacementsPerFrame = 12;   // frag-storm cap; single impacts never hit it
 
 	UPROPERTY() TArray<TObjectPtr<APFPaintballProjectile>> CosmeticPool;
 	int32 NextCosmeticSlot = 0;
