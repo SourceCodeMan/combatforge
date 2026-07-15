@@ -1162,6 +1162,18 @@ void APFArenaShell::ApplyTint(UStaticMeshComponent* Comp, const FLinearColor& Co
 	{
 		return;
 	}
+	// Cohesion (ApplyCohesivePalette) may have already placed a shared MID (Floor/Wall/Metal) on this
+	// component. A MID cannot parent another MID — UE rejects it ("not a valid parent") and the tint
+	// instance renders as the default checker. Walk up to the underlying master material first.
+	while (UMaterialInstanceDynamic* ParentMID = Cast<UMaterialInstanceDynamic>(Parent))
+	{
+		UMaterialInterface* Base = ParentMID->Parent;
+		if (Base == nullptr || Base == Parent)
+		{
+			break;
+		}
+		Parent = Base;
+	}
 	UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Parent, this);
 	MID->SetVectorParameterValue(TEXT("Color"), Color);
 	Comp->SetMaterial(0, MID);
