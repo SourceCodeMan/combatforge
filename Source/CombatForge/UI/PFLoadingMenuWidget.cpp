@@ -1216,7 +1216,7 @@ void UPFLoadingMenuWidget::BuildTree()
 
 	// ---- Two-column body (playtest: one tall column scrolled forever) ----
 	// LEFT: the tab row + all setup content (build mode, game mode, format, community maps, class, options).
-	// RIGHT: every "do something" control — QUICK START, HOST/JOIN, START GAME, QUIT — always on screen.
+	// RIGHT: every "do something" control — QUICK START, HOST/JOIN, START GAME, DONATE, QUIT — always on screen.
 	UVerticalBox* LeftCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	UVerticalBox* RightCol = WidgetTree->ConstructWidget<UVerticalBox>();
 
@@ -1510,6 +1510,22 @@ void UPFLoadingMenuWidget::BuildTree()
 		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 	}
 
+	// Support the free game — opens the creator's Buy Me a Coffee page in the system browser.
+	DonateButton = WidgetTree->ConstructWidget<UButton>();
+	DonateButton->SetBackgroundColor(FLinearColor(1.f, 0.72f, 0.12f, 0.95f));   // BMC-style warm yellow
+	DonateButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnDonateClicked);
+	DonateLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	DonateLabel->SetText(FText::FromString(TEXT("BUY ME A COFFEE")));
+	DonateLabel->SetFont(PFLoadFont(14, true));
+	DonateLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.10f, 0.06f)));
+	DonateLabel->SetJustification(ETextJustify::Center);
+	DonateButton->AddChild(DonateLabel);
+	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(DonateButton))
+	{
+		V->SetHorizontalAlignment(HAlign_Fill);
+		V->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+	}
+
 	QuitDesktopButton = WidgetTree->ConstructWidget<UButton>();
 	QuitDesktopButton->SetBackgroundColor(FLinearColor(0.25f, 0.08f, 0.08f, 0.95f));
 	QuitDesktopButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuitDesktopClicked);
@@ -1522,7 +1538,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(QuitDesktopButton))
 	{
 		V->SetHorizontalAlignment(HAlign_Fill);
-		V->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+		V->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
 	}
 
 	// ---- Assemble the two columns ----
@@ -2279,6 +2295,13 @@ void UPFLoadingMenuWidget::OnEnterClicked()
 		TEXT("LoadingMenu: dismissed — entering lobby (Mode=%s Type=%s Format=%s Bots=%s)"),
 		*BuildModeLabel(SelectedBuildMode), *MatchTypeLabel(SelectedMatchType),
 		*FormatLabel(SelectedTeamSize), bSelectedFillBots ? TEXT("on") : TEXT("off"));
+}
+
+void UPFLoadingMenuWidget::OnDonateClicked()
+{
+	// Opens the system default browser — no in-game web view, no network call from the game.
+	FPlatformProcess::LaunchURL(TEXT("https://buymeacoffee.com/tomchapman"), nullptr, nullptr);
+	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened donate page (buymeacoffee.com/tomchapman)"));
 }
 
 void UPFLoadingMenuWidget::OnQuitDesktopClicked()
