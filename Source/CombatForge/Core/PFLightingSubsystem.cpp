@@ -50,8 +50,9 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		if (UDirectionalLightComponent* SunComp = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
 		{
 			SunComp->SetMobility(EComponentMobility::Movable);
-			// Playtest: +~20% from 5.0 (was still a bit dark); keep well under multi-light washout era.
-			SunComp->SetIntensity(6.0f);
+			// Playtest 3: still crushed-dark with no Lumen GI. Direct key up 6->8.5 (lit faces punchier);
+			// the real shadow fix is the SkyLight below (ambient is the ONLY indirect term without Lumen).
+			SunComp->SetIntensity(8.5f);
 			SunComp->SetLightColor(FLinearColor(1.0f, 0.97f, 0.92f));
 			SunComp->SetAtmosphereSunLight(true);
 			SunComp->SetDynamicShadowDistanceMovableLight(16000.f);
@@ -79,9 +80,12 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		{
 			SkyComp->SetMobility(EComponentMobility::Movable);
 			SkyComp->SetRealTimeCapture(true);
-			// Fill lift so bunkers aren't muddy (+~20% from 1.10 playtest).
-			SkyComp->SetIntensity(1.30f);
-			SkyComp->SetLowerHemisphereColor(FLinearColor(0.11f, 0.11f, 0.10f));
+			// ⭐ MAIN DARKNESS FIX: with Lumen dropped (7fd5b86), this SkyLight is the ONLY indirect/ambient
+			// light — every surface out of the sun's line goes to this value. 1.30 left bunkers near-black.
+			// 1.30 -> 3.0 (~2.3x ambient fill). Lower hemisphere (floor-up bounce sim) lifted too so floors
+			// and undersides aren't pitch black. Exposure/contrast/vignette below also target shadows.
+			SkyComp->SetIntensity(3.0f);
+			SkyComp->SetLowerHemisphereColor(FLinearColor(0.26f, 0.26f, 0.28f));
 		}
 	}
 
@@ -115,21 +119,25 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.AutoExposureMinBrightness = 1.f;
 		PP.bOverride_AutoExposureMaxBrightness = true;
 		PP.AutoExposureMaxBrightness = 1.f;
-		// Slight positive bias — playtest asked ~20% brighter after 0.05.
+		// Overall lift on top of the light-rig boost. 0.30 -> 0.65 (~+0.35 EV, ~1.27x). Kept moderate on
+		// purpose so the newly-filled shadows brighten more than the already-lit faces (avoid blow-out).
 		PP.bOverride_AutoExposureBias = true;
-		PP.AutoExposureBias = 0.30f;
+		PP.AutoExposureBias = 0.65f;
 
 		// Clean industrial grade (original knobs + mild vignette/bloom).
 		PP.bOverride_BloomIntensity = true;
 		PP.BloomIntensity = 0.28f;
 		PP.bOverride_BloomThreshold = true;
 		PP.BloomThreshold = 1.0f;
+		// Vignette darkens screen edges — cut hard (0.28 -> 0.10) so the periphery isn't crushed.
 		PP.bOverride_VignetteIntensity = true;
-		PP.VignetteIntensity = 0.28f;
+		PP.VignetteIntensity = 0.10f;
 		PP.bOverride_ColorSaturation = true;
-		PP.ColorSaturation = FVector4(0.96, 0.96, 0.98, 1.0);
+		PP.ColorSaturation = FVector4(0.98, 0.98, 1.0, 1.0);
+		// Contrast >1 crushes shadows to black — the main tonemap cause of the "everything's dark" look.
+		// 1.10 -> 1.03 lifts the low end while keeping the image from going flat.
 		PP.bOverride_ColorContrast = true;
-		PP.ColorContrast = FVector4(1.10, 1.10, 1.08, 1.0);
+		PP.ColorContrast = FVector4(1.03, 1.03, 1.02, 1.0);
 		PP.bOverride_ColorGamma = true;
 		PP.ColorGamma = FVector4(1.0, 1.0, 1.0, 1.0);
 		PP.bOverride_ColorGain = true;
