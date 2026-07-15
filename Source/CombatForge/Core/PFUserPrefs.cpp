@@ -180,9 +180,13 @@ void FPFUserPrefs::ApplyQualityMethodCVars(int32 QualityLevel)
 	const int32 Q = FMath::Clamp(QualityLevel, 0, 3);
 	// {GI method (0 none / 2 SSGI / 1 Lumen), SSGI enable, reflections (0 none / 2 SSR / 1 Lumen),
 	//  VSM enable, AA method (1 FXAA / 2 TAA / 4 TSR)} per quality level.
-	static const int32 GIMethod[4]   = { 0, 2, 1, 1 };
-	static const int32 SSGIEnable[4] = { 0, 1, 0, 0 };
-	static const int32 ReflMethod[4] = { 0, 2, 1, 1 };
+	// NO LUMEN at any tier: the project never generates mesh distance fields, so Lumen has no data to trace
+	// ("Lumen is enabled but has no ray tracing data" warning) and silently produces no GI. Screen-space GI +
+	// SSR actually work here, are far cheaper (the whole point of the budget path), and clear the warning.
+	// (To ever enable real Lumen: turn on Generate Mesh Distance Fields project-wide — heavier cook + GPU.)
+	static const int32 GIMethod[4]   = { 0, 2, 2, 2 };
+	static const int32 SSGIEnable[4] = { 0, 1, 1, 1 };
+	static const int32 ReflMethod[4] = { 0, 2, 2, 2 };
 	static const int32 VSMEnable[4]  = { 0, 0, 1, 1 };
 	static const int32 AAMethod[4]   = { 1, 2, 4, 4 };
 
