@@ -2169,28 +2169,15 @@ void ACombatForgeGameMode::TickDominationScoring()
 			continue;
 		}
 		int32 OutA = 0, OutB = 0;
-		CP->ServerQueryOccupancy(OutA, OutB);
+		TArray<ACombatForgePlayerState*> Occupants;
+		CP->ServerQueryOccupancy(OutA, OutB, &Occupants);
 
-		// Stamp PS for anyone standing on this pad (HUD "● POINT B" + the capture bar).
-		if (OutA + OutB > 0)
+		// Stamp PS from the SAME overlap set that counted them — the old separate center-distance test used
+		// a smaller effective radius than the sphere overlap (capsule extent), so edge-standers captured
+		// zones with no capture bar on their own screen.
+		for (ACombatForgePlayerState* PS : Occupants)
 		{
-			const FVector CPLoc = CP->GetActorLocation();
-			constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's capture radius
-			for (APlayerState* PSBase : GS->PlayerArray)
-			{
-				ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-				if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
-				{
-					continue;
-				}
-				if (const APawn* Pawn = PS->GetPawn())
-				{
-					if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
-					{
-						PS->ServerSetStandingOnPoint(static_cast<uint8>(CP->GetPointIndex()));
-					}
-				}
-			}
+			PS->ServerSetStandingOnPoint(static_cast<uint8>(CP->GetPointIndex()));
 		}
 
 		if (CP->ServerTickCapture(OutA, OutB, ObjectiveScoreInterval, DominationCaptureSeconds))
@@ -2216,9 +2203,12 @@ void ACombatForgeGameMode::TickDominationScoring()
 			GS->ServerSetTeamScores(ScoreA, ScoreB);
 			if (ScoreA >= DominationTargetScore || ScoreB >= DominationTargetScore)
 			{
-				EndDomination(ScoreA >= DominationTargetScore && ScoreB >= DominationTargetScore
-					? (ScoreA >= ScoreB ? 0 : 1)
-					: (ScoreA >= DominationTargetScore ? 0 : 1));
+				// Strict compares: a single-team cross is strictly ahead; a same-tick double cross at equal
+				// score is a DRAW (TeamNone), matching the timer path instead of silently crowning team 0.
+				uint8 Winner = TeamNone;
+				if (ScoreA > ScoreB) { Winner = 0; }
+				else if (ScoreB > ScoreA) { Winner = 1; }
+				EndDomination(Winner);
 			}
 		}
 	}
@@ -2256,7 +2246,8 @@ void ACombatForgeGameMode::TickHardpointScoring()
 	}
 
 	int32 OutA = 0, OutB = 0;
-	const uint8 Sole = Active->ServerQueryOccupancy(OutA, OutB);
+	TArray<ACombatForgePlayerState*> Occupants;
+	const uint8 Sole = Active->ServerQueryOccupancy(OutA, OutB, &Occupants);
 
 	// Hardpoint: pad is neutral unless a single team is standing on it right now.
 	// Empty / contested → no owner, no score (sticky owner was awarding points to an empty hill).
@@ -2269,22 +2260,10 @@ void ACombatForgeGameMode::TickHardpointScoring()
 		Active->ServerSetControllingTeam(255);
 	}
 
-	const FVector CPLoc = Active->GetActorLocation();
-	constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's tripled capture radius
-	for (APlayerState* PSBase : GS->PlayerArray)
+	// Stamp from the same overlap set that counted them (see TickDominationScoring).
+	for (ACombatForgePlayerState* PS : Occupants)
 	{
-		ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-		if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
-		{
-			continue;
-		}
-		if (const APawn* Pawn = PS->GetPawn())
-		{
-			if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
-			{
-				PS->ServerSetStandingOnPoint(static_cast<uint8>(Active->GetPointIndex()));
-			}
-		}
+		PS->ServerSetStandingOnPoint(static_cast<uint8>(Active->GetPointIndex()));
 	}
 
 	// Score only while sole occupancy this tick.

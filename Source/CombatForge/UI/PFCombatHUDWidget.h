@@ -88,8 +88,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> BannerText;
 	/** Objective callout under the top score strip (carrier / on-point). Hidden when idle. */
 	UPROPERTY() TObjectPtr<UTextBlock> ObjectiveStatusText;
-	// Domination: A/B/C zone chips under the score strip (letter = owner color, segment bar while capturing)
-	// + the CoD-style linear capture meter above the weapon HUD when the local player is in a zone.
+	// Domination: A/B/C zone chips under the score strip (letter = owner color, "|··" segment bar while
+	// capturing) + the CoD-style linear capture meter above the weapon HUD when the local player is in a zone.
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> ZoneChips;
 	UPROPERTY() TObjectPtr<class UHorizontalBox> ZoneChipsRow;
 	UPROPERTY() TObjectPtr<UProgressBar> CaptureBar;

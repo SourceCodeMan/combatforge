@@ -32,6 +32,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "UObject/UObjectIterator.h"   // pf.ArmedAnims live-toggle sink
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NavigationInvokerComponent.h"
 #include "Net/UnrealNetwork.h"            // DOREPLIFETIME (KitRep)
@@ -47,7 +48,28 @@
 // respawn) in case the retarget T-poses or slides on some machine.
 static TAutoConsoleVariable<int32> CVarArmedAnims(
 	TEXT("pf.ArmedAnims"), 1,
-	TEXT("1 = rifle-hold locomotion from AnimStarterPack (default), 0 = original unarmed Bandit anims."));
+	TEXT("1 = rifle-hold locomotion from the template rifle kit (default), 0 = original unarmed Bandit anims. Applies live."));
+
+// Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
+// kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
+static void PFArmedAnimsSink()
+{
+	static int32 LastArmed = CVarArmedAnims.GetValueOnGameThread();
+	const int32 Now = CVarArmedAnims.GetValueOnGameThread();
+	if (Now == LastArmed)
+	{
+		return;
+	}
+	LastArmed = Now;
+	for (TObjectIterator<ACombatForgeCharacter> It; It; ++It)
+	{
+		if (It->GetWorld() != nullptr && It->GetWorld()->IsGameWorld())
+		{
+			It->RefreshBanditAnimSet();
+		}
+	}
+}
+static FAutoConsoleVariableSink GPFArmedAnimsSink(FConsoleCommandDelegate::CreateStatic(&PFArmedAnimsSink));
 
 ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPFCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
@@ -999,8 +1021,11 @@ void ACombatForgeCharacter::UpdateViewmodelFeel(float DeltaSeconds, FVector& Out
 		PrevCamYaw = CamYaw;
 		PrevCamPitch = CamPitch;
 
-		const float YawRate = DYaw / Dt;     // deg/s
-		const float PitchRate = DPitch / Dt;
+		// Rates from the REAL frame time — dividing the accumulated delta by the clamped Dt turned every
+		// 100-200ms hitch into a fake huge look-rate and a one-frame gun lurch.
+		const float RateDt = FMath::Max(DeltaSeconds, 0.0001f);
+		const float YawRate = DYaw / RateDt;     // deg/s
+		const float PitchRate = DPitch / RateDt;
 		const float MaxSway = 5.f * AdsSuppress;
 		SwayYaw.Update(FMath::Clamp(-YawRate * 0.014f, -MaxSway, MaxSway) * AdsSuppress, Dt, 260.f, 0.8f);
 		SwayPitch.Update(FMath::Clamp(-PitchRate * 0.012f, -MaxSway * 0.75f, MaxSway * 0.75f) * AdsSuppress, Dt, 260.f, 0.8f);
@@ -1114,8 +1139,9 @@ void ACombatForgeCharacter::Landed(const FHitResult& Hit)
 	if (FallDistance > LandingDipMinFallUU && IsLocallyControlled())
 	{
 		// Viewmodel absorbs the landing too (springs back over ~0.3s) — the camera shake alone left the gun
-		// rigidly glued to the view, which reads weightless.
-		LandDipSpring.Vel -= FMath::Clamp(FallDistance / 55.f, 5.f, 24.f);
+		// rigidly glued to the view, which reads weightless. Impulse sized so the spring PEAK lands in the
+		// visible -1..-5 uu range (the original /55 clamp 5..24 peaked at ~0.5 uu — invisible).
+		LandDipSpring.Vel -= FMath::Clamp(FallDistance / 6.f, 45.f, 220.f);
 		if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		{
 			if (PC->PlayerCameraManager != nullptr)
@@ -1186,20 +1212,9 @@ void ACombatForgeCharacter::AssembleBanditCharacter()
 	}
 
 	// Route the Bandit sequences through the existing sequence-loco path (both teams — global test toggle).
-	// Prefer the RIFLE-HOLD set (soldiers should look like they're holding the gun, not walking empty-handed);
-	// pf.ArmedAnims 0 reverts to the unarmed A_MM_* set if the cross-skeleton playback misbehaves.
-	UAnimSequence* IdleSeq = BanditIdleAnim;
-	UAnimSequence* WalkSeq = BanditWalkAnim;
-	UAnimSequence* RunSeq  = BanditRunAnim;
-	if (CVarArmedAnims.GetValueOnGameThread() != 0
-		&& ArmedIdleAnim != nullptr && ArmedWalkAnim != nullptr && ArmedRunAnim != nullptr)
-	{
-		IdleSeq = ArmedIdleAnim;
-		WalkSeq = ArmedWalkAnim;
-		RunSeq  = ArmedRunAnim;
-	}
-	Team0IdleAnim = IdleSeq; Team0WalkAnim = WalkSeq; Team0RunAnim = RunSeq;
-	Team1IdleAnim = IdleSeq; Team1WalkAnim = WalkSeq; Team1RunAnim = RunSeq;
+	// Selection lives in RefreshBanditAnimSet so the pf.ArmedAnims kill switch applies LIVE (pawns are
+	// reused across respawns — waiting for a fresh Assemble meant the switch never actually took effect).
+	UAnimSequence* IdleSeq = RefreshBanditAnimSet();
 
 	// Base body carries the skeleton + animation (single-node + UpdateSequenceLocomotion, like Quantum).
 	Base->SetSkeletalMeshAsset(BanditBodyMesh);
@@ -1881,9 +1896,43 @@ void ACombatForgeCharacter::ApplyHandWeaponPose()
 	WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
 }
 
+UAnimSequence* ACombatForgeCharacter::RefreshBanditAnimSet()
+{
+	// Prefer the RIFLE-HOLD set (soldiers should look like they're holding the gun, not walking
+	// empty-handed); pf.ArmedAnims 0 reverts to the unarmed A_MM_* set if cross-skeleton playback
+	// misbehaves. Called from Assemble AND from the cvar sink (live toggle).
+	UAnimSequence* IdleSeq = BanditIdleAnim;
+	UAnimSequence* WalkSeq = BanditWalkAnim;
+	UAnimSequence* RunSeq  = BanditRunAnim;
+	if (CVarArmedAnims.GetValueOnGameThread() != 0
+		&& ArmedIdleAnim != nullptr && ArmedWalkAnim != nullptr && ArmedRunAnim != nullptr)
+	{
+		IdleSeq = ArmedIdleAnim;
+		WalkSeq = ArmedWalkAnim;
+		RunSeq  = ArmedRunAnim;
+	}
+	Team0IdleAnim = IdleSeq; Team0WalkAnim = WalkSeq; Team0RunAnim = RunSeq;
+	Team1IdleAnim = IdleSeq; Team1WalkAnim = WalkSeq; Team1RunAnim = RunSeq;
+
+	// Live re-arm on an already-assembled pawn (skip corpses — the death fall owns the mesh).
+	if (bBanditAssembled && bSequenceLocoActive && !bEliminatedAppearanceActive
+		&& GetMesh() != nullptr && IdleSeq != nullptr)
+	{
+		GetMesh()->PlayAnimation(IdleSeq, /*bLooping=*/true);
+		SeqLocoState = 1;   // next UpdateSequenceLocomotion re-picks walk/jog from the new set
+	}
+	return IdleSeq;
+}
+
 void ACombatForgeCharacter::UpdateSequenceLocomotion()
 {
 	if (!bSequenceLocoActive || !bUsingArtBody || GetMesh() == nullptr)
+	{
+		return;
+	}
+	// Eliminated: the directional death fall owns the mesh until DeathHideTimer hides it. SeqLocoState=0
+	// (stamped at death AND on revive) re-arms the right locomotion anim at respawn.
+	if (bEliminatedAppearanceActive)
 	{
 		return;
 	}
@@ -2223,6 +2272,9 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 {
 	// Mesh only — collision timing (0.5 s corpse block) is the health
 	// component's job (04 §2.4).
+	// Freeze the locomotion driver while out: it runs every Tick and would stomp the death fall back to
+	// looping idle ONE FRAME after it starts (bug hunt 2026-07-15 — the fall never rendered).
+	bEliminatedAppearanceActive = bEliminated;
 	if (BodyMesh != nullptr)
 	{
 		BodyMesh->SetHiddenInGame(bEliminated);

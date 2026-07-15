@@ -398,6 +398,25 @@ UTexture2D* UPFLoadingMenuWidget::GetMapPreview(const FString& JsonFileName)
 	PngName += TEXT(".png");
 	const FString PngPath = FPFPaths::ArenaDir() / PngName;
 	UTexture2D* Tex = FPaths::FileExists(PngPath) ? FImageUtils::ImportFileAsTexture2D(PngPath) : nullptr;
+	// Brighten ~10% in the PIXELS at load — the raw viewport grabs read dark, and a widget tint > 1.0 is
+	// clamped by Slate (the earlier display-time tint was a silent no-op). Uniform for old + new shots.
+	if (Tex != nullptr && Tex->GetPlatformData() != nullptr && Tex->GetPlatformData()->Mips.Num() > 0
+		&& Tex->GetPixelFormat() == PF_B8G8R8A8)
+	{
+		FTexture2DMipMap& Mip = Tex->GetPlatformData()->Mips[0];
+		if (uint8* Px = static_cast<uint8*>(Mip.BulkData.Lock(LOCK_READ_WRITE)))
+		{
+			const int64 Bytes = Mip.BulkData.GetBulkDataSize();
+			for (int64 i = 0; i + 3 < Bytes; i += 4)
+			{
+				Px[i + 0] = static_cast<uint8>(FMath::Min<int32>(255, (static_cast<int32>(Px[i + 0]) * 110) / 100));
+				Px[i + 1] = static_cast<uint8>(FMath::Min<int32>(255, (static_cast<int32>(Px[i + 1]) * 110) / 100));
+				Px[i + 2] = static_cast<uint8>(FMath::Min<int32>(255, (static_cast<int32>(Px[i + 2]) * 110) / 100));
+			}
+			Mip.BulkData.Unlock();
+			Tex->UpdateResource();
+		}
+	}
 	MapPreviewCache.Add(JsonFileName, Tex);
 	return Tex;
 }
@@ -1822,15 +1841,13 @@ void UPFLoadingMenuWidget::RefreshMapPicker()
 			{
 				if (UTexture2D* Preview = GetMapPreview(M.FileName))
 				{
+					// Brightening happens in the pixel data at load (GetMapPreview) — a >1.0 widget tint
+					// is clamped by Slate and did nothing.
 					MapSlotImages[SlotIdx]->SetBrushFromTexture(Preview, /*bMatchSize=*/false);
-					// The raw viewport grabs come out dark in the menu — lift them ~10% at display time
-					// (applies uniformly to old shots too, unlike a capture-time fix).
-					MapSlotImages[SlotIdx]->SetColorAndOpacity(FLinearColor(1.10f, 1.10f, 1.10f, 1.f));
 				}
 				else
 				{
 					MapSlotImages[SlotIdx]->SetBrush(FSlateColorBrush(FLinearColor(0.15f, 0.16f, 0.20f, 1.f)));
-					MapSlotImages[SlotIdx]->SetColorAndOpacity(FLinearColor::White);
 				}
 			}
 		}

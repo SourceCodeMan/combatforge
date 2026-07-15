@@ -50,6 +50,14 @@ struct COMBATFORGE_API FPFUserPrefs
 	static void SetFrameRateLimitIndex(int32 Idx);
 	static float FrameRateLimitForIndex(int32 Idx);   // 0.f = uncapped (engine convention)
 
+	/**
+	 * Pipeline METHOD switches per quality level — Lumen vs SSGI vs none, Lumen reflections vs SSR, VSM vs
+	 * CSM, TSR vs TAA/FXAA. These cvars are NOT ECVF_Scalability, so Scalability.ini cannot set them (the
+	 * engine ensures + ignores); they must be pushed from code. Called at boot (GameInstance::Init) and on
+	 * every Options quality Apply. Low(0)=cheapest, Medium(1)=screen-space, High(2)/Epic(3)=full pipeline.
+	 */
+	static void ApplyQualityMethodCVars(int32 QualityLevel);
+
 	// ---- Key rebinding (stored as "Bind_<ActionId>" = key name) ----
 	/** Saved override key for a rebindable action, or an invalid FKey if none is saved. */
 	static FKey GetKeyOverride(FName ActionId);

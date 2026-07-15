@@ -1107,6 +1107,8 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 		S->SetFullscreenMode(Mode);
 		S->SetVSyncEnabled(bWorkingVSync);
 		S->SetOverallScalabilityLevel(WorkingQuality);
+		// Method switches ride along with the sg level (not scalability-flagged -> must be set from code).
+		FPFUserPrefs::ApplyQualityMethodCVars(WorkingQuality);
 		S->SetFrameRateLimit(FPFUserPrefs::FrameRateLimitForIndex(WorkingFpsIndex));
 
 		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560 };

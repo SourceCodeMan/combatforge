@@ -225,6 +225,7 @@ private:
 	// Directional elimination reactions (0=front 1=right 2=back 3=left, relative to the shot).
 	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> DeathDirAnims;
 	FTimerHandle DeathHideTimer;   // plays the fall, then hides the body
+	bool bEliminatedAppearanceActive = false;   // gates UpdateSequenceLocomotion off the corpse
 	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharBaseComps;   // fixed base skin parts (head/legs)
 	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharSlotComps;   // one per PFChar customization slot
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> ArmbandMesh;              // team-colored band, left arm (team distinction)
@@ -258,6 +259,8 @@ public:
 	void ReapplyCharacterConfig();
 	/** Owning client: build the kit from the ACTIVE class slot's saved prefs and push it to the server. */
 	void PushLocalKit();
+	/** Re-pick armed vs unarmed locomotion set from pf.ArmedAnims and re-arm a live pawn. Returns the idle. */
+	UAnimSequence* RefreshBanditAnimSet();
 
 	/** Apply the saved weapon selection: swap the FP viewmodel + TP weapon mesh/material/pose. */
 	void ApplyWeaponLoadout();
@@ -340,10 +343,18 @@ private:
 		float Vel = 0.f;
 		void Update(float Target, float Dt, float Stiffness, float Zeta)
 		{
+			// Substepped (~120 Hz): a single Euler step at k=320 goes unstable/inverts below ~26 fps —
+			// exactly the budget GPUs the frame cap work targets. Substepping keeps the feel identical
+			// at 30 fps and 144 fps.
 			const float Omega = FMath::Sqrt(FMath::Max(Stiffness, 1.f));
-			const float Accel = -Stiffness * (Pos - Target) - 2.f * Zeta * Omega * Vel;
-			Vel += Accel * Dt;
-			Pos += Vel * Dt;
+			const int32 N = FMath::Clamp(FMath::CeilToInt(Dt * 120.f), 1, 8);
+			const float h = Dt / static_cast<float>(N);
+			for (int32 i = 0; i < N; ++i)
+			{
+				const float Accel = -Stiffness * (Pos - Target) - 2.f * Zeta * Omega * Vel;
+				Vel += Accel * h;
+				Pos += Vel * h;
+			}
 		}
 	};
 	FPFSpring SwayYaw, SwayPitch, SwayX, SwayZ;             // look-lag rotation + translation

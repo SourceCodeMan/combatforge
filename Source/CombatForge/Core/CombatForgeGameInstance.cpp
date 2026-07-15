@@ -27,9 +27,14 @@ void UCombatForgeGameInstance::Init()
 		if (UGameUserSettings* S = GEngine->GetGameUserSettings())
 		{
 			S->SetFrameRateLimit(FPFUserPrefs::FrameRateLimitForIndex(FPFUserPrefs::GetFrameRateLimitIndex()));
-			S->ApplySettings(false);
+			// NON-resolution apply only: full ApplySettings re-requested the SAVED window mode/resolution,
+			// stomping -WINDOWED -ResX/-ResY launches (broke the 2-player playtest launcher).
+			S->ApplyNonResolutionSettings();
 		}
 	}
+	// Pipeline method switches (Lumen/VSM/TSR vs the budget path) for the saved quality — these cvars are
+	// not scalability-flagged, so the ini can't set them (see FPFUserPrefs::ApplyQualityMethodCVars).
+	FPFUserPrefs::ApplyQualityMethodCVars(FPFUserPrefs::GetQualityLevel());
 }
 
 FGuid UCombatForgeGameInstance::GetLocalPlayerGuid() const

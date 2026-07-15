@@ -289,7 +289,8 @@ bool APFControlPointActor::ServerTickCapture(int32 CountA, int32 CountB, float D
 	return bOwnerChanged;
 }
 
-uint8 APFControlPointActor::ServerQueryOccupancy(int32& OutA, int32& OutB) const
+uint8 APFControlPointActor::ServerQueryOccupancy(int32& OutA, int32& OutB,
+	TArray<ACombatForgePlayerState*>* OutOccupants) const
 {
 	OutA = 0;
 	OutB = 0;
@@ -307,13 +308,18 @@ uint8 APFControlPointActor::ServerQueryOccupancy(int32& OutA, int32& OutB) const
 		{
 			continue;
 		}
-		const ACombatForgePlayerState* PS = Char->GetPlayerState<ACombatForgePlayerState>();
+		ACombatForgePlayerState* PS = Char->GetPlayerState<ACombatForgePlayerState>();
 		if (!PS || !PS->bAliveInRound)
 		{
 			continue;
 		}
 		if (PS->TeamId == 0) { ++OutA; }
 		else if (PS->TeamId == 1) { ++OutB; }
+		else { continue; }
+		if (OutOccupants != nullptr)
+		{
+			OutOccupants->Add(PS);
+		}
 	}
 
 	if (OutA > 0 && OutB == 0) { return 0; }

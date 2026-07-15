@@ -188,8 +188,10 @@ namespace PFChar
 		{
 			return;
 		}
+		// NO Flush here: the dead-scroll class wheel calls this per notch, and a synchronous ini write per
+		// notch hitches the respawn screen on slow disks. Every reader goes through the in-memory GConfig
+		// cache; durability comes from SaveConfig's flush (menu saves) and the engine's shutdown flush.
 		GConfig->SetInt(TEXT("CombatForge"), TEXT("CharActiveSlot"), ClampSaveSlot(SaveSlot), GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 
 	void SaveConfig(int32 SaveSlot, const FPFCharacterConfig& Config)

@@ -561,7 +561,9 @@ void ACombatForgePlayerController::OnCycleClassWhileDead(const FInputActionValue
 	// spawn wearing — no pawn or RPC needed while dead (the old pawn may already be destroyed).
 	const float Dir = Value.Get<float>();
 	const ACombatForgePlayerState* PS = GetPlayerState<ACombatForgePlayerState>();
-	if (FMath::IsNearlyZero(Dir) || PS == nullptr || PS->OutKind != 1)
+	// Also bail while a menu overlay is up — scrolling the Options page was silently cycling the class
+	// behind it (the countdown screen is the only surface this belongs to).
+	if (FMath::IsNearlyZero(Dir) || PS == nullptr || PS->OutKind != 1 || IsOptionsMenuOpen())
 	{
 		return;
 	}

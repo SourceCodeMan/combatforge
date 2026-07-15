@@ -60,8 +60,11 @@ public:
 	/**
 	 * Server: count living teamed pawns currently overlapping the capture sphere.
 	 * OutA/OutB = players per team. Returns sole-team controller if uncontested, else 255.
+	 * OutOccupants (optional) collects the counted PlayerStates — the HUD stamp must derive from the SAME
+	 * overlap set as the count, or players at the zone edge capture with no capture bar on their screen.
 	 */
-	uint8 ServerQueryOccupancy(int32& OutA, int32& OutB) const;
+	uint8 ServerQueryOccupancy(int32& OutA, int32& OutB,
+		TArray<class ACombatForgePlayerState*>* OutOccupants = nullptr) const;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaSeconds) override;

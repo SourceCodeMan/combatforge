@@ -2,6 +2,7 @@
 
 #include "Core/PFUserPrefs.h"
 
+#include "HAL/IConsoleManager.h"
 #include "Misc/ConfigCacheIni.h"
 
 namespace
@@ -172,6 +173,32 @@ float FPFUserPrefs::FrameRateLimitForIndex(int32 Idx)
 {
 	static const float Caps[] = { 60.f, 120.f, 144.f, 240.f, 0.f };   // 0 = uncapped
 	return Caps[FMath::Clamp(Idx, 0, 4)];
+}
+
+void FPFUserPrefs::ApplyQualityMethodCVars(int32 QualityLevel)
+{
+	const int32 Q = FMath::Clamp(QualityLevel, 0, 3);
+	// {GI method (0 none / 2 SSGI / 1 Lumen), SSGI enable, reflections (0 none / 2 SSR / 1 Lumen),
+	//  VSM enable, AA method (1 FXAA / 2 TAA / 4 TSR)} per quality level.
+	static const int32 GIMethod[4]   = { 0, 2, 1, 1 };
+	static const int32 SSGIEnable[4] = { 0, 1, 0, 0 };
+	static const int32 ReflMethod[4] = { 0, 2, 1, 1 };
+	static const int32 VSMEnable[4]  = { 0, 0, 1, 1 };
+	static const int32 AAMethod[4]   = { 1, 2, 4, 4 };
+
+	auto SetCVar = [](const TCHAR* Name, int32 Value)
+	{
+		if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(Name))
+		{
+			// SetByGameSetting: below SetByConsole, so pf.* / console experiments still win over the menu.
+			Var->Set(Value, ECVF_SetByGameSetting);
+		}
+	};
+	SetCVar(TEXT("r.DynamicGlobalIlluminationMethod"), GIMethod[Q]);
+	SetCVar(TEXT("r.SSGI.Enable"), SSGIEnable[Q]);
+	SetCVar(TEXT("r.ReflectionMethod"), ReflMethod[Q]);
+	SetCVar(TEXT("r.Shadow.Virtual.Enable"), VSMEnable[Q]);
+	SetCVar(TEXT("r.AntiAliasingMethod"), AAMethod[Q]);
 }
 
 FKey FPFUserPrefs::GetKeyOverride(FName ActionId)

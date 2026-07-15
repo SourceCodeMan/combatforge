@@ -1014,9 +1014,11 @@ void UPFCombatHUDWidget::UpdateObjectiveStatus()
 
 void UPFCombatHUDWidget::EnsureZoneCache()
 {
-	// Weak-cache the three zone actors, sorted A/B/C. Clients receive them by replication whenever, so refill
-	// on any invalid entry; 3 actors via iterator is trivially cheap at that rate.
-	bool bValid = ZoneCache.Num() > 0;
+	// Weak-cache the three zone actors, sorted A/B/C. Clients receive them by replication whenever — a
+	// late joiner can tick this with only 1-2 zones replicated, so a PARTIAL set is stale (accepting it
+	// aliased chips/capture bars to the wrong zones for the rest of the match). Keep rescanning until all
+	// three exist; 3 actors via iterator is trivially cheap at that rate.
+	bool bValid = ZoneCache.Num() >= 3;
 	for (const TWeakObjectPtr<APFControlPointActor>& CP : ZoneCache)
 	{
 		if (!CP.IsValid())
@@ -1095,7 +1097,7 @@ void UPFCombatHUDWidget::UpdateDominationHUD()
 			FLinearColor Color = (Owner <= 1) ? PFColors::ForTeam(Owner) : Neutral;
 			if (CP->IsContested())
 			{
-				Text += TEXT(" ✕");   // contested marker
+				Text += TEXT(" ×");   // contested marker (Latin-1 — the fancier glyphs render as tofu in Roboto)
 				Color = FLinearColor(1.f, 0.85f, 0.3f);
 			}
 			else if (Capper <= 1)
@@ -1104,7 +1106,8 @@ void UPFCombatHUDWidget::UpdateDominationHUD()
 				Text += TEXT(" ");
 				for (int32 s = 0; s < 4; ++s)
 				{
-					Text += (s < Filled) ? TEXT("▰") : TEXT("▱");
+					// '|' / '·' — Roboto has no ▰▱ block glyphs (they rendered as tofu boxes).
+					Text += (s < Filled) ? TEXT("|") : TEXT("·");
 				}
 				Color = PFColors::ForTeam(Capper);
 			}
