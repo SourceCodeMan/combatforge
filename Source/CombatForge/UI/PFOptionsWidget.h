@@ -60,6 +60,7 @@ protected:
 	UFUNCTION() void OnQualityClicked();
 	UFUNCTION() void OnWindowModeClicked();
 	UFUNCTION() void OnResolutionClicked();
+	UFUNCTION() void OnFpsLimitClicked();
 	UFUNCTION() void OnFullscreenChanged(bool bIsChecked);
 	UFUNCTION() void OnVSyncChanged(bool bIsChecked);
 	UFUNCTION() void OnInvertYChanged(bool bIsChecked);
@@ -115,6 +116,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> WindowModeValueText;
 	UPROPERTY() TObjectPtr<UButton> ResolutionButton;
 	UPROPERTY() TObjectPtr<UTextBlock> ResolutionValueText;
+	UPROPERTY() TObjectPtr<UButton> FpsLimitButton;
+	UPROPERTY() TObjectPtr<UTextBlock> FpsLimitValueText;
 	UPROPERTY() TObjectPtr<UCheckBox> FullscreenCheck;
 	UPROPERTY() TObjectPtr<UCheckBox> VSyncCheck;
 	UPROPERTY() TObjectPtr<UCheckBox> InvertYCheck;
@@ -134,6 +137,7 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> HintText;
 
 	int32  WorkingQuality = 2;
+	int32  WorkingFpsIndex = 2;   // {60,120,144,240,Uncapped}, default 144
 	int32  WorkingWindowMode = 0;   // 0 FS 1 Borderless 2 Windowed
 	int32  WorkingResIndex = 0;
 	bool   bWorkingFullscreen = true;

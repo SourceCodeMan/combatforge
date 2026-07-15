@@ -3,7 +3,9 @@
 #include "Core/CombatForgeGameInstance.h"
 
 #include "CombatForge.h"
+#include "Core/PFUserPrefs.h"
 #include "Dom/JsonObject.h"
+#include "GameFramework/GameUserSettings.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -16,6 +18,18 @@ void UCombatForgeGameInstance::Init()
 {
 	Super::Init();
 	LoadOrCreateIdentity();
+
+	// Frame cap from OUR pref (default 144) — uncapped rendering pegs any GPU at ~100% (an RTX 5090 sat at
+	// 86-90% drawing 300+ fps of a simple arena) for zero gameplay gain. Applied every boot so players who
+	// never open Options still get the cap; the Options FPS-limit row edits the same pref.
+	if (GEngine != nullptr)
+	{
+		if (UGameUserSettings* S = GEngine->GetGameUserSettings())
+		{
+			S->SetFrameRateLimit(FPFUserPrefs::FrameRateLimitForIndex(FPFUserPrefs::GetFrameRateLimitIndex()));
+			S->ApplySettings(false);
+		}
+	}
 }
 
 FGuid UCombatForgeGameInstance::GetLocalPlayerGuid() const

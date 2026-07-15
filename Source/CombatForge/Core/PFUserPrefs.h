@@ -44,6 +44,11 @@ struct COMBATFORGE_API FPFUserPrefs
 	static void SetResolutionIndex(int32 Idx);
 	static float GetResolutionScalePct();   // 50..100, default 100
 	static void SetResolutionScalePct(float Pct);
+	// Frame-rate cap. Uncapped renders as many frames as the GPU can draw — it pegged an RTX 5090 at ~90%
+	// for zero gameplay gain (heat/noise/power). Index into {60, 120, 144, 240, Uncapped}, default 2 (144).
+	static int32 GetFrameRateLimitIndex();
+	static void SetFrameRateLimitIndex(int32 Idx);
+	static float FrameRateLimitForIndex(int32 Idx);   // 0.f = uncapped (engine convention)
 
 	// ---- Key rebinding (stored as "Bind_<ActionId>" = key name) ----
 	/** Saved override key for a rebindable action, or an invalid FKey if none is saved. */

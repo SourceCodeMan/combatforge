@@ -238,6 +238,21 @@ void UPFOptionsWidget::BuildVideoPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 6.f));
 	}
 
+	// FPS limit — capped by default (144): uncapped just cooks the GPU rendering frames nobody sees.
+	UHorizontalBox* FpsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	FpsRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("FPS limit"), 15, false));
+	FpsLimitButton = MakeTabButton(TEXT("  144  "), TEXT("FpsLimitBtn"));
+	FpsLimitValueText = Cast<UTextBlock>(FpsLimitButton->GetChildAt(0));
+	FpsLimitButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnFpsLimitClicked);
+	if (UHorizontalBoxSlot* H = FpsRow->AddChildToHorizontalBox(FpsLimitButton))
+	{
+		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(FpsRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
 	// Legacy fullscreen check still maps to window mode 0
 	UHorizontalBox* FsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	FsRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Fullscreen"), 15, false));
@@ -869,6 +884,12 @@ void UPFOptionsWidget::OnResolutionClicked()
 	RefreshLabels();
 }
 
+void UPFOptionsWidget::OnFpsLimitClicked()
+{
+	WorkingFpsIndex = (WorkingFpsIndex + 1) % 5;
+	RefreshLabels();
+}
+
 void UPFOptionsWidget::OnResScaleChanged(float Value)
 {
 	WorkingResScale = FMath::Clamp(Value, 50.f, 100.f);
@@ -956,6 +977,13 @@ void UPFOptionsWidget::RefreshLabels()
 	{
 		ResolutionValueText->SetText(FText::FromString(FString::Printf(TEXT("  %s  "), *ResolutionLabel())));
 	}
+	if (FpsLimitValueText)
+	{
+		const float Cap = FPFUserPrefs::FrameRateLimitForIndex(WorkingFpsIndex);
+		FpsLimitValueText->SetText(FText::FromString(Cap > 0.f
+			? FString::Printf(TEXT("  %d  "), FMath::RoundToInt(Cap))
+			: FString(TEXT("  Uncapped  "))));
+	}
 	if (ResScaleValueText)
 	{
 		ResScaleValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(WorkingResScale))));
@@ -1019,6 +1047,7 @@ void UPFOptionsWidget::PullFromSettings()
 	WorkingQuality = FPFUserPrefs::GetQualityLevel();
 	WorkingResScale = FPFUserPrefs::GetResolutionScalePct();
 	WorkingResIndex = FPFUserPrefs::GetResolutionIndex();
+	WorkingFpsIndex = FPFUserPrefs::GetFrameRateLimitIndex();
 
 	if (GConfig)
 	{
@@ -1064,6 +1093,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	FPFUserPrefs::SetQualityLevel(WorkingQuality);
 	FPFUserPrefs::SetResolutionIndex(WorkingResIndex);
 	FPFUserPrefs::SetResolutionScalePct(WorkingResScale);
+	FPFUserPrefs::SetFrameRateLimitIndex(WorkingFpsIndex);
 
 	if (UGameUserSettings* S = GEngine ? GEngine->GetGameUserSettings() : nullptr)
 	{
@@ -1077,6 +1107,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 		S->SetFullscreenMode(Mode);
 		S->SetVSyncEnabled(bWorkingVSync);
 		S->SetOverallScalabilityLevel(WorkingQuality);
+		S->SetFrameRateLimit(FPFUserPrefs::FrameRateLimitForIndex(WorkingFpsIndex));
 
 		static const int32 W[] = { 1280, 1366, 1600, 1920, 2560 };
 		static const int32 H[] = { 720,  768,  900,  1080, 1440 };

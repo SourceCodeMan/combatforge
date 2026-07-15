@@ -158,6 +158,22 @@ void FPFUserPrefs::SetResolutionScalePct(float Pct)
 	}
 }
 
+int32 FPFUserPrefs::GetFrameRateLimitIndex()
+{
+	return FMath::Clamp(ReadInt(TEXT("FrameRateLimitIndex"), 2), 0, 4);
+}
+
+void FPFUserPrefs::SetFrameRateLimitIndex(int32 Idx)
+{
+	WriteInt(TEXT("FrameRateLimitIndex"), FMath::Clamp(Idx, 0, 4));
+}
+
+float FPFUserPrefs::FrameRateLimitForIndex(int32 Idx)
+{
+	static const float Caps[] = { 60.f, 120.f, 144.f, 240.f, 0.f };   // 0 = uncapped
+	return Caps[FMath::Clamp(Idx, 0, 4)];
+}
+
 FKey FPFUserPrefs::GetKeyOverride(FName ActionId)
 {
 	if (GConfig)
