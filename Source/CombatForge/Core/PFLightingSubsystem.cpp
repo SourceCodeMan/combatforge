@@ -91,9 +91,10 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 			// constant floor (0.24 -> 0.38) so no surface can fall to pure black.
 			// 2.5 now that the capture sees real (bright) sky from above the roof — 4.5 on a bright capture
 			// would blow out. This is the effective ambient floor lift; tune up if the interior's still dim.
-			// 2.5 -> 2.8: skylight openings were cut in half (Tom: too many) — mild ambient bump offsets
-			// the lost direct-sun pools. Brightness slider (options) gives the player final say.
-			SkyComp->SetIntensity(2.8f);
+			// 2.5 = the value in the last build Tom validated (with Grok's bright-albedo floor fix).
+			// LIGHTING VALUES ARE FROZEN — no more blind tuning against unseen surfaces. Player-facing
+			// brightness/contrast sliders in options are the only sanctioned adjustment path.
+			SkyComp->SetIntensity(2.5f);
 			SkyComp->SetLowerHemisphereColor(FLinearColor(0.38f, 0.38f, 0.42f));
 		}
 	}
