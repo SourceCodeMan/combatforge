@@ -2322,6 +2322,14 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	{
 		ViewModelRoot->SetVisibility(!bEliminated, /*bPropagateToChildren=*/true);
 	}
+
+	if (!bEliminated)
+	{
+		// Respawns REUSE this pawn (reset-in-place + teleport, no repossession), so PawnClientRestart never
+		// re-fires — without this push, a class switched on the death screen showed on the countdown UI but
+		// you respawned with the OLD kit. Revive runs on every machine; PushLocalKit no-ops on bots/remotes.
+		PushLocalKit();
+	}
 }
 
 FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
