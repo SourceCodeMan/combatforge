@@ -623,7 +623,7 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 {
 	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
-	Sub->SetText(FText::FromString(TEXT("Customize your character — saved to this PC, applied when you spawn.")));
+	Sub->SetText(FText::FromString(TEXT("Your five classes — clothing AND weapon per slot, saved to this PC, applied when you spawn.")));
 	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
 	Sub->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Sub))
@@ -662,6 +662,43 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		V->SetHorizontalAlignment(HAlign_Center);
 		V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
 	}
+
+	// The class's WEAPON — merged from the old LOADOUT tab; per-slot persistence (WeaponCat_<slot>/WeaponIdx_<slot>).
+	BuildWeaponPicker(Col);
+
+	// Crosshair preference (moved from the old LOADOUT tab; local, not per-class).
+	{
+		UHorizontalBox* XRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+		UTextBlock* XLab = WidgetTree->ConstructWidget<UTextBlock>();
+		XLab->SetText(FText::FromString(TEXT("CROSSHAIR")));
+		XLab->SetFont(PFLoadFont(13, true));
+		XLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
+		USizeBox* XSizer = WidgetTree->ConstructWidget<USizeBox>();
+		XSizer->SetWidthOverride(110.f);
+		XSizer->SetContent(XLab);
+		XRow->AddChildToHorizontalBox(XSizer);
+		LoadoutCrosshairButton = WidgetTree->ConstructWidget<UButton>();
+		LoadoutCrosshairButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
+		LoadoutCrosshairButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnCrosshairCycle);
+		LoadoutCrosshairValueText = WidgetTree->ConstructWidget<UTextBlock>();
+		LoadoutCrosshairValueText->SetFont(PFLoadFont(12, false));
+		LoadoutCrosshairValueText->SetJustification(ETextJustify::Center);
+		LoadoutCrosshairValueText->SetClipping(EWidgetClipping::ClipToBounds);
+		LoadoutCrosshairValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		LoadoutCrosshairButton->AddChild(LoadoutCrosshairValueText);
+		if (UHorizontalBoxSlot* H = XRow->AddChildToHorizontalBox(LoadoutCrosshairButton))
+		{
+			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			H->SetPadding(FMargin(8.f, 0.f));
+		}
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(XRow))
+		{
+			V->SetPadding(FMargin(40.f, 4.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+	}
+	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
+	RefreshLoadoutLabels();
 
 	// Left: live rotating 3D preview (render target bound in EnsureCharPreview). Right: per-slot steppers.
 	UHorizontalBox* Body = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -781,16 +818,19 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 	ActiveSaveSlot = SaveSlot;
 	PFChar::SetActiveSaveSlot(SaveSlot);
 	CharConfig = PFChar::LoadConfig(SaveSlot);
-	// Push the newly-selected slot to the spawned pawn + the tab preview.
+	WeaponConfig = PFWeapon::LoadConfig(SaveSlot);   // a class = clothing AND weapon — load both together
+	// Push the newly-selected class to the spawned pawn + the tab preview.
 	if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()))
 	{
 		Char->ReapplyCharacterConfig();
+		Char->ReapplyWeaponLoadout();
 	}
 	if (CharPreviewActor != nullptr)
 	{
 		CharPreviewActor->ApplyConfig(CharConfig);
 	}
 	RefreshCharacterLabels();
+	RefreshWeaponLabels();
 	RefreshSaveSlotHighlight();
 }
 
@@ -1163,21 +1203,15 @@ void UPFLoadingMenuWidget::BuildTree()
 	UHorizontalBox* MenuTabs = WidgetTree->ConstructWidget<UHorizontalBox>();
 	TabSetup = MakeMenuTab(TEXT("  MATCH SETUP  "), TEXT("TabSetup"));
 	TabHowTo = MakeMenuTab(TEXT("  HOW TO PLAY  "), TEXT("TabHowTo"));
-	TabLoadout = MakeMenuTab(TEXT("  LOADOUT  "), TEXT("TabLoadout"));
-	TabCharacter = MakeMenuTab(TEXT("  CHARACTER  "), TEXT("TabCharacter"));
+	TabCharacter = MakeMenuTab(TEXT("  CLASS  "), TEXT("TabCharacter"));   // merged Loadout+Character: 5 classes = clothing + weapon
 	OptionsTabButton = MakeMenuTab(TEXT("  OPTIONS  "), TEXT("TabOptions"));   // opens the options overlay
 	TabSetup->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabSetup);
 	TabHowTo->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabHowTo);
-	TabLoadout->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabLoadout);
 	TabCharacter->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnTabCharacter);
 	OptionsTabButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnOptionsClicked);
 	// Tab display order: MATCH SETUP · LOADOUT · CHARACTER · OPTIONS · HOW TO PLAY (reference last). The
 	// switcher page indices are decoupled from this order, so only the add order changes.
 	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabSetup))
-	{
-		H->SetPadding(FMargin(4.f, 0.f));
-	}
-	if (UHorizontalBoxSlot* H = MenuTabs->AddChildToHorizontalBox(TabLoadout))
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
@@ -1251,7 +1285,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	BuildHowToPlayPage(HowToCol);
 
 	UVerticalBox* LoadoutCol = WidgetTree->ConstructWidget<UVerticalBox>();
-	BuildLoadoutPage(LoadoutCol);
+	// (Loadout page merged into the CLASS tab — page 2 kept as an empty switcher placeholder.)
 
 	UVerticalBox* CharacterCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	BuildCharacterPage(CharacterCol);

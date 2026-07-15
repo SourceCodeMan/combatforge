@@ -3,6 +3,7 @@
 #include "Combat/PFWeaponCatalog.h"
 
 #include "CombatForge.h"
+#include "Player/PFCharacterCustomization.h"   // PFChar::GetActiveSaveSlot — weapon choice is per class slot
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/ConfigCacheIni.h"
@@ -25,25 +26,31 @@ namespace PFWeapon
 			  FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(42.f, 3.5f, -3.5f) },
 			{ TEXT("Rifle (Olive)"), TEXT("/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive"),
 			  TEXT("/Game/QuantumCharacter/Materials/M_Rifle_Olive.M_Rifle_Olive"),
-			  FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(42.f, 3.5f, -3.5f) },
-			// Bandits AK meshes are authored larger than the Lyra rifle — scale WAY down (0.48 filled the screen)
+			  FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(28.7f, 6.4f, 0.f),
+			  FVector(8.3f, -6.4f, -1.6f), FRotator(1.5f, 0.f, -1.5f) },
+			// Muzzle + ADS are COMPUTED from mesh geometry (Saved/weapon_geometry.json) via the sight-line formula:
+			// AdsLoc = (D,0,0) - FPLoc - R(s*p_sight), R(v)=(v.y,-v.x,v.z), D=20cm, p_sight=(x_center, 0.58*len,
+			// boxMax.z - margin). The formula reproduces the verified SM_Rifle ADS. AK hip = Tom's live-tuned pose.
+			// (Old note: Bandits AK meshes are authored larger than the Lyra rifle — scale WAY down (0.48 filled the screen)
 			// and pull toward center. Still a blind guess; live-tune with pf.WeaponFP.
 			// Hand-tuned in-game (pf.WeaponFP).
 			{ TEXT("AK (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black"),
-			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(20.f, 3.f, -3.f) },
+			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(17.f, 6.4f, 0.6f),
+			  FVector(15.0f, -6.4f, -1.7f), FRotator(5.f, 0.f, -5.f) },
 			{ TEXT("AK (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
-			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(20.f, 3.f, -3.f) },
+			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(17.f, 6.4f, 0.6f),
+			  FVector(15.0f, -6.4f, -1.7f), FRotator(5.f, 0.f, -5.f) },
 		};
 		// SMG = burst or automatic (NO single); looser accuracy + shorter range than a rifle, but the fastest
 		// ROF and a smaller mag (rifle 30/12bps, SMG 25/14bps, pistol 18/10bps - per-weapon identity).
 		const FPFWeaponDef GSMGs[] = {
 			{ TEXT("AKSU (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black"),
-			  nullptr, FVector(2.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f),
-			  FVector(15.f, -5.5f, -1.5f), FRotator(1.5f, 0.f, -1.5f),
+			  nullptr, FVector(-3.7f, 6.f, -3.f), FRotator(-5.f, -90.f, 5.f), 0.30f, FVector(10.8f, 6.4f, 0.6f),
+			  FVector(18.7f, -6.4f, -1.6f), FRotator(5.f, 0.f, -5.f),
 			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3, /*MagSize*/ 25, /*Bps*/ 14.f },
 			{ TEXT("AKSU (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood"),
-			  nullptr, FVector(2.f, 4.f, -4.f), FRotator(-1.5f, -90.f, 1.5f), 0.30f, FVector(20.f, 2.5f, -4.f),
-			  FVector(15.f, -5.5f, -1.5f), FRotator(1.5f, 0.f, -1.5f),
+			  nullptr, FVector(-3.7f, 6.f, -3.f), FRotator(-5.f, -90.f, 5.f), 0.30f, FVector(10.8f, 6.4f, 0.6f),
+			  FVector(18.7f, -6.4f, -1.6f), FRotator(5.f, 0.f, -5.f),
 			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3, /*MagSize*/ 25, /*Bps*/ 14.f },
 		};
 		// Pistol = burst or single (NO auto). Sidearm hold; shortest range.
@@ -51,8 +58,8 @@ namespace PFWeapon
 			// Pistol floated way out front — pull it back hard (base viewmodel already sits 26 uu forward). ADS was
 			// too high + aimed off the trigger not the sight: drop it and bring the front sight back toward center.
 			{ TEXT("Pistol"), TEXT("/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol"),
-			  nullptr, FVector(-12.f, 3.f, -4.f), FRotator(-2.f, -90.f, 2.f), 0.40f, FVector(6.f, 2.f, -3.f),
-			  FVector(9.f, -3.f, -4.f), FRotator(1.5f, 0.f, -1.5f),
+			  nullptr, FVector(0.5f, 6.4f, -4.5f), FRotator(-2.f, -90.f, 2.f), 0.40f, FVector(7.f, 6.4f, 0.5f),
+			  FVector(21.1f, -6.4f, -1.6f), FRotator(2.f, 0.f, -2.f),
 			  (1 << 0) | (1 << 1), EPFFireMode::Single, 2.0f, 0.12f, 9000.f, 1.2f, 3, /*MagSize*/ 18, /*Bps*/ 10.f },
 		};
 
@@ -114,27 +121,48 @@ namespace PFWeapon
 		return FPFWeaponConfig{ 0, 0 };   // SM_Rifle
 	}
 
-	void SaveConfig(const FPFWeaponConfig& Config)
+	void SaveConfig(int32 ClassSlot, const FPFWeaponConfig& Config)
 	{
 		if (GConfig == nullptr)
 		{
 			return;
 		}
-		GConfig->SetInt(TEXT("CombatForge"), TEXT("WeaponCat"), FMath::Clamp(Config.Category, 0, GCatCount - 1), GGameUserSettingsIni);
-		GConfig->SetInt(TEXT("CombatForge"), TEXT("WeaponIdx"), FMath::Max(0, Config.Index), GGameUserSettingsIni);
+		const FString CatKey = FString::Printf(TEXT("WeaponCat_%d"), ClassSlot);
+		const FString IdxKey = FString::Printf(TEXT("WeaponIdx_%d"), ClassSlot);
+		GConfig->SetInt(TEXT("CombatForge"), *CatKey, FMath::Clamp(Config.Category, 0, GCatCount - 1), GGameUserSettingsIni);
+		GConfig->SetInt(TEXT("CombatForge"), *IdxKey, FMath::Max(0, Config.Index), GGameUserSettingsIni);
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 
-	FPFWeaponConfig LoadConfig()
+	FPFWeaponConfig LoadConfig(int32 ClassSlot)
 	{
 		FPFWeaponConfig C = DefaultConfig();
 		if (GConfig != nullptr)
 		{
-			GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponCat"), C.Category, GGameUserSettingsIni);
-			GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponIdx"), C.Index, GGameUserSettingsIni);
+			const FString CatKey = FString::Printf(TEXT("WeaponCat_%d"), ClassSlot);
+			const FString IdxKey = FString::Printf(TEXT("WeaponIdx_%d"), ClassSlot);
+			if (!GConfig->GetInt(TEXT("CombatForge"), *CatKey, C.Category, GGameUserSettingsIni))
+			{
+				// Legacy single-weapon keys (pre class-slots) seed the first read of any slot.
+				GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponCat"), C.Category, GGameUserSettingsIni);
+			}
+			if (!GConfig->GetInt(TEXT("CombatForge"), *IdxKey, C.Index, GGameUserSettingsIni))
+			{
+				GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponIdx"), C.Index, GGameUserSettingsIni);
+			}
 		}
 		C.Category = FMath::Clamp(C.Category, 0, GCatCount - 1);
 		C.Index = FMath::Clamp(C.Index, 0, GCats[C.Category].Count - 1);
 		return C;
+	}
+
+	void SaveConfig(const FPFWeaponConfig& Config)
+	{
+		SaveConfig(PFChar::GetActiveSaveSlot(), Config);
+	}
+
+	FPFWeaponConfig LoadConfig()
+	{
+		return LoadConfig(PFChar::GetActiveSaveSlot());
 	}
 }

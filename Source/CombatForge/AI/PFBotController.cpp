@@ -128,7 +128,8 @@ void APFBotController::OnPossess(APawn* InPawn)
 	LastSeenTime = InvestigateTime = -1000.f;   // clear stale search memory from a previous life
 	bHaveTacticalGoal = false;   ReposTimer = 0.f;   // re-evaluate firing position for the new pawn
 	LastKnownHP = 255;   RoundMaxHP = 1;   SuppressedUntil = -1000.f;   // fresh health/suppression for the new life
-	ScanTimer = 0.f;   ScanYawOffset = 0.f;
+	ScanTimer = 0.f;   ScanYawOffset = 0.f;   ScanPitchOffset = 0.f;
+	JumpStallTimer = 0.f;   JumpCooldown = 0.f;
 	LastCombatTime = -1000.f;   // fresh life = out of combat → first contact gets a full reaction delay
 	TriggerPullTimer = 0.f;
 	// Give this bot a team id so perception has a concrete affiliation (attitude itself comes from the
@@ -331,6 +332,12 @@ void APFBotController::Tick(float DeltaSeconds)
 			ScanYawOffset = (FMath::FRand() < 0.30f)
 				? FMath::FRandRange(120.f, 200.f) * (FMath::FRand() < 0.5f ? -1.f : 1.f)   // glance to a flank / behind
 				: FMath::FRandRange(-70.f, 70.f);                                          // sweep the front arc
+			// Verticality: a third of glances check HIGH (upper floors, wall tops), some check low; the sight
+			// cone follows the look pitch, so bots actually notice players holding high ground now.
+			const float R = FMath::FRand();
+			ScanPitchOffset = (R < 0.35f) ? FMath::FRandRange(15.f, 40.f)
+			                 : (R < 0.50f) ? FMath::FRandRange(-25.f, -10.f)
+			                 : FMath::FRandRange(-5.f, 8.f);
 			ScanTimer = FMath::FRandRange(1.2f, 2.6f);
 		}
 	}
@@ -397,7 +404,8 @@ void APFBotController::Tick(float DeltaSeconds)
 			if (!ToC.IsNearlyZero())
 			{
 				FRotator LookRot = ToC.Rotation();
-				LookRot.Yaw += ScanYawOffset;   // glance around while advancing
+				LookRot.Yaw += ScanYawOffset;     // glance around while advancing
+				LookRot.Pitch = FMath::Clamp(LookRot.Pitch + ScanPitchOffset, -60.f, 60.f);   // check high ground too
 				SetControlRotation(FMath::RInterpTo(GetControlRotation(), LookRot, DeltaSeconds, 3.5f));
 			}
 			RepathTimer -= DeltaSeconds;
@@ -502,6 +510,7 @@ void APFBotController::Tick(float DeltaSeconds)
 		{
 			FRotator LookRot = ToLook.Rotation();
 			LookRot.Yaw += ScanYawOffset;
+			LookRot.Pitch = FMath::Clamp(LookRot.Pitch + ScanPitchOffset, -60.f, 60.f);   // sweep upper levels too
 			SetControlRotation(FMath::RInterpTo(GetControlRotation(), LookRot, DeltaSeconds, 3.5f));
 		}
 	}
@@ -573,10 +582,41 @@ void APFBotController::Tick(float DeltaSeconds)
 			MoveToGoal(GoalLoc, Target);   // Target may be null (search/objective) → MoveToGoal just paths to GoalLoc
 			RepathTimer = RepathInterval;
 		}
+
+		// JUMP low barriers: the navmesh can't route over knee/waist walls, so bots were confined to ground
+		// lanes players hop over freely. A bot stalled against a JUMPABLE obstacle (knee trace blocked, head
+		// trace clear) hops it and keeps pushing toward its goal — verticality via the same moves players make.
+		JumpCooldown -= DeltaSeconds;
+		const float Speed2D = Bot->GetVelocity().Size2D();
+		JumpStallTimer = (Speed2D < 60.f) ? (JumpStallTimer + DeltaSeconds) : 0.f;
+		if (JumpCooldown <= 0.f && JumpStallTimer > 0.4f)
+		{
+			if (UWorld* JW = GetWorld())
+			{
+				const FVector Fwd = (GoalLoc - BotLoc).GetSafeNormal2D();
+				if (!Fwd.IsNearlyZero())
+				{
+					FCollisionQueryParams JQ(FName(TEXT("BotJump")), /*bTraceComplex=*/false, Bot);
+					FHitResult KneeHit, HeadHit;
+					const FVector KneeStart = BotLoc + FVector(0.f, 0.f, -50.f);
+					const bool bKneeBlocked = JW->LineTraceSingleByChannel(KneeHit, KneeStart, KneeStart + Fwd * 120.f, ECC_WorldStatic, JQ);
+					const FVector HeadStart = BotLoc + FVector(0.f, 0.f, 70.f);
+					const bool bHeadBlocked = JW->LineTraceSingleByChannel(HeadHit, HeadStart, HeadStart + Fwd * 160.f, ECC_WorldStatic, JQ);
+					if (bKneeBlocked && !bHeadBlocked)
+					{
+						Bot->Jump();
+						Bot->AddMovementInput(Fwd, 1.f);   // carry over the lip while airborne
+						JumpCooldown = 1.2f;
+						JumpStallTimer = 0.f;
+					}
+				}
+			}
+		}
 	}
 	else
 	{
 		StopMovement();
+		JumpStallTimer = 0.f;
 	}
 }
 
@@ -713,11 +753,27 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 		const bool bLOS = !World->LineTraceSingleByChannel(Hit, P + FVector(0.f, 0.f, 60.f), EnemyEye, ECC_Visibility, Q);
 		Score += bLOS ? 3.f : -2.5f;
 
-		// (2) Good range: prefer the stand-off band; punish being right on top of the enemy.
-		Score += 1.f - FMath::Abs(Dist - PreferredRangeUU) / FMath::Max(EngageRangeUU, 1.f);
-		if (Dist < MinRangeUU) { Score -= 1.f; }
+		// AGGRESSION MODEL (playtest: "bots happy to stay behind cover on their side"): an UNHURT bot presses
+		// the attack — positions CLOSER to the enemy score higher and cover is nearly ignored. Only a bot that
+		// has actually been HIT (suppressed window) values cover and stand-off range. Shooting well was never
+		// the problem; camping was.
+		const UWorld* W2 = GetWorld();
+		const bool bHurt = (W2 != nullptr) && (static_cast<float>(W2->GetTimeSeconds()) < SuppressedUntil);
 
-		// (3) Near cover: short cardinal probes — a wall/prop beside us is good (we can duck); boxed-in is bad.
+		if (bHurt)
+		{
+			// (2a) Hurt: prefer the stand-off band while the sting wears off.
+			Score += 1.f - FMath::Abs(Dist - PreferredRangeUU) / FMath::Max(EngageRangeUU, 1.f);
+			if (Dist < MinRangeUU) { Score -= 1.f; }
+		}
+		else
+		{
+			// (2b) Unhurt: ADVANCE. Closer beats farther, down to a bayonet-range floor.
+			Score += 1.5f * (1.f - FMath::Clamp(Dist / FMath::Max(EngageRangeUU, 1.f), 0.f, 1.f));
+			if (Dist < MinRangeUU * 0.5f) { Score -= 0.75f; }   // don't literally stand inside them
+		}
+
+		// (3) Near cover: short cardinal probes. Full weight only while HURT; a healthy bot barely cares.
 		int32 CoverSides = 0;
 		static const FVector Dirs[4] = { FVector(1,0,0), FVector(-1,0,0), FVector(0,1,0), FVector(0,-1,0) };
 		const FVector Chest = P + FVector(0.f, 0.f, 40.f);
@@ -726,7 +782,7 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 			FHitResult CH;
 			if (World->LineTraceSingleByChannel(CH, Chest, Chest + D * CoverProbeUU, ECC_WorldStatic, Q)) { ++CoverSides; }
 		}
-		Score += CoverSides * 0.5f;
+		Score += CoverSides * (bHurt ? 0.8f : 0.1f);
 		if (CoverSides >= 4) { Score -= 1.5f; }   // fully walled in — can't fight from here
 
 		// (4) Flank: prefer the enemy's side/rear over walking straight into their facing.

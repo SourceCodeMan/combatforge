@@ -174,7 +174,12 @@ private:
 	// ---- Idle scanning: when not engaged the bot glances around (front sweeps + periodic flank/rear checks) so
 	//      it isn't permanently blind behind — a patient flanker is caught when the sweep brings them into view.
 	float ScanTimer = 0.f;
-	float ScanYawOffset = 0.f;   // current glance offset (deg) added to the look direction
+	float ScanYawOffset = 0.f;    // current glance offset (deg) added to the look direction
+	float ScanPitchOffset = 0.f;  // vertical glance — bots check upper floors / high walls, not just their own level
+
+	// ---- Jump-over-low-barriers: when path-following stalls against a jumpable wall, hop it. ----
+	float JumpStallTimer = 0.f;
+	float JumpCooldown = 0.f;
 
 	// ---- Tactical reposition state: the current chosen firing position + its re-evaluation timer. ----
 	FVector TacticalGoal = FVector::ZeroVector;

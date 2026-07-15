@@ -65,6 +65,10 @@ namespace PFWeapon
 	FPFWeaponConfig DefaultConfig();
 
 	// ---- Persistence (GGameUserSettings.ini [CombatForge]) ----
+	// The weapon choice is PER CLASS SLOT (the same 5 slots as the character save slots) — each class is a full
+	// kit: clothing + gun. The parameterless overloads route through PFChar::GetActiveSaveSlot().
+	void SaveConfig(int32 ClassSlot, const FPFWeaponConfig& Config);
+	FPFWeaponConfig LoadConfig(int32 ClassSlot);
 	void SaveConfig(const FPFWeaponConfig& Config);
 	FPFWeaponConfig LoadConfig();
 }

@@ -21,7 +21,7 @@ namespace
 		{ TEXT("Arms"),     TEXT("Arms"),     TEXT("/Game/Bandits/Mesh/Arms")           },
 		{ TEXT("Hips"),     TEXT("Hips"),     TEXT("/Game/Bandits/Mesh/Hips_Module")    },
 		{ TEXT("Pants"),    TEXT("Pants"),    TEXT("/Game/Bandits/Mesh/Pants")          },
-		{ TEXT("Cloth"),    TEXT("Cloth"),    TEXT("/Game/Bandits/Mesh/Cloth")          },
+		{ TEXT("Cloth"),    TEXT("Shirt"),    TEXT("/Game/Bandits/Mesh/Cloth")          },   // pack folder is "Cloth"; players see "Shirt" (internal key unchanged so saved slots keep working)
 		{ TEXT("Backpack"), TEXT("Backpack"), TEXT("/Game/Bandits/Mesh/Bacpacks")       },
 	};
 	constexpr int32 GSlotCount = UE_ARRAY_COUNT(GSlots);
