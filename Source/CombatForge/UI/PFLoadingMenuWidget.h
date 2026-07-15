@@ -201,6 +201,8 @@ private:
 	UFUNCTION() void OnMapPageNext();
 	UFUNCTION() void OnMapAutoClicked();
 	UFUNCTION() void OnQuickStartClicked();
+	UFUNCTION() void OnHostLanClicked();   // relaunch this map as a LISTEN server (LAN/VPN friends can join)
+	UFUNCTION() void OnJoinLanClicked();   // connect to the host IP typed in the join box
 
 	/** Apply Play-Only + Skirmish + 4v4 + bots + auto map (first-session default). */
 	void ApplyQuickStartPreset();
@@ -209,6 +211,9 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> SubtitleText;
 	UPROPERTY() TObjectPtr<UButton> QuickStartButton;
+	UPROPERTY() TObjectPtr<UButton> HostLanButton;
+	UPROPERTY() TObjectPtr<class UEditableTextBox> JoinIpBox;
+	UPROPERTY() TObjectPtr<UButton> JoinLanButton;
 	UPROPERTY() TObjectPtr<UTextBlock> QuickStartLabel;
 	UPROPERTY() TObjectPtr<UTextBlock> StatusText;
 	UPROPERTY() TObjectPtr<UProgressBar> ProgressBar;

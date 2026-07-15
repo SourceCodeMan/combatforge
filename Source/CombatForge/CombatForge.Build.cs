@@ -18,7 +18,7 @@ public class CombatForge : ModuleRules
 			"Core", "CoreUObject", "Engine", "InputCore",
 			"EnhancedInput",
 			"UMG", "Slate", "SlateCore",
-			"NetCore",                       // push-model / net serialization helpers
+			"NetCore", "Sockets",                       // push-model / net serialization helpers
 			"EngineCameras",                 // UWaveOscillatorCameraShakePattern (PFCameraShakes)
 			"AIModule",                      // AAIController base for roster-filling bots (PFBotController)
 			"GameplayTasks",                 // AIModule dep for AI Perception (sight/hearing senses)

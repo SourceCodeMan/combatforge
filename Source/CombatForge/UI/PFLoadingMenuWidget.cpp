@@ -12,6 +12,9 @@
 #include "Blueprint/WidgetTree.h"
 #include "Brushes/SlateColorBrush.h"
 #include "Components/Button.h"
+#include "Components/EditableTextBox.h"
+#include "SocketSubsystem.h"
+#include "IPAddress.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
@@ -43,6 +46,25 @@
 #include "ShaderPipelineCache.h"
 #include "Styling/CoreStyle.h"
 #include "UObject/SoftObjectPath.h"
+
+namespace
+{
+	// Primary LAN IP of this machine (what a friend types into JOIN). Falls back to a hint if unresolvable.
+	FString GetLocalLanIp()
+	{
+		bool bCanBind = false;
+		if (ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM))
+		{
+			TSharedRef<FInternetAddr> Addr = Sockets->GetLocalHostAddr(*GLog, bCanBind);
+			if (Addr->IsValid())
+			{
+				return Addr->ToString(/*bAppendPort=*/false);
+			}
+		}
+		return TEXT("<this PC's IP>");
+	}
+}
+
 
 namespace
 {
@@ -1196,7 +1218,79 @@ void UPFLoadingMenuWidget::BuildTree()
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(QuickHint))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 20.f));
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
+	}
+
+	// ---- LAN multiplayer (no matchmaking yet): HOST turns this PC into a listen server; JOIN connects to a
+	//      host's IP — same network or VPN. State-aware: a fresh boot shows the controls; a hosting session
+	//      shows "friends join <ip>"; a joined client shows the connection.
+	{
+		const ENetMode Net = GetWorld() ? GetWorld()->GetNetMode() : NM_Standalone;
+		UHorizontalBox* MpRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+		if (Net == NM_Standalone)
+		{
+			HostLanButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("HostLanBtn"));
+			HostLanButton->SetBackgroundColor(FLinearColor(0.16f, 0.34f, 0.2f, 1.f));
+			HostLanButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnHostLanClicked);
+			UTextBlock* HostLab = WidgetTree->ConstructWidget<UTextBlock>();
+			HostLab->SetText(FText::FromString(TEXT("  HOST LAN GAME  ")));
+			HostLab->SetFont(PFLoadFont(13, true));
+			HostLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			HostLanButton->AddChild(HostLab);
+			if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(HostLanButton))
+			{
+				H->SetPadding(FMargin(4.f, 0.f, 10.f, 0.f));
+				H->SetVerticalAlignment(VAlign_Center);
+			}
+
+			JoinIpBox = WidgetTree->ConstructWidget<UEditableTextBox>();
+			JoinIpBox->SetHintText(FText::FromString(TEXT("host IP — e.g. 192.168.1.50")));
+			JoinIpBox->SetText(FText::FromString(FPFUserPrefs::GetLastJoinIp()));
+			USizeBox* IpSizer = WidgetTree->ConstructWidget<USizeBox>();
+			IpSizer->SetWidthOverride(210.f);
+			IpSizer->SetContent(JoinIpBox);
+			if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(IpSizer))
+			{
+				H->SetPadding(FMargin(4.f, 0.f));
+				H->SetVerticalAlignment(VAlign_Center);
+			}
+
+			JoinLanButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("JoinLanBtn"));
+			JoinLanButton->SetBackgroundColor(FLinearColor(0.16f, 0.24f, 0.4f, 1.f));
+			JoinLanButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnJoinLanClicked);
+			UTextBlock* JoinLab = WidgetTree->ConstructWidget<UTextBlock>();
+			JoinLab->SetText(FText::FromString(TEXT("  JOIN  ")));
+			JoinLab->SetFont(PFLoadFont(13, true));
+			JoinLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			JoinLanButton->AddChild(JoinLab);
+			if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(JoinLanButton))
+			{
+				H->SetPadding(FMargin(4.f, 0.f));
+				H->SetVerticalAlignment(VAlign_Center);
+			}
+		}
+		else
+		{
+			UTextBlock* NetLab = WidgetTree->ConstructWidget<UTextBlock>();
+			NetLab->SetFont(PFLoadFont(13, true));
+			NetLab->SetJustification(ETextJustify::Center);
+			if (Net == NM_ListenServer)
+			{
+				NetLab->SetText(FText::FromString(FString::Printf(TEXT("HOSTING — friends join:  %s"), *GetLocalLanIp())));
+				NetLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.9f, 0.5f)));
+			}
+			else
+			{
+				NetLab->SetText(FText::FromString(TEXT("CONNECTED to host")));
+				NetLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.75f, 1.f)));
+			}
+			MpRow->AddChildToHorizontalBox(NetLab);
+		}
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MpRow))
+		{
+			V->SetHorizontalAlignment(HAlign_Center);
+			V->SetPadding(FMargin(0.f, 0.f, 0.f, 20.f));
+		}
 	}
 
 	// ---- Menu tabs: Match Setup | How to Play ----
@@ -1830,6 +1924,35 @@ void UPFLoadingMenuWidget::ApplyQuickStartPreset()
 		QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — applied ✓  ")));
 	}
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: Quick Start preset applied"));
+}
+
+void UPFLoadingMenuWidget::OnHostLanClicked()
+{
+	// Relaunch the map as a LISTEN server: same solo flow, but LAN/VPN friends can now join this PC by IP.
+	// (First host triggers the Windows Firewall prompt — allow it or nobody can connect.)
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("Menu: hosting LAN listen server (join at %s)"), *GetLocalLanIp());
+		PC->ConsoleCommand(TEXT("open L_Graybox?listen"));
+	}
+}
+
+void UPFLoadingMenuWidget::OnJoinLanClicked()
+{
+	FString Ip = JoinIpBox ? JoinIpBox->GetText().ToString().TrimStartAndEnd() : FString();
+	if (Ip.IsEmpty())
+	{
+		SetStatus(TEXT("Type the host's IP first (they see it after clicking HOST)."));
+		return;
+	}
+	FPFUserPrefs::SetLastJoinIp(Ip);
+	FPFUserPrefs::Flush();
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("Menu: joining LAN host %s"), *Ip);
+		SetStatus(FString::Printf(TEXT("Connecting to %s…"), *Ip));
+		PC->ConsoleCommand(FString::Printf(TEXT("open %s"), *Ip));
+	}
 }
 
 void UPFLoadingMenuWidget::OnQuickStartClicked()

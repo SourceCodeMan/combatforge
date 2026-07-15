@@ -31,6 +31,10 @@ struct COMBATFORGE_API FPFUserPrefs
 	static int32 GetWindowModeIndex();      // 0=Fullscreen 1=Borderless 2=Windowed
 	static void SetWindowModeIndex(int32 Idx);
 
+	// LAN multiplayer: the last host IP joined (pre-filled in the JOIN box).
+	static FString GetLastJoinIp();
+	static void SetLastJoinIp(const FString& Ip);
+
 	// Video prefs mirrored here because the ENGINE readbacks are lossy: GetOverallScalabilityLevel() returns
 	// -1 whenever a custom resolution scale is applied (the widget clamped that to Low and then SAVED Low on
 	// the next Apply). The user's true choices seed the UI; the engine values are derived from them.

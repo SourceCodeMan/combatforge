@@ -102,6 +102,24 @@ void FPFUserPrefs::SetWindowModeIndex(int32 Idx)
 	WriteInt(TEXT("WindowModeIndex"), FMath::Clamp(Idx, 0, 2));
 }
 
+FString FPFUserPrefs::GetLastJoinIp()
+{
+	FString Ip;
+	if (GConfig)
+	{
+		GConfig->GetString(TEXT("CombatForge"), TEXT("LastJoinIp"), Ip, GGameUserSettingsIni);
+	}
+	return Ip;
+}
+
+void FPFUserPrefs::SetLastJoinIp(const FString& Ip)
+{
+	if (GConfig)
+	{
+		GConfig->SetString(TEXT("CombatForge"), TEXT("LastJoinIp"), *Ip, GGameUserSettingsIni);
+	}
+}
+
 int32 FPFUserPrefs::GetQualityLevel()
 {
 	return FMath::Clamp(ReadInt(TEXT("QualityLevel"), 2), 0, 3);
