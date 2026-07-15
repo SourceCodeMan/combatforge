@@ -23,11 +23,12 @@ namespace PFWeapon
 		const FPFWeaponDef GRifles[] = {
 			{ TEXT("Rifle (default)"), TEXT("/Game/Weapons/Rifle/Mesh/SM_Rifle.SM_Rifle"),
 			  TEXT("/Game/Weapons/Rifle/M_PF_Rifle.M_PF_Rifle"),
-			  FVector(3.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(42.f, 3.5f, -3.5f) },
+			  FVector(6.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.5f, FVector(42.f, 3.5f, -3.5f),
+			  FVector(15.f, -5.4f, -1.2f), FRotator(1.5f, 0.f, -0.5f) },   // Tom-tuned 2026-07-15
 			{ TEXT("Rifle (Olive)"), TEXT("/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive"),
 			  TEXT("/Game/QuantumCharacter/Materials/M_Rifle_Olive.M_Rifle_Olive"),
-			  FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(28.7f, 6.4f, 0.f),
-			  FVector(8.3f, -6.4f, -1.6f), FRotator(1.5f, 0.f, -1.5f) },
+			  FVector(6.f, 5.5f, -3.5f), FRotator(-1.5f, -90.f, 1.5f), 0.5f, FVector(42.f, 3.5f, -3.5f),
+			  FVector(15.f, -5.4f, -1.2f), FRotator(1.5f, 0.f, -0.5f) },   // Tom: match default rifle exactly 2026-07-15
 			// Muzzle + ADS are COMPUTED from mesh geometry (Saved/weapon_geometry.json) via the sight-line formula:
 			// AdsLoc = (D,0,0) - FPLoc - R(s*p_sight), R(v)=(v.y,-v.x,v.z), D=20cm, p_sight=(x_center, 0.58*len,
 			// boxMax.z - margin). The formula reproduces the verified SM_Rifle ADS. AK hip = Tom's live-tuned pose.
@@ -35,11 +36,11 @@ namespace PFWeapon
 			// and pull toward center. Still a blind guess; live-tune with pf.WeaponFP.
 			// Hand-tuned in-game (pf.WeaponFP).
 			{ TEXT("AK (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black"),
-			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(17.f, 6.4f, 0.6f),
-			  FVector(15.0f, -6.4f, -1.7f), FRotator(5.f, 0.f, -5.f) },
+			  nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(28.7f, 6.4f, 0.f),
+			  FVector(5.f, -6.2f, 1.5f), FRotator(1.8f, 0.f, -0.5f) },   // Tom-tuned 2026-07-15
 			{ TEXT("AK (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
-			  nullptr, FVector(-3.f, 6.f, -2.8f), FRotator(-5.f, -90.f, 5.f), 0.31f, FVector(17.f, 6.4f, 0.6f),
-			  FVector(15.0f, -6.4f, -1.7f), FRotator(5.f, 0.f, -5.f) },
+			  nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.f, 1.5f), 0.48f, FVector(28.7f, 6.4f, 0.f),
+			  FVector(5.f, -6.2f, 1.5f), FRotator(1.8f, 0.f, -0.5f) },   // Tom-tuned 2026-07-15 (identical to Black)
 		};
 		// SMG = burst or automatic (NO single); looser accuracy + shorter range than a rifle, but the fastest
 		// ROF and a smaller mag (rifle 30/12bps, SMG 25/14bps, pistol 18/10bps - per-weapon identity).
