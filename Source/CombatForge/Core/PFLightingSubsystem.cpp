@@ -3,6 +3,7 @@
 #include "Core/PFLightingSubsystem.h"
 
 #include "CombatForge.h"
+#include "Core/PFUserPrefs.h"
 
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -131,10 +132,8 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.AutoExposureMinBrightness = 1.f;
 		PP.bOverride_AutoExposureMaxBrightness = true;
 		PP.AutoExposureMaxBrightness = 1.f;
-		// Mild pull (0.50 -> 0.42) mostly to tame the sun pools; the SkyLight raise above does the real
-		// lifting of the dark areas. Independent knob — raise for brighter-overall, lower if pools blow.
-		PP.bOverride_AutoExposureBias = true;
-		PP.AutoExposureBias = 0.42f;
+		// Exposure bias + contrast are written by ApplyUserGradeToSettings below: frozen base
+		// values (0.42 bias / 1.03 contrast) + the user's saved brightness/contrast sliders.
 
 		// Clean industrial grade (original knobs + mild vignette/bloom).
 		PP.bOverride_BloomIntensity = true;
@@ -146,10 +145,6 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.VignetteIntensity = 0.10f;
 		PP.bOverride_ColorSaturation = true;
 		PP.ColorSaturation = FVector4(0.98, 0.98, 1.0, 1.0);
-		// Contrast >1 crushes shadows to black — the main tonemap cause of the "everything's dark" look.
-		// 1.10 -> 1.03 lifts the low end while keeping the image from going flat.
-		PP.bOverride_ColorContrast = true;
-		PP.ColorContrast = FVector4(1.03, 1.03, 1.02, 1.0);
 		PP.bOverride_ColorGamma = true;
 		PP.ColorGamma = FVector4(1.0, 1.0, 1.0, 1.0);
 		PP.bOverride_ColorGain = true;
@@ -172,8 +167,37 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		PP.MotionBlurAmount = 0.f;
 		PP.bOverride_LensFlareIntensity = true;
 		PP.LensFlareIntensity = 0.f;
+
+		// Seed the user's saved brightness/contrast grade at rig spawn so it applies in every new
+		// match world without the options menu ever opening; keep the PPV for live slider updates.
+		ApplyUserGradeToSettings(PP, FPFUserPrefs::GetBrightnessEV(), FPFUserPrefs::GetContrastScale());
+		GradedPPV = PPV;
 	}
 
 	UE_LOG(CombatForgeLog, Log, TEXT("PFLightingSubsystem: known-good CQB rig restored (netmode %d)"),
 		static_cast<int32>(World.GetNetMode()));
+}
+
+void UPFLightingSubsystem::SetUserGrade(float BrightnessEV, float ContrastScale)
+{
+	if (APostProcessVolume* PPV = GradedPPV.Get())
+	{
+		ApplyUserGradeToSettings(PPV->Settings, BrightnessEV, ContrastScale);
+	}
+}
+
+void UPFLightingSubsystem::ApplyUserGradeToSettings(FPostProcessSettings& PP,
+	float BrightnessEV, float ContrastScale)
+{
+	// FROZEN base values (Tom-validated look, commit 76e217d) — the sliders offset/scale them,
+	// never replace them, so slider defaults (0 EV / 1.0) reproduce the exact baseline image.
+	constexpr float BaseExposureBias = 0.42f;      // "raise for brighter-overall, lower if pools blow"
+	const FVector4 BaseContrast(1.03, 1.03, 1.02, 1.0);   // >1 crushes shadows; keep the warm channel bias
+
+	const float EV = FMath::Clamp(BrightnessEV, -1.f, 1.f);
+	const float C = FMath::Clamp(ContrastScale, 0.85f, 1.2f);
+	PP.bOverride_AutoExposureBias = true;
+	PP.AutoExposureBias = BaseExposureBias + EV;
+	PP.bOverride_ColorContrast = true;
+	PP.ColorContrast = FVector4(BaseContrast.X * C, BaseContrast.Y * C, BaseContrast.Z * C, 1.0);
 }

@@ -17,6 +17,9 @@
  * Known-good path: single key directional, modest sky, locked histogram exposure min=max=1.
  * Do not use AEM_Manual for packaged clients (caused pure-white in-match frames).
  */
+class APostProcessVolume;
+struct FPostProcessSettings;
+
 UCLASS()
 class COMBATFORGE_API UPFLightingSubsystem : public UWorldSubsystem
 {
@@ -26,6 +29,15 @@ public:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
+	/** Options-menu sliders land here: offsets the rig's BASE exposure/contrast (never replaces
+	 *  them). The base values stay frozen in SpawnLightingRig — this is the only sanctioned
+	 *  user-facing brightness path (see commit 76e217d). */
+	void SetUserGrade(float BrightnessEV, float ContrastScale);
+
 private:
 	void SpawnLightingRig(UWorld& World);
+	/** Single owner of the grade math — used at rig spawn AND at runtime so the paths never drift. */
+	static void ApplyUserGradeToSettings(FPostProcessSettings& PP, float BrightnessEV, float ContrastScale);
+
+	TWeakObjectPtr<APostProcessVolume> GradedPPV;   // spawned rig PPV (per-world)
 };

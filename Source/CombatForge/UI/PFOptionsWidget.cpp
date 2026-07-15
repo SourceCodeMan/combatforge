@@ -12,6 +12,7 @@
 #include "InputCoreTypes.h"
 #include "Player/CombatForgeCharacter.h"
 #include "Combat/PFCombatAudio.h"
+#include "Core/PFLightingSubsystem.h"
 
 #include "AudioDevice.h"
 #include "Blueprint/WidgetTree.h"
@@ -314,6 +315,46 @@ void UPFOptionsWidget::BuildVideoPage(UWidget* ParentBox)
 	{
 		V->SetPadding(FMargin(0.f, 10.f));
 	}
+
+	// Brightness — EV offset on the match lighting rig's frozen base exposure (live-applies).
+	UHorizontalBox* BrRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	BrRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Brightness"), 15, false));
+	BrightnessSlider = WidgetTree->ConstructWidget<USlider>();
+	BrightnessSlider->SetMinValue(-1.f);
+	BrightnessSlider->SetMaxValue(1.f);
+	BrightnessSlider->SetStepSize(0.05f);
+	BrightnessSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnBrightnessChanged);
+	if (UHorizontalBoxSlot* H = BrRow->AddChildToHorizontalBox(BrightnessSlider))
+	{
+		H->SetPadding(FMargin(16.f, 0.f));
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+	BrightnessValueText = MakeLabel(WidgetTree, TEXT("+0.00 EV"), 14, true);
+	BrRow->AddChildToHorizontalBox(BrightnessValueText);
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(BrRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
+	// Contrast — scales the rig's base contrast (live-applies).
+	UHorizontalBox* CtRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	CtRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Contrast"), 15, false));
+	ContrastSlider = WidgetTree->ConstructWidget<USlider>();
+	ContrastSlider->SetMinValue(0.85f);
+	ContrastSlider->SetMaxValue(1.2f);
+	ContrastSlider->SetStepSize(0.01f);
+	ContrastSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnContrastChanged);
+	if (UHorizontalBoxSlot* H = CtRow->AddChildToHorizontalBox(ContrastSlider))
+	{
+		H->SetPadding(FMargin(16.f, 0.f));
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+	ContrastValueText = MakeLabel(WidgetTree, TEXT("1.00"), 14, true);
+	CtRow->AddChildToHorizontalBox(ContrastValueText);
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(CtRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
 }
 
 void UPFOptionsWidget::BuildAudioPage(UWidget* ParentBox)
@@ -368,10 +409,10 @@ void UPFOptionsWidget::BuildAudioPage(UWidget* ParentBox)
 		}
 	}
 
-	// Ambient bed
+	// Background wind (Tom: "ambient bed" meant nothing to him — plain English)
 	{
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
-		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Ambient bed"), 15, false));
+		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Background wind"), 15, false));
 		AmbientVolSlider = WidgetTree->ConstructWidget<USlider>();
 		AmbientVolSlider->SetMinValue(0.f);
 		AmbientVolSlider->SetMaxValue(1.f);
@@ -391,7 +432,7 @@ void UPFOptionsWidget::BuildAudioPage(UWidget* ParentBox)
 	}
 
 	UTextBlock* Note = MakeLabel(WidgetTree,
-		TEXT("SFX = combat/UI one-shots. Ambient = soft arena wind bed."), 12, false);
+		TEXT("SFX = gunfire and menu sounds. Background wind = a quiet outdoor wind loop."), 12, false);
 	Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
 	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Note))
 	{
@@ -773,6 +814,10 @@ void UPFOptionsWidget::ApplyEmbeddedChrome()
 	if (BackButton)        { BackButton->SetVisibility(ESlateVisibility::Collapsed); }
 	if (QuitMenuButton)    { QuitMenuButton->SetVisibility(ESlateVisibility::Collapsed); }
 	if (QuitDesktopButton) { QuitDesktopButton->SetVisibility(ESlateVisibility::Collapsed); }
+	// The boot menu has its own top-level HOW TO PLAY tab, so the embedded options card showing
+	// a second one read as a duplicate (Tom 2026-07-15). The in-game pause overlay never routes
+	// through here (bEmbedded=false), so it keeps its How to Play tab.
+	if (TabHowTo)          { TabHowTo->SetVisibility(ESlateVisibility::Collapsed); }
 }
 
 void UPFOptionsWidget::EnterEmbeddedMode()
@@ -896,6 +941,31 @@ void UPFOptionsWidget::OnResScaleChanged(float Value)
 	RefreshLabels();
 }
 
+void UPFOptionsWidget::OnBrightnessChanged(float Value)
+{
+	WorkingBrightness = FMath::Clamp(Value, -1.f, 1.f);
+	ApplyBrightnessContrast(WorkingBrightness, WorkingContrast);   // live while dragging
+	RefreshLabels();
+}
+
+void UPFOptionsWidget::OnContrastChanged(float Value)
+{
+	WorkingContrast = FMath::Clamp(Value, 0.85f, 1.2f);
+	ApplyBrightnessContrast(WorkingBrightness, WorkingContrast);
+	RefreshLabels();
+}
+
+void UPFOptionsWidget::ApplyBrightnessContrast(float EV, float Contrast)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UPFLightingSubsystem* Lighting = World->GetSubsystem<UPFLightingSubsystem>())
+		{
+			Lighting->SetUserGrade(EV, Contrast);   // no-op in worlds without a spawned rig (boot menu)
+		}
+	}
+}
+
 void UPFOptionsWidget::OnMasterVolChanged(float Value)
 {
 	WorkingMasterVol = FMath::Clamp(Value, 0.f, 1.f);
@@ -988,6 +1058,14 @@ void UPFOptionsWidget::RefreshLabels()
 	{
 		ResScaleValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(WorkingResScale))));
 	}
+	if (BrightnessValueText)
+	{
+		BrightnessValueText->SetText(FText::FromString(FString::Printf(TEXT("%+.2f EV"), WorkingBrightness)));
+	}
+	if (ContrastValueText)
+	{
+		ContrastValueText->SetText(FText::FromString(FString::Printf(TEXT("%.2f"), WorkingContrast)));
+	}
 	if (MasterVolValueText)
 	{
 		MasterVolValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(WorkingMasterVol * 100.f))));
@@ -1021,6 +1099,8 @@ void UPFOptionsWidget::RefreshLabels()
 		InvertYCheck->SetIsChecked(bWorkingInvertY);
 	}
 	if (ResScaleSlider) { ResScaleSlider->SetValue(WorkingResScale); }
+	if (BrightnessSlider) { BrightnessSlider->SetValue(WorkingBrightness); }
+	if (ContrastSlider) { ContrastSlider->SetValue(WorkingContrast); }
 	if (MasterVolSlider) { MasterVolSlider->SetValue(WorkingMasterVol); }
 	if (SfxVolSlider) { SfxVolSlider->SetValue(WorkingSfxVol); }
 	if (AmbientVolSlider) { AmbientVolSlider->SetValue(WorkingAmbientVol); }
@@ -1059,6 +1139,8 @@ void UPFOptionsWidget::PullFromSettings()
 	WorkingSfxVol = FMath::Clamp(WorkingSfxVol, 0.f, 1.f);
 	WorkingSens = FMath::Clamp(WorkingSens, 0.2f, 3.f);
 	WorkingAmbientVol = FPFUserPrefs::GetAmbientVolume();
+	WorkingBrightness = FPFUserPrefs::GetBrightnessEV();
+	WorkingContrast = FPFUserPrefs::GetContrastScale();
 	bWorkingInvertY = FPFUserPrefs::GetInvertY();
 	WorkingFov = FPFUserPrefs::GetFieldOfView();
 	WorkingWindowMode = FPFUserPrefs::GetWindowModeIndex();
@@ -1088,6 +1170,8 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	FPFUserPrefs::SetInvertY(bWorkingInvertY);
 	FPFUserPrefs::SetFieldOfView(WorkingFov);
 	FPFUserPrefs::SetAmbientVolume(WorkingAmbientVol);
+	FPFUserPrefs::SetBrightnessEV(WorkingBrightness);
+	FPFUserPrefs::SetContrastScale(WorkingContrast);
 	FPFUserPrefs::SetWindowModeIndex(WorkingWindowMode);
 	// Mirror the user's TRUE video choices (the engine's own readbacks are lossy — see PullFromSettings).
 	FPFUserPrefs::SetQualityLevel(WorkingQuality);
@@ -1137,6 +1221,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 
 	ApplyMasterVolume(WorkingMasterVol);
 	ApplySfxVolume(WorkingSfxVol);
+	ApplyBrightnessContrast(WorkingBrightness, WorkingContrast);
 	ApplyLookSensitivity(WorkingSens);
 	ApplyInvertY(bWorkingInvertY);
 	ApplyFieldOfView(WorkingFov);

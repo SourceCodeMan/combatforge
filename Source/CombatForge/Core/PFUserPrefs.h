@@ -28,6 +28,12 @@ struct COMBATFORGE_API FPFUserPrefs
 	static float GetAmbientVolume();        // 0..1
 	static void SetAmbientVolume(float V);
 
+	// ---- User video grade (options sliders → the match lighting rig's post-process) ----
+	static float GetBrightnessEV();         // -1..+1 EV offset on the rig's base exposure bias, default 0
+	static void SetBrightnessEV(float EV);
+	static float GetContrastScale();        // 0.85..1.20 scale on the rig's base contrast, default 1.0
+	static void SetContrastScale(float C);
+
 	static int32 GetWindowModeIndex();      // 0=Fullscreen 1=Borderless 2=Windowed
 	static void SetWindowModeIndex(int32 Idx);
 
@@ -64,6 +70,13 @@ struct COMBATFORGE_API FPFUserPrefs
 	static void SetKeyOverride(FName ActionId, FKey Key);
 	/** Remove a saved override (revert that action to its default at next Build). */
 	static void ClearKeyOverride(FName ActionId);
+
+	// ---- Favorite community maps (host-side picker convenience, max 5) ----
+	// Ids are the community catalog dedupe key: ArenaId (lowercase SHA1 content hash) when the
+	// record has one, else FileName — the same rule ListTopCommunityMaps dedupes by.
+	static constexpr int32 MaxFavoriteMaps = 5;
+	static TArray<FString> GetFavoriteMapIds();
+	static void SetFavoriteMapIds(const TArray<FString>& Ids);
 
 	static void Flush();
 

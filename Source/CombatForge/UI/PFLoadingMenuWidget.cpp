@@ -167,6 +167,21 @@ void UPFMapPickButton::HandleClicked()
 	}
 }
 
+void UPFMapFavButton::InitRow(UPFLoadingMenuWidget* InOwner, int32 InSlotIndex)
+{
+	OwnerWidget = InOwner;
+	SlotIndex = InSlotIndex;
+	OnClicked.AddUniqueDynamic(this, &UPFMapFavButton::HandleClicked);
+}
+
+void UPFMapFavButton::HandleClicked()
+{
+	if (OwnerWidget.IsValid())
+	{
+		OwnerWidget->NotifyMapFavClicked(SlotIndex);
+	}
+}
+
 // -------------------------------------------------------------- loading menu
 
 TSharedRef<SWidget> UPFLoadingMenuWidget::RebuildWidget()
@@ -338,6 +353,8 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 	MapSlotButtons.Reset();
 	MapSlotLabels.Reset();
 	MapSlotImages.Reset();
+	MapFavButtons.Reset();
+	MapFavGlyphs.Reset();
 	for (int32 i = 0; i < MapsPerPage; ++i)
 	{
 		UPFMapPickButton* Row = WidgetTree->ConstructWidget<UPFMapPickButton>(
@@ -370,11 +387,35 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		}
 
+		// Favorite star (host only; ASCII '*' — U+2605 is tofu in Roboto). Nested button
+		// consumes the click, so starring never also selects the row.
+		UPFMapFavButton* Fav = WidgetTree->ConstructWidget<UPFMapFavButton>(
+			UPFMapFavButton::StaticClass(), *FString::Printf(TEXT("MapFav%d"), i));
+		Fav->SetBackgroundColor(FLinearColor(0.10f, 0.11f, 0.14f, 0.2f));
+		Fav->InitRow(this, i);
+		UTextBlock* FavGlyph = WidgetTree->ConstructWidget<UTextBlock>();
+		FavGlyph->SetText(FText::FromString(TEXT("*")));
+		FavGlyph->SetFont(PFLoadFont(20, true));
+		FavGlyph->SetColorAndOpacity(FSlateColor(FLinearColor(0.40f, 0.42f, 0.48f)));
+		FavGlyph->SetJustification(ETextJustify::Center);
+		Fav->AddChild(FavGlyph);
+		USizeBox* FavBox = WidgetTree->ConstructWidget<USizeBox>();
+		FavBox->SetWidthOverride(36.f);
+		FavBox->SetHeightOverride(36.f);
+		FavBox->SetContent(Fav);
+		if (UHorizontalBoxSlot* H = RowContent->AddChildToHorizontalBox(FavBox))
+		{
+			H->SetVerticalAlignment(VAlign_Center);
+			H->SetPadding(FMargin(4.f, 2.f));
+		}
+
 		Row->AddChild(RowContent);
 
 		MapSlotButtons.Add(Row);
 		MapSlotLabels.Add(Lab);
 		MapSlotImages.Add(Thumb);
+		MapFavButtons.Add(Fav);
+		MapFavGlyphs.Add(FavGlyph);
 		if (UVerticalBoxSlot* V = MapPickerBox->AddChildToVerticalBox(Row))
 		{
 			V->SetPadding(FMargin(0.f, 2.f));
@@ -664,13 +705,17 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 {
 	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
-	Sub->SetText(FText::FromString(TEXT("Your five classes — clothing AND weapon per slot, saved to this PC, applied when you spawn.")));
+	// 13px + wrap + Fill slot: the old default-size, centered, non-wrapping line overran the
+	// HOST LAN GAME column on the right (Tom 2026-07-15).
+	Sub->SetText(FText::FromString(TEXT("Your five classes — clothing and weapon per slot. Saved to this PC, applied on spawn.")));
+	Sub->SetFont(PFLoadFont(13, false));
+	Sub->SetAutoWrapText(true);
 	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
 	Sub->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Sub))
 	{
 		V->SetPadding(FMargin(0.f, 4.f, 0.f, 12.f));
-		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetHorizontalAlignment(HAlign_Fill);   // wrap width bounded by the 600px page, not the text
 	}
 
 	ActiveSaveSlot = PFChar::GetActiveSaveSlot();
@@ -1511,19 +1556,23 @@ void UPFLoadingMenuWidget::BuildTree()
 	}
 
 	// Support the free game — opens the creator's Buy Me a Coffee page in the system browser.
+	// Floats bottom-center of the whole menu (Tom 2026-07-15), not in the right column.
 	DonateButton = WidgetTree->ConstructWidget<UButton>();
 	DonateButton->SetBackgroundColor(FLinearColor(1.f, 0.72f, 0.12f, 0.95f));   // BMC-style warm yellow
 	DonateButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnDonateClicked);
 	DonateLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	DonateLabel->SetText(FText::FromString(TEXT("BUY ME A COFFEE")));
+	DonateLabel->SetText(FText::FromString(TEXT("  BUY ME A COFFEE  ")));
 	DonateLabel->SetFont(PFLoadFont(14, true));
 	DonateLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.10f, 0.06f)));
 	DonateLabel->SetJustification(ETextJustify::Center);
 	DonateButton->AddChild(DonateLabel);
-	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(DonateButton))
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(DonateButton))
 	{
-		V->SetHorizontalAlignment(HAlign_Fill);
-		V->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+		S->SetAnchors(FAnchors(0.5f, 1.f, 0.5f, 1.f));
+		S->SetAlignment(FVector2D(0.5f, 1.f));
+		S->SetPosition(FVector2D(0.f, -18.f));
+		S->SetAutoSize(true);
+		S->SetZOrder(2);
 	}
 
 	QuitDesktopButton = WidgetTree->ConstructWidget<UButton>();
@@ -1775,12 +1824,67 @@ void UPFLoadingMenuWidget::ReloadMapCatalog()
 		PngName += TEXT(".png");
 		return !FPaths::FileExists(FPFPaths::ArenaDir() / PngName);
 	});
+
+	// ---- Favorites (host-side only; max 5, persisted in GameUserSettings.ini) ----
+	FavoriteIds = FPFUserPrefs::GetFavoriteMapIds();
+	if (IsLocalHost() && FavoriteIds.Num() > 0)
+	{
+		// Prune ids whose arena file vanished — but ONLY when the catalog is complete (not cut by
+		// the 100 cap) so a favorite beyond the cap is never wrongly dropped, and NEVER on clients
+		// (ListTopCommunityMaps returns empty on NM_Client — pruning there would wipe the list).
+		if (MapCatalog.Num() > 0 && MapCatalog.Num() < MaxMaps)
+		{
+			const int32 Before = FavoriteIds.Num();
+			FavoriteIds.RemoveAll([this](const FString& Id)
+			{
+				return !MapCatalog.ContainsByPredicate([&Id](const FPFCommunityMapInfo& M)
+				{
+					return FavKeyFor(M) == Id;
+				});
+			});
+			if (FavoriteIds.Num() != Before)
+			{
+				FPFUserPrefs::SetFavoriteMapIds(FavoriteIds);
+				FPFUserPrefs::Flush();
+			}
+		}
+
+		// Favorites-first stable partition: favorites occupy page 1 in rank order, the rest keep
+		// today's ranked order after them. Preserve the explicit selection across the reorder.
+		FString SelectedFile;
+		if (MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
+		{
+			SelectedFile = MapCatalog[SelectedMapCatalogIndex].FileName;
+		}
+		TArray<FPFCommunityMapInfo> Partitioned;
+		Partitioned.Reserve(MapCatalog.Num());
+		for (const FPFCommunityMapInfo& M : MapCatalog) { if (IsFavorite(M))  { Partitioned.Add(M); } }
+		for (const FPFCommunityMapInfo& M : MapCatalog) { if (!IsFavorite(M)) { Partitioned.Add(M); } }
+		MapCatalog = MoveTemp(Partitioned);
+		if (!SelectedFile.IsEmpty())
+		{
+			SelectedMapCatalogIndex = MapCatalog.IndexOfByPredicate(
+				[&SelectedFile](const FPFCommunityMapInfo& M) { return M.FileName == SelectedFile; });
+		}
+	}
+
 	const int32 PageCount = FMath::Max(1, FMath::DivideAndRoundUp(FMath::Max(MapCatalog.Num(), 1), MapsPerPage));
 	MapPageIndex = FMath::Clamp(MapPageIndex, 0, PageCount - 1);
 	if (SelectedMapCatalogIndex != INDEX_NONE && !MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
 	{
 		SelectedMapCatalogIndex = INDEX_NONE;
 	}
+}
+
+FString UPFLoadingMenuWidget::FavKeyFor(const FPFCommunityMapInfo& M)
+{
+	// Same identity rule the catalog dedupes by: content hash when present, else the file name.
+	return M.ArenaId.IsEmpty() ? M.FileName : M.ArenaId;
+}
+
+bool UPFLoadingMenuWidget::IsFavorite(const FPFCommunityMapInfo& M) const
+{
+	return FavoriteIds.Contains(FavKeyFor(M));
 }
 
 void UPFLoadingMenuWidget::RefreshMapPicker()
@@ -1800,6 +1904,14 @@ void UPFLoadingMenuWidget::RefreshMapPicker()
 	MapPageIndex = FMath::Clamp(MapPageIndex, 0, PageCount - 1);
 	const int32 Start = MapPageIndex * MapsPerPage;
 	const int32 End = FMath::Min(Start + MapsPerPage, Total);
+
+	if (MapPickerHeader)
+	{
+		MapPickerHeader->SetText(FText::FromString((IsLocalHost() && FavoriteIds.Num() > 0)
+			? FString::Printf(TEXT("COMMUNITY MAP  ·  FAVORITES %d/%d"),
+				FavoriteIds.Num(), FPFUserPrefs::MaxFavoriteMaps)
+			: FString(TEXT("COMMUNITY MAP"))));
+	}
 
 	if (MapPageLabel)
 	{
@@ -1843,9 +1955,22 @@ void UPFLoadingMenuWidget::RefreshMapPicker()
 				? FLinearColor(0.25f, 0.22f, 0.08f, 0.98f)
 				: FLinearColor(0.10f, 0.11f, 0.14f, 0.95f));
 		}
+		// Favorite star: hosts only (favorites never surface for joining clients).
+		if (MapFavButtons.IsValidIndex(SlotIdx) && MapFavButtons[SlotIdx])
+		{
+			MapFavButtons[SlotIdx]->SetVisibility((bHost && bValid)
+				? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+			MapFavButtons[SlotIdx]->SetIsEnabled(bHost);
+		}
 		if (bValid)
 		{
 			const FPFCommunityMapInfo& M = MapCatalog[CatalogIdx];
+			if (MapFavGlyphs.IsValidIndex(SlotIdx) && MapFavGlyphs[SlotIdx])
+			{
+				MapFavGlyphs[SlotIdx]->SetColorAndOpacity(FSlateColor(IsFavorite(M)
+					? FLinearColor(1.0f, 0.85f, 0.2f)      // gold = favorited
+					: FLinearColor(0.40f, 0.42f, 0.48f))); // dim = not
+			}
 			if (MapSlotLabels.IsValidIndex(SlotIdx) && MapSlotLabels[SlotIdx])
 			{
 				MapSlotLabels[SlotIdx]->SetText(FText::FromString(FString::Printf(
@@ -1917,7 +2042,8 @@ void UPFLoadingMenuWidget::RefreshSetupLabels()
 			IsLocalHost()
 				? (NeedsCommunityMap()
 					? TEXT("Improvement/Play-Only: pick a community map below (10 per page)")
-					: TEXT("Click MODE / TYPE / FORMAT to cycle · bots checkbox · applied live"))
+					// Tom: drop the "Click MODE/TYPE/FORMAT to cycle" helper — empty collapses the row.
+					: TEXT(""))
 				: TEXT("Host chooses match setup · waiting for Enter")));
 	}
 	// Non-host: still clickable visually but handlers no-op; dim slightly via background.
@@ -1946,6 +2072,38 @@ void UPFLoadingMenuWidget::NotifyMapSlotClicked(int32 SlotIndex)
 	SelectedMapCatalogIndex = CatalogIdx;
 	RefreshMapPicker();
 	ApplyMapSelectionToHost();
+}
+
+void UPFLoadingMenuWidget::NotifyMapFavClicked(int32 SlotIndex)
+{
+	if (!IsLocalHost() || bDismissed || !NeedsCommunityMap())
+	{
+		return;
+	}
+	const int32 CatalogIdx = MapPageIndex * MapsPerPage + SlotIndex;
+	if (!MapCatalog.IsValidIndex(CatalogIdx))
+	{
+		return;
+	}
+	const FString Key = FavKeyFor(MapCatalog[CatalogIdx]);
+	if (FavoriteIds.Remove(Key) == 0)
+	{
+		// Not a favorite yet — add, unless the 5-cap is hit (message auto-clears on next repaint).
+		if (FavoriteIds.Num() >= FPFUserPrefs::MaxFavoriteMaps)
+		{
+			if (MapSelectedLabel)
+			{
+				MapSelectedLabel->SetText(FText::FromString(
+					TEXT("Favorites full (5) — unstar one first")));
+			}
+			return;
+		}
+		FavoriteIds.Add(Key);
+	}
+	FPFUserPrefs::SetFavoriteMapIds(FavoriteIds);
+	FPFUserPrefs::Flush();
+	ReloadMapCatalog();    // re-partition favorites-first; the toggled map jumps pages immediately
+	RefreshMapPicker();
 }
 
 void UPFLoadingMenuWidget::OnMapPagePrev()

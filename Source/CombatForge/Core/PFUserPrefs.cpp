@@ -93,6 +93,26 @@ void FPFUserPrefs::SetAmbientVolume(float V)
 	WriteFloat(TEXT("AmbientVolume"), FMath::Clamp(V, 0.f, 1.f));
 }
 
+float FPFUserPrefs::GetBrightnessEV()
+{
+	return FMath::Clamp(ReadFloat(TEXT("BrightnessEV"), 0.f), -1.f, 1.f);
+}
+
+void FPFUserPrefs::SetBrightnessEV(float EV)
+{
+	WriteFloat(TEXT("BrightnessEV"), FMath::Clamp(EV, -1.f, 1.f));
+}
+
+float FPFUserPrefs::GetContrastScale()
+{
+	return FMath::Clamp(ReadFloat(TEXT("ContrastScale"), 1.f), 0.85f, 1.2f);
+}
+
+void FPFUserPrefs::SetContrastScale(float C)
+{
+	WriteFloat(TEXT("ContrastScale"), FMath::Clamp(C, 0.85f, 1.2f));
+}
+
 int32 FPFUserPrefs::GetWindowModeIndex()
 {
 	return FMath::Clamp(ReadInt(TEXT("WindowModeIndex"), 0), 0, 2);
@@ -118,6 +138,54 @@ void FPFUserPrefs::SetLastJoinIp(const FString& Ip)
 	if (GConfig)
 	{
 		GConfig->SetString(TEXT("CombatForge"), TEXT("LastJoinIp"), *Ip, GGameUserSettingsIni);
+	}
+}
+
+TArray<FString> FPFUserPrefs::GetFavoriteMapIds()
+{
+	// Single CSV key: arenaIds are lowercase hex and filenames are arena_*.json — no commas.
+	FString Csv;
+	if (GConfig)
+	{
+		GConfig->GetString(TEXT("CombatForge"), TEXT("FavoriteMapIds"), Csv, GGameUserSettingsIni);
+	}
+	TArray<FString> Raw;
+	Csv.ParseIntoArray(Raw, TEXT(","), /*bCullEmpty=*/true);
+	TArray<FString> Ids;
+	for (FString& Id : Raw)
+	{
+		Id.TrimStartAndEndInline();
+		if (!Id.IsEmpty() && !Ids.Contains(Id))
+		{
+			Ids.Add(Id);
+		}
+	}
+	if (Ids.Num() > MaxFavoriteMaps)
+	{
+		Ids.SetNum(MaxFavoriteMaps);
+	}
+	return Ids;
+}
+
+void FPFUserPrefs::SetFavoriteMapIds(const TArray<FString>& InIds)
+{
+	TArray<FString> Ids;
+	for (const FString& Id : InIds)
+	{
+		const FString Trimmed = Id.TrimStartAndEnd();
+		if (!Trimmed.IsEmpty() && !Ids.Contains(Trimmed))
+		{
+			Ids.Add(Trimmed);
+		}
+		if (Ids.Num() >= MaxFavoriteMaps)
+		{
+			break;   // hard cap, defensively enforced here too
+		}
+	}
+	if (GConfig)
+	{
+		GConfig->SetString(TEXT("CombatForge"), TEXT("FavoriteMapIds"),
+			*FString::Join(Ids, TEXT(",")), GGameUserSettingsIni);
 	}
 }
 

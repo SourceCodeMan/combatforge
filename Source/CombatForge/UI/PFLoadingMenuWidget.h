@@ -40,6 +40,24 @@ private:
 	int32 SlotIndex = 0;
 };
 
+/** Per-row favorite star (host only, max 5). Nested inside the map row — the inner SButton
+ *  consumes the click so starring never also selects the row. */
+UCLASS()
+class COMBATFORGE_API UPFMapFavButton : public UButton
+{
+	GENERATED_BODY()
+
+public:
+	void InitRow(UPFLoadingMenuWidget* InOwner, int32 InSlotIndex);
+
+protected:
+	UFUNCTION() void HandleClicked();
+
+private:
+	TWeakObjectPtr<UPFLoadingMenuWidget> OwnerWidget;
+	int32 SlotIndex = 0;
+};
+
 /** Prev/next stepper for one character-customization slot (payload button; avoids per-row handlers). */
 UCLASS()
 class COMBATFORGE_API UPFCharSlotButton : public UButton
@@ -130,6 +148,9 @@ public:
 
 	/** Map-row click from UPFMapPickButton (slot 0..9 on current page). */
 	void NotifyMapSlotClicked(int32 SlotIndex);
+
+	/** Star click from UPFMapFavButton — toggles the slot's map in the 5-max favorites list. */
+	void NotifyMapFavClicked(int32 SlotIndex);
 
 	/** Character-customization prev/next step for a slot (Dir -1/+1), cycling through None + parts. */
 	void NotifyCharSlotStep(int32 SlotIdx, int32 Dir);
@@ -289,6 +310,8 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UPFMapPickButton>> MapSlotButtons;
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> MapSlotLabels;
 	UPROPERTY() TArray<TObjectPtr<UImage>> MapSlotImages;
+	UPROPERTY() TArray<TObjectPtr<UPFMapFavButton>> MapFavButtons;
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> MapFavGlyphs;
 	/** filename(.json) -> loaded PNG preview (cached; a null value means "tried, none on disk"). */
 	UPROPERTY() TMap<FString, TObjectPtr<UTexture2D>> MapPreviewCache;
 
@@ -299,6 +322,11 @@ private:
 	int32 ActiveMenuTab = 0;
 
 	TArray<FPFCommunityMapInfo> MapCatalog;
+	/** Local favorites (arenaId-or-filename keys, max 5) — seeds from FPFUserPrefs each catalog reload. */
+	TArray<FString> FavoriteIds;
+	/** Favorite identity = the catalog dedupe key: ArenaId when present, else FileName. */
+	static FString FavKeyFor(const FPFCommunityMapInfo& M);
+	bool IsFavorite(const FPFCommunityMapInfo& M) const;
 	int32 MapPageIndex = 0;
 	/** Index into MapCatalog, or INDEX_NONE for auto top-ranked. */
 	int32 SelectedMapCatalogIndex = INDEX_NONE;

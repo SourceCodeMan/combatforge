@@ -70,6 +70,8 @@ protected:
 	UFUNCTION() void OnSensChanged(float Value);
 	UFUNCTION() void OnFovChanged(float Value);
 	UFUNCTION() void OnResScaleChanged(float Value);
+	UFUNCTION() void OnBrightnessChanged(float Value);
+	UFUNCTION() void OnContrastChanged(float Value);
 
 private:
 	void BuildTree();
@@ -91,6 +93,7 @@ private:
 	static constexpr int32 NumRebinds = 7;
 	void ApplyMasterVolume(float Linear01);
 	void ApplySfxVolume(float Linear01);
+	void ApplyBrightnessContrast(float EV, float Contrast);   // → PFLightingSubsystem::SetUserGrade
 	void ApplyLookSensitivity(float Sens);
 	void ApplyInvertY(bool bInvert);
 	void ApplyFieldOfView(float Fov);
@@ -123,6 +126,10 @@ private:
 	UPROPERTY() TObjectPtr<UCheckBox> InvertYCheck;
 	UPROPERTY() TObjectPtr<USlider> ResScaleSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> ResScaleValueText;
+	UPROPERTY() TObjectPtr<USlider> BrightnessSlider;
+	UPROPERTY() TObjectPtr<UTextBlock> BrightnessValueText;
+	UPROPERTY() TObjectPtr<USlider> ContrastSlider;
+	UPROPERTY() TObjectPtr<UTextBlock> ContrastValueText;
 	UPROPERTY() TObjectPtr<USlider> MasterVolSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> MasterVolValueText;
 	UPROPERTY() TObjectPtr<USlider> SfxVolSlider;
@@ -144,6 +151,8 @@ private:
 	bool   bWorkingVSync = true;
 	bool   bWorkingInvertY = false;
 	float  WorkingResScale = 100.f;
+	float  WorkingBrightness = 0.f;    // EV offset, -1..+1
+	float  WorkingContrast = 1.f;      // scale, 0.85..1.20
 	float  WorkingMasterVol = 1.f;
 	float  WorkingSfxVol = 1.f;
 	float  WorkingAmbientVol = 0.22f;
