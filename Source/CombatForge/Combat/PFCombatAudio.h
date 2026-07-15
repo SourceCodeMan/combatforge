@@ -79,6 +79,12 @@ private:
 	/** Layered muzzle: near-field 2D transient + spatial body (and optional tail). */
 	void PlayLayeredMuzzle(const FVector& Loc, bool bLocalOwner);
 
+	/** Procedural waves never report finished (engine zero-fills on underrun), so their active
+	 *  sounds are immortal — hard-stop the spawned component after the wave's real duration.
+	 *  Without this, leaked 2D shot-pops saturate the 32-voice pool after ~1 min of firing and
+	 *  ALL gunfire goes silent (louder self-finishing cues like the hitmarker keep working). */
+	void StopCompAfter(UAudioComponent* Comp, float Seconds);
+
 	static void QueuePcm(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm);
 
 	// Imported Free_Sounds_Pack cues (null if pack missing).
@@ -109,6 +115,7 @@ private:
 	UPROPERTY(Transient) TObjectPtr<USoundAttenuation> ImpactAttenuation;
 	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> MuzzleConcurrency;
 	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> ImpactConcurrency;
+	UPROPERTY(Transient) TObjectPtr<USoundConcurrency> UIConcurrency;    // 2D procedural one-shots: self-cap so a leak can never squat the voice pool
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> AmbientComp;
 
 	TArray<uint8> PcmHitmarker;

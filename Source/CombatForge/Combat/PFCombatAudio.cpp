@@ -16,6 +16,7 @@
 #include "Sound/SoundBase.h"
 #include "Sound/SoundConcurrency.h"
 #include "Sound/SoundWaveProcedural.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -425,6 +426,17 @@ void UPFCombatAudio::EnsureSounds()
 		C.RetriggerTime = 0.f;
 	}
 
+	// Defense-in-depth for 2D procedural one-shots: even if a future wave slips past StopCompAfter,
+	// it evicts an old squatter instead of permanently occupying one of the 32 mixer voices.
+	UIConcurrency = NewObject<USoundConcurrency>(this);
+	{
+		FSoundConcurrencySettings& C = UIConcurrency->Concurrency;
+		C.MaxCount = 16;
+		C.bLimitToOwner = false;
+		C.ResolutionRule = EMaxConcurrentResolutionRule::StopOldest;
+		C.RetriggerTime = 0.f;
+	}
+
 	UE_LOG(CombatForgeLog, Log,
 		TEXT("[Audio] layered muzzle body=%s mech=%s tail=%s impact=%s"),
 		CueMuzzle ? TEXT("cue") : TEXT("proc"),
@@ -452,7 +464,10 @@ void UPFCombatAudio::PlayUI(USoundBase* Preferred, const TArray<uint8>& Pcm, flo
 	const float Dur = static_cast<float>(Pcm.Num() / sizeof(int16)) / static_cast<float>(kSampleRate);
 	USoundWaveProcedural* Live = MakeWaveShell(this, Dur);
 	QueuePcm(Live, Pcm);
-	UGameplayStatics::PlaySound2D(this, Live, Vol, Pitch);
+	// Fire-and-forget PlaySound2D leaks procedural waves forever (they never self-finish) — the
+	// root cause of "gunfire dies after a minute". Spawn a component and stop it ourselves.
+	UAudioComponent* Comp = UGameplayStatics::SpawnSound2D(this, Live, Vol, Pitch, 0.f, UIConcurrency);
+	StopCompAfter(Comp, Dur / FMath::Max(0.1f, Pitch) + 0.1f);
 }
 
 void UPFCombatAudio::PlayWorld(USoundBase* Preferred, const TArray<uint8>& Pcm, float Volume, float Pitch,
@@ -478,6 +493,7 @@ void UPFCombatAudio::PlayWorldAt(USoundBase* Preferred, const TArray<uint8>& Pcm
 		return;
 	}
 	USoundBase* ToPlay = Preferred;
+	float ProcDur = -1.f;   // >0 = procedural wave that must be hard-stopped (never self-finishes)
 	if (ToPlay == nullptr)
 	{
 		if (Pcm.Num() == 0)
@@ -488,18 +504,43 @@ void UPFCombatAudio::PlayWorldAt(USoundBase* Preferred, const TArray<uint8>& Pcm
 		USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
 		QueuePcm(Wave, Pcm);
 		ToPlay = Wave;
+		ProcDur = Dur;
 	}
 	const float Vol = Volume * ReadSfxVolumeScale();
 	USoundAttenuation* Att = AttenuationOverride ? AttenuationOverride : CombatAttenuation.Get();
 	if (Att)
 	{
-		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
-			Vol, Pitch, 0.f, Att, Concurrency);
+		UAudioComponent* Comp = UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc,
+			FRotator::ZeroRotator, Vol, Pitch, 0.f, Att, Concurrency);
+		if (ProcDur > 0.f)
+		{
+			StopCompAfter(Comp, ProcDur / FMath::Max(0.1f, Pitch) + 0.1f);
+		}
 	}
 	else
 	{
-		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
+		UAudioComponent* Comp = UGameplayStatics::SpawnSound2D(this, ToPlay, Vol, Pitch, 0.f,
+			ProcDur > 0.f ? UIConcurrency.Get() : nullptr);
+		if (ProcDur > 0.f)
+		{
+			StopCompAfter(Comp, ProcDur / FMath::Max(0.1f, Pitch) + 0.1f);
+		}
 	}
+}
+
+void UPFCombatAudio::StopCompAfter(UAudioComponent* Comp, float Seconds)
+{
+	UWorld* World = GetWorld();
+	if (Comp == nullptr || World == nullptr)
+	{
+		return;
+	}
+	// bAutoDestroy is true on spawned one-shots: Stop() releases the active sound, its mixer
+	// voice, and its concurrency slot. WeakLambda no-ops if the component died first.
+	FTimerHandle Handle;
+	World->GetTimerManager().SetTimer(Handle,
+		FTimerDelegate::CreateWeakLambda(Comp, [Comp]() { Comp->Stop(); }),
+		FMath::Max(0.05f, Seconds), /*bLoop=*/false);
 }
 
 void UPFCombatAudio::PlayLayeredMuzzle(const FVector& Loc, bool bLocalOwner)
@@ -660,6 +701,7 @@ void UPFCombatAudio::PlayFootstep(bool bSprint)
 	}
 
 	USoundBase* ToPlay = CueFootstep;
+	float ProcDur = -1.f;
 	if (ToPlay == nullptr)
 	{
 		if (PcmFootstep.Num() == 0)
@@ -670,16 +712,26 @@ void UPFCombatAudio::PlayFootstep(bool bSprint)
 		USoundWaveProcedural* Wave = MakeWaveShell(this, Dur);
 		QueuePcm(Wave, PcmFootstep);
 		ToPlay = Wave;
+		ProcDur = Dur;
 	}
 
 	if (FootstepAttenuation)
 	{
-		UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc, FRotator::ZeroRotator,
-			Vol, Pitch, 0.f, FootstepAttenuation, nullptr);
+		UAudioComponent* Comp = UGameplayStatics::SpawnSoundAtLocation(this, ToPlay, Loc,
+			FRotator::ZeroRotator, Vol, Pitch, 0.f, FootstepAttenuation, nullptr);
+		if (ProcDur > 0.f)
+		{
+			StopCompAfter(Comp, ProcDur / FMath::Max(0.1f, Pitch) + 0.1f);
+		}
 	}
 	else
 	{
-		UGameplayStatics::PlaySound2D(this, ToPlay, Vol, Pitch);
+		UAudioComponent* Comp = UGameplayStatics::SpawnSound2D(this, ToPlay, Vol, Pitch, 0.f,
+			ProcDur > 0.f ? UIConcurrency.Get() : nullptr);
+		if (ProcDur > 0.f)
+		{
+			StopCompAfter(Comp, ProcDur / FMath::Max(0.1f, Pitch) + 0.1f);
+		}
 	}
 }
 

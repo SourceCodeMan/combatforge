@@ -62,3 +62,5 @@ UpgradeLog.htm
 # Fab Niagara Examples pack (local install; soft-loaded from /Game/NiagaraExamples when present)
 Content/NiagaraExamples/
 
+# parked non-cookable content packs (moved out of Content/ so the cooker skips them)
+_parked_content/

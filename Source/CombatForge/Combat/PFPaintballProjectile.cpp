@@ -22,11 +22,13 @@
 
 namespace
 {
-	// Elongated tracer along velocity (+X with bRotationFollowsVelocity). Dropped another ~1/3 for an
-	// airsoft-BB read (was 0.10 / 0.037) — collision radius stays forgiving for hit registration.
-	constexpr float TracerLenScale = 0.067f;   // ~6.7 uu long
-	constexpr float TracerRadScale = 0.025f;   // ~2.5 uu diameter
-	constexpr float EmissiveBoost = 5.5f;      // hot team tracer read (04 §2.2)
+	// Elongated tracer along velocity (+X with bRotationFollowsVelocity). Halved AGAIN per Tom
+	// 2026-07-15 (was 0.10/0.037, then 0.067/0.025) — collision radius stays forgiving for hit reg.
+	constexpr float TracerLenScale = 0.0335f;  // ~3.4 uu long
+	constexpr float TracerRadScale = 0.0125f;  // ~1.25 uu diameter
+	// 5.5 -> 2.5: at 5.5 the 90-BB frag burst read as an orange blob storm; 2.5 keeps team-color
+	// readability while tracers read as lit BBs, not glowing orbs.
+	constexpr float EmissiveBoost = 2.5f;      // team tracer read (04 §2.2)
 	constexpr float DefaultRadiusUU = 2.33f;
 }
 

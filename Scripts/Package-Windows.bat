@@ -30,6 +30,7 @@ call "%UE%\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun ^
   -platform=Win64 ^
   -clientconfig=%CONFIG% ^
   -build -cook -stage -pak -iostore -compressed ^
+  -nodebuginfo ^
   -prereqs ^
   -archive -archivedirectory="%OUT%"
 
