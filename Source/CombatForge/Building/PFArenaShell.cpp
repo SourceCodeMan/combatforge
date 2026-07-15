@@ -261,9 +261,12 @@ void APFArenaShell::BuildWarehouseDressing()
 		{
 			for (int32 Row = 0; Row < RoofRows; ++Row)
 			{
-				if (((Col + 2 * Row) % 3) == 1)
+				if (((Col + Row) % 2) != 0)
 				{
-					continue;                               // skylight opening — leave this bay open
+					continue;   // skylight opening (~50%, checkerboard). Open this much so the SkyLight's
+					            // real-time capture actually sees sky -> bright UNIFORM ambient reaches the
+					            // up-facing floor between sun pools (no GI here to bounce it in). 32% left the
+					            // capture too dark and the floor read black. Tunable via this skip rule.
 				}
 				DressingParts.Add(MakeShapePart(FString::Printf(TEXT("CeilingPanel%d_%d"), Col, Row),
 					FVector((Col + 0.5f) * PanelW, (Row + 0.5f) * PanelH, CeilingZ),

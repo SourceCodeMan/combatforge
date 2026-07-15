@@ -74,7 +74,10 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		}
 	}
 
-	if (ASkyLight* Sky = World.SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FTransform::Identity, Params))
+	// Capture point raised to arena-center, just under the roofline — from here the real-time capture looks
+	// out through the roof skylights and sees sky (from the floor corner it mostly saw dark interior).
+	if (ASkyLight* Sky = World.SpawnActor<ASkyLight>(ASkyLight::StaticClass(),
+			FTransform(FRotator::ZeroRotator, FVector(3200.f, 2000.f, 1300.f)), Params))
 	{
 		if (USkyLightComponent* SkyComp = Sky->GetLightComponent())
 		{
