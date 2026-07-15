@@ -3,6 +3,7 @@
 #include "Player/CombatForgeCharacter.h"
 
 #include "HAL/IConsoleManager.h"   // pf.BanditChar spike toggle
+#include "DrawDebugHelpers.h"       // pf.ShowMuzzle marker
 
 #include "CombatForge.h"
 #include "Core/CombatForgeTypes.h"
@@ -49,6 +50,12 @@
 static TAutoConsoleVariable<int32> CVarArmedAnims(
 	TEXT("pf.ArmedAnims"), 1,
 	TEXT("1 = rifle-hold locomotion from the template rifle kit (default), 0 = original unarmed Bandit anims. Applies live."));
+
+// Tuning aid: draw the FP cosmetic muzzle (where owner tracers spawn) so pf.WeaponFP's muzzle offset can be
+// aligned to the visible barrel. Off by default; local player only (drawn in Tick's IsLocallyControlled block).
+static TAutoConsoleVariable<int32> CVarShowMuzzle(
+	TEXT("pf.ShowMuzzle"), 0,
+	TEXT("1 = draw a marker at the first-person muzzle + shot line (align pf.WeaponFP's last 3 args to the barrel)."));
 
 // Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
 // kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
@@ -641,6 +648,17 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 				RecoilPitch + HomeRot.Pitch + ReloadPitch + FeelRot.Pitch,
 				HomeRot.Yaw + FeelRot.Yaw,
 				HomeRot.Roll + FeelRot.Roll));
+
+			// pf.ShowMuzzle 1: draw a marker at the cosmetic muzzle (where FP tracers spawn) + a short line
+			// along the shot direction, so the muzzle offset (last 3 args of pf.WeaponFP) can be aligned to
+			// the visible barrel by eye. Green sphere = origin; cyan line = shot path.
+			if (CVarShowMuzzle.GetValueOnGameThread() != 0)
+			{
+				const FVector MuzzleW = GetMuzzleLocation(true);
+				const FVector AimW = GetControlRotation().Vector();
+				DrawDebugSphere(GetWorld(), MuzzleW, 1.6f, 10, FColor::Green, false, -1.f, 0, 0.3f);
+				DrawDebugLine(GetWorld(), MuzzleW, MuzzleW + AimW * 60.f, FColor::Cyan, false, -1.f, 0, 0.4f);
+			}
 		}
 
 		// Footsteps — local only, grounded movement.
