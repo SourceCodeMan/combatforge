@@ -1093,8 +1093,8 @@ void APFArenaShell::SetMapBackdropActive(bool bActive)
 
 void APFArenaShell::ApplyCohesivePalette()
 {
-	// Shared palette with PFBuildGrid — warehouse textures on M_PF_Arena* triplanar masters.
-	// Megascans Surface MIs stay on draped props only (real UVs); cubes must stay triplanar.
+	// Shared palette with PFBuildGrid. CreatePaletteMID prefers warehouse Surface MIs
+	// (working albedo). Do NOT use M_PF_ArenaFloor — pure black base-color graph.
 	UMaterialInstanceDynamic* FloorMID = PFBuildPieceVisuals::CreatePaletteMID(
 		this, PFBuildPieceVisuals::EPFSurfaceRole::FloorConcrete);
 	UMaterialInstanceDynamic* WallMID = PFBuildPieceVisuals::CreatePaletteMID(
@@ -1107,7 +1107,7 @@ void APFArenaShell::ApplyCohesivePalette()
 	if (FloorMID == nullptr && WallMID == nullptr && MetalMID == nullptr)
 	{
 		UE_LOG(CombatForgeLog, Warning,
-			TEXT("ArenaShell: cohesion palette masters missing — keeping CDO materials"));
+			TEXT("ArenaShell: cohesion palette missing — keeping CDO materials"));
 		return;
 	}
 

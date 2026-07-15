@@ -56,11 +56,13 @@ namespace
 	UStaticMesh* GCylinder = nullptr;
 	UStaticMesh* GCone = nullptr;
 
-	// Triplanar masters (world-aligned — correct on non-uniform scaled cubes).
-	UMaterialInterface* GMasterFloor = nullptr;  // M_PF_ArenaFloor
-	UMaterialInterface* GMasterWall = nullptr;   // M_PF_ArenaWall
-	// Metal master is procedural (no tex params) — rebind metal maps onto floor triplanar instead.
-	UMaterialInterface* GMasterMetalTri = nullptr;
+	// PREFERRED: warehouse Surface MIs (self-contained albedo — non-black).
+	// FALLBACK: M_PF_ArenaWall triplanar only. NEVER assign M_PF_ArenaFloor (miswired → black).
+	UMaterialInterface* GWhFloor = nullptr;
+	UMaterialInterface* GWhMetal = nullptr;
+	UMaterialInterface* GWhRoof = nullptr;
+	UMaterialInterface* GMasterWall = nullptr;   // M_PF_ArenaWall (working)
+	UMaterialInterface* GMasterFloor = nullptr;  // loaded for diagnostics only
 
 	FSurfaceProfile GSurfWall;
 	FSurfaceProfile GSurfFloor;
@@ -331,26 +333,28 @@ namespace
 		MID->SetVectorParameterValue(TEXT("Tint"), S.AlbedoTint);
 	}
 
-	UMaterialInterface* MasterForRole(EPFSurfaceRole Role)
+	/** Soft-loaded Megascans Surface MI for this role (nullptr if pack missing). */
+	UMaterialInterface* WarehouseSurfaceForRole(EPFSurfaceRole Role)
 	{
 		switch (Role)
 		{
-		case EPFSurfaceRole::WallConcrete:
-			return GMasterWall ? GMasterWall : GMasterFloor;
 		case EPFSurfaceRole::FloorConcrete:
-			// WORKAROUND: M_PF_ArenaFloor renders BLACK — its base-color graph is mis-wired (separate from
-			// the roughness Clamp), unlike M_PF_ArenaWall which is correct. Drive the floor through the
-			// working WALL master + the floor-concrete textures (world-aligned projection is orientation-
-			// agnostic, so it lands right on a horizontal surface). Revert to GMasterFloor once the floor
-			// material's base-color path is repaired in-editor.
-			return GMasterWall ? GMasterWall : GMasterFloor;
+		case EPFSurfaceRole::WallConcrete:
+			// Same smooth floor MI for walls+floors: facade MI read near-black on engine cubes.
+			return GWhFloor;
 		case EPFSurfaceRole::MetalRusty:
+			return GWhMetal;
 		case EPFSurfaceRole::MetalRoof:
-			// Rebind metal maps onto floor triplanar (has BaseColorTex/NormalTex/RoughTex params).
-			return GMasterMetalTri ? GMasterMetalTri : (GMasterFloor ? GMasterFloor : GMasterWall);
+			return GWhRoof ? GWhRoof : GWhMetal;
 		default:
-			return GMasterFloor ? GMasterFloor : GMasterWall;
+			return GWhFloor;
 		}
+	}
+
+	/** Triplanar fallback only — NEVER M_PF_ArenaFloor (black base-color graph). */
+	UMaterialInterface* TriplanarFallbackMaster()
+	{
+		return GMasterWall;
 	}
 
 	const FPropSlot* SlotForProp(EPFPieceType Type)
@@ -436,14 +440,24 @@ void EnsureLoaded()
 	// ---- Structural surface profiles (materials; geometry stays basic shapes) ----
 	InitSurfaceProfiles();
 
-	// Triplanar masters — world-aligned so scaled arena/build cubes don't smear like mesh-UV Megascans MIs.
-	// Intentionally NOT M_PF_BuildPiece (ISM checker + local-edit guardrail).
-	GMasterFloor = Cast<UMaterialInterface>(
-		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaFloor.M_PF_ArenaFloor")).TryLoad());
+	// Warehouse Surface MIs first (working albedo). These are what the shell used successfully
+	// before cohesion rebinding stomped them with broken M_PF_ArenaFloor MIDs.
+	GWhFloor = Cast<UMaterialInterface>(FSoftObjectPath(
+		TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Floor_Concrete_Smooth_01/MI_Ind_War_Floor_Concrete_Smooth_01_A.MI_Ind_War_Floor_Concrete_Smooth_01_A")).TryLoad());
+	GWhMetal = Cast<UMaterialInterface>(FSoftObjectPath(
+		TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/MI_Ind_War_Sheet_Metal_Rusty_01_A.MI_Ind_War_Sheet_Metal_Rusty_01_A")).TryLoad());
+	GWhRoof = Cast<UMaterialInterface>(FSoftObjectPath(
+		TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/MI_Ind_War_Roof_Painted_01.MI_Ind_War_Roof_Painted_01")).TryLoad());
+	if (GWhRoof == nullptr)
+	{
+		GWhRoof = GWhMetal;
+	}
+
+	// Fallback triplanar: WALL only. M_PF_ArenaFloor base-color is miswired → pure black.
 	GMasterWall = Cast<UMaterialInterface>(
 		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaWall.M_PF_ArenaWall")).TryLoad());
-	// Floor master doubles as metal carrier (has texture params; ArenaMetal is procedural-only).
-	GMasterMetalTri = GMasterFloor;
+	GMasterFloor = Cast<UMaterialInterface>(
+		FSoftObjectPath(TEXT("/Game/Materials/M_PF_ArenaFloor.M_PF_ArenaFloor")).TryLoad());
 
 	// PropCan → metal / plastic barrel (upright cover).
 	GBarrel.TargetSize = FVector(120.f, 120.f, 220.f);
@@ -478,22 +492,19 @@ void EnsureLoaded()
 	};
 	Keep(GCube); Keep(GCylinder); Keep(GCone);
 	Keep(GBarrel.Mesh); Keep(GCrate.Mesh); Keep(GBoxes.Mesh);
-	Keep(GMasterFloor); Keep(GMasterWall);
+	Keep(GWhFloor); Keep(GWhMetal); Keep(GWhRoof); Keep(GMasterWall); Keep(GMasterFloor);
 	for (FSurfaceProfile* P : { &GSurfWall, &GSurfFloor, &GSurfRamp, &GSurfRoof, &GSurfFallback })
 	{
 		Keep(P->BaseColor); Keep(P->Normal); Keep(P->ORD);
 	}
 
 	UE_LOG(CombatForgeLog, Log,
-		TEXT("BuildPieceVisuals: props Barrel=%s Crate=%s Boxes=%s (wh=%d/%d/%d) | palette Wall=%s Floor=%s Ramp=%s Roof=%s (tex=%d/%d/%d/%d) masters floor=%d wall=%d"),
+		TEXT("BuildPieceVisuals: props Barrel=%s Crate=%s Boxes=%s | warehouseMI floor=%d metal=%d roof=%d | triplanar wall=%d floorAsset=%d(black-do-not-use)"),
 		GBarrel.Mesh ? *GBarrel.Mesh->GetName() : TEXT("null"),
 		GCrate.Mesh ? *GCrate.Mesh->GetName() : TEXT("null"),
 		GBoxes.Mesh ? *GBoxes.Mesh->GetName() : TEXT("null"),
-		GBarrel.bWarehouse ? 1 : 0, GCrate.bWarehouse ? 1 : 0, GBoxes.bWarehouse ? 1 : 0,
-		GSurfWall.Label, GSurfFloor.Label, GSurfRamp.Label, GSurfRoof.Label,
-		GSurfWall.BaseColor ? 1 : 0, GSurfFloor.BaseColor ? 1 : 0,
-		GSurfRamp.BaseColor ? 1 : 0, GSurfRoof.BaseColor ? 1 : 0,
-		GMasterFloor ? 1 : 0, GMasterWall ? 1 : 0);
+		GWhFloor ? 1 : 0, GWhMetal ? 1 : 0, GWhRoof ? 1 : 0,
+		GMasterWall ? 1 : 0, GMasterFloor ? 1 : 0);
 }
 
 UStaticMesh* MeshForType(EPFPieceType Type)
@@ -555,10 +566,27 @@ EPFSurfaceRole RoleForPieceType(EPFPieceType Type)
 UMaterialInstanceDynamic* CreatePaletteMID(UObject* Outer, EPFSurfaceRole Role)
 {
 	EnsureLoaded();
-	UMaterialInterface* Master = MasterForRole(Role);
+
+	// 1) Warehouse Surface MIs — preferred. Self-contained albedo; what worked before cohesion
+	//    rebinding forced broken M_PF_ArenaFloor (black) onto every floor/wall cube.
+	if (UMaterialInterface* Wh = WarehouseSurfaceForRole(Role))
+	{
+		UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Wh, Outer);
+		if (Mid)
+		{
+			return Mid;
+		}
+		// Some cooked MIs reject dynamic instances — assign via caller using parent is fine,
+		// but we only return MIDs from this API; fall through to triplanar.
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("BuildPieceVisuals: Create MID from warehouse surface failed for role %s — triplanar fallback"),
+			SurfaceRoleName(Role));
+	}
+
+	// 2) Working triplanar wall master + texture rebind (never ArenaFloor).
+	UMaterialInterface* Master = TriplanarFallbackMaster();
 	if (Master == nullptr)
 	{
-		// Absolute last resort — engine solid (ghost path still works via Color).
 		Master = Cast<UMaterialInterface>(
 			FSoftObjectPath(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")).TryLoad());
 	}

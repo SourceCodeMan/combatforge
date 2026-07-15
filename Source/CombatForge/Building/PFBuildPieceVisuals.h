@@ -14,10 +14,10 @@ class UStaticMesh;
  * cohesion surface palette (warehouse concrete/metal textures on triplanar masters).
  *
  * Structural pieces (Wall/Floor/Ramp/Roof) keep engine basic-shape geometry so
- * edge placement / thin AABBs stay exact. Materials use M_PF_Arena* triplanar
- * masters (NOT M_PF_BuildPiece — that asset is off-limits for ISM/checker reasons)
- * with Scene_Warehouse textures rebinding at runtime so arena shell + built forts
- * share one CQB industrial look.
+ * edge placement / thin AABBs stay exact. Materials prefer Scene_Warehouse Surface
+ * MIs (self-contained albedo — proven non-black). Fallback is M_PF_ArenaWall
+ * triplanar + texture rebind. NEVER M_PF_ArenaFloor (miswired base color = pure black)
+ * and NEVER M_PF_BuildPiece (ISM checker + local-edit guardrail).
  * Props soft-load Megascans from Scene_Warehouse (native materials).
  */
 namespace PFBuildPieceVisuals
