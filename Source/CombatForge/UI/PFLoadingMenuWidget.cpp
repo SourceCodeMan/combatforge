@@ -118,7 +118,7 @@ namespace
 		switch (Type)
 		{
 		case EPFMatchType::Elimination:
-			return TEXT("Last team standing · first to N round wins");
+			return TEXT("Last team standing · first to 4 round wins");
 		case EPFMatchType::FreeForAll:
 			return TEXT("Solo · most tags · no teams · play-only");
 		case EPFMatchType::Skirmish:
@@ -126,7 +126,7 @@ namespace
 		case EPFMatchType::CaptureFlag:
 			return TEXT("Grab their flag · score at your base · first to 3");
 		case EPFMatchType::Domination:
-			return TEXT("Hold points A / B / C · score over time");
+			return TEXT("Capture & hold A / B / C · first to 200");
 		case EPFMatchType::Hardpoint:
 			return TEXT("One rotating point · hold it · score over time");
 		default:
@@ -1195,6 +1195,12 @@ void UPFLoadingMenuWidget::BuildTree()
 		V->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
 	}
 
+	// ---- Two-column body (playtest: one tall column scrolled forever) ----
+	// LEFT: the tab row + all setup content (build mode, game mode, format, community maps, class, options).
+	// RIGHT: every "do something" control — QUICK START, HOST/JOIN, START GAME, QUIT — always on screen.
+	UVerticalBox* LeftCol = WidgetTree->ConstructWidget<UVerticalBox>();
+	UVerticalBox* RightCol = WidgetTree->ConstructWidget<UVerticalBox>();
+
 	// First-session one-click preset (host): Play-Only Skirmish 4v4 with bots + community map.
 	QuickStartButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("QuickStartBtn"));
 	QuickStartButton->SetBackgroundColor(FLinearColor(1.f, 0.85f, 0.2f, 0.95f));
@@ -1205,9 +1211,9 @@ void UPFLoadingMenuWidget::BuildTree()
 	QuickStartLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.12f, 0.14f)));
 	QuickStartLabel->SetJustification(ETextJustify::Center);
 	QuickStartButton->AddChild(QuickStartLabel);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(QuickStartButton))
+	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(QuickStartButton))
 	{
-		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetHorizontalAlignment(HAlign_Fill);
 		V->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 	}
 	UTextBlock* QuickHint = WidgetTree->ConstructWidget<UTextBlock>();
@@ -1215,10 +1221,10 @@ void UPFLoadingMenuWidget::BuildTree()
 	QuickHint->SetFont(PFLoadFont(12, false));
 	QuickHint->SetColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.62f, 0.68f)));
 	QuickHint->SetJustification(ETextJustify::Center);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(QuickHint))
+	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(QuickHint))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
 	}
 
 	// ---- LAN multiplayer (no matchmaking yet): HOST turns this PC into a listen server; JOIN connects to a
@@ -1226,23 +1232,26 @@ void UPFLoadingMenuWidget::BuildTree()
 	//      shows "friends join <ip>"; a joined client shows the connection.
 	{
 		const ENetMode Net = GetWorld() ? GetWorld()->GetNetMode() : NM_Standalone;
-		UHorizontalBox* MpRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+		// Stacked for the narrow right column: HOST on its own line, then IP + JOIN as a row.
+		UVerticalBox* MpBox = WidgetTree->ConstructWidget<UVerticalBox>();
 		if (Net == NM_Standalone)
 		{
 			HostLanButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("HostLanBtn"));
 			HostLanButton->SetBackgroundColor(FLinearColor(0.16f, 0.34f, 0.2f, 1.f));
 			HostLanButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnHostLanClicked);
 			UTextBlock* HostLab = WidgetTree->ConstructWidget<UTextBlock>();
-			HostLab->SetText(FText::FromString(TEXT("  HOST LAN GAME  ")));
-			HostLab->SetFont(PFLoadFont(13, true));
+			HostLab->SetText(FText::FromString(TEXT("HOST LAN GAME")));
+			HostLab->SetFont(PFLoadFont(14, true));
 			HostLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			HostLab->SetJustification(ETextJustify::Center);
 			HostLanButton->AddChild(HostLab);
-			if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(HostLanButton))
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(HostLanButton))
 			{
-				H->SetPadding(FMargin(4.f, 0.f, 10.f, 0.f));
-				H->SetVerticalAlignment(VAlign_Center);
+				V->SetHorizontalAlignment(HAlign_Fill);
+				V->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 			}
 
+			UHorizontalBox* JoinRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 			JoinIpBox = WidgetTree->ConstructWidget<UEditableTextBox>();
 			JoinIpBox->SetHintText(FText::FromString(TEXT("host IP")));
 			JoinIpBox->SetText(FText::FromString(FPFUserPrefs::GetLastJoinIp()));
@@ -1250,10 +1259,11 @@ void UPFLoadingMenuWidget::BuildTree()
 			USizeBox* IpSizer = WidgetTree->ConstructWidget<USizeBox>();
 			IpSizer->SetWidthOverride(210.f);
 			IpSizer->SetContent(JoinIpBox);
-			if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(IpSizer))
+			if (UHorizontalBoxSlot* H = JoinRow->AddChildToHorizontalBox(IpSizer))
 			{
-				H->SetPadding(FMargin(4.f, 0.f));
+				H->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
 				H->SetVerticalAlignment(VAlign_Center);
+				H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 			}
 
 			JoinLanButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("JoinLanBtn"));
@@ -1264,10 +1274,13 @@ void UPFLoadingMenuWidget::BuildTree()
 			JoinLab->SetFont(PFLoadFont(13, true));
 			JoinLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			JoinLanButton->AddChild(JoinLab);
-			if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(JoinLanButton))
+			if (UHorizontalBoxSlot* H = JoinRow->AddChildToHorizontalBox(JoinLanButton))
 			{
-				H->SetPadding(FMargin(4.f, 0.f));
 				H->SetVerticalAlignment(VAlign_Center);
+			}
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(JoinRow))
+			{
+				V->SetHorizontalAlignment(HAlign_Fill);
 			}
 		}
 		else
@@ -1285,7 +1298,11 @@ void UPFLoadingMenuWidget::BuildTree()
 				NetLab->SetText(FText::FromString(TEXT("CONNECTED to host")));
 				NetLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.75f, 1.f)));
 			}
-			MpRow->AddChildToHorizontalBox(NetLab);
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(NetLab))
+			{
+				V->SetHorizontalAlignment(HAlign_Center);
+				V->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+			}
 			if (Net == NM_ListenServer)
 			{
 				// Way back out: return to a private standalone session (disconnects any joined friends, who
@@ -1294,20 +1311,20 @@ void UPFLoadingMenuWidget::BuildTree()
 				StopBtn->SetBackgroundColor(FLinearColor(0.42f, 0.18f, 0.16f, 1.f));
 				StopBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnStopHostingClicked);
 				UTextBlock* StopLab = WidgetTree->ConstructWidget<UTextBlock>();
-				StopLab->SetText(FText::FromString(TEXT("  STOP HOSTING  ")));
+				StopLab->SetText(FText::FromString(TEXT("STOP HOSTING")));
 				StopLab->SetFont(PFLoadFont(12, true));
 				StopLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				StopLab->SetJustification(ETextJustify::Center);
 				StopBtn->AddChild(StopLab);
-				if (UHorizontalBoxSlot* H = MpRow->AddChildToHorizontalBox(StopBtn))
+				if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(StopBtn))
 				{
-					H->SetPadding(FMargin(10.f, 0.f, 0.f, 0.f));
-					H->SetVerticalAlignment(VAlign_Center);
+					V->SetHorizontalAlignment(HAlign_Fill);
 				}
 			}
 		}
-		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MpRow))
+		if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(MpBox))
 		{
-			V->SetHorizontalAlignment(HAlign_Center);
+			V->SetHorizontalAlignment(HAlign_Fill);
 			V->SetPadding(FMargin(0.f, 0.f, 0.f, 20.f));
 		}
 	}
@@ -1340,7 +1357,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	{
 		H->SetPadding(FMargin(4.f, 0.f));
 	}
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MenuTabs))
+	if (UVerticalBoxSlot* V = LeftCol->AddChildToVerticalBox(MenuTabs))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
 		V->SetPadding(FMargin(0.f, 0.f, 0.f, 14.f));
@@ -1428,49 +1445,49 @@ void UPFLoadingMenuWidget::BuildTree()
 	MenuSwitcher->AddChild(CharacterCol);    // index 3
 	MenuSwitcher->AddChild(OptionsCol);      // index 4
 
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(MenuSizer))
+	if (UVerticalBoxSlot* V = LeftCol->AddChildToVerticalBox(MenuSizer))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
 		V->SetPadding(FMargin(0.f, 0.f, 0.f, 28.f));
 	}
 
-	// ---- Warmup status ----
+	// ---- Warmup status (right column, above START GAME) ----
 	StatusText = WidgetTree->ConstructWidget<UTextBlock>();
 	StatusText->SetText(FText::FromString(TEXT("Starting…")));
-	StatusText->SetFont(PFLoadFont(15, false));
+	StatusText->SetFont(PFLoadFont(14, false));
 	StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.92f)));
 	StatusText->SetJustification(ETextJustify::Center);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(StatusText))
+	StatusText->SetAutoWrapText(true);
+	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(StatusText))
 	{
-		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+		V->SetPadding(FMargin(0.f, 4.f, 0.f, 10.f));
 	}
 
 	ProgressBar = WidgetTree->ConstructWidget<UProgressBar>();
 	ProgressBar->SetPercent(0.f);
 	ProgressBar->SetFillColorAndOpacity(FLinearColor(1.f, 0.85f, 0.25f));
 	USizeBox* ProgressSizer = WidgetTree->ConstructWidget<USizeBox>();
-	ProgressSizer->SetWidthOverride(420.f);
 	ProgressSizer->SetHeightOverride(14.f);
 	ProgressSizer->SetContent(ProgressBar);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(ProgressSizer))
+	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(ProgressSizer))
 	{
-		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 28.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 20.f));
 	}
 
 	EnterButton = WidgetTree->ConstructWidget<UButton>();
 	EnterButton->SetIsEnabled(false);
 	EnterButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnEnterClicked);
 	EnterLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	EnterLabel->SetText(FText::FromString(TEXT("ENTER LOBBY")));
+	EnterLabel->SetText(FText::FromString(TEXT("START GAME")));
 	EnterLabel->SetFont(PFLoadFont(18, true));
 	EnterLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.15f, 0.15f, 0.18f)));
 	EnterLabel->SetJustification(ETextJustify::Center);
 	EnterButton->AddChild(EnterLabel);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(EnterButton))
+	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(EnterButton))
 	{
-		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetHorizontalAlignment(HAlign_Fill);
 		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 	}
 
@@ -1483,15 +1500,34 @@ void UPFLoadingMenuWidget::BuildTree()
 	QuitDesktopLabel->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.85f)));
 	QuitDesktopLabel->SetJustification(ETextJustify::Center);
 	QuitDesktopButton->AddChild(QuitDesktopLabel);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(QuitDesktopButton))
+	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(QuitDesktopButton))
+	{
+		V->SetHorizontalAlignment(HAlign_Fill);
+		V->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+	}
+
+	// ---- Assemble the two columns ----
+	UHorizontalBox* BodyRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	if (UHorizontalBoxSlot* H = BodyRow->AddChildToHorizontalBox(LeftCol))
+	{
+		H->SetPadding(FMargin(0.f, 0.f, 28.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Top);
+	}
+	USizeBox* RightSizer = WidgetTree->ConstructWidget<USizeBox>();
+	RightSizer->SetWidthOverride(320.f);
+	RightSizer->SetContent(RightCol);
+	if (UHorizontalBoxSlot* H = BodyRow->AddChildToHorizontalBox(RightSizer))
+	{
+		H->SetVerticalAlignment(VAlign_Top);
+	}
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(BodyRow))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
 	}
 
 	// Wrap the whole menu in a full-viewport scroll box: content stays top-anchored (so clicking tabs never
 	// shifts the layout — the old "jumping" bug) and long pages (e.g. Play-Only + community map picker) scroll
-	// so the ENTER LOBBY button is always reachable instead of falling off the bottom.
+	// so the START GAME button is always reachable instead of falling off the bottom.
 	UScrollBox* MenuScroll = WidgetTree->ConstructWidget<UScrollBox>();
 	MenuScroll->AddChild(Col);
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(MenuScroll))
@@ -1787,10 +1823,14 @@ void UPFLoadingMenuWidget::RefreshMapPicker()
 				if (UTexture2D* Preview = GetMapPreview(M.FileName))
 				{
 					MapSlotImages[SlotIdx]->SetBrushFromTexture(Preview, /*bMatchSize=*/false);
+					// The raw viewport grabs come out dark in the menu — lift them ~10% at display time
+					// (applies uniformly to old shots too, unlike a capture-time fix).
+					MapSlotImages[SlotIdx]->SetColorAndOpacity(FLinearColor(1.10f, 1.10f, 1.10f, 1.f));
 				}
 				else
 				{
 					MapSlotImages[SlotIdx]->SetBrush(FSlateColorBrush(FLinearColor(0.15f, 0.16f, 0.20f, 1.f)));
+					MapSlotImages[SlotIdx]->SetColorAndOpacity(FLinearColor::White);
 				}
 			}
 		}
@@ -1937,7 +1977,7 @@ void UPFLoadingMenuWidget::ApplyQuickStartPreset()
 	RefreshSetupLabels();
 	ApplySelectionsToHost();
 	ApplyMapSelectionToHost();
-	SetStatus(TEXT("Quick Start ready — press ENTER LOBBY when warm-up finishes."));
+	SetStatus(TEXT("Quick Start ready — press START GAME when warm-up finishes."));
 	if (QuickStartLabel)
 	{
 		QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — applied ✓  ")));
@@ -2183,14 +2223,14 @@ void UPFLoadingMenuWidget::FinishWarmup()
 		ProgressBar->SetPercent(1.f);
 		ProgressBar->SetFillColorAndOpacity(FLinearColor(0.35f, 0.85f, 0.4f));   // green = done warming up
 	}
-	SetStatus(TEXT("Ready — press ENTER LOBBY to start."));
+	SetStatus(TEXT("Ready — press START GAME to start."));
 	if (EnterButton)
 	{
 		EnterButton->SetIsEnabled(true);
 	}
 	if (EnterLabel)
 	{
-		EnterLabel->SetText(FText::FromString(TEXT("ENTER LOBBY")));
+		EnterLabel->SetText(FText::FromString(TEXT("START GAME")));
 	}
 	// Ensure host selection is on the server before anyone enters.
 	ApplySelectionsToHost();

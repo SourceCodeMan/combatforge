@@ -8,7 +8,10 @@
 #include "Combat/PFWeaponComponent.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
+#include "Objectives/PFControlPointActor.h"
 #include "Player/CombatForgeCharacter.h"
+
+#include "EngineUtils.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Camera/CameraComponent.h"
@@ -211,6 +214,29 @@ void UPFCombatHUDWidget::BuildTree()
 		VSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
 	}
 
+	// Domination zone chips: A / B / C, letter tinted by owner, "▰▰▱▱" segment bar while a capture runs
+	// (the CoD letter-icon-fills-with-capturing-color idea, in text form to match the HUD style).
+	ZoneChipsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	ZoneChips.Reset();
+	for (int32 i = 0; i < 3; ++i)
+	{
+		UTextBlock* Chip = WidgetTree->ConstructWidget<UTextBlock>();
+		Chip->SetFont(PFCombatFont(17, true));
+		Chip->SetJustification(ETextJustify::Center);
+		Chip->SetText(FText::GetEmpty());
+		if (UHorizontalBoxSlot* HSlot = ZoneChipsRow->AddChildToHorizontalBox(Chip))
+		{
+			HSlot->SetPadding(FMargin(12.f, 0.f));
+		}
+		ZoneChips.Add(Chip);
+	}
+	ZoneChipsRow->SetVisibility(ESlateVisibility::Collapsed);
+	if (UVerticalBoxSlot* VSlot = TopBox->AddChildToVerticalBox(ZoneChipsRow))
+	{
+		VSlot->SetHorizontalAlignment(HAlign_Center);
+		VSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+	}
+
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(TopBox))
 	{
 		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
@@ -317,6 +343,46 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetPosition(FVector2D(0.f, 36.f));
 		CSlot->SetAutoSize(true);
 		CSlot->SetZOrder(41);
+	}
+
+	OutClassText = WidgetTree->ConstructWidget<UTextBlock>();
+	OutClassText->SetText(FText::GetEmpty());
+	OutClassText->SetFont(PFCombatFont(18, true));
+	OutClassText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.9f, 1.f, 0.95f)));
+	OutClassText->SetJustification(ETextJustify::Center);
+	OutClassText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(OutClassText))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		CSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		CSlot->SetPosition(FVector2D(0.f, 92.f));
+		CSlot->SetAutoSize(true);
+		CSlot->SetZOrder(41);
+	}
+
+	// ---- Domination capture meter (CoD "Capture Meter": linear bar, lower-center, above the weapon HUD;
+	//      shown while the local player stands in a zone with capture activity) ----
+	CaptureBarLabel = WidgetTree->ConstructWidget<UTextBlock>();
+	CaptureBarLabel->SetFont(PFCombatFont(16, true));
+	CaptureBarLabel->SetJustification(ETextJustify::Center);
+	CaptureBarLabel->SetText(FText::GetEmpty());
+	CaptureBarLabel->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(CaptureBarLabel))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		CSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		CSlot->SetPosition(FVector2D(0.f, -196.f));
+		CSlot->SetAutoSize(true);
+	}
+	CaptureBar = WidgetTree->ConstructWidget<UProgressBar>();
+	CaptureBar->SetPercent(0.f);
+	CaptureBar->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(CaptureBar))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		CSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		CSlot->SetPosition(FVector2D(0.f, -172.f));
+		CSlot->SetSize(FVector2D(340.f, 16.f));
 	}
 }
 
@@ -807,6 +873,11 @@ void UPFCombatHUDWidget::UpdateOutOverlay()
 			OutSubtitleText->SetVisibility(ESlateVisibility::Collapsed);
 			OutSubtitleText->SetText(FText::GetEmpty());
 		}
+		if (OutClassText)
+		{
+			OutClassText->SetVisibility(ESlateVisibility::Collapsed);
+			OutClassText->SetText(FText::GetEmpty());
+		}
 	};
 
 	const UPFHealthComponent* Health = BoundHealth.Get();
@@ -862,6 +933,25 @@ void UPFCombatHUDWidget::UpdateOutOverlay()
 			Subtitle.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
 	}
 
+	// Respawn countdown doubles as the class-select screen: show the active class + its weapon, live-updated
+	// as the wheel cycles slots (the fresh pawn pushes whatever is active when the timer hits zero).
+	if (OutClassText)
+	{
+		if (OutKind == 1)
+		{
+			const int32 ClassSlot = PFChar::GetActiveSaveSlot();
+			const FPFWeaponConfig WpnCfg = PFWeapon::LoadConfig(ClassSlot);
+			const FPFWeaponDef& Def = PFWeapon::Weapon(WpnCfg.Category, WpnCfg.Index);
+			OutClassText->SetText(FText::FromString(FString::Printf(
+				TEXT("CLASS %d — %s     (scroll to change)"), ClassSlot + 1, Def.DisplayName)));
+			OutClassText->SetVisibility(ESlateVisibility::HitTestInvisible);
+		}
+		else
+		{
+			OutClassText->SetVisibility(ESlateVisibility::Collapsed);
+			OutClassText->SetText(FText::GetEmpty());
+		}
+	}
 }
 
 void UPFCombatHUDWidget::UpdateObjectiveStatus()
@@ -922,6 +1012,167 @@ void UPFCombatHUDWidget::UpdateObjectiveStatus()
 	ObjectiveStatusText->SetColorAndOpacity(FSlateColor(Color));
 }
 
+void UPFCombatHUDWidget::EnsureZoneCache()
+{
+	// Weak-cache the three zone actors, sorted A/B/C. Clients receive them by replication whenever, so refill
+	// on any invalid entry; 3 actors via iterator is trivially cheap at that rate.
+	bool bValid = ZoneCache.Num() > 0;
+	for (const TWeakObjectPtr<APFControlPointActor>& CP : ZoneCache)
+	{
+		if (!CP.IsValid())
+		{
+			bValid = false;
+			break;
+		}
+	}
+	if (bValid)
+	{
+		return;
+	}
+	ZoneCache.Reset();
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<APFControlPointActor> It(World); It; ++It)
+		{
+			ZoneCache.Add(*It);
+		}
+	}
+	ZoneCache.Sort([](const TWeakObjectPtr<APFControlPointActor>& L, const TWeakObjectPtr<APFControlPointActor>& R)
+	{
+		return (L.IsValid() ? L->GetPointIndex() : 99) < (R.IsValid() ? R->GetPointIndex() : 99);
+	});
+}
+
+void UPFCombatHUDWidget::UpdateDominationHUD()
+{
+	const ACombatForgeGameState* GS = BoundGameState.Get();
+	const ACombatForgePlayerState* LocalPS =
+		GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<ACombatForgePlayerState>() : nullptr;
+	const bool bDom = GS && LocalPS && GS->MatchType == EPFMatchType::Domination
+		&& GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live;
+
+	auto HideAll = [this]()
+	{
+		if (ZoneChipsRow) { ZoneChipsRow->SetVisibility(ESlateVisibility::Collapsed); }
+		if (CaptureBar) { CaptureBar->SetVisibility(ESlateVisibility::Collapsed); }
+		if (CaptureBarLabel) { CaptureBarLabel->SetVisibility(ESlateVisibility::Collapsed); }
+	};
+	if (!bDom)
+	{
+		HideAll();
+		return;
+	}
+	EnsureZoneCache();
+	if (ZoneCache.Num() == 0)
+	{
+		HideAll();
+		return;
+	}
+
+	const FLinearColor Neutral(0.65f, 0.65f, 0.7f);
+
+	// Chips: letter colored by OWNER; while a capture chain runs, a 4-segment fill in the CAPTURING team's
+	// color shows remote progress (CoD fills the letter icon the same way).
+	if (ZoneChipsRow)
+	{
+		ZoneChipsRow->SetVisibility(ESlateVisibility::HitTestInvisible);
+		for (int32 i = 0; i < ZoneChips.Num(); ++i)
+		{
+			UTextBlock* Chip = ZoneChips[i];
+			const APFControlPointActor* CP = ZoneCache.IsValidIndex(i) ? ZoneCache[i].Get() : nullptr;
+			if (!Chip)
+			{
+				continue;
+			}
+			if (!CP)
+			{
+				Chip->SetText(FText::GetEmpty());
+				continue;
+			}
+			const uint8 Owner = CP->GetControllingTeam();
+			const uint8 Capper = CP->GetCapturingTeam();
+			FString Text = FString::Chr(static_cast<TCHAR>(TEXT('A') + i));
+			FLinearColor Color = (Owner <= 1) ? PFColors::ForTeam(Owner) : Neutral;
+			if (CP->IsContested())
+			{
+				Text += TEXT(" ✕");   // contested marker
+				Color = FLinearColor(1.f, 0.85f, 0.3f);
+			}
+			else if (Capper <= 1)
+			{
+				const int32 Filled = FMath::Clamp(FMath::RoundToInt(CP->GetCaptureProgress01() * 4.f), 0, 4);
+				Text += TEXT(" ");
+				for (int32 s = 0; s < 4; ++s)
+				{
+					Text += (s < Filled) ? TEXT("▰") : TEXT("▱");
+				}
+				Color = PFColors::ForTeam(Capper);
+			}
+			Chip->SetText(FText::FromString(Text));
+			Chip->SetColorAndOpacity(FSlateColor(Color));
+		}
+	}
+
+	// Capture meter: only while the LOCAL player stands in a zone with something happening.
+	const APFControlPointActor* MyCP = nullptr;
+	if (LocalPS->StandingOnPoint != 255)
+	{
+		const int32 Idx = static_cast<int32>(LocalPS->StandingOnPoint);
+		MyCP = ZoneCache.IsValidIndex(Idx) ? ZoneCache[Idx].Get() : nullptr;
+	}
+	FString Label;
+	float Fill = 0.f;
+	FLinearColor FillColor = Neutral;
+	if (MyCP)
+	{
+		const TCHAR Letter = static_cast<TCHAR>(TEXT('A') + MyCP->GetPointIndex());
+		const uint8 Owner = MyCP->GetControllingTeam();
+		const uint8 Capper = MyCP->GetCapturingTeam();
+		const uint8 MyTeam = LocalPS->TeamId;
+		if (MyCP->IsContested())
+		{
+			Label = TEXT("CONTESTED");
+			Fill = MyCP->GetCaptureProgress01();
+			FillColor = FLinearColor(1.f, 0.85f, 0.3f);
+		}
+		else if (Capper <= 1)
+		{
+			Fill = MyCP->GetCaptureProgress01();
+			FillColor = PFColors::ForTeam(Capper);
+			if (Capper == MyTeam)
+			{
+				// Stage 1 on an enemy-owned zone is the neutralize pass (CoD's two-stage flip).
+				Label = (Owner != 255 && Owner != MyTeam)
+					? FString::Printf(TEXT("NEUTRALIZING %c"), Letter)
+					: FString::Printf(TEXT("CAPTURING %c"), Letter);
+			}
+			else
+			{
+				Label = FString::Printf(TEXT("LOSING %c"), Letter);
+			}
+		}
+	}
+	const bool bShowBar = !Label.IsEmpty();
+	if (CaptureBar)
+	{
+		CaptureBar->SetVisibility(bShowBar ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		if (bShowBar)
+		{
+			CaptureBar->SetPercent(Fill);
+			CaptureBar->SetFillColorAndOpacity(FillColor);
+		}
+	}
+	if (CaptureBarLabel)
+	{
+		CaptureBarLabel->SetVisibility(bShowBar ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		if (bShowBar)
+		{
+			CaptureBarLabel->SetText(FText::FromString(Label));
+			CaptureBarLabel->SetColorAndOpacity(FSlateColor(FillColor));
+		}
+	}
+}
+
 void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
@@ -932,6 +1183,7 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 	UpdateCrosshair();
 	UpdateBanner(InDeltaTime);
 	UpdateObjectiveStatus();
+	UpdateDominationHUD();
 
 	if (const ACombatForgeGameState* GS = BoundGameState.Get())
 	{

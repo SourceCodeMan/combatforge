@@ -63,6 +63,8 @@ private:
 	void UpdateBanner(float InDeltaTime);
 	/** CTF carrier / Dom-HP on-point strip (reads local PlayerState each tick). */
 	void UpdateObjectiveStatus();
+	void UpdateDominationHUD();   // A/B/C ownership chips + the capture-progress bar
+	void EnsureZoneCache();       // find/cache the three control-point actors (clients get them via replication)
 	/** Full-screen "YOU'RE OUT" + respawn timer / out-for-round (local eliminated player only). */
 	void UpdateOutOverlay();
 
@@ -86,11 +88,19 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> BannerText;
 	/** Objective callout under the top score strip (carrier / on-point). Hidden when idle. */
 	UPROPERTY() TObjectPtr<UTextBlock> ObjectiveStatusText;
+	// Domination: A/B/C zone chips under the score strip (letter = owner color, segment bar while capturing)
+	// + the CoD-style linear capture meter above the weapon HUD when the local player is in a zone.
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> ZoneChips;
+	UPROPERTY() TObjectPtr<class UHorizontalBox> ZoneChipsRow;
+	UPROPERTY() TObjectPtr<UProgressBar> CaptureBar;
+	UPROPERTY() TObjectPtr<UTextBlock> CaptureBarLabel;
+	TArray<TWeakObjectPtr<class APFControlPointActor>> ZoneCache;
 
 	/** Full-screen elim overlay (dim + YOU'RE OUT + countdown). */
 	UPROPERTY() TObjectPtr<UImage> OutDim;
 	UPROPERTY() TObjectPtr<UTextBlock> OutTitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> OutSubtitleText;
+	UPROPERTY() TObjectPtr<UTextBlock> OutClassText;     // "CLASS n — <weapon> | scroll to change" on the countdown
 
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsA;
 	UPROPERTY() TArray<TObjectPtr<UImage>> PipsB;
