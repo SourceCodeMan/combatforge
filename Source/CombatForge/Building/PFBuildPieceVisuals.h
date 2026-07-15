@@ -6,25 +6,38 @@
 #include "Core/CombatForgeTypes.h"
 
 class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class UStaticMesh;
 
 /**
  * Shared build-piece display names, soft-loaded warehouse prop meshes, and
- * per-type structural surface profiles (triplanar textures + team accent).
+ * cohesion surface palette (warehouse concrete/metal textures on triplanar masters).
  *
  * Structural pieces (Wall/Floor/Ramp/Roof) keep engine basic-shape geometry so
- * edge placement / thin AABBs stay exact; art comes from M_PF_BuildPiece MIDs
- * with warehouse (or Concrete034) textures applied per type.
+ * edge placement / thin AABBs stay exact. Materials use M_PF_Arena* triplanar
+ * masters (NOT M_PF_BuildPiece — that asset is off-limits for ISM/checker reasons)
+ * with Scene_Warehouse textures rebinding at runtime so arena shell + built forts
+ * share one CQB industrial look.
  * Props soft-load Megascans from Scene_Warehouse (native materials).
  */
 namespace PFBuildPieceVisuals
 {
+	/** Cohesion palette roles shared by arena shell + structural build pieces. */
+	enum class EPFSurfaceRole : uint8
+	{
+		FloorConcrete,   // smooth warehouse floor
+		WallConcrete,    // facade / bunker concrete (lighter tile than floor)
+		MetalRusty,      // ramps, posts, trusses
+		MetalRoof,       // painted roof / ceiling decks
+		MAX
+	};
+
 	/** Display name for HUD / wheel (player-facing). */
 	const TCHAR* DisplayName(EPFPieceType Type);
 	const TCHAR* DisplayName(EPFBuildTool Tool);
 
 	/**
-	 * Ensure prop meshes + structural surface textures are soft-loaded
+	 * Ensure prop meshes + structural surface textures + triplanar masters are soft-loaded
 	 * (idempotent, safe from game thread). Falls back to engine shapes / Concrete034.
 	 */
 	void EnsureLoaded();
@@ -49,6 +62,22 @@ namespace PFBuildPieceVisuals
 	 */
 	void ApplyStructuralSurface(UMaterialInstanceDynamic* MID, EPFPieceType Type);
 
+	/** Map piece type → cohesion palette role. */
+	EPFSurfaceRole RoleForPieceType(EPFPieceType Type);
+
+	/**
+	 * Create a MID on the shared triplanar master with warehouse textures for this role.
+	 * Outer owns the MID. Returns null only if no master material could load.
+	 * Never touches M_PF_BuildPiece.
+	 */
+	UMaterialInstanceDynamic* CreatePaletteMID(UObject* Outer, EPFSurfaceRole Role);
+
+	/** Convenience: CreatePaletteMID(Outer, RoleForPieceType(Type)). */
+	UMaterialInstanceDynamic* CreateStructuralPaletteMID(UObject* Outer, EPFPieceType Type);
+
 	/** Short label for logging / debug (e.g. "wall-concrete", "ramp-metal"). */
 	const TCHAR* StructuralSurfaceName(EPFPieceType Type);
+
+	/** Role label for logging. */
+	const TCHAR* SurfaceRoleName(EPFSurfaceRole Role);
 }

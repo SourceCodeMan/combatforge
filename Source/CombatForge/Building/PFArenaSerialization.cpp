@@ -119,7 +119,8 @@ FString FPFArenaSerialization::ComputeHalfHash(const TArray<FPFBuildPieceRec>& P
 
 TSharedRef<FJsonObject> FPFArenaSerialization::BuildLayoutJson(const TArray<FPFBuildPieceRec>& Pieces,
                                                                const FString& MatchId, int32 TeamSize,
-                                                               const FDateTime& CreatedUtc)
+                                                               const FDateTime& CreatedUtc,
+                                                               const FString& ParentArenaId)
 {
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 
@@ -141,9 +142,17 @@ TSharedRef<FJsonObject> FPFArenaSerialization::BuildLayoutJson(const TArray<FPFB
 	Grid->SetNumberField(TEXT("levels"), PFGrid::Levels);
 	Root->SetObjectField(TEXT("grid"), Grid);
 
-	Root->SetStringField(TEXT("arenaId"), ComputeArenaId(Pieces));
+	const FString ArenaId = ComputeArenaId(Pieces);
+	Root->SetStringField(TEXT("arenaId"), ArenaId);
 	Root->SetStringField(TEXT("halfHashA"), ComputeHalfHash(Pieces, 0));
 	Root->SetStringField(TEXT("halfHashB"), ComputeHalfHash(Pieces, 1));
+
+	// Remix lineage: record the source map ONLY when this is a genuine fork (the layout actually changed).
+	// Equal ids ⇒ nothing was remixed (or a Play-Only replay) ⇒ no parent; empty ⇒ Creative/from scratch.
+	if (!ParentArenaId.IsEmpty() && ParentArenaId != ArenaId)
+	{
+		Root->SetStringField(TEXT("parentArenaId"), ParentArenaId);
+	}
 
 	TArray<TSharedPtr<FJsonValue>> PieceArray;
 	PieceArray.Reserve(Pieces.Num());

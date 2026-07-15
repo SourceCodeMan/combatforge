@@ -29,10 +29,17 @@ struct COMBATFORGE_API FPFArenaSerialization
 	/**
 	 * Builds the ① piece/grid block of the match JSON: schema, game, matchId, createdUtc,
 	 * teamSize, grid{...}, arenaId, halfHashA/B, pieces[{id,t,x,y,z,r,own,team}].
+	 *
+	 * ParentArenaId (Remix lineage, T27+): the arenaId of the community map this layout was built ON TOP
+	 * of (Improvement/Remix mode). Written as "parentArenaId" ONLY when it is non-empty AND differs from
+	 * this layout's own arenaId — so a remix that changed nothing (or a from-scratch/Creative build) records
+	 * no parent. This makes "improve → NEW map, never overwrite the original" explicit and traceable in the
+	 * data (the content-hash arenaId already guarantees a changed layout is a distinct map + distinct file).
 	 */
 	static TSharedRef<FJsonObject> BuildLayoutJson(const TArray<FPFBuildPieceRec>& Pieces,
 	                                               const FString& MatchId, int32 TeamSize,
-	                                               const FDateTime& CreatedUtc);
+	                                               const FDateTime& CreatedUtc,
+	                                               const FString& ParentArenaId = FString());
 
 	/**
 	 * Inverse of BuildLayoutJson's piece block: parses the "pieces" array back into records (and reads

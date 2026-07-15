@@ -78,7 +78,7 @@ namespace
 
 void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
                                           const TArray<FPFBuildPieceRec>& FrozenPieces,
-                                          int32 TeamSize)
+                                          int32 TeamSize, const FString& ParentArenaId)
 {
 	if (!IsServerContext())
 	{
@@ -96,8 +96,9 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 	RecordCreatedUtc = FDateTime::UtcNow();
 	CurrentMatchId   = MatchId;
 	CurrentArenaId   = FPFArenaSerialization::ComputeArenaId(FrozenPieces);
+	CurrentParentArenaId = ParentArenaId;   // BuildLayoutJson drops it when it equals CurrentArenaId (no real remix)
 	CurrentRecordJson = FPFArenaSerialization::BuildLayoutJson(FrozenPieces, MatchId, TeamSize,
-	                                                           RecordCreatedUtc);
+	                                                           RecordCreatedUtc, ParentArenaId);
 
 	const FString ArenaDir = FPFPaths::ArenaDir();   // stable per-user dir (survives repackaging)
 	CurrentFilePath = ArenaDir / FString::Printf(TEXT("arena_%s_%s.json"),
@@ -109,9 +110,12 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 
 	if (WriteRecordToDisk())
 	{
+		const bool bRemix = !CurrentParentArenaId.IsEmpty() && CurrentParentArenaId != CurrentArenaId;
 		UE_LOG(CombatForgeLog, Log,
-			TEXT("PFRatingSubsystem: began match record %s (arenaId %s, %d pieces) -> %s"),
-			*CurrentMatchId, *CurrentArenaId, FrozenPieces.Num(), *CurrentFilePath);
+			TEXT("PFRatingSubsystem: began match record %s (arenaId %s, %d pieces%s) -> %s"),
+			*CurrentMatchId, *CurrentArenaId, FrozenPieces.Num(),
+			bRemix ? *FString::Printf(TEXT(", remix of %s"), *CurrentParentArenaId.Left(8)) : TEXT(""),
+			*CurrentFilePath);
 	}
 }
 
@@ -256,6 +260,7 @@ bool UPFRatingSubsystem::ParseArenaFile(const FString& AbsolutePath, const FStri
 	OutInfo.PieceCount = OutPieces.Num();
 	OutInfo.TeamSize = TeamSize;
 	Root->TryGetStringField(TEXT("arenaId"), OutInfo.ArenaId);
+	Root->TryGetStringField(TEXT("parentArenaId"), OutInfo.ParentArenaId);   // Remix lineage; absent on originals
 	Root->TryGetStringField(TEXT("createdUtc"), OutInfo.CreatedUtc);
 
 	// Vote tally → rank score (up +2, down −1).
@@ -421,14 +426,24 @@ bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces
 	return false;
 }
 
-bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces,
+bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces, FString& OutArenaId,
 	const FString& PreferredFileName) const
 {
-	if (!PreferredFileName.IsEmpty() && LoadCommunityArenaByFileName(PreferredFileName, OutPieces))
+	OutArenaId.Reset();
+
+	const bool bLoaded =
+		(!PreferredFileName.IsEmpty() && LoadCommunityArenaByFileName(PreferredFileName, OutPieces))
+		|| LoadMostRecentArena(OutPieces);   // whole arena, both halves, unchanged
+	if (!bLoaded)
 	{
-		return true;
+		return false;
 	}
-	return LoadMostRecentArena(OutPieces);   // whole arena, both halves, unchanged
+
+	// The Remix parent id is the CONTENT hash of the base layout — never a filename. It must be computed the
+	// same way the child records its own arenaId so lineage lookups line up and the "unchanged ⇒ no parent"
+	// guard in BuildLayoutJson fires correctly (a filename would never equal the child hash → false lineage).
+	OutArenaId = FPFArenaSerialization::ComputeArenaId(OutPieces);
+	return true;
 }
 
 bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, uint8 TargetTeam) const
@@ -548,6 +563,7 @@ void UPFRatingSubsystem::ClearRecordState()
 	PendingVotes.Reset();
 	CurrentMatchId.Reset();
 	CurrentArenaId.Reset();
+	CurrentParentArenaId.Reset();
 	CurrentFilePath.Reset();
 	RecordCreatedUtc = FDateTime();
 	bRecordActive = false;

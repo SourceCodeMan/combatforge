@@ -113,6 +113,8 @@ private:
 	void HideCubeDressingByPrefix(const TCHAR* Prefix);
 
 	void ApplyTint(UStaticMeshComponent* Comp, const FLinearColor& Color);
+	/** Rebind floor/wall/metal cube shell to the shared warehouse cohesion palette (BeginPlay). */
+	void ApplyCohesivePalette();
 	void BindToGameState(ACombatForgeGameState* GS);
 	void OnGameStateSet(AGameStateBase* NewGameState);
 	void HandlePhaseChanged(EPFMatchPhase NewPhase);

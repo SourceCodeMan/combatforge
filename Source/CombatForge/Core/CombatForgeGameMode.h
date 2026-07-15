@@ -234,6 +234,8 @@ protected:
 	bool  bPendingMatchOver = false;         // decided during intermission
 	uint8 PendingMatchWinner = 255;
 	FPFMatchResult PendingMatchResult;
+	/** Improvement/PlayOnly base map id for BeginMatchRecord parent lineage (empty = from-scratch). */
+	FString PendingParentArenaId;
 
 	float MatchStartServerTime = 0.f;        // stamped at Lobby→Build (matchDurationSec source)
 

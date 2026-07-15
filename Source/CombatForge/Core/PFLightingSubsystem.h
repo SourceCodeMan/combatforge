@@ -7,20 +7,15 @@
 #include "PFLightingSubsystem.generated.h"
 
 /**
- * Art-directed runtime lighting for the 64×40 m arena (CQB warehouse mood).
+ * Spawns the runtime lighting rig (sun + SkyAtmosphere + real-time SkyLight + height fog +
+ * volumetric clouds + a graded PostProcess volume) on EVERY machine — host and each remote client.
  *
- * Spawns on EVERY rendering machine (host + remote clients) — lights never replicate.
- * Skips dedicated servers. Zero authored assets (T17): all actors are engine natives.
+ * Lighting is purely local/cosmetic and must never replicate. Spawns on OnWorldBeginPlay for
+ * game/PIE worlds only (not the front-end if it never loads a game world subsystem the same way —
+ * match entry is when this runs; menu can look fine while match is broken if this rig overexposes).
  *
- * Rig layers (motivated industrial interior, not "asset viewer" flat light):
- *   1. Atmosphere + cool ambient sky (low fill → real contrast)
- *   2. Hard warm KEY directional (raking sun / clerestory)
- *   3. Soft cool FILL directional opposite (no shadows — bounce stand-in)
- *   4. High-bay practicals (warm ceiling pools — readable mid-field)
- *   5. Rim / edge spots (north/south wall wash — silhouette separation)
- *   6. Spawn-end accents (subtle team-side warmth/cool at the long axis ends)
- *   7. Warm-up pen practicals
- *   8. Height fog + unbound filmic post-process (locked exposure)
+ * Known-good path: single key directional, modest sky, locked histogram exposure min=max=1.
+ * Do not use AEM_Manual for packaged clients (caused pure-white in-match frames).
  */
 UCLASS()
 class COMBATFORGE_API UPFLightingSubsystem : public UWorldSubsystem

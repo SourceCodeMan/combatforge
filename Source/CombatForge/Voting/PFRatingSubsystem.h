@@ -27,6 +27,8 @@ struct COMBATFORGE_API FPFCommunityMapInfo
 	UPROPERTY() int32 ThumbUp = 0;
 	UPROPERTY() int32 ThumbDown = 0;
 	UPROPERTY() FString CreatedUtc;
+	/** Remix lineage: the arenaId this map was improved FROM (empty for original/from-scratch maps). */
+	UPROPERTY() FString ParentArenaId;
 };
 
 /**
@@ -52,7 +54,7 @@ public:
 	 * Any record still open from a previous match is discarded with a warning.
 	 */
 	void BeginMatchRecord(const FString& MatchId, const TArray<FPFBuildPieceRec>& FrozenPieces,
-	                      int32 TeamSize);
+	                      int32 TeamSize, const FString& ParentArenaId = FString());
 
 	/**
 	 * VotePhase: stages one player's vote for the commit. bBuiltHalfA = the voter's team built
@@ -82,8 +84,10 @@ public:
 	 * Loads a whole saved community arena (both halves, unchanged) for Improvement mode — everyone
 	 * builds on top of it. Server-only; false if none saved. The injector re-mints piece ids.
 	 * Prefer PreferredFileName when non-empty and valid; else highest-ranked / most recent.
+	 * OutArenaId ← the content-hash id of the loaded base map (its Remix parent when the layout is edited).
 	 */
-	bool PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces, const FString& PreferredFileName = FString()) const;
+	bool PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces, FString& OutArenaId,
+	                        const FString& PreferredFileName = FString()) const;
 
 	/**
 	 * Ranked community catalog for the map picker (top MaxCount, default 100).
@@ -129,6 +133,7 @@ private:
 
 	FString CurrentMatchId;
 	FString CurrentArenaId;
+	FString CurrentParentArenaId;   // Remix source id for this record (empty = original/from-scratch)
 	FString CurrentFilePath;
 	FDateTime RecordCreatedUtc;
 	bool bRecordActive = false;

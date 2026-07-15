@@ -175,21 +175,9 @@ void APFBuildGrid::BeginPlay()
 		}
 	}
 
-	// Structural committed pieces: M_PF_BuildPiece compiles to the engine checker on INSTANCED meshes, so use
-	// the self-contained warehouse concrete/metal Surface MIs the arena already renders (wall concrete / floor
-	// concrete / metal for ramp+roof). These MIs have no team "Color" param, so pieces are no longer team-tinted
-	// — an accepted tradeoff for real textures over the checker. Falls back to the old M_PF_BuildPiece MID only
-	// if the warehouse pack is absent. Props with native mats skip.
-	auto LoadSurfaceMI = [](EPFPieceType T) -> UMaterialInterface*
-	{
-		// Wall's own facade-concrete MI renders near-black; reuse the (lighter, verified-good) smooth floor
-		// concrete for walls too so they read as gray concrete instead of black.
-		const TCHAR* Path =
-			(T == EPFPieceType::Wall || T == EPFPieceType::Floor)
-				? TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Floor_Concrete_Smooth_01/MI_Ind_War_Floor_Concrete_Smooth_01_A.MI_Ind_War_Floor_Concrete_Smooth_01_A")
-				: TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/MI_Ind_War_Sheet_Metal_Rusty_01_A.MI_Ind_War_Sheet_Metal_Rusty_01_A");
-		return Cast<UMaterialInterface>(FSoftObjectPath(Path).TryLoad());
-	};
+	// Cohesion palette: triplanar M_PF_Arena* masters + warehouse textures (same stack as arena shell).
+	// Avoids mesh-UV Megascans MIs on cubes (smear / near-black walls) and never uses M_PF_BuildPiece
+	// (ISM checker). Props keep native warehouse mats.
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
 	{
 		const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
@@ -197,7 +185,8 @@ void APFBuildGrid::BeginPlay()
 		{
 			continue;
 		}
-		UMaterialInterface* SurfaceMat = LoadSurfaceMI(Type);
+		// One MID per type (team tint dropped for texture readability — accepted tradeoff).
+		UMaterialInstanceDynamic* PaletteMID = PFBuildPieceVisuals::CreateStructuralPaletteMID(this, Type);
 		for (uint8 Team = 0; Team < 2; ++Team)
 		{
 			const int32 K = ISMCIndexFor(Type, Team);
@@ -205,9 +194,10 @@ void APFBuildGrid::BeginPlay()
 			{
 				continue;
 			}
-			if (SurfaceMat != nullptr)
+			if (PaletteMID != nullptr)
 			{
-				PieceISMCs[K]->SetMaterial(0, SurfaceMat);
+				PieceISMCs[K]->SetMaterial(0, PaletteMID);
+				TeamMIDs[K] = PaletteMID;
 			}
 			else if (ShapeMaterial != nullptr)
 			{
@@ -221,7 +211,7 @@ void APFBuildGrid::BeginPlay()
 	}
 
 	UE_LOG(CombatForgeLog, Log,
-		TEXT("BuildGrid: structural surfaces Wall=%s Floor=%s Ramp=%s Roof=%s"),
+		TEXT("BuildGrid: cohesion palette Wall=%s Floor=%s Ramp=%s Roof=%s"),
 		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Wall),
 		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Floor),
 		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Ramp),

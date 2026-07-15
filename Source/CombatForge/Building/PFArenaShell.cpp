@@ -3,6 +3,7 @@
 #include "Building/PFArenaShell.h"
 
 #include "CombatForge.h"
+#include "Building/PFBuildPieceVisuals.h"
 #include "Core/CombatForgeGameState.h"
 
 #include "Components/BoxComponent.h"
@@ -914,6 +915,10 @@ void APFArenaShell::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Cohesion: rebind cube shell surfaces onto the same warehouse triplanar palette as built forts.
+	// Must run before ApplyTint so metal posts still get their gray Color MID on the new master.
+	ApplyCohesivePalette();
+
 	// Tints (MIDs are runtime objects — never created in the ctor).
 	if (SpawnStrips.Num() >= 2)
 	{
@@ -1061,6 +1066,83 @@ void APFArenaShell::SetMapBackdropActive(bool bActive)
 	// Spawn strips + midline stay visible (gameplay landmarks).
 	UE_LOG(CombatForgeLog, Log, TEXT("ArenaShell: map backdrop %s (cube shell hidden, collision kept)"),
 		bActive ? TEXT("ON") : TEXT("OFF"));
+}
+
+void APFArenaShell::ApplyCohesivePalette()
+{
+	// Shared palette with PFBuildGrid — warehouse textures on M_PF_Arena* triplanar masters.
+	// Megascans Surface MIs stay on draped props only (real UVs); cubes must stay triplanar.
+	UMaterialInstanceDynamic* FloorMID = PFBuildPieceVisuals::CreatePaletteMID(
+		this, PFBuildPieceVisuals::EPFSurfaceRole::FloorConcrete);
+	UMaterialInstanceDynamic* WallMID = PFBuildPieceVisuals::CreatePaletteMID(
+		this, PFBuildPieceVisuals::EPFSurfaceRole::WallConcrete);
+	UMaterialInstanceDynamic* MetalMID = PFBuildPieceVisuals::CreatePaletteMID(
+		this, PFBuildPieceVisuals::EPFSurfaceRole::MetalRusty);
+	UMaterialInstanceDynamic* RoofMID = PFBuildPieceVisuals::CreatePaletteMID(
+		this, PFBuildPieceVisuals::EPFSurfaceRole::MetalRoof);
+
+	if (FloorMID == nullptr && WallMID == nullptr && MetalMID == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("ArenaShell: cohesion palette masters missing — keeping CDO materials"));
+		return;
+	}
+
+	// Remember CDO-assigned materials so we can rewrite every component that still holds them.
+	UMaterialInterface* const OldFloor = FloorMaterial.Get();
+	UMaterialInterface* const OldWall = WallMaterial.Get();
+	UMaterialInterface* const OldMetal = MetalMaterial.Get();
+
+	if (FloorMID) { FloorMaterial = FloorMID; TintMIDs.Add(FloorMID); }
+	if (WallMID)  { WallMaterial = WallMID;   TintMIDs.Add(WallMID); }
+	if (MetalMID) { MetalMaterial = MetalMID; TintMIDs.Add(MetalMID); }
+	if (RoofMID)  { TintMIDs.Add(RoofMID); }
+
+	auto Remap = [&](UStaticMeshComponent* Comp)
+	{
+		if (Comp == nullptr)
+		{
+			return;
+		}
+		UMaterialInterface* Cur = Comp->GetMaterial(0);
+		if (Cur == nullptr || (MarkMaterial && Cur == MarkMaterial.Get()))
+		{
+			return;   // leave Color-driven paint marks alone
+		}
+		if (OldFloor && Cur == OldFloor && FloorMID)
+		{
+			Comp->SetMaterial(0, FloorMID);
+		}
+		else if (OldWall && Cur == OldWall && WallMID)
+		{
+			// Ceiling decks used WallMaterial at construction — reassign to roof metal for cohesion.
+			const FString Name = Comp->GetName();
+			if (Name.StartsWith(TEXT("Ceiling")) || Name.StartsWith(TEXT("Purlin")) || Name.Contains(TEXT("Deck")))
+			{
+				Comp->SetMaterial(0, RoofMID ? RoofMID : WallMID);
+			}
+			else
+			{
+				Comp->SetMaterial(0, WallMID);
+			}
+		}
+		else if (OldMetal && Cur == OldMetal && MetalMID)
+		{
+			Comp->SetMaterial(0, MetalMID);
+		}
+	};
+
+	Remap(FieldFloor);
+	Remap(PenFloor);
+	Remap(EscapeLid);
+	for (UStaticMeshComponent* W : PerimeterWalls) { Remap(W); }
+	for (UStaticMeshComponent* W : PenWalls) { Remap(W); }
+	for (UStaticMeshComponent* P : MidlinePosts) { Remap(P); }
+	for (UStaticMeshComponent* Part : DressingParts) { Remap(Part); }
+
+	UE_LOG(CombatForgeLog, Log,
+		TEXT("ArenaShell: cohesion palette applied (floor=%d wall=%d metal=%d roof=%d)"),
+		FloorMID ? 1 : 0, WallMID ? 1 : 0, MetalMID ? 1 : 0, RoofMID ? 1 : 0);
 }
 
 void APFArenaShell::ApplyTint(UStaticMeshComponent* Comp, const FLinearColor& Color)

@@ -722,19 +722,25 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		//   Creative               → only an all-bot team's half is filled.
 		if (BuildGrid)
 		{
+			// Remix lineage: cleared each build; set only when a community base is actually loaded below. A
+			// Creative / from-scratch build leaves it empty so its save records no parent (see BeginMatchRecord).
+			PendingParentArenaId.Reset();
 			if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
 			{
 				if (GS->BuildMode == EPFBuildMode::Improvement || GS->BuildMode == EPFBuildMode::PlayOnly)
 				{
 					TArray<FPFBuildPieceRec> Whole;
-					if (Rating->PickCommunityArena(Whole, GS->SelectedCommunityMapFile))
+					FString BaseArenaId;
+					if (Rating->PickCommunityArena(Whole, BaseArenaId, GS->SelectedCommunityMapFile))
 					{
 						BuildGrid->ServerInjectPieces(Whole);
+						PendingParentArenaId = BaseArenaId;   // source map this Remix builds on; captured at save
 						UE_LOG(CombatForgeLog, Log,
-							TEXT("GameMode: %s loaded %d community pieces (map=%s)"),
+							TEXT("GameMode: %s loaded %d community pieces (map=%s, arenaId=%s)"),
 							GS->BuildMode == EPFBuildMode::PlayOnly ? TEXT("PlayOnly") : TEXT("Improvement"),
 							Whole.Num(),
-							GS->SelectedCommunityMapFile.IsEmpty() ? TEXT("auto") : *GS->SelectedCommunityMapFile);
+							GS->SelectedCommunityMapFile.IsEmpty() ? TEXT("auto") : *GS->SelectedCommunityMapFile,
+							*BaseArenaId.Left(8));
 					}
 					else
 					{
@@ -791,7 +797,10 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			{
 				int32 TeamA = 0, TeamB = 0;
 				GetTeamCounts(TeamA, TeamB);
-				Rating->BeginMatchRecord(GS->MatchId, BuildGrid->GetPieces(), FMath::Max(TeamA, TeamB));
+				// PendingParentArenaId is non-empty only for a Remix of a loaded community map; BeginMatchRecord
+				// drops it when the frozen layout hashes identically (nothing changed ⇒ same map, no fork).
+				Rating->BeginMatchRecord(GS->MatchId, BuildGrid->GetPieces(), FMath::Max(TeamA, TeamB),
+					PendingParentArenaId);
 			}
 		}
 		if (ArenaShell)
