@@ -1540,11 +1540,11 @@ void ACombatForgeGameMode::BeginLiveRound()
 
 	if (GS->MatchType == EPFMatchType::Domination)
 	{
-		// Redesigned Domination: ONE active zone; 15s consecutive-majority capture; owner earns 1 pt/sec;
-		// the active zone rotates A->B->C so teams run zone to zone.
-		DominationActiveSlot = 0;
-		DominationCaptureProgress = 0.f;
-		DominationCapturingTeam = 255;
+		// CoD-style Domination (playtest + research rework): ALL THREE zones live simultaneously, no rotation.
+		// A zone is captured by standing in it uncontested — 15s solo for a neutral zone, faster with teammates
+		// (x min(N,3)), 2x total for an enemy zone (neutralize, then capture). Progress persists when the zone
+		// empties (Tom's spec), freezes while contested (CoD). Income: 1 pt per owned zone per 5s, first to 200.
+		DominationIncomeTickCounter = 0;
 		SpawnObjectiveActors();
 		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
 		ApplyServerMoveLocks();
@@ -1552,10 +1552,8 @@ void ACombatForgeGameMode::BeginLiveRound()
 			&ACombatForgeGameMode::ResolveDominationOnTimer, SkirmishMatchDuration, false);
 		GetWorldTimerManager().SetTimer(ObjectiveScoreTimerHandle, this,
 			&ACombatForgeGameMode::TickDominationScoring, ObjectiveScoreInterval, true);
-		GetWorldTimerManager().SetTimer(HardpointRotateTimerHandle, this,
-			&ACombatForgeGameMode::RotateDominationZone, DominationRotateInterval, true);
-		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: Domination LIVE (%.0f s, capture %.0f s, rotate %.0f s, first to %d)"),
-			SkirmishMatchDuration, DominationCaptureSeconds, DominationRotateInterval, DominationTargetScore);
+		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: Domination LIVE (%.0f s, capture %.0f s, first to %d, all zones active)"),
+			SkirmishMatchDuration, DominationCaptureSeconds, DominationTargetScore);
 		return;
 	}
 
@@ -1920,9 +1918,8 @@ void ACombatForgeGameMode::SpawnObjectiveActors()
 		for (int32 i = 0; i < PFObjectiveLayout::ControlPointCount; ++i)
 		{
 			const FVector Loc = PFObjectiveLayout::ControlPointLocation(i);
-			// Both objective modes run ONE active zone now (Dom redesign: capture-and-hold a single contested
-			// zone that rotates; Hardpoint unchanged).
-			const bool bActive = bHardpoint ? (i == HardpointActiveSlot) : (i == DominationActiveSlot);
+			// Hardpoint: one active hill that rotates. Domination (CoD model): ALL zones live at once.
+			const bool bActive = bHardpoint ? (i == HardpointActiveSlot) : true;
 			APFControlPointActor* CP = World->SpawnActor<APFControlPointActor>(
 				APFControlPointActor::StaticClass(), Loc, FRotator::ZeroRotator, Params);
 			if (CP)
@@ -2161,125 +2158,70 @@ void ACombatForgeGameMode::TickDominationScoring()
 		}
 	}
 
-	// Redesigned Domination (playtest spec): ONE active zone. A team CAPTURES it by holding the MAJORITY in
-	// the zone for DominationCaptureSeconds consecutive seconds (contested = the side with more players makes
-	// progress; owner presence isn't required to defend, but out-numbering attackers stalls them). Once
-	// captured, the owner earns 1 pt/sec — until the enemy flips it with their own 15s majority, or the zone
-	// rotates (RotateDominationZone) and the fight moves.
-	APFControlPointActor* Active = nullptr;
+	// CoD-style Domination: every zone runs its own capture chain (the math + replication live on the zone
+	// actor — ServerTickCapture); this tick feeds each zone its occupancy, stamps PS for the HUD, pays the
+	// owner income, and checks the win.
+	int32 OwnedZones[2] = { 0, 0 };
 	for (APFControlPointActor* CP : ControlPoints)
 	{
-		if (CP && CP->IsPointActive())
+		if (!CP || !CP->IsPointActive())
 		{
-			Active = CP;
-			break;
+			continue;
 		}
-	}
-	if (!Active)
-	{
-		return;
-	}
+		int32 OutA = 0, OutB = 0;
+		CP->ServerQueryOccupancy(OutA, OutB);
 
-	int32 OutA = 0, OutB = 0;
-	Active->ServerQueryOccupancy(OutA, OutB);
-
-	// Stamp PS for anyone currently on the active pad (HUD "● POINT B").
-	if (OutA + OutB > 0)
-	{
-		const FVector CPLoc = Active->GetActorLocation();
-		constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's capture radius
-		for (APlayerState* PSBase : GS->PlayerArray)
+		// Stamp PS for anyone standing on this pad (HUD "● POINT B" + the capture bar).
+		if (OutA + OutB > 0)
 		{
-			ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-			if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
+			const FVector CPLoc = CP->GetActorLocation();
+			constexpr float RadiusSq = 525.f * 525.f;   // matches APFControlPointActor's capture radius
+			for (APlayerState* PSBase : GS->PlayerArray)
 			{
-				continue;
-			}
-			if (const APawn* Pawn = PS->GetPawn())
-			{
-				if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
+				ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+				if (!PS || !PS->bAliveInRound || PS->TeamId > 1)
 				{
-					PS->ServerSetStandingOnPoint(static_cast<uint8>(Active->GetPointIndex()));
+					continue;
+				}
+				if (const APawn* Pawn = PS->GetPawn())
+				{
+					if (FVector::DistSquared(Pawn->GetActorLocation(), CPLoc) <= RadiusSq)
+					{
+						PS->ServerSetStandingOnPoint(static_cast<uint8>(CP->GetPointIndex()));
+					}
 				}
 			}
 		}
-	}
 
-	const uint8 ZoneOwner = Active->GetControllingTeam();
-
-	// Majority in the zone (255 = tie or empty). Only a NON-owning majority makes capture progress.
-	uint8 Majority = 255;
-	if (OutA > OutB)      { Majority = 0; }
-	else if (OutB > OutA) { Majority = 1; }
-
-	if (Majority <= 1 && Majority != ZoneOwner)
-	{
-		if (DominationCapturingTeam != Majority)
+		if (CP->ServerTickCapture(OutA, OutB, ObjectiveScoreInterval, DominationCaptureSeconds))
 		{
-			DominationCapturingTeam = Majority;   // new attacker chain starts fresh
-			DominationCaptureProgress = 0.f;
+			UE_LOG(CombatForgeLog, Log, TEXT("Domination: zone %d -> team %d"),
+				CP->GetPointIndex(), CP->GetControllingTeam());
 		}
-		DominationCaptureProgress += ObjectiveScoreInterval;
-		if (DominationCaptureProgress >= DominationCaptureSeconds)
+		if (CP->GetControllingTeam() <= 1)
 		{
-			Active->ServerSetControllingTeam(Majority);
-			UE_LOG(CombatForgeLog, Log, TEXT("Domination: team %d captured zone %d"),
-				Majority, Active->GetPointIndex());
-			DominationCapturingTeam = 255;
-			DominationCaptureProgress = 0.f;
+			++OwnedZones[CP->GetControllingTeam()];
 		}
 	}
-	else
-	{
-		// No eligible attacker majority this second (tie, empty, or the owner holds it): progress bleeds off.
-		DominationCapturingTeam = 255;
-		DominationCaptureProgress = FMath::Max(0.f, DominationCaptureProgress - ObjectiveScoreInterval);
-	}
 
-	// Owner income: 1 pt/sec while the active zone is owned (presence not required once captured).
-	if (ZoneOwner <= 1)
+	// Owner income: 1 pt per owned zone per 5 seconds (CoD: 1 pt/flag/5s tick, first to 200). Presence not
+	// required once captured — and per BO6, contested does NOT pause an owned zone's income, only capture.
+	if (++DominationIncomeTickCounter >= 5)
 	{
-		uint16 ScoreA = GS->TeamScores[0];
-		uint16 ScoreB = GS->TeamScores[1];
-		if (ZoneOwner == 0) { ++ScoreA; } else { ++ScoreB; }
-		GS->ServerSetTeamScores(ScoreA, ScoreB);
-		if (ScoreA >= DominationTargetScore)
+		DominationIncomeTickCounter = 0;
+		if (OwnedZones[0] > 0 || OwnedZones[1] > 0)
 		{
-			EndDomination(0);
-			return;
-		}
-		if (ScoreB >= DominationTargetScore)
-		{
-			EndDomination(1);
-		}
-	}
-}
-
-void ACombatForgeGameMode::RotateDominationZone()
-{
-	ACombatForgeGameState* GS = GetPFGameState();
-	if (!GS || GS->MatchType != EPFMatchType::Domination
-		|| GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live
-		|| ControlPoints.Num() == 0)
-	{
-		return;
-	}
-	// Advance the active zone A->B->C and reset it NEUTRAL: income stops, both teams sprint to the new fight.
-	DominationActiveSlot = (DominationActiveSlot + 1) % ControlPoints.Num();
-	DominationCapturingTeam = 255;
-	DominationCaptureProgress = 0.f;
-	for (int32 i = 0; i < ControlPoints.Num(); ++i)
-	{
-		if (APFControlPointActor* CP = ControlPoints[i])
-		{
-			CP->ServerSetActive(i == DominationActiveSlot);
-			if (i == DominationActiveSlot)
+			const uint16 ScoreA = static_cast<uint16>(GS->TeamScores[0] + OwnedZones[0]);
+			const uint16 ScoreB = static_cast<uint16>(GS->TeamScores[1] + OwnedZones[1]);
+			GS->ServerSetTeamScores(ScoreA, ScoreB);
+			if (ScoreA >= DominationTargetScore || ScoreB >= DominationTargetScore)
 			{
-				CP->ServerSetControllingTeam(255);
+				EndDomination(ScoreA >= DominationTargetScore && ScoreB >= DominationTargetScore
+					? (ScoreA >= ScoreB ? 0 : 1)
+					: (ScoreA >= DominationTargetScore ? 0 : 1));
 			}
 		}
 	}
-	UE_LOG(CombatForgeLog, Log, TEXT("Domination: active zone -> %d"), DominationActiveSlot);
 }
 
 void ACombatForgeGameMode::TickHardpointScoring()

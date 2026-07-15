@@ -163,13 +163,15 @@ void APFBotController::ApplySkill()
 	// Skill difficulty comes from aim error / turn rate / reaction, not from refusing to fire at distance.
 	switch (Effective)
 	{
+	// Reaction gaps cut ~40-50% (playtest: bots felt sluggish to notice you). Difficulty separation now leans
+	// harder on aim error / turn rate than on the notice delay.
 	case EPFBotSkill::Rookie:
-		AimErrorDeg = 14.f;  AimTurnRate = 2.5f;  ReactionDelay = 0.60f;  EngageRangeUU = 7000.f;  break;
+		AimErrorDeg = 14.f;  AimTurnRate = 2.5f;  ReactionDelay = 0.35f;  EngageRangeUU = 7000.f;  break;
 	case EPFBotSkill::Sharpshooter:
-		AimErrorDeg = 1.5f;  AimTurnRate = 11.f;  ReactionDelay = 0.12f;  EngageRangeUU = 8500.f;  break;
+		AimErrorDeg = 1.5f;  AimTurnRate = 11.f;  ReactionDelay = 0.07f;  EngageRangeUU = 8500.f;  break;
 	case EPFBotSkill::Regular:
 	default:
-		AimErrorDeg = 4.5f;  AimTurnRate = 6.5f;  ReactionDelay = 0.30f;  EngageRangeUU = 8000.f;  break;
+		AimErrorDeg = 4.5f;  AimTurnRate = 6.5f;  ReactionDelay = 0.16f;  EngageRangeUU = 8000.f;  break;
 	}
 }
 
@@ -1021,18 +1023,35 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 		return true;
 	}
 
-	// Domination / Hardpoint: both modes run ONE active zone now — go fight for it. Correct for attack AND
-	// defense: standing on the owned active zone denies the enemy the majority they need to flip it.
-	APFControlPointActor* GoalCP = nullptr;
+	// Hardpoint: one active hill — everyone fights for it (attack AND defense: standing on the owned hill
+	// denies the enemy sole occupancy).
+	// Domination (CoD model): ALL zones live. Push zones my team does NOT own (nearest first); when more than
+	// one needs taking, split the roster by parity so the whole team doesn't stack a single flag. All owned →
+	// defend the nearest one.
+	TArray<APFControlPointActor*, TInlineAllocator<4>> Capturable;
+	APFControlPointActor* NearestAny = nullptr;
+	float NearestAnySq = TNumericLimits<float>::Max();
+	for (const TWeakObjectPtr<APFControlPointActor>& CPPtr : ControlPointsCache)
 	{
-		float BestSq = TNumericLimits<float>::Max();
-		for (const TWeakObjectPtr<APFControlPointActor>& CPPtr : ControlPointsCache)
+		APFControlPointActor* CP = CPPtr.Get();
+		if (CP == nullptr || !CP->IsPointActive()) { continue; }
+		const float DSq = FVector::DistSquared(BotLoc, CP->GetActorLocation());
+		if (DSq < NearestAnySq) { NearestAnySq = DSq; NearestAny = CP; }
+		if (Mode == EPFMatchType::Domination && CP->GetControllingTeam() != MyTeam)
 		{
-			APFControlPointActor* CP = CPPtr.Get();
-			if (CP == nullptr || !CP->IsPointActive()) { continue; }
-			const float DSq = FVector::DistSquared(BotLoc, CP->GetActorLocation());
-			if (DSq < BestSq) { BestSq = DSq; GoalCP = CP; }
+			Capturable.Add(CP);
 		}
+	}
+	APFControlPointActor* GoalCP = NearestAny;
+	if (Mode == EPFMatchType::Domination && Capturable.Num() > 0)
+	{
+		Capturable.Sort([&BotLoc](const APFControlPointActor& L, const APFControlPointActor& R)
+		{
+			return FVector::DistSquared(BotLoc, L.GetActorLocation())
+				< FVector::DistSquared(BotLoc, R.GetActorLocation());
+		});
+		const int32 Pick = (Capturable.Num() > 1 && (MyPS->RosterIndex % 2) == 1) ? 1 : 0;
+		GoalCP = Capturable[Pick];
 	}
 	if (GoalCP != nullptr)
 	{

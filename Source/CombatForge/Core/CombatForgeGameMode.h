@@ -56,9 +56,8 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  SkirmishMatchDuration = 300.f;  // one continuous Live period (Skirmish + FFA + objectives)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 CaptureFlagTarget = 3; // CTF: first team to N captures
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  HardpointRotateInterval = 45.f; // Hardpoint: seconds per slot
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  DominationCaptureSeconds = 15.f; // Dom: consecutive majority seconds to capture/flip the active zone
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  DominationRotateInterval = 60.f; // Dom: active zone advances A->B->C on this period
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="10", ClampMax="1000")) int32 DominationTargetScore = 150; // 1 pt/sec of zone ownership -> first to N wins
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  DominationCaptureSeconds = 15.f; // Dom: solo seconds to capture a NEUTRAL zone (enemy zone = 2x via neutralize; teammates speed it x min(N,3))
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="10", ClampMax="1000")) int32 DominationTargetScore = 200; // CoD: 1 pt per owned zone per 5 s -> first to 200
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  ObjectiveScoreInterval = 1.f;   // Dom/HP: score tick period
 
 	// ---- The only phase mutator in the codebase ----
@@ -131,7 +130,6 @@ protected:
 	void TickDominationScoring();                      // 1 Hz: sole occupancy on each pad → TeamScores
 	void TickHardpointScoring();                       // 1 Hz: sole occupancy on active hill → TeamScores
 	void RotateHardpoint();                            // advance active control-point slot
-	void RotateDominationZone();                       // Dom: advance the single active zone (fresh neutral fight)
 	void SpawnObjectiveActors();                       // flags / control points from PFGrid layout
 	void DestroyObjectiveActors();
 	/** 4 ammo barrels at random field spots each combat start (refill mag+reserve). */
@@ -207,10 +205,8 @@ protected:
 	UPROPERTY() TObjectPtr<APFFlagActor> Flags[2];
 	UPROPERTY() TArray<TObjectPtr<APFControlPointActor>> ControlPoints;
 	int32 HardpointActiveSlot = 0;
-	// Domination (one-active-zone redesign): which zone is live + the current capture chain.
-	int32 DominationActiveSlot = 0;
-	float DominationCaptureProgress = 0.f;   // consecutive majority-seconds by DominationCapturingTeam
-	uint8 DominationCapturingTeam = 255;
+	// Domination (CoD model): per-zone capture chains live on the zone actors; the mode only counts income ticks.
+	int32 DominationIncomeTickCounter = 0;   // 1 Hz scoring tick -> income every 5th (1 pt/zone/5 s)
 
 	FTimerHandle PhaseTimerHandle;           // Build / Vote / Results phase ends
 	FTimerHandle RoundTimerHandle;           // Freeze / Live / Intermission steps
