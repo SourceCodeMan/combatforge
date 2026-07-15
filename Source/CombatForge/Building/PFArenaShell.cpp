@@ -261,11 +261,12 @@ void APFArenaShell::BuildWarehouseDressing()
 		{
 			for (int32 Row = 0; Row < RoofRows; ++Row)
 			{
-				if (((Col + 2 * Row) % 3) == 1)
+				if (((Col + 2 * Row) % 6) == 1)
 				{
-					continue;   // skylight opening (~1/3, staggered) — sun shafts through these. Ambient for
-					            // the floor comes from the SkyLight (raised above the roof to capture sky),
-					            // NOT from roof openness, so this stays at the good ~1/3 shafts look.
+					continue;   // skylight opening (7 of 40 ≈ 1/6, staggered) — Tom: 1/3 was "way too much",
+					            // cut in half. Ambient for the floor comes from the SkyLight (raised above
+					            // the roof to capture sky), NOT roof openness; SkyLight bumped to offset
+					            // the lost sun pools.
 				}
 				DressingParts.Add(MakeShapePart(FString::Printf(TEXT("CeilingPanel%d_%d"), Col, Row),
 					FVector((Col + 0.5f) * PanelW, (Row + 0.5f) * PanelH, CeilingZ),
