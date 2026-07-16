@@ -37,7 +37,26 @@ call "%UE%\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun ^
 echo.
 if %ERRORLEVEL% NEQ 0 (
   echo *** PACKAGE FAILED (exit %ERRORLEVEL%) - see the UAT log above. ***
+  endlocal
+  exit /b 1
+)
+
+REM --- Privacy scrub (Adam/Benj alpha, 2026-07-15) --------------------------------
+REM Saved\ regenerates every time the packaged exe runs (playtest logs/crash dumps)
+REM and leaks the host's PC name + LAN IP + hardware; .pdb leaks build paths. Strip
+REM both from the archive so a butler push can never ship them. This is the durable
+REM fix behind the manual delete that was being done by hand before each push.
+if exist "%OUT%\CombatForge\Saved" rmdir /s /q "%OUT%\CombatForge\Saved"
+if exist "%OUT%\Engine\Saved"      rmdir /s /q "%OUT%\Engine\Saved"
+del /s /q "%OUT%\*.pdb" >nul 2>&1
+
+REM --- Pre-push guard: refuse to leave anything sensitive in the archive ----------
+set "DIRTY="
+if exist "%OUT%\CombatForge\Saved" set "DIRTY=1"
+dir /s /b "%OUT%\*.pdb" >nul 2>&1 && set "DIRTY=1"
+if defined DIRTY (
+  echo *** WARNING: Saved\ or .pdb still present in %OUT% - do NOT push until clean. ***
 ) else (
-  echo === Done. Build is in %OUT% ===
+  echo === Done + scrubbed. Build is in %OUT% (no Saved/, no .pdb - safe to push). ===
 )
 endlocal

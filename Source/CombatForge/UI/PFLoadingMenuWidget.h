@@ -207,7 +207,9 @@ private:
 	bool NeedsCommunityMap() const;
 
 	UFUNCTION() void OnEnterClicked();
-	UFUNCTION() void OnDonateClicked();   // opens buymeacoffee.com/tomchapman in the system browser
+	UFUNCTION() void OnDonateClicked();    // opens buymeacoffee.com/tomchapman in the system browser
+	UFUNCTION() void OnWebsiteClicked();   // opens playcombatforge.com
+	UFUNCTION() void OnDiscordClicked();   // opens the Discord invite (bug reports + community)
 	UFUNCTION() void OnQuitDesktopClicked();
 	UFUNCTION() void OnModeClicked();
 	UFUNCTION() void OnTypeClicked();
@@ -244,6 +246,10 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> EnterLabel;
 	UPROPERTY() TObjectPtr<UButton> DonateButton;
 	UPROPERTY() TObjectPtr<UTextBlock> DonateLabel;
+	UPROPERTY() TObjectPtr<UButton> WebsiteButton;
+	UPROPERTY() TObjectPtr<UTextBlock> WebsiteLabel;
+	UPROPERTY() TObjectPtr<UButton> DiscordButton;
+	UPROPERTY() TObjectPtr<UTextBlock> DiscordLabel;
 	UPROPERTY() TObjectPtr<UButton> QuitDesktopButton;
 	UPROPERTY() TObjectPtr<UTextBlock> QuitDesktopLabel;
 

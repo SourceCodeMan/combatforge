@@ -1571,18 +1571,43 @@ void UPFLoadingMenuWidget::BuildTree()
 		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 	}
 
-	// Support the free game — opens the creator's Buy Me a Coffee page in the system browser.
-	// Floats bottom-center of the whole menu (Tom 2026-07-15), not in the right column.
-	DonateButton = WidgetTree->ConstructWidget<UButton>();
-	DonateButton->SetBackgroundColor(FLinearColor(1.f, 0.72f, 0.12f, 0.95f));   // BMC-style warm yellow
+	// Community links bar — Website · Discord · Buy Me a Coffee — floats bottom-center of the menu.
+	// Each opens in the system default browser (FPlatformProcess::LaunchURL) — no in-game web view,
+	// no network call from the game itself.
+	UHorizontalBox* LinksRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	auto AddLinkButton = [&](UButton*& OutBtn, TObjectPtr<UTextBlock>& OutLabel, const FString& Text,
+		const FLinearColor& Bg, const FLinearColor& Fg, FName BtnName)
+	{
+		OutBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), BtnName);
+		OutBtn->SetBackgroundColor(Bg);
+		OutLabel = WidgetTree->ConstructWidget<UTextBlock>();
+		OutLabel->SetText(FText::FromString(Text));
+		OutLabel->SetFont(PFLoadFont(14, true));
+		OutLabel->SetColorAndOpacity(FSlateColor(Fg));
+		OutLabel->SetJustification(ETextJustify::Center);
+		OutBtn->AddChild(OutLabel);
+		if (UHorizontalBoxSlot* H = LinksRow->AddChildToHorizontalBox(OutBtn))
+		{
+			H->SetPadding(FMargin(6.f, 0.f));
+			H->SetVerticalAlignment(VAlign_Center);
+		}
+	};
+	UButton* WebBtn = nullptr;
+	UButton* DiscBtn = nullptr;
+	UButton* DonBtn = nullptr;
+	AddLinkButton(WebBtn, WebsiteLabel, TEXT("  WEBSITE  "),
+		FLinearColor(0.16f, 0.20f, 0.28f, 0.95f), FLinearColor(0.85f, 0.90f, 1.f), TEXT("WebsiteButton"));
+	AddLinkButton(DiscBtn, DiscordLabel, TEXT("  DISCORD  "),
+		FLinearColor(0.35f, 0.40f, 0.95f, 0.95f), FLinearColor(0.95f, 0.96f, 1.f), TEXT("DiscordButton"));   // Discord blurple
+	AddLinkButton(DonBtn, DonateLabel, TEXT("  BUY ME A COFFEE  "),
+		FLinearColor(1.f, 0.72f, 0.12f, 0.95f), FLinearColor(0.12f, 0.10f, 0.06f), TEXT("DonateButton"));   // BMC warm yellow
+	WebsiteButton = WebBtn;
+	DiscordButton = DiscBtn;
+	DonateButton = DonBtn;
+	WebsiteButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnWebsiteClicked);
+	DiscordButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnDiscordClicked);
 	DonateButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnDonateClicked);
-	DonateLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	DonateLabel->SetText(FText::FromString(TEXT("  BUY ME A COFFEE  ")));
-	DonateLabel->SetFont(PFLoadFont(14, true));
-	DonateLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.10f, 0.06f)));
-	DonateLabel->SetJustification(ETextJustify::Center);
-	DonateButton->AddChild(DonateLabel);
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(DonateButton))
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(LinksRow))
 	{
 		S->SetAnchors(FAnchors(0.5f, 1.f, 0.5f, 1.f));
 		S->SetAlignment(FVector2D(0.5f, 1.f));
@@ -2480,6 +2505,18 @@ void UPFLoadingMenuWidget::OnDonateClicked()
 	// Opens the system default browser — no in-game web view, no network call from the game.
 	FPlatformProcess::LaunchURL(TEXT("https://buymeacoffee.com/tomchapman"), nullptr, nullptr);
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened donate page (buymeacoffee.com/tomchapman)"));
+}
+
+void UPFLoadingMenuWidget::OnWebsiteClicked()
+{
+	FPlatformProcess::LaunchURL(TEXT("https://playcombatforge.com/"), nullptr, nullptr);
+	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened website (playcombatforge.com)"));
+}
+
+void UPFLoadingMenuWidget::OnDiscordClicked()
+{
+	FPlatformProcess::LaunchURL(TEXT("https://discord.gg/f7U2xXxAxc"), nullptr, nullptr);
+	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened Discord invite"));
 }
 
 void UPFLoadingMenuWidget::OnQuitDesktopClicked()

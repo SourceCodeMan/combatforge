@@ -62,6 +62,28 @@ namespace
 		for (int32 i = 0; i < GSlotCount; ++i)
 		{
 			EnumerateDir(GSlots[i].Dir, GSlotPartsCache[i]);
+
+			// Shirt-slot workaround (Adam's playtest, 2026-07-15): the long button-up field jackets
+			// (Jacket / Jacket_Gorka / Jacket_Hood / Jacket_M65) carry extra coat-tail/skirt bones that
+			// the Mannequin-compatible base skeleton never drives — attached via SetLeaderPoseComponent
+			// those bones freeze at bind pose and stick out as a rigid flat "tail" off the hip. Pullovers
+			// (Sweatshirt/Hoodie) and the tucked tee have no such bones, which is why it was "only
+			// button-ups". Hide the affected parts for the alpha until an art pass re-skins the coat verts
+			// to the pelvis (or drives the coat bones). Reversible: shrink/grow ExcludeSubstrings.
+			if (FCString::Stricmp(GSlots[i].Id, TEXT("Cloth")) == 0)
+			{
+				static const TCHAR* ExcludeSubstrings[] = { TEXT("Jacket") };
+				GSlotPartsCache[i].RemoveAll([](const FSoftObjectPath& P)
+				{
+					const FString S = P.ToString();
+					for (const TCHAR* Bad : ExcludeSubstrings)
+					{
+						if (S.Contains(Bad)) { return true; }
+					}
+					return false;
+				});
+			}
+
 			Total += GSlotPartsCache[i].Num();
 		}
 		// Base skin parts that complete the naked SKM_Body base (head + legs).
