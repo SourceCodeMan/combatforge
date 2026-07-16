@@ -48,9 +48,13 @@
 // Rifle-hold locomotion kill-switch: the armed set plays AnimStarterPack sequences on the Bandit skeleton via
 // a compatible-skeletons entry — visually unverifiable headless, so keep a live revert (`pf.ArmedAnims 0` +
 // respawn) in case the retarget T-poses or slides on some machine.
+// Default 0 (Tom playtest 2026-07-16): the rifle-hold anim packs are on foreign mannequin skeletons
+// and the compatible-skeleton remap STRETCHES the Bandit body (verified: forehead fixed but torso/legs
+// elongated). Reverted to the native unarmed Bandit set — no retarget = no stretch, hands down = no
+// forehead (rifle carried at the hip). Flip to 1 only once the rifle anims are properly IK-retargeted.
 static TAutoConsoleVariable<int32> CVarArmedAnims(
-	TEXT("pf.ArmedAnims"), 1,
-	TEXT("1 = rifle-hold locomotion from the template rifle kit (default), 0 = original unarmed Bandit anims. Applies live."));
+	TEXT("pf.ArmedAnims"), 0,
+	TEXT("0 = native unarmed Bandit anims (default; no retarget stretch), 1 = rifle-hold pack anims. Applies live."));
 
 // Tuning aid: draw the FP cosmetic muzzle (where owner tracers spawn) so pf.WeaponFP's muzzle offset can be
 // aligned to the visible barrel. Off by default; local player only (drawn in Tick's IsLocallyControlled block).
@@ -337,32 +341,34 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedIdleFinder(
 		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_Idle.AS_Rifle_Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedRunFinder(
-		TEXT("/Game/AnimStarterPack/Sprint_Fwd_Rifle.Sprint_Fwd_Rifle"));
+		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_RunFwd.AS_Rifle_RunFwd"));
 	if (ArmedIdleFinder.Succeeded()) { ArmedIdleAnim = ArmedIdleFinder.Object; }
 	if (ArmedRunFinder.Succeeded())  { ArmedRunAnim  = ArmedRunFinder.Object; }
 
 	// 8-direction sets, index = round(atan2(right,fwd)/45°) & 7: 0=Fwd 1=FwdRight 2=Right 3=BwdRight 4=Bwd
 	// 5=BwdLeft 6=Left 7=FwdLeft.
 	{
+		// Relaxed LOW-READY set (Shooter Rifle Animations pack) so MOVING bots are also gun-down, not
+		// shouldered-at-the-face. Pack has 6 dirs (no fwd-diagonals) → map fwd-diagonals to pure L/R.
 		static const TCHAR* WalkDirPaths[8] = {
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd.MF_Rifle_Walk_Fwd"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Right.MF_Rifle_Walk_Fwd_Right"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Right.MF_Rifle_Walk_Right"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Right.MF_Rifle_Walk_Bwd_Right"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd.MF_Rifle_Walk_Bwd"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Bwd_Left.MF_Rifle_Walk_Bwd_Left"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Left.MF_Rifle_Walk_Left"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Walk/MF_Rifle_Walk_Fwd_Left.MF_Rifle_Walk_Fwd_Left"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkFwd.AS_Rifle_WalkFwd"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwdRight.AS_Rifle_WalkBwdRight"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwd.AS_Rifle_WalkBwd"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwdLeft.AS_Rifle_WalkBwdLeft"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
 		};
 		static const TCHAR* JogDirPaths[8] = {
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd.MF_Rifle_Jog_Fwd"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Right.MF_Rifle_Jog_Fwd_Right"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Right.MF_Rifle_Jog_Right"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Right.MF_Rifle_Jog_Bwd_Right"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd.MF_Rifle_Jog_Bwd"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Bwd_Left.MF_Rifle_Jog_Bwd_Left"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Left.MF_Rifle_Jog_Left"),
-			TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd_Left.MF_Rifle_Jog_Fwd_Left"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogFwd.AS_Rifle_JogFwd"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogRight.AS_Rifle_JogRight"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogRight.AS_Rifle_JogRight"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwdRight.AS_Rifle_JogBwdRight"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwd.AS_Rifle_JogBwd"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwdLeft.AS_Rifle_JogBwdLeft"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
+			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
 		};
 		ArmedWalkDir.SetNum(8);
 		ArmedJogDir.SetNum(8);
@@ -2277,6 +2283,21 @@ void ACombatForgeCharacter::ApplyRaisedWeaponPose()
 
 void ACombatForgeCharacter::UpdateWeaponHoldPose()
 {
+	// Force the TP gun hidden every frame while eliminated. SetEliminatedAppearance hides it once, but
+	// some path re-shows it during the 5 s corpse window (Tom: "floating gun until the timer resets").
+	// This runs every tick so the weapon can never stay visible on a dead body regardless of that path.
+	if (WeaponMeshComp != nullptr)
+	{
+		if (const UPFHealthComponent* H = GetHealth())
+		{
+			if (H->bEliminated)
+			{
+				WeaponMeshComp->SetHiddenInGame(true);
+				return;
+			}
+		}
+	}
+
 	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr || !bUsingArtBody)
 	{
 		return;
