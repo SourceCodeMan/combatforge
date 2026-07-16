@@ -235,10 +235,11 @@ void APFAmmoBarrel::LocalRequestInteract()
 	{
 		return;
 	}
-	ServerInteract(LocalOverlappingPawn.Get());
+	// Host/local-authority path only; remote clients refill via ACombatForgeCharacter::ServerRefillAtBarrel.
+	AuthorityInteract(LocalOverlappingPawn.Get());
 }
 
-void APFAmmoBarrel::ServerInteract_Implementation(APawn* Interactor)
+void APFAmmoBarrel::AuthorityInteract(APawn* Interactor)
 {
 	if (!HasAuthority() || !bAvailable || !Interactor)
 	{

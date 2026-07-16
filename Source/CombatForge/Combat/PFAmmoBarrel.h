@@ -32,6 +32,13 @@ public:
 	/** Local player pressed interact while overlapping — routes to server. */
 	void LocalRequestInteract();
 
+	/** Server-authority refill (validates phase/availability/range, then refills). Called from the
+	 *  interacting pawn's OWN Server RPC — the barrel is owned by the server-only GameMode, so a
+	 *  Server RPC issued ON the barrel from a client is dropped (no owning connection). Routing the
+	 *  RPC through the client-owned pawn and calling this on the server is what makes joined clients
+	 *  able to refill. Authority-guarded; a direct client call no-ops. */
+	void AuthorityInteract(APawn* Interactor);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -42,8 +49,6 @@ protected:
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 	UFUNCTION() void OnRep_Available();
-
-	UFUNCTION(Server, Reliable) void ServerInteract(APawn* Interactor);
 
 	void SoftLoadMesh();
 	void UpdatePromptVisibility();

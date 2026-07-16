@@ -122,6 +122,12 @@ private:
 		int32  Count = 0;
 	};
 
+	/** Swap prop ISMs to warehouse meshes + apply the cohesion palette. Idempotent; called from
+	 *  BeginPlay and lazily from AddPieceLocal so client-side FastArray rebuilds that precede
+	 *  BeginPlay don't render prop pieces on the GCube placeholder (giant unskinned cube). */
+	void EnsurePieceVisualsApplied();
+	bool bPieceVisualsReady = false;
+
 	/** Add/remove the local mirror of a record: ISM instance + occupancy (server AND client path). */
 	void AddPieceLocal(const FPFBuildPieceRec& Rec);
 	void RemovePieceLocal(const FPFBuildPieceRec& Rec);

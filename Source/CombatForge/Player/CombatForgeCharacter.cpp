@@ -1024,7 +1024,17 @@ void ACombatForgeCharacter::OnInteractPressed()
 	}
 	if (Best)
 	{
-		Best->LocalRequestInteract();
+		// Route through the pawn's own Server RPC — a Server RPC on the barrel is dropped for
+		// remote clients (barrel is owned by the server-only GameMode, no owning connection).
+		ServerRefillAtBarrel(Best);
+	}
+}
+
+void ACombatForgeCharacter::ServerRefillAtBarrel_Implementation(APFAmmoBarrel* Barrel)
+{
+	if (Barrel)
+	{
+		Barrel->AuthorityInteract(this);   // barrel re-validates phase/availability/range on the server
 	}
 }
 

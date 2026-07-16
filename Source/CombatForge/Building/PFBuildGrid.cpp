@@ -147,6 +147,20 @@ void APFBuildGrid::BeginPlay()
 	Super::BeginPlay();
 
 	Pieces.OwnerGrid = this;   // belt+braces: ctor set it, keep it correct post-init on both sides
+	EnsurePieceVisualsApplied();
+}
+
+// Prop-mesh swap + cohesion palette. Idempotent, and ALSO called from AddPieceLocal so a joining
+// client whose FastArray PostReplicatedAdd fires BEFORE BeginPlay still builds box/barrel/crate
+// instances on the real warehouse meshes — not the GCube placeholder, which rendered a client-placed
+// box as a GIANT UNSKINNED cube (Adam's 3-player playtest, 2026-07-15).
+void APFBuildGrid::EnsurePieceVisualsApplied()
+{
+	if (bPieceVisualsReady)
+	{
+		return;
+	}
+	bPieceVisualsReady = true;
 
 	// Soft-load warehouse prop meshes + structural surface textures after CDO so first compile doesn't freeze PIE.
 	PFBuildPieceVisuals::EnsureLoaded();
@@ -703,6 +717,7 @@ void APFBuildGrid::ServerInjectPieces(const TArray<FPFBuildPieceRec>& InPieces)
 
 void APFBuildGrid::AddPieceLocal(const FPFBuildPieceRec& Rec)
 {
+	EnsurePieceVisualsApplied();   // clients rebuild via PostReplicatedAdd, which can precede BeginPlay
 	const int32 K = ISMCIndexFor(Rec.Type, Rec.Team);
 	if (PieceISMCs[K])
 	{
