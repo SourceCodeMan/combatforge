@@ -330,8 +330,12 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	// actually sidestep instead of moonwalking a forward loop. Sprint borrows AnimStarterPack's
 	// Sprint_Fwd_Rifle (UE4 mannequin — shared bones remap, UE5-only twist bones hold ref pose).
 	// Missing packs = null finders = automatic unarmed fallback.
+	// Relaxed LOW-READY idle (Shooter Rifle Animations pack) — replaces MF_Rifle_Idle_ADS, an *aiming*
+	// idle that held a stationary bot's gun up at its cheek ("gun on forehead", Adam/Tom playtest). The
+	// pack is on its own UE4 mannequin skeleton, registered compatible with SKM_Bandit_Skeleton via
+	// Scripts/add_compatible_skeleton.py so FSkeletonRemapping plays it on the Bandit body.
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedIdleFinder(
-		TEXT("/Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS.MF_Rifle_Idle_ADS"));
+		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_Idle.AS_Rifle_Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedRunFinder(
 		TEXT("/Game/AnimStarterPack/Sprint_Fwd_Rifle.Sprint_Fwd_Rifle"));
 	if (ArmedIdleFinder.Succeeded()) { ArmedIdleAnim = ArmedIdleFinder.Object; }

@@ -16,6 +16,7 @@ BANDIT_PATH = "/Game/Bandits/Mesh/SKM_Bandit_Skeleton"
 SOURCES = [
     "/Game/AnimStarterPack/Character/HeroTPP_Skeleton",       # UE4 mannequin: sprint/crouch fills
     "/Game/Characters/Mannequins/Meshes/SK_Mannequin",        # UE5 Manny: the full rifle kit (primary)
+    "/Game/RifleAnims/ShowcaseAssets/Meshes/Mannequin/UE4_Mannequin_Skeleton",  # Shooter Rifle Animations pack: relaxed LOW-READY idle (fixes gun-at-face)
 ]
 
 bandit = unreal.load_asset(BANDIT_PATH)
