@@ -214,7 +214,6 @@ private:
 
 	// Reload state
 	double ReloadEndTime = 0.0;
-	bool   bWasADSBeforeReload = false;
 
 	// Server-side validation state
 	float  FireTokens = 3.f;            // token bucket, cap 3, refill 12/s (04 §2.1)

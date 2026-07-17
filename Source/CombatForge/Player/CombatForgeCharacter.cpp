@@ -498,6 +498,7 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	bADSHeld = false;
 	bFireHeld = false;
 	bJumpKeyHeld = false;
+	bADSToggleMode = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +774,9 @@ void ACombatForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	{
 		BuildComponent->BindInput(EIC, Cfg);
 	}
+
+	// Pick up the hold-vs-toggle ADS pref for this (locally controlled) pawn.
+	RefreshADSToggleMode();
 }
 
 // ---------------------------------------------------------------------------
@@ -987,12 +991,17 @@ void ACombatForgeCharacter::OnFireReleased()
 
 void ACombatForgeCharacter::OnADSPressed()
 {
-	SetADS(true);
+	// Hold mode: press enters ADS (release exits). Toggle mode: each press flips the standing intent.
+	SetADS(bADSToggleMode ? !bADSHeld : true);
 }
 
 void ACombatForgeCharacter::OnADSReleased()
 {
-	SetADS(false);
+	// Toggle mode ignores the release; hold mode exits ADS on release.
+	if (!bADSToggleMode)
+	{
+		SetADS(false);
+	}
 }
 
 void ACombatForgeCharacter::OnReloadPressed()
@@ -1080,11 +1089,41 @@ void ACombatForgeCharacter::SetADS(bool bWantsADS)
 	UpdateMovementIntents();
 }
 
+void ACombatForgeCharacter::NotifyReloadStateChanged()
+{
+	// Reload begin/end changes what IsADS() returns (it self-suppresses while reloading); push it into
+	// the movement stream now so the server drops / restores the ADS spread cone in lockstep.
+	UpdateMovementIntents();
+}
+
+void ACombatForgeCharacter::RefreshADSToggleMode()
+{
+	const bool bNewToggle = FPFUserPrefs::GetADSToggle();
+	if (bNewToggle != (bool)bADSToggleMode)
+	{
+		bADSToggleMode = bNewToggle;
+		// Switching modes clears any latched ADS so a toggle left "on" can't strand you scoped-in
+		// after you flip back to hold (where no button is down to release).
+		if (bADSHeld)
+		{
+			SetADS(false);
+		}
+	}
+}
+
 bool ACombatForgeCharacter::IsADS() const
 {
 	if (PFMovement == nullptr)
 	{
 		return bADSHeld;
+	}
+	// Reload suppresses ADS for its duration. Deriving this from the weapon's live bReloading flag (instead
+	// of latching a copy) keeps bADSHeld as the player's PURE intent — a release mid-reload is honored, and
+	// dying mid-reload can't strand you scoped (respawn authoritatively clears bReloading). Owner-only, so it
+	// only gates the locally-controlled path; the server sees the same result via the compressed move flag.
+	if (IsLocallyControlled() && WeaponComponent != nullptr && WeaponComponent->bReloading)
+	{
+		return false;
 	}
 	// Owning client: the raw held key drives the state (and feeds the
 	// compressed flag via UpdateMovementIntents). Server / proxies: bADSHeld

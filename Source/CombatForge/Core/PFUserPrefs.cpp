@@ -73,6 +73,16 @@ void FPFUserPrefs::SetInvertY(bool bInvert)
 	WriteBool(TEXT("InvertY"), bInvert);
 }
 
+bool FPFUserPrefs::GetADSToggle()
+{
+	return ReadBool(TEXT("ADSToggle"), false);   // default hold
+}
+
+void FPFUserPrefs::SetADSToggle(bool bToggle)
+{
+	WriteBool(TEXT("ADSToggle"), bToggle);
+}
+
 float FPFUserPrefs::GetFieldOfView()
 {
 	return FMath::Clamp(ReadFloat(TEXT("FieldOfView"), 105.f), 80.f, 110.f);

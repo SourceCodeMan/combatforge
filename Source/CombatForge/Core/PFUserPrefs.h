@@ -22,6 +22,10 @@ struct COMBATFORGE_API FPFUserPrefs
 	static bool GetInvertY();
 	static void SetInvertY(bool bInvert);
 
+	// Aim-down-sights input style: false = hold (default, press-and-hold), true = toggle (press to enter/exit).
+	static bool GetADSToggle();
+	static void SetADSToggle(bool bToggle);
+
 	static float GetFieldOfView();          // 80..110, default 105
 	static void SetFieldOfView(float Fov);
 

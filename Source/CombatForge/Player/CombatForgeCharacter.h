@@ -58,6 +58,12 @@ public:
 	bool  IsADS() const;                   // target state
 	float GetADSAlpha() const;             // 0..1 transition alpha (0.18 in / 0.14 out) — weapon spread lerp input
 	void  SetPreferredBaseFOV(float Fov);  // options menu hip FOV (80..110)
+	/** Reload begin/end pushes the current ADS intent into the movement stream (IsADS() self-suppresses
+	 *  while WeaponComponent->bReloading). Called by UPFWeaponComponent so a mid-reload aim release is honored. */
+	void  NotifyReloadStateChanged();
+	/** Re-reads the hold-vs-toggle ADS pref (FPFUserPrefs::GetADSToggle). Called on possess and when the
+	 *  options menu changes it live; clears any latched ADS on a mode change so you can't get stuck scoped. */
+	void  RefreshADSToggleMode();
 
 	// ---- Team + elimination cosmetics (pkg-weapons calls these) ----
 	void  SetTeamColor(uint8 TeamId);      // MID tint on the graybox mesh
@@ -406,9 +412,10 @@ private:
 
 	// ---- Input state ----
 	uint8 bSprintKeyHeld : 1;
-	uint8 bADSHeld : 1;
+	uint8 bADSHeld : 1;          // player's standing ADS intent (hold = button down; toggle = latched)
 	uint8 bFireHeld : 1;
 	uint8 bJumpKeyHeld : 1;
+	uint8 bADSToggleMode : 1;    // cached FPFUserPrefs::GetADSToggle(): false = hold, true = toggle
 
 	// ---- FOV arbiter state ----
 	float ADSAlpha = 0.f;

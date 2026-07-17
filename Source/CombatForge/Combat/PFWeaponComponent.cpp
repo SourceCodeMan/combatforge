@@ -709,12 +709,10 @@ void UPFWeaponComponent::BeginReload(double Now)
 	ACombatForgeCharacter* Char = GetPFCharacter();
 	if (Char != nullptr && Char->IsLocallyControlled())
 	{
-		// Reload kicks you out of ADS for the 1.0 s (04 §3).
-		bWasADSBeforeReload = Char->IsADS();
-		if (bWasADSBeforeReload)
-		{
-			Char->SetADS(false);
-		}
+		// Reload kicks you out of ADS for the reload's duration (04 §3). IsADS() self-suppresses while
+		// bReloading, so we only need to push the intent into the move stream — bADSHeld (the real aim-button
+		// record) is left untouched, so a release during the reload is honored and re-ADS on finish is exact.
+		Char->NotifyReloadStateChanged();
 		if (UPFCombatAudio* Audio = Char->GetCombatAudio())
 		{
 			Audio->PlayReload();
@@ -740,14 +738,12 @@ void UPFWeaponComponent::FinishReload()
 	OnReloadStateChangedEvent.Broadcast(false);
 
 	ACombatForgeCharacter* Char = GetPFCharacter();
-	if (Char != nullptr && Char->IsLocallyControlled() && bWasADSBeforeReload)
+	if (Char != nullptr && Char->IsLocallyControlled())
 	{
-		// CONTRACT-GAP: 04 §3 says "auto re-ADS if still held", but §3.3 exposes no raw
-		// ADS-held query on the character. Approximated as "held when the reload began";
-		// a release during the 1.0 s window is corrected by the next ADS input event.
-		Char->SetADS(true);
+		// bReloading is now false, so IsADS() resumes reporting the player's live intent (bADSHeld):
+		// ADS re-engages iff the button is still held (or toggle is still latched). No stale snapshot.
+		Char->NotifyReloadStateChanged();
 	}
-	bWasADSBeforeReload = false;
 }
 
 void UPFWeaponComponent::CancelReload()
@@ -758,8 +754,15 @@ void UPFWeaponComponent::CancelReload()
 	}
 	// "Restores prior count" (04 §3) is free: the hopper only fills on FinishReload.
 	bReloading = false;
-	bWasADSBeforeReload = false;
 	OnReloadStateChangedEvent.Broadcast(false);
+	// A cancelled reload must also lift ADS suppression (IsADS() reads bReloading, now false).
+	if (ACombatForgeCharacter* Char = GetPFCharacter())
+	{
+		if (Char->IsLocallyControlled())
+		{
+			Char->NotifyReloadStateChanged();
+		}
+	}
 }
 
 void UPFWeaponComponent::UpdateReload(double Now)

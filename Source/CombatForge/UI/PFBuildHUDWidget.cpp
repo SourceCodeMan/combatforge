@@ -352,7 +352,9 @@ void UPFBuildHUDWidget::UpdateReadyCounts()
 	for (const APlayerState* PS : GS->PlayerArray)
 	{
 		const ACombatForgePlayerState* PFPS = Cast<ACombatForgePlayerState>(PS);
-		if (PFPS && PFPS->TeamId <= 1)
+		// Bots never set bReady (AreAllPlayersReady skips IsABot()), so counting them in Total[]
+		// leaves the display stuck below full ("Ready 1/4") even as the match starts. Humans only.
+		if (PFPS && !PFPS->IsABot() && PFPS->TeamId <= 1)
 		{
 			++Total[PFPS->TeamId];
 			if (PFPS->bReady)

@@ -195,7 +195,12 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 		FEnhancedActionKeyMapping& Hold = IMC_Build->MapKey(IA_BuildWheel, EKeys::Q);
 		UInputTriggerHold* HoldTrigger = NewObject<UInputTriggerHold>(IMC_Build);
 		HoldTrigger->HoldTimeThreshold = 0.18f;
-		HoldTrigger->bIsOneShot = true;
+		// bIsOneShot MUST stay false: a one-shot Hold fires Triggered once at the 0.18s threshold
+		// and then evaluates to None the very next frame (while Q is still down), which Enhanced Input
+		// reports as Completed → OnWheelReleased → the wheel closes ~1 frame after it opens. With
+		// bIsOneShot=false the Hold keeps returning Triggered every frame while Q is held (the open is
+		// idempotent via bWheelOpenSent) and Completed fires only on real key release, committing the sector.
+		HoldTrigger->bIsOneShot = false;
 		Hold.Triggers.Add(HoldTrigger);
 	}
 

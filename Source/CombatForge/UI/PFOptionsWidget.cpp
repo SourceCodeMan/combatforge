@@ -477,6 +477,21 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 6.f));
 	}
 
+	// Aim style: checked = toggle ADS (press to enter/exit), unchecked = hold (default).
+	UHorizontalBox* AdsRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	AdsRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Aim toggle (ADS)"), 15, false));
+	ADSToggleCheck = WidgetTree->ConstructWidget<UCheckBox>();
+	ADSToggleCheck->OnCheckStateChanged.AddDynamic(this, &UPFOptionsWidget::OnADSToggleChanged);
+	if (UHorizontalBoxSlot* H = AdsRow->AddChildToHorizontalBox(ADSToggleCheck))
+	{
+		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(AdsRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
 	UHorizontalBox* FovRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	FovRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Field of view"), 15, false));
 	FovSlider = WidgetTree->ConstructWidget<USlider>();
@@ -1006,6 +1021,11 @@ void UPFOptionsWidget::OnInvertYChanged(bool bIsChecked)
 	bWorkingInvertY = bIsChecked;
 }
 
+void UPFOptionsWidget::OnADSToggleChanged(bool bIsChecked)
+{
+	bWorkingADSToggle = bIsChecked;
+}
+
 const TCHAR* UPFOptionsWidget::QualityName(int32 Level)
 {
 	switch (Level)
@@ -1101,6 +1121,10 @@ void UPFOptionsWidget::RefreshLabels()
 	{
 		InvertYCheck->SetIsChecked(bWorkingInvertY);
 	}
+	if (ADSToggleCheck)
+	{
+		ADSToggleCheck->SetIsChecked(bWorkingADSToggle);
+	}
 	if (ResScaleSlider) { ResScaleSlider->SetValue(WorkingResScale); }
 	if (BrightnessSlider) { BrightnessSlider->SetValue(WorkingBrightness); }
 	if (ContrastSlider) { ContrastSlider->SetValue(WorkingContrast); }
@@ -1145,6 +1169,7 @@ void UPFOptionsWidget::PullFromSettings()
 	WorkingBrightness = FPFUserPrefs::GetBrightnessEV();
 	WorkingContrast = FPFUserPrefs::GetContrastScale();
 	bWorkingInvertY = FPFUserPrefs::GetInvertY();
+	bWorkingADSToggle = FPFUserPrefs::GetADSToggle();
 	WorkingFov = FPFUserPrefs::GetFieldOfView();
 	WorkingWindowMode = FPFUserPrefs::GetWindowModeIndex();
 
@@ -1171,6 +1196,7 @@ void UPFOptionsWidget::PullFromSettings()
 void UPFOptionsWidget::PushToSettings(bool bSave)
 {
 	FPFUserPrefs::SetInvertY(bWorkingInvertY);
+	FPFUserPrefs::SetADSToggle(bWorkingADSToggle);
 	FPFUserPrefs::SetFieldOfView(WorkingFov);
 	FPFUserPrefs::SetAmbientVolume(WorkingAmbientVol);
 	FPFUserPrefs::SetBrightnessEV(WorkingBrightness);
@@ -1227,6 +1253,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	ApplyBrightnessContrast(WorkingBrightness, WorkingContrast);
 	ApplyLookSensitivity(WorkingSens);
 	ApplyInvertY(bWorkingInvertY);
+	ApplyADSToggle(bWorkingADSToggle);
 	ApplyFieldOfView(WorkingFov);
 	ApplyKeyBinds();
 
@@ -1304,6 +1331,19 @@ void UPFOptionsWidget::ApplyInvertY(bool bInvert)
 		if (UPFInputConfig* Cfg = PC->GetInputConfig())
 		{
 			Cfg->SetLookInvertY(bInvert);
+		}
+	}
+}
+
+void UPFOptionsWidget::ApplyADSToggle(bool bToggle)
+{
+	// Write first so the pawn's re-read sees the new value even if Apply runs before PushToSettings.
+	FPFUserPrefs::SetADSToggle(bToggle);
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
+		{
+			Char->RefreshADSToggleMode();   // live-apply mid-match, no re-possess needed
 		}
 	}
 }

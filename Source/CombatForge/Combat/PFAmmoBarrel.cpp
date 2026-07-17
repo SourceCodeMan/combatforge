@@ -48,6 +48,15 @@ APFAmmoBarrel::APFAmmoBarrel()
 	CollisionBody->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
 	CollisionBody->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	CollisionBody->SetCanEverAffectNavigation(false);
+	// The box top sits at Z=140 — a flat, walkable face players used as a free +140uu step to crouch-jump
+	// over the perimeter wall. Mark it Unwalkable so IsWalkable rejects the top and the pawn slides off,
+	// while ECC_Pawn/PF_ECC_Paintball blocking (cover + BB splat) is unchanged. The legit jump apex (~135uu)
+	// barely reaches the top anyway, so standability costs nothing.
+	{
+		FWalkableSlopeOverride Slope;
+		Slope.WalkableSlopeBehavior = EWalkableSlopeBehavior::WalkableSlope_Unwalkable;
+		CollisionBody->SetWalkableSlopeOverride(Slope);
+	}
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (CylFinder.Succeeded())

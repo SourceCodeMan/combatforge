@@ -64,6 +64,7 @@ protected:
 	UFUNCTION() void OnFullscreenChanged(bool bIsChecked);
 	UFUNCTION() void OnVSyncChanged(bool bIsChecked);
 	UFUNCTION() void OnInvertYChanged(bool bIsChecked);
+	UFUNCTION() void OnADSToggleChanged(bool bIsChecked);
 	UFUNCTION() void OnMasterVolChanged(float Value);
 	UFUNCTION() void OnSfxVolChanged(float Value);
 	UFUNCTION() void OnAmbientVolChanged(float Value);
@@ -96,6 +97,7 @@ private:
 	void ApplyBrightnessContrast(float EV, float Contrast);   // → PFLightingSubsystem::SetUserGrade
 	void ApplyLookSensitivity(float Sens);
 	void ApplyInvertY(bool bInvert);
+	void ApplyADSToggle(bool bToggle);
 	void ApplyFieldOfView(float Fov);
 	void ApplyWindowAndResolution();
 
@@ -124,6 +126,7 @@ private:
 	UPROPERTY() TObjectPtr<UCheckBox> FullscreenCheck;
 	UPROPERTY() TObjectPtr<UCheckBox> VSyncCheck;
 	UPROPERTY() TObjectPtr<UCheckBox> InvertYCheck;
+	UPROPERTY() TObjectPtr<UCheckBox> ADSToggleCheck;
 	UPROPERTY() TObjectPtr<USlider> ResScaleSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> ResScaleValueText;
 	UPROPERTY() TObjectPtr<USlider> BrightnessSlider;
@@ -150,6 +153,7 @@ private:
 	bool   bWorkingFullscreen = true;
 	bool   bWorkingVSync = true;
 	bool   bWorkingInvertY = false;
+	bool   bWorkingADSToggle = false;
 	float  WorkingResScale = 100.f;
 	float  WorkingBrightness = 0.f;    // EV offset, -1..+1
 	float  WorkingContrast = 1.f;      // scale, 0.85..1.20
