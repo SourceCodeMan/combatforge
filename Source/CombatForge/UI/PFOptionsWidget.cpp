@@ -11,6 +11,7 @@
 #include "Engine/LocalPlayer.h"
 #include "InputCoreTypes.h"
 #include "Player/CombatForgeCharacter.h"
+#include "Player/PFCharacterCustomization.h"   // PFChar active class-slot switch (in-game)
 #include "Combat/PFCombatAudio.h"
 #include "Core/PFLightingSubsystem.h"
 
@@ -444,6 +445,25 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 {
 	UVerticalBox* Box = CastChecked<UVerticalBox>(ParentBox);
 
+	// CLASS quick-switch — click to cycle your active class (applies to your pawn live). Hidden in the
+	// boot-menu embedded options (the boot menu has its own full CHARACTER tab); this is for the in-game
+	// pause menu, so you can change class without leaving the match.
+	UHorizontalBox* ClassRowBox = WidgetTree->ConstructWidget<UHorizontalBox>();
+	ClassRowBox->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Class"), 15, false));
+	ClassButton = WidgetTree->ConstructWidget<UButton>();
+	ClassButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnClassClicked);
+	ClassValueText = MakeLabel(WidgetTree, TEXT("  Class 1  "), 14, true);
+	ClassButton->AddChild(ClassValueText);
+	if (UHorizontalBoxSlot* H = ClassRowBox->AddChildToHorizontalBox(ClassButton))
+	{
+		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(ClassRowBox))
+	{
+		V->SetPadding(FMargin(0.f, 10.f));
+	}
+	ClassRow = ClassRowBox;
+
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 	Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Mouse sensitivity"), 15, false));
 	SensSlider = WidgetTree->ConstructWidget<USlider>();
@@ -835,6 +855,8 @@ void UPFOptionsWidget::ApplyEmbeddedChrome()
 	// a second one read as a duplicate (Tom 2026-07-15). The in-game pause overlay never routes
 	// through here (bEmbedded=false), so it keeps its How to Play tab.
 	if (TabHowTo)          { TabHowTo->SetVisibility(ESlateVisibility::Collapsed); }
+	// The boot menu has its own CHARACTER tab for class selection, so hide the in-game class quick-switch here.
+	if (ClassRow)          { ClassRow->SetVisibility(ESlateVisibility::Collapsed); }
 }
 
 void UPFOptionsWidget::EnterEmbeddedMode()
@@ -1026,6 +1048,31 @@ void UPFOptionsWidget::OnADSToggleChanged(bool bIsChecked)
 	bWorkingADSToggle = bIsChecked;
 }
 
+void UPFOptionsWidget::OnClassClicked()
+{
+	const int32 N = PFChar::SaveSlotCount();
+	if (N <= 0)
+	{
+		return;
+	}
+	PFChar::SetActiveSaveSlot((PFChar::GetActiveSaveSlot() + 1) % N);
+	// Apply live to the local pawn (new outfit + weapon). In combat this swaps your loadout immediately;
+	// dead/lobby it's picked up on the next spawn.
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
+		{
+			Char->ReapplyCharacterConfig();
+			Char->ReapplyWeaponLoadout();
+		}
+	}
+	if (ClassValueText)
+	{
+		ClassValueText->SetText(FText::FromString(
+			FString::Printf(TEXT("  Class %d  "), PFChar::GetActiveSaveSlot() + 1)));
+	}
+}
+
 const TCHAR* UPFOptionsWidget::QualityName(int32 Level)
 {
 	switch (Level)
@@ -1058,6 +1105,11 @@ FString UPFOptionsWidget::ResolutionLabel() const
 
 void UPFOptionsWidget::RefreshLabels()
 {
+	if (ClassValueText)
+	{
+		ClassValueText->SetText(FText::FromString(
+			FString::Printf(TEXT("  Class %d  "), PFChar::GetActiveSaveSlot() + 1)));
+	}
 	if (QualityValueText)
 	{
 		QualityValueText->SetText(FText::FromString(FString::Printf(TEXT("  %s  "), QualityName(WorkingQuality))));

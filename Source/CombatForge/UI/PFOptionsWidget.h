@@ -65,6 +65,7 @@ protected:
 	UFUNCTION() void OnVSyncChanged(bool bIsChecked);
 	UFUNCTION() void OnInvertYChanged(bool bIsChecked);
 	UFUNCTION() void OnADSToggleChanged(bool bIsChecked);
+	UFUNCTION() void OnClassClicked();   // cycle the active class slot + apply to the local pawn (in-game)
 	UFUNCTION() void OnMasterVolChanged(float Value);
 	UFUNCTION() void OnSfxVolChanged(float Value);
 	UFUNCTION() void OnAmbientVolChanged(float Value);
@@ -119,6 +120,10 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> QualityValueText;
 	UPROPERTY() TObjectPtr<UButton> WindowModeButton;
 	UPROPERTY() TObjectPtr<UTextBlock> WindowModeValueText;
+	// In-game class quick-switch (Controls page). Hidden in the boot-menu embedded options (ApplyEmbeddedChrome).
+	UPROPERTY() TObjectPtr<class UHorizontalBox> ClassRow;
+	UPROPERTY() TObjectPtr<UButton> ClassButton;
+	UPROPERTY() TObjectPtr<UTextBlock> ClassValueText;
 	UPROPERTY() TObjectPtr<UButton> ResolutionButton;
 	UPROPERTY() TObjectPtr<UTextBlock> ResolutionValueText;
 	UPROPERTY() TObjectPtr<UButton> FpsLimitButton;
