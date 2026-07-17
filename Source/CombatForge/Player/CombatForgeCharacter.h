@@ -64,6 +64,9 @@ public:
 	/** Re-reads the hold-vs-toggle ADS pref (FPFUserPrefs::GetADSToggle). Called on possess and when the
 	 *  options menu changes it live; clears any latched ADS on a mode change so you can't get stuck scoped. */
 	void  RefreshADSToggleMode();
+	/** Re-reads the hold-vs-toggle crouch pref (FPFUserPrefs::GetCrouchToggle). Called on possess and when
+	 *  the options menu changes it live; clears latched crouch on a mode change so you can't get stuck low. */
+	void  RefreshCrouchToggleMode();
 
 	// ---- Team + elimination cosmetics (pkg-weapons calls these) ----
 	void  SetTeamColor(uint8 TeamId);      // MID tint on the graybox mesh
@@ -446,6 +449,7 @@ private:
 	uint8 bFireHeld : 1;
 	uint8 bJumpKeyHeld : 1;
 	uint8 bADSToggleMode : 1;    // cached FPFUserPrefs::GetADSToggle(): false = hold, true = toggle
+	uint8 bCrouchToggleMode : 1; // cached FPFUserPrefs::GetCrouchToggle(): false = hold, true = toggle
 
 	// Demolition bomb: the bomb this pawn is currently holding F on (server-side), + plant debounce.
 	TWeakObjectPtr<class APFBombActor> DefusingBomb;

@@ -110,6 +110,10 @@ public:
 	/** Fingerprint / serialization input. */
 	const TArray<FPFBuildPieceRec>& GetPieces() const { return Pieces.Items; }
 
+	/** Vertical bases / height cap for the map currently in play (Warehouse 4/1200, Yard 7/2100). */
+	int32 ActiveLevels() const;
+	int32 ActiveHeightCapUU() const;
+
 	/** ISM hit → piece record, for the client delete-tool highlight. */
 	bool FindPieceByHit(const FHitResult& Hit, uint16& OutPieceId, FPFBuildPieceRec& OutRec) const;
 

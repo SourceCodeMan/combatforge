@@ -62,6 +62,8 @@ const FPFArenaMapDef& PFGetArenaMapDef(EPFArenaMap Map)
 		/*CellsY=*/PFGrid::CellsY,                                  // 10 rows
 		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400
 		static_cast<float>(PFGrid::CellsY * PFGrid::CellUU),        // 4000
+		/*Levels=*/PFGrid::Levels,                                  // 4 bases / 3 wall stories
+		/*HeightCapUU=*/PFGrid::HeightCapUU,                        // 1200 — under the roof
 		/*bRoof=*/true, /*bPerimeter=*/true, /*bWarehouseScenery=*/false,
 		/*SunIntensity=*/6.f, TEXT("WAREHOUSE")
 	};
@@ -69,11 +71,14 @@ const FPFArenaMapDef& PFGetArenaMapDef(EPFArenaMap Map)
 	// concrete pad sits in the open with the warehouse next door and desert to the horizon.
 	// 2026-07-17: now a genuinely BIGGER field — 16×20 grid (the whole 8000 is buildable/playable),
 	// its own arenaId grid-header so Yard maps don't load on the Warehouse and vice versa.
+	// 2026-07-17: open-air height — 6 wall stories (7 bases / 2100 cap) so you can stack forts high.
 	static const FPFArenaMapDef Yard = {
 		EPFArenaMap::Yard,
 		/*CellsY=*/2 * PFGrid::CellsY,                              // 20 rows — the extra field is now LIVE grid
 		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400 — length unchanged
 		static_cast<float>(2 * PFGrid::CellsY * PFGrid::CellUU),    // 8000
+		/*Levels=*/PFGrid::YardLevels,                              // 7 bases / 6 wall stories
+		/*HeightCapUU=*/PFGrid::YardHeightCapUU,                    // 2100 — open sky
 		/*bRoof=*/false, /*bPerimeter=*/false, /*bWarehouseScenery=*/true,
 		/*SunIntensity=*/4.f, TEXT("THE YARD")
 	};

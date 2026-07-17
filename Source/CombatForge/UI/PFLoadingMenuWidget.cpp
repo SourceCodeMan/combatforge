@@ -266,7 +266,7 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Pick map, mode, type, format, and bots here, then START GAME."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("MOVE & LOOK"), 14, true, Head);
-	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump (again mid-air at a wall = climb over) · Shift sprint · Ctrl/C crouch"), 12, false, Key);
+	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump (again mid-air at a wall = climb over) · Shift sprint · Ctrl/C crouch (hold or toggle in Options)"), 12, false, Key);
 
 	AddHowToLine(Box, TEXT("COMBAT"), 14, true, Head);
 	AddHowToLine(Box, TEXT("LMB fire · RMB aim · V fire mode · R reload · F refill at barrels · E frag · Q smoke · B melee · Scroll pistol"), 12, false, Key);
@@ -1225,8 +1225,20 @@ void UPFLoadingMenuWidget::NotifyCardSelected(int32 Kind, int32 Value)
 	}
 	else if (Kind == 3)
 	{
-		SelectedArenaMap = static_cast<EPFArenaMap>(
+		const EPFArenaMap NewMap = static_cast<EPFArenaMap>(
 			FMath::Clamp(Value, 0, static_cast<int32>(EPFArenaMap::MAX_Count) - 1));
+		const bool bArenaChanged = (NewMap != SelectedArenaMap);
+		SelectedArenaMap = NewMap;
+		// Warehouse ↔ Yard have independent community catalogs — drop the old pick first so we
+		// never push a Warehouse file while switching to The Yard (or the reverse), then re-list.
+		if (bArenaChanged)
+		{
+			SelectedMapCatalogIndex = INDEX_NONE;
+			ApplySelectionsToHost();   // shell swap + community → auto; GS ArenaMap updates for ListTop
+			ReloadMapCatalog();        // only maps for the new shell
+			RefreshSetupLabels();
+			return;
+		}
 	}
 	RefreshSetupLabels();   // refreshes the cards AND the map-picker visibility (shows it for Improvement/Play-Only)
 	ApplySelectionsToHost();
@@ -1877,31 +1889,13 @@ void UPFLoadingMenuWidget::ReloadMapCatalog()
 	});
 
 	// ---- Favorites (host-side only; max 5, persisted in GameUserSettings.ini) ----
+	// Favorites are global prefs but each shell only surfaces favorites that exist IN THIS catalog
+	// (Warehouse vs Yard catalogs are independent). Never prune a favorite just because it belongs
+	// to the other map — that would wipe Yard favorites while browsing Warehouse and vice versa.
 	FavoriteIds = FPFUserPrefs::GetFavoriteMapIds();
 	if (IsLocalHost() && FavoriteIds.Num() > 0)
 	{
-		// Prune ids whose arena file vanished — but ONLY when the catalog is complete (not cut by
-		// the 100 cap) so a favorite beyond the cap is never wrongly dropped, and NEVER on clients
-		// (ListTopCommunityMaps returns empty on NM_Client — pruning there would wipe the list).
-		if (MapCatalog.Num() > 0 && MapCatalog.Num() < MaxMaps)
-		{
-			const int32 Before = FavoriteIds.Num();
-			FavoriteIds.RemoveAll([this](const FString& Id)
-			{
-				return !MapCatalog.ContainsByPredicate([&Id](const FPFCommunityMapInfo& M)
-				{
-					return FavKeyFor(M) == Id;
-				});
-			});
-			if (FavoriteIds.Num() != Before)
-			{
-				FPFUserPrefs::SetFavoriteMapIds(FavoriteIds);
-				FPFUserPrefs::Flush();
-			}
-		}
-
-		// Favorites-first stable partition: favorites occupy page 1 in rank order, the rest keep
-		// today's ranked order after them. Preserve the explicit selection across the reorder.
+		// Favorites-first stable partition for maps that are valid on THIS shell. Preserve selection.
 		FString SelectedFile;
 		if (MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
 		{
@@ -1958,17 +1952,25 @@ void UPFLoadingMenuWidget::RefreshMapPicker()
 
 	if (MapPickerHeader)
 	{
-		MapPickerHeader->SetText(FText::FromString((IsLocalHost() && FavoriteIds.Num() > 0)
-			? FString::Printf(TEXT("COMMUNITY MAP  ·  FAVORITES %d/%d"),
-				FavoriteIds.Num(), FPFUserPrefs::MaxFavoriteMaps)
-			: FString(TEXT("COMMUNITY MAP"))));
+		// Tag the shell so it's obvious Warehouse picks stay off The Yard and vice versa.
+		const FString ShellTag = PFGetArenaMapDef(SelectedArenaMap).Label;
+		int32 FavOnThisShell = 0;
+		for (const FPFCommunityMapInfo& M : MapCatalog)
+		{
+			if (IsFavorite(M)) { ++FavOnThisShell; }
+		}
+		MapPickerHeader->SetText(FText::FromString((IsLocalHost() && FavOnThisShell > 0)
+			? FString::Printf(TEXT("%s MAPS  ·  FAVORITES %d/%d"),
+				*ShellTag, FavOnThisShell, FPFUserPrefs::MaxFavoriteMaps)
+			: FString::Printf(TEXT("%s MAPS"), *ShellTag)));
 	}
 
 	if (MapPageLabel)
 	{
 		if (Total == 0)
 		{
-			MapPageLabel->SetText(FText::FromString(TEXT("No maps saved yet")));
+			MapPageLabel->SetText(FText::FromString(
+				FString::Printf(TEXT("No %s maps yet"), *PFGetArenaMapDef(SelectedArenaMap).Label)));
 		}
 		else
 		{

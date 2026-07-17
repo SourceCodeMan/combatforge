@@ -6,6 +6,9 @@
 #include "Building/PFBuildGrid.h"
 #include "Combat/PFCombatAudio.h"
 #include "Combat/PFHealthComponent.h"
+#include "Combat/PFPaintballProjectile.h"
+#include "Combat/PFSplatSubsystem.h"
+#include "Combat/PFWeaponComponent.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
 #include "Core/CombatForgeTypes.h"
@@ -60,6 +63,7 @@ void APFBombActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(APFBombActor, DefuseAccumSeconds);
 	DOREPLIFETIME(APFBombActor, bDetonated);
 	DOREPLIFETIME(APFBombActor, bArmed);
+	DOREPLIFETIME(APFBombActor, BurstSeed);
 }
 
 void APFBombActor::BeginPlay()
@@ -210,6 +214,8 @@ void APFBombActor::ServerDetonate()
 	{
 		return;
 	}
+	// Seed BEFORE flipping bDetonated so the OnRep bunch carries a matching BurstSeed for client tracers.
+	BurstSeed = static_cast<uint32>(FMath::Rand()) ^ (GetUniqueID() * 2654435761u);
 	bDetonated = true;
 	// Belt-and-braces phase guard: only remove the piece while the match is still in COMBAT. If a phase
 	// transition raced the fuse (bombs are normally destroyed at Combat exit), detonating into a cleared /
@@ -222,7 +228,11 @@ void APFBombActor::ServerDetonate()
 			Grid->ServerRemovePieceForMatch(TargetPieceId);   // also clears the piece's bomb registry entry
 		}
 	}
-	PlayDetonationLocal();   // host cosmetics; clients replay via OnRep_Detonated
+	// Same radial BB burst as the frag grenade (cover blocks, teammates immune) — 300 pellets for a
+	// breach charge so anyone camping the wall gets painted when it goes.
+	const FVector At = GetActorLocation();
+	SpawnFragBurst(At, BurstSeed);
+	PlayDetonationLocal();   // host cosmetics/audio; clients replay via OnRep_Detonated
 	ForceNetUpdate();
 	SetLifeSpan(0.8f);       // linger long enough for the OnRep to land on clients
 }
@@ -254,6 +264,12 @@ void APFBombActor::PlayDetonationLocal()
 {
 	if (Mesh)          { Mesh->SetVisibility(false); }
 	if (CountdownText) { CountdownText->SetVisibility(false); }
+	const FVector At = GetActorLocation();
+	// Host already has the authoritative BB spray as its visual; only remote clients need cosmetics.
+	if (!HasAuthority())
+	{
+		SpawnCosmeticFragBurst(At, BurstSeed);
+	}
 	// Boom audio through the LOCAL player's combat audio (the grenade detonation pattern).
 	const UWorld* World = GetWorld();
 	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
@@ -262,7 +278,84 @@ void APFBombActor::PlayDetonationLocal()
 	{
 		if (UPFCombatAudio* Audio = LocalChar->GetCombatAudio())
 		{
-			Audio->PlayFragBurstAt(GetActorLocation());
+			Audio->PlayFragBurstAt(At);
+		}
+	}
+}
+
+void APFBombActor::SpawnFragBurst(const FVector& At, uint32 Seed)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || !HasAuthority())
+	{
+		return;
+	}
+
+	// Damage/splat routing needs a live weapon component (ResolveAuthoritativeImpact early-outs without
+	// one). Prefer the planter's current pawn — after a mid-fuse respawn that is the new loadout weapon.
+	UPFWeaponComponent* SrcWeapon = nullptr;
+	APawn* PlanterPawn = nullptr;
+	if (ACombatForgePlayerState* PS = PlanterPS.Get())
+	{
+		PlanterPawn = PS->GetPawn();
+		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PlanterPawn))
+		{
+			SrcWeapon = Char->GetWeapon();
+		}
+	}
+
+	FRandomStream Stream(Seed);
+	for (int32 i = 0; i < FragBBCount; ++i)
+	{
+		FVector Dir = Stream.VRand();
+		if (Dir.Z < 0.f)
+		{
+			Dir.Z = -Dir.Z * 0.5f;   // bias lower hemisphere upward so BBs spray out, not into the floor
+		}
+		Dir = Dir.GetSafeNormal();
+
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		Params.Owner = PlanterPawn ? static_cast<AActor*>(PlanterPawn) : this;
+		Params.Instigator = PlanterPawn;
+		APFPaintballProjectile* BB = World->SpawnActor<APFPaintballProjectile>(
+			APFPaintballProjectile::StaticClass(), At, Dir.Rotation(), Params);
+		if (BB != nullptr)
+		{
+			// Distinct high ShotIndex space so bomb hitmarkers don't collide with live-fire indices.
+			BB->InitProjectile(At, Dir, PlanterTeam, /*bAuthoritative=*/true, SrcWeapon,
+				Seed + static_cast<uint32>(i) + 1u);
+		}
+	}
+}
+
+void APFBombActor::SpawnCosmeticFragBurst(const FVector& At, uint32 Seed)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	UPFSplatSubsystem* Splats = World->GetSubsystem<UPFSplatSubsystem>();
+	if (Splats == nullptr)
+	{
+		return;   // dedicated/non-rendering world
+	}
+	// SAME seed + SAME bias as SpawnFragBurst so cosmetic tracers line up with the authoritative BBs.
+	// Cosmetic pool is 64 — extras re-use slots (same tradeoff as the frag grenade).
+	FRandomStream Stream(Seed);
+	for (int32 i = 0; i < FragBBCount; ++i)
+	{
+		FVector Dir = Stream.VRand();
+		if (Dir.Z < 0.f)
+		{
+			Dir.Z = -Dir.Z * 0.5f;
+		}
+		Dir = Dir.GetSafeNormal();
+		if (APFPaintballProjectile* Ball = Splats->AcquireCosmeticProjectile())
+		{
+			Ball->InitProjectile(At, Dir, PlanterTeam, /*bAuthoritative=*/false, /*SourceWeapon=*/nullptr,
+				Seed + static_cast<uint32>(i) + 1u);
 		}
 	}
 }

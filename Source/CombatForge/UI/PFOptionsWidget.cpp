@@ -499,6 +499,21 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 6.f));
 	}
 
+	// Crouch style: checked = toggle crouch (press to crouch/stand), unchecked = hold (default).
+	UHorizontalBox* CrouchRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	CrouchRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Crouch toggle"), 15, false));
+	CrouchToggleCheck = WidgetTree->ConstructWidget<UCheckBox>();
+	CrouchToggleCheck->OnCheckStateChanged.AddDynamic(this, &UPFOptionsWidget::OnCrouchToggleChanged);
+	if (UHorizontalBoxSlot* H = CrouchRow->AddChildToHorizontalBox(CrouchToggleCheck))
+	{
+		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(CrouchRow))
+	{
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
 	UHorizontalBox* FovRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	FovRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Field of view"), 15, false));
 	FovSlider = WidgetTree->ConstructWidget<USlider>();
@@ -519,7 +534,7 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 	}
 
 	UTextBlock* Note = MakeLabel(WidgetTree,
-		TEXT("Sensitivity & Invert apply on Apply. FOV is hip FOV (ADS still zooms)."), 12, false);
+		TEXT("Sensitivity, Invert, Aim/Crouch toggle apply on Apply. FOV is hip FOV (ADS still zooms). Unchecked = hold."), 12, false);
 	Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
 	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Note))
 	{
@@ -802,7 +817,7 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 
 	AddHowToLine(Box, TEXT("MOVE & LOOK"), 15, true, Head);
 	AddHowToLine(Box, TEXT("WASD  move     ·     Mouse  look     ·     Space  jump (press Space again mid-air at a wall to climb over)"), 13, false, Key);
-	AddHowToLine(Box, TEXT("Shift  sprint     ·     Ctrl / C  crouch (slide while sprinting)"), 13, false, Key);
+	AddHowToLine(Box, TEXT("Shift  sprint     ·     Ctrl / C  crouch (slide while sprinting; hold or toggle in Options)"), 13, false, Key);
 
 	AddHowToLine(Box, TEXT("COMBAT"), 15, true, Head);
 	AddHowToLine(Box, TEXT("LMB  fire  ·  RMB  aim  ·  V  fire mode  ·  R  reload  ·  F  refill at ammo barrels"), 13, false, Key);
@@ -1078,6 +1093,11 @@ void UPFOptionsWidget::OnADSToggleChanged(bool bIsChecked)
 	bWorkingADSToggle = bIsChecked;
 }
 
+void UPFOptionsWidget::OnCrouchToggleChanged(bool bIsChecked)
+{
+	bWorkingCrouchToggle = bIsChecked;
+}
+
 void UPFOptionsWidget::OnClassClicked()
 {
 	const int32 N = PFChar::SaveSlotCount();
@@ -1207,6 +1227,10 @@ void UPFOptionsWidget::RefreshLabels()
 	{
 		ADSToggleCheck->SetIsChecked(bWorkingADSToggle);
 	}
+	if (CrouchToggleCheck)
+	{
+		CrouchToggleCheck->SetIsChecked(bWorkingCrouchToggle);
+	}
 	if (ResScaleSlider) { ResScaleSlider->SetValue(WorkingResScale); }
 	if (BrightnessSlider) { BrightnessSlider->SetValue(WorkingBrightness); }
 	if (ContrastSlider) { ContrastSlider->SetValue(WorkingContrast); }
@@ -1252,6 +1276,7 @@ void UPFOptionsWidget::PullFromSettings()
 	WorkingContrast = FPFUserPrefs::GetContrastScale();
 	bWorkingInvertY = FPFUserPrefs::GetInvertY();
 	bWorkingADSToggle = FPFUserPrefs::GetADSToggle();
+	bWorkingCrouchToggle = FPFUserPrefs::GetCrouchToggle();
 	WorkingFov = FPFUserPrefs::GetFieldOfView();
 	WorkingWindowMode = FPFUserPrefs::GetWindowModeIndex();
 
@@ -1279,6 +1304,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 {
 	FPFUserPrefs::SetInvertY(bWorkingInvertY);
 	FPFUserPrefs::SetADSToggle(bWorkingADSToggle);
+	FPFUserPrefs::SetCrouchToggle(bWorkingCrouchToggle);
 	FPFUserPrefs::SetFieldOfView(WorkingFov);
 	FPFUserPrefs::SetAmbientVolume(WorkingAmbientVol);
 	FPFUserPrefs::SetBrightnessEV(WorkingBrightness);
@@ -1336,6 +1362,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	ApplyLookSensitivity(WorkingSens);
 	ApplyInvertY(bWorkingInvertY);
 	ApplyADSToggle(bWorkingADSToggle);
+	ApplyCrouchToggle(bWorkingCrouchToggle);
 	ApplyFieldOfView(WorkingFov);
 	ApplyKeyBinds();
 
@@ -1426,6 +1453,19 @@ void UPFOptionsWidget::ApplyADSToggle(bool bToggle)
 		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
 		{
 			Char->RefreshADSToggleMode();   // live-apply mid-match, no re-possess needed
+		}
+	}
+}
+
+void UPFOptionsWidget::ApplyCrouchToggle(bool bToggle)
+{
+	// Write first so the pawn's re-read sees the new value even if Apply runs before PushToSettings.
+	FPFUserPrefs::SetCrouchToggle(bToggle);
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
+		{
+			Char->RefreshCrouchToggleMode();   // live-apply mid-match, no re-possess needed
 		}
 	}
 }

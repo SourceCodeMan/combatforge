@@ -14,7 +14,7 @@
  *
  * Record coordinate semantics (FPFBuildPieceRec / FPFPlacementQuery):
  *  - X/Y/Z are sub-grid units (100 uu).
- *  - Structural: X/Y = cell min-corner (multiples of 4), Z = level*3 (0/3/6/9).
+ *  - Structural: X/Y = cell min-corner (multiples of 4), Z = level*3 (0/3/6/… up to map Levels).
  *  - Props: X/Y = center, Z = support-top (multiples of 3 — floor tops are 300-multiples, T25).
  *  - Rot: 0-3 = 90° yaw steps. Walls: canonical edge 0=N (+Y edge), 1=E (+X edge).
  *    Ramps: index of the ascent direction (0=+X, 1=+Y, 2=-X, 3=-Y); low edge nearest the player.
@@ -28,13 +28,14 @@ struct COMBATFORGE_API FPFGridMath
 	// World → grid quantization (03 §4)
 	// ---------------------------------------------------------------
 
-	/** Cell + level from a world point: floor(P.xy/400), level = clamp(round(P.z/300), 0, 3). */
-	static FIntVector WorldToCell(const FVector& P)
+	/** Cell + level from a world point: floor(P.xy/400), level = clamp(round(P.z/300), 0, NumLevels-1). */
+	static FIntVector WorldToCell(const FVector& P, int32 NumLevels = PFGrid::Levels)
 	{
 		const int32 Cx = FMath::FloorToInt32(P.X / static_cast<double>(PFGrid::CellUU));
 		const int32 Cy = FMath::FloorToInt32(P.Y / static_cast<double>(PFGrid::CellUU));
+		const int32 MaxLevel = FMath::Max(0, NumLevels - 1);
 		const int32 Level = FMath::Clamp(
-			FMath::RoundToInt32(P.Z / static_cast<double>(PFGrid::WallHeightUU)), 0, PFGrid::Levels - 1);
+			FMath::RoundToInt32(P.Z / static_cast<double>(PFGrid::WallHeightUU)), 0, MaxLevel);
 		return FIntVector(Cx, Cy, Level);
 	}
 
@@ -49,10 +50,11 @@ struct COMBATFORGE_API FPFGridMath
 
 	/**
 	 * Wall snap: nearest of the 4 cell edges from frac(P.xy/400), canonicalized S/W → the
-	 * neighbor cell's N/E (03 §2). Level clamps to 0..2 — a level-3-based wall breaches the cap.
+	 * neighbor cell's N/E (03 §2). Level clamps to 0..NumLevels-2 — a top-base wall breaches the cap.
 	 * EdgeNE: 0 = N (+Y edge of the anchor cell), 1 = E (+X edge).
 	 */
-	static void SnapWall(const FVector& P, int32& CellX, int32& CellY, int32& Level, uint8& EdgeNE)
+	static void SnapWall(const FVector& P, int32& CellX, int32& CellY, int32& Level, uint8& EdgeNE,
+	                     int32 NumLevels = PFGrid::Levels)
 	{
 		CellX = FMath::FloorToInt32(P.X / static_cast<double>(PFGrid::CellUU));
 		CellY = FMath::FloorToInt32(P.Y / static_cast<double>(PFGrid::CellUU));
@@ -70,8 +72,9 @@ struct COMBATFORGE_API FPFGridMath
 		else if (Edge == 3) { CellX -= 1; Edge = 1; }   // W → neighbor's E
 		EdgeNE = Edge;
 
+		const int32 MaxWallLevel = FMath::Max(0, NumLevels - 2);
 		Level = FMath::Clamp(
-			FMath::RoundToInt32(P.Z / static_cast<double>(PFGrid::WallHeightUU)), 0, PFGrid::Levels - 2);
+			FMath::RoundToInt32(P.Z / static_cast<double>(PFGrid::WallHeightUU)), 0, MaxWallLevel);
 	}
 
 	/**
@@ -268,15 +271,17 @@ struct COMBATFORGE_API FPFGridMath
 	/**
 	 * Sub-grid Z of the surface supporting a prop at this XY: terrain (0) or the highest
 	 * blocking support under the height cap. Floor tops are exact 300-multiples (T25), so the
-	 * result is quantized to level tops (0/3/6/9 sub-grid). Traces PF_ECC_BuildTrace downward.
+	 * result is quantized to level tops (0/3/6/… sub-grid). Traces PF_ECC_BuildTrace downward.
 	 */
-	static int16 SupportTopSubZ(const UWorld* World, const FVector& XY)
+	static int16 SupportTopSubZ(const UWorld* World, const FVector& XY,
+	                            int32 NumLevels = PFGrid::Levels,
+	                            int32 HeightCapUU = PFGrid::HeightCapUU)
 	{
 		if (!World)
 		{
 			return 0;
 		}
-		const FVector Start(XY.X, XY.Y, static_cast<float>(PFGrid::HeightCapUU) + 100.f);
+		const FVector Start(XY.X, XY.Y, static_cast<float>(HeightCapUU) + 100.f);
 		const FVector End(XY.X, XY.Y, -50.f);
 		FHitResult Hit;
 		FCollisionQueryParams Params;
@@ -285,9 +290,10 @@ struct COMBATFORGE_API FPFGridMath
 		{
 			return 0;
 		}
+		const int32 MaxLevel = FMath::Max(0, NumLevels - 1);
 		const int32 Level = FMath::Clamp(
 			FMath::RoundToInt32(Hit.ImpactPoint.Z / static_cast<double>(PFGrid::WallHeightUU)),
-			0, PFGrid::Levels - 1);
+			0, MaxLevel);
 		return static_cast<int16>(Level * 3);
 	}
 };

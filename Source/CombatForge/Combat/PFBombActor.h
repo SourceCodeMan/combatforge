@@ -15,9 +15,11 @@ class UTextRenderComponent;
  * Demolition bomb (anti-griefing breach): planted on a structural build piece during Combat with a 15 s fuse.
  * An ENEMY of the planter can defuse by holding F for a continuous 8 s. On detonation the ONE targeted piece
  * is removed from the LIVE grid for the rest of the match (APFBuildGrid::ServerRemovePieceForMatch) — the
- * saved arena is never touched, so the piece returns next match. Server-authoritative throughout: plant and
- * defuse route through the interacting PAWN's Server RPCs (the barrel pattern — this actor is GameMode-owned,
- * so a client RPC issued directly on it would be dropped).
+ * saved arena is never touched, so the piece returns next match — AND a frag-style radial BB burst
+ * (FragBBCount pellets, same hit → ApplyPaintHit pipeline as the grenade) paints anyone nearby. Cover
+ * blocks it; teammates are immune (B12). Server-authoritative throughout: plant and defuse route through
+ * the interacting PAWN's Server RPCs (the barrel pattern — this actor is GameMode-owned, so a client RPC
+ * issued directly on it would be dropped).
  */
 UCLASS()
 class COMBATFORGE_API APFBombActor : public AActor
@@ -42,6 +44,8 @@ public:
 	static constexpr float FuseSeconds       = 15.f;
 	static constexpr float DefuseHoldSeconds = 8.f;
 	static constexpr float DefuseRangeUU     = 260.f;   // hold-F reach (slightly over barrel interact range)
+	/** Radial BB count on detonation — same pipeline as the frag grenade (90), dialed up for a breach charge. */
+	static constexpr int32 FragBBCount       = 300;
 
 protected:
 	virtual void BeginPlay() override;
@@ -52,8 +56,12 @@ protected:
 	void ServerDetonate();
 	void ServerDefused();
 	UFUNCTION() void OnRep_Detonated();
-	/** Boom cosmetics on THIS machine (host directly, clients via OnRep) — reuses the frag audio. */
+	/** Boom cosmetics on THIS machine (host directly, clients via OnRep) — frag audio + cosmetic BB spray. */
 	void PlayDetonationLocal();
+	/** Server: authoritative BB burst (damage / elim / splat) — same path as APFGrenadeProjectile frag. */
+	void SpawnFragBurst(const FVector& At, uint32 Seed);
+	/** Non-host clients: cosmetic tracers from the shared BurstSeed so they line up with server BBs. */
+	void SpawnCosmeticFragBurst(const FVector& At, uint32 Seed);
 	void UpdateLabel();
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Root;
@@ -69,6 +77,8 @@ protected:
 	/** REPLICATED — the client-side F-press pre-scan reads IsArmed(); a server-only flag left joined
 	 *  clients unable to ever begin a defuse (review wf_e923820a). */
 	UPROPERTY(Replicated) bool bArmed = false;
+	/** Shared frag-spread seed so remote cosmetic tracers match the server BB directions. */
+	UPROPERTY(Replicated) uint32 BurstSeed = 0;
 
 	// Server-only.
 	uint16 TargetPieceId = 0;

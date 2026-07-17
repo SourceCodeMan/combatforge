@@ -260,6 +260,30 @@ int32 APFBuildGrid::ActiveCellsY() const
 	return PFGrid::CellsY;   // pre-GameState fallback = the default (Warehouse) grid
 }
 
+int32 APFBuildGrid::ActiveLevels() const
+{
+	if (const UWorld* W = GetWorld())
+	{
+		if (const ACombatForgeGameState* GS = W->GetGameState<ACombatForgeGameState>())
+		{
+			return PFGetArenaMapDef(GS->ArenaMap).Levels;
+		}
+	}
+	return PFGrid::Levels;
+}
+
+int32 APFBuildGrid::ActiveHeightCapUU() const
+{
+	if (const UWorld* W = GetWorld())
+	{
+		if (const ACombatForgeGameState* GS = W->GetGameState<ACombatForgeGameState>())
+		{
+			return PFGetArenaMapDef(GS->ArenaMap).HeightCapUU;
+		}
+	}
+	return PFGrid::HeightCapUU;
+}
+
 // ---------------------------------------------------------------------------
 // Shared validation
 // ---------------------------------------------------------------------------
@@ -349,21 +373,24 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		}
 	}
 
-	// --- Height cap (walls: level 0..2 only — a level-3-based wall breaches the cap) ---
+	// --- Height cap (walls: level 0..Levels-2 only — a top-base wall crowns at HeightCap) ---
 	// Strict: top of piece must stay under HeightCap so stacked floors can't form a deck you
 	// jump over the perimeter from. (Perimeter walls + escape lid also block escape.)
+	// Map-specific: Warehouse 4/1200 (3 wall stories under the roof), Yard 7/2100 (6 wall stories).
+	const int32 MapLevels = ActiveLevels();
+	const int32 MapHeightCap = ActiveHeightCapUU();
 	const int32 Level = Q.Z / 3;
-	if (Q.Type == EPFPieceType::Wall && Level > PFGrid::Levels - 2)
+	if (Q.Type == EPFPieceType::Wall && Level > MapLevels - 2)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	if (!bProp && Level > PFGrid::Levels - 1)
+	if (!bProp && Level > MapLevels - 1)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	// Leave a small air gap under the escape lid / wall rim (no piece crowns at 1200 flat).
+	// Leave a small air gap under the escape lid / wall rim (no piece crowns at the cap flat).
 	constexpr float HeightCapSlackUU = 8.f;
-	if (Bounds.Max.Z > static_cast<float>(PFGrid::HeightCapUU) - HeightCapSlackUU)
+	if (Bounds.Max.Z > static_cast<float>(MapHeightCap) - HeightCapSlackUU)
 	{
 		return EPFDenyReason::HeightCap;
 	}

@@ -24,7 +24,7 @@ struct COMBATFORGE_API FPFCommunityMapInfo
 	UPROPERTY() int32 Score = 0;
 	UPROPERTY() int32 PieceCount = 0;
 	UPROPERTY() int32 TeamSize = 0;
-	/** Build-grid rows the map was made on (Warehouse 10, Yard 20). Gates cross-map loads. */
+	/** Build-grid rows the map was made on (Warehouse 10, Yard 20). Gates catalog + load per shell. */
 	UPROPERTY() int32 CellsY = PFGrid::CellsY;
 	UPROPERTY() int32 ThumbUp = 0;
 	UPROPERTY() int32 ThumbDown = 0;
@@ -94,6 +94,9 @@ public:
 	/**
 	 * Ranked community catalog for the map picker (top MaxCount, default 100).
 	 * Host disk only (Saved/Arenas/*.json). Safe to call from the listen-host boot menu.
+	 *
+	 * Warehouse and Yard catalogs are independent: only maps whose grid rows match the active
+	 * arena shell (Warehouse 10 / Yard 20) are returned. Cross-map picks are never listed or loaded.
 	 */
 	void ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMaps, int32 MaxCount = 100) const;
 

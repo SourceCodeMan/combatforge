@@ -346,6 +346,10 @@ void UPFRatingSubsystem::ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMa
 	// First-time / empty install: ship playable starter maps.
 	EnsureSeedArenas();
 
+	// Independent catalogs per arena shell (Tom): Warehouse maps never appear in the Yard picker
+	// and vice versa. Same gate LoadCommunityArenaByFileName uses so list + load stay in lockstep.
+	const int32 ActiveCY = ResolveActiveGridCellsY(GI);
+
 	const FString Dir = FPFPaths::ArenaDir();
 	TArray<FString> Files;
 	IFileManager::Get().FindFiles(Files, *(Dir / TEXT("*.json")), /*Files=*/true, /*Directories=*/false);
@@ -359,6 +363,10 @@ void UPFRatingSubsystem::ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMa
 		if (!ParseArenaFile(Dir / FileName, FileName, Info, Pieces))
 		{
 			continue;
+		}
+		if (Info.CellsY != ActiveCY)
+		{
+			continue;   // other map's community builds stay on their own shell
 		}
 		const FString Key = Info.ArenaId.IsEmpty() ? FileName : Info.ArenaId;
 		if (const FPFCommunityMapInfo* Existing = BestByArena.Find(Key))
@@ -385,8 +393,8 @@ void UPFRatingSubsystem::ListTopCommunityMaps(TArray<FPFCommunityMapInfo>& OutMa
 	{
 		OutMaps.SetNum(Cap);
 	}
-	UE_LOG(CombatForgeLog, Log, TEXT("RatingSubsystem: community map catalog %d (cap %d)"),
-		OutMaps.Num(), Cap);
+	UE_LOG(CombatForgeLog, Log, TEXT("RatingSubsystem: community map catalog %d for %d-row grid (cap %d)"),
+		OutMaps.Num(), ActiveCY, Cap);
 }
 
 bool UPFRatingSubsystem::LoadCommunityArenaByFileName(const FString& FileName,

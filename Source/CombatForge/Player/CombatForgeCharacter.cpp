@@ -503,6 +503,7 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	bFireHeld = false;
 	bJumpKeyHeld = false;
 	bADSToggleMode = false;
+	bCrouchToggleMode = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -788,8 +789,9 @@ void ACombatForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 		BuildComponent->BindInput(EIC, Cfg);
 	}
 
-	// Pick up the hold-vs-toggle ADS pref for this (locally controlled) pawn.
+	// Pick up hold-vs-toggle prefs for this (locally controlled) pawn.
 	RefreshADSToggleMode();
+	RefreshCrouchToggleMode();
 }
 
 // ---------------------------------------------------------------------------
@@ -952,7 +954,24 @@ void ACombatForgeCharacter::OnSprintReleased()
 
 void ACombatForgeCharacter::OnCrouchSlidePressed()
 {
-	if (PFMovement != nullptr)
+	if (PFMovement == nullptr)
+	{
+		return;
+	}
+	// Hold mode: press enters crouch (release exits). Toggle mode: each press flips crouch intent.
+	// CMC still decides slide vs crouch from (bWantsToCrouch + sprint + speed) either way.
+	if (bCrouchToggleMode)
+	{
+		if (PFMovement->bWantsToCrouch)
+		{
+			PFMovement->OnCrouchSlideReleased();
+		}
+		else
+		{
+			PFMovement->OnCrouchSlidePressed();
+		}
+	}
+	else
 	{
 		PFMovement->OnCrouchSlidePressed();
 	}
@@ -960,7 +979,8 @@ void ACombatForgeCharacter::OnCrouchSlidePressed()
 
 void ACombatForgeCharacter::OnCrouchSlideReleased()
 {
-	if (PFMovement != nullptr)
+	// Toggle mode ignores the release; hold mode stands on release.
+	if (!bCrouchToggleMode && PFMovement != nullptr)
 	{
 		PFMovement->OnCrouchSlideReleased();
 	}
@@ -1331,6 +1351,21 @@ void ACombatForgeCharacter::RefreshADSToggleMode()
 		if (bADSHeld)
 		{
 			SetADS(false);
+		}
+	}
+}
+
+void ACombatForgeCharacter::RefreshCrouchToggleMode()
+{
+	const bool bNewToggle = FPFUserPrefs::GetCrouchToggle();
+	if (bNewToggle != (bool)bCrouchToggleMode)
+	{
+		bCrouchToggleMode = bNewToggle;
+		// Switching modes clears latched crouch so a toggle left "down" can't strand you crouched
+		// after you flip back to hold (where no button is down to release).
+		if (PFMovement != nullptr && PFMovement->bWantsToCrouch)
+		{
+			PFMovement->OnCrouchSlideReleased();
 		}
 	}
 }

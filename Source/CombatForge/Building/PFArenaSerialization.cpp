@@ -140,7 +140,10 @@ TSharedRef<FJsonObject> FPFArenaSerialization::BuildLayoutJson(const TArray<FPFB
 	Grid->SetNumberField(TEXT("wallH"), PFGrid::WallHeightUU);
 	Grid->SetNumberField(TEXT("cellsX"), PFGrid::CellsX);
 	Grid->SetNumberField(TEXT("cellsY"), GridCellsY);   // per-map rows (Warehouse 10, Yard 20) — gates cross-map loads
-	Grid->SetNumberField(TEXT("levels"), PFGrid::Levels);
+	// Vertical stack follows the map: Warehouse 4 / Yard 7 (derived from row count so callers
+	// that already pass GridCellsY don't need a second arg).
+	const int32 GridLevels = (GridCellsY >= PFGrid::MaxCellsY) ? PFGrid::YardLevels : PFGrid::Levels;
+	Grid->SetNumberField(TEXT("levels"), GridLevels);
 	Root->SetObjectField(TEXT("grid"), Grid);
 
 	const FString ArenaId = ComputeArenaId(Pieces);
@@ -191,11 +194,15 @@ bool FPFArenaSerialization::ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
 	if (Root->TryGetObjectField(TEXT("grid"), GridObj) && GridObj != nullptr && (*GridObj).IsValid())
 	{
 		int32 CellUU = PFGrid::CellUU, CellsX = PFGrid::CellsX, CellsY = PFGrid::CellsY;
+		int32 Levels = PFGrid::Levels;
 		(*GridObj)->TryGetNumberField(TEXT("cellUU"), CellUU);
 		(*GridObj)->TryGetNumberField(TEXT("cellsX"), CellsX);
 		(*GridObj)->TryGetNumberField(TEXT("cellsY"), CellsY);
+		(*GridObj)->TryGetNumberField(TEXT("levels"), Levels);
 		const bool bKnownRows = (CellsY == PFGrid::CellsY || CellsY == PFGrid::MaxCellsY);
-		if (CellUU != PFGrid::CellUU || CellsX != PFGrid::CellsX || !bKnownRows)
+		// Accept Warehouse (4) or Yard (7) level counts; missing/legacy levels defaults above to 4.
+		const bool bKnownLevels = (Levels == PFGrid::Levels || Levels == PFGrid::YardLevels);
+		if (CellUU != PFGrid::CellUU || CellsX != PFGrid::CellsX || !bKnownRows || !bKnownLevels)
 		{
 			return false;
 		}

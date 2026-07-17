@@ -209,7 +209,12 @@ namespace PFGrid
 	constexpr int32 WallHeightUU = 300;constexpr int32 SubPerCell = 4;   // CellUU / SubUU
 	constexpr int32 CellsX = 16;       constexpr int32 CellsY = 10;   // CellsY = the DEFAULT (Warehouse) rows
 	constexpr int32 MaxCellsY = 20;    // largest per-map row count (The Yard) — sizes fixed seal-check arrays
+	// Vertical stack: Levels base heights at Z = 0, 300, … (Levels-1)*300. Walls use levels 0..Levels-2
+	// (a wall on the top base would crown at HeightCap). Warehouse = 4 levels / 3 wall stories / 1200 cap
+	// (fits under the roof). The Yard is open air and allows 7 levels / 6 wall stories / 2100 cap.
 	constexpr int32 Levels = 4;        constexpr int32 HeightCapUU = 1200;
+	constexpr int32 YardLevels = 7;    constexpr int32 YardHeightCapUU = 2100;
+	constexpr int32 MaxLevels = YardLevels;   // largest per-map level count
 	// Field-local cell columns (x): [0]=A spawn, [1..6]=A plot, [7..8]=neutral, [9..14]=B plot, [15]=B spawn
 	constexpr int32 SpawnColA = 0;     constexpr int32 PlotAMinX = 1;  constexpr int32 PlotAMaxX = 6;
 	constexpr int32 NeutralMinX = 7;   constexpr int32 NeutralMaxX = 8;
@@ -230,6 +235,8 @@ struct COMBATFORGE_API FPFArenaMapDef
 	int32   CellsY = PFGrid::CellsY;    // build-grid rows for THIS map (Warehouse 10, Yard 20). FieldY = CellsY*CellUU.
 	float   FieldX = static_cast<float>(PFGrid::CellsX * PFGrid::CellUU);   // 6400
 	float   FieldY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);   // 4000
+	int32   Levels = PFGrid::Levels;           // vertical bases (Warehouse 4 = 3 wall stories; Yard 7 = 6)
+	int32   HeightCapUU = PFGrid::HeightCapUU; // world-Z top of the build volume
 	bool    bRoof = true;               // roof deck + trusses + skylights (Warehouse); false = open air
 	bool    bPerimeter = true;          // arena walls + escape lid + wall dressing; false = wide-open field
 	bool    bWarehouseScenery = false;  // Yard: non-enterable warehouse building beside the field

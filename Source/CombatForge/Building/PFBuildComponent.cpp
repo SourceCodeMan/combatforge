@@ -264,13 +264,31 @@ void UPFBuildComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 bool UPFBuildComponent::ComputeSnappedSlot(EPFPieceType Type, const FVector& AnchorP, float CamYawDeg,
                                            int16& OutX, int16& OutY, int16& OutZ, uint8& OutRot) const
 {
+	// Per-map vertical stack (Warehouse 3 wall stories / Yard 6). Prefers the live grid's map def.
+	int32 MapLevels = PFGrid::Levels;
+	int32 MapHeightCap = PFGrid::HeightCapUU;
+	if (const APFBuildGrid* Grid = GetGrid())
+	{
+		MapLevels = Grid->ActiveLevels();
+		MapHeightCap = Grid->ActiveHeightCapUU();
+	}
+	else if (const UWorld* World = GetWorld())
+	{
+		if (const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>())
+		{
+			const FPFArenaMapDef& Def = PFGetArenaMapDef(GS->ArenaMap);
+			MapLevels = Def.Levels;
+			MapHeightCap = Def.HeightCapUU;
+		}
+	}
+
 	switch (Type)
 	{
 	case EPFPieceType::Wall:
 	{
 		int32 Cx = 0, Cy = 0, Level = 0;
 		uint8 Edge = 0;
-		FPFGridMath::SnapWall(AnchorP, Cx, Cy, Level, Edge);
+		FPFGridMath::SnapWall(AnchorP, Cx, Cy, Level, Edge, MapLevels);
 		OutX = static_cast<int16>(Cx * PFGrid::SubPerCell);
 		OutY = static_cast<int16>(Cy * PFGrid::SubPerCell);
 		OutZ = static_cast<int16>(Level * 3);
@@ -281,7 +299,7 @@ bool UPFBuildComponent::ComputeSnappedSlot(EPFPieceType Type, const FVector& Anc
 	case EPFPieceType::Ramp:
 	case EPFPieceType::Roof:
 	{
-		const FIntVector Cell = FPFGridMath::WorldToCell(AnchorP);
+		const FIntVector Cell = FPFGridMath::WorldToCell(AnchorP, MapLevels);
 		OutX = static_cast<int16>(Cell.X * PFGrid::SubPerCell);
 		OutY = static_cast<int16>(Cell.Y * PFGrid::SubPerCell);
 		OutZ = static_cast<int16>(Cell.Z * 3);
@@ -297,7 +315,7 @@ bool UPFBuildComponent::ComputeSnappedSlot(EPFPieceType Type, const FVector& Anc
 		const FIntVector Sub = FPFGridMath::WorldToSubGrid(AnchorP);
 		OutX = static_cast<int16>(Sub.X);
 		OutY = static_cast<int16>(Sub.Y);
-		OutZ = FPFGridMath::SupportTopSubZ(GetWorld(), AnchorP);
+		OutZ = FPFGridMath::SupportTopSubZ(GetWorld(), AnchorP, MapLevels, MapHeightCap);
 		OutRot = PropRotOffset;
 		return true;
 	}

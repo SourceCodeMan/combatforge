@@ -93,7 +93,9 @@ void APFPaintballProjectile::InitProjectile(const FVector& Origin, const FVector
 	ShotIndexStored = ShotIndex;
 	bAuthoritativeMode = bAuthoritative;
 	SourceWeaponWeak = SourceWeapon;
-	ShooterActorWeak = SourceWeapon ? SourceWeapon->GetOwner() : nullptr;
+	// Prefer the weapon owner; fall back to Instigator so weaponless sources (bomb after planter
+	// recycled) still credit the right shooter and ignore them for self-splat.
+	ShooterActorWeak = SourceWeapon ? SourceWeapon->GetOwner() : GetInstigator();
 
 	// Ballistic numbers come from the weapon config so a data-only tune reaches both modes.
 	float Speed = 10000.f;
@@ -233,12 +235,6 @@ void APFPaintballProjectile::HandleProjectileStop(const FHitResult& ImpactResult
 void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 {
 	UPFWeaponComponent* Weapon = SourceWeaponWeak.Get();
-	if (Weapon == nullptr)
-	{
-		// Shooter left mid-flight: no channel to confirm or splat through. Ball just breaks.
-		return;
-	}
-
 	const FVector ImpactPoint = Hit.ImpactPoint;
 	const FVector ImpactNormal = Hit.ImpactNormal;
 	AActor* HitActor = Hit.GetActor();
@@ -253,7 +249,10 @@ void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 		if (VictimTeam != 255 && VictimTeam == TeamId)
 		{
 			// Friendly fire (B12): cosmetic splat only — no damage, no hit event, no hitmarker.
-			Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);
+			if (Weapon != nullptr)
+			{
+				Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);
+			}
 			return;
 		}
 
@@ -273,14 +272,21 @@ void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 
 		VictimHealth->ApplyPaintHit(PaintHit);
 
-		// Hitmarker only via ClientHitConfirm (B3); elim variant if this ball finished them.
-		Weapon->ClientHitConfirm(ShotIndexStored, VictimHealth->bEliminated);
-		Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);
+		// Hitmarker/splat need a live weapon channel. Weaponless sources (bomb after planter
+		// recycled) still apply damage above so nearby players get painted.
+		if (Weapon != nullptr)
+		{
+			Weapon->ClientHitConfirm(ShotIndexStored, VictimHealth->bEliminated);
+			Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);
+		}
 		return;
 	}
 
-	// World hit (or corpse): splat only.
-	Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);
+	// World hit (or corpse): splat only when we have a weapon multicast channel.
+	if (Weapon != nullptr)
+	{
+		Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);
+	}
 }
 
 void APFPaintballProjectile::HandleCosmeticImpact(const FHitResult& Hit)

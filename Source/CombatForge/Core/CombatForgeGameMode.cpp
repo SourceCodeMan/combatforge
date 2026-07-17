@@ -1118,6 +1118,14 @@ void ACombatForgeGameMode::HostSetArenaMap(EPFArenaMap NewMap)
 	}
 	GS->ServerSetArenaMap(NewMap);
 
+	// Community catalogs are per-shell (Warehouse ≠ Yard). Drop any host pick from the previous
+	// map so Improvement/PlayOnly re-resolves to auto top-ranked for THIS grid (load would reject
+	// the old file via CellsY gate, but the lobby label would still show a dead pick).
+	if (!GS->SelectedCommunityMapFile.IsEmpty() || !GS->SelectedCommunityMapLabel.IsEmpty())
+	{
+		GS->ServerSetSelectedCommunityMap(FString(), TEXT("Auto (top ranked)"));
+	}
+
 	// Map identity travels as ACTOR CLASS: destroy the old shell and spawn the new map's class —
 	// the actor channel tears down / constructs the ctor-built geometry on every client, so the
 	// swap needs zero new replication machinery (the shell contract: "replicated for existence

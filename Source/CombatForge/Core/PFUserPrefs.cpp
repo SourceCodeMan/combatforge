@@ -83,6 +83,16 @@ void FPFUserPrefs::SetADSToggle(bool bToggle)
 	WriteBool(TEXT("ADSToggle"), bToggle);
 }
 
+bool FPFUserPrefs::GetCrouchToggle()
+{
+	return ReadBool(TEXT("CrouchToggle"), false);   // default hold
+}
+
+void FPFUserPrefs::SetCrouchToggle(bool bToggle)
+{
+	WriteBool(TEXT("CrouchToggle"), bToggle);
+}
+
 float FPFUserPrefs::GetFieldOfView()
 {
 	return FMath::Clamp(ReadFloat(TEXT("FieldOfView"), 105.f), 80.f, 110.f);

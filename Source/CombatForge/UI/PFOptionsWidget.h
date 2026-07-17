@@ -66,6 +66,7 @@ protected:
 	UFUNCTION() void OnVSyncChanged(bool bIsChecked);
 	UFUNCTION() void OnInvertYChanged(bool bIsChecked);
 	UFUNCTION() void OnADSToggleChanged(bool bIsChecked);
+	UFUNCTION() void OnCrouchToggleChanged(bool bIsChecked);
 	UFUNCTION() void OnClassClicked();   // cycle the active class slot + apply to the local pawn (in-game)
 	UFUNCTION() void OnMasterVolChanged(float Value);
 	UFUNCTION() void OnSfxVolChanged(float Value);
@@ -101,6 +102,7 @@ private:
 	void ApplyLookSensitivity(float Sens);
 	void ApplyInvertY(bool bInvert);
 	void ApplyADSToggle(bool bToggle);
+	void ApplyCrouchToggle(bool bToggle);
 	void ApplyFieldOfView(float Fov);
 	void ApplyWindowAndResolution();
 
@@ -134,6 +136,7 @@ private:
 	UPROPERTY() TObjectPtr<UCheckBox> VSyncCheck;
 	UPROPERTY() TObjectPtr<UCheckBox> InvertYCheck;
 	UPROPERTY() TObjectPtr<UCheckBox> ADSToggleCheck;
+	UPROPERTY() TObjectPtr<UCheckBox> CrouchToggleCheck;
 	UPROPERTY() TObjectPtr<USlider> ResScaleSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> ResScaleValueText;
 	UPROPERTY() TObjectPtr<USlider> BrightnessSlider;
@@ -161,6 +164,7 @@ private:
 	bool   bWorkingVSync = true;
 	bool   bWorkingInvertY = false;
 	bool   bWorkingADSToggle = false;
+	bool   bWorkingCrouchToggle = false;
 	float  WorkingResScale = 100.f;
 	float  WorkingBrightness = 0.f;    // EV offset, -1..+1
 	float  WorkingContrast = 1.f;      // scale, 0.85..1.20
