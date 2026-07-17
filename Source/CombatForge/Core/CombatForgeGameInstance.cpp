@@ -8,6 +8,7 @@
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Misc/NetworkVersion.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
 #include "Serialization/JsonReader.h"
@@ -18,6 +19,23 @@ void UCombatForgeGameInstance::Init()
 {
 	Super::Init();
 	LoadOrCreateIdentity();
+
+	// Multiplayer build gate: fold our engine version + game build number (PFBuild::NetProtocol) into the
+	// network version so a client on a DIFFERENT CombatForge build fails the join handshake with a clean
+	// version-mismatch error, instead of connecting and mirroring pieces through stale code (the giant-box /
+	// missing-skin version-skew bug). Same build both ends → same value → compatible. Bound at boot, before
+	// any networking, so the first GetLocalNetworkVersion() computation picks it up.
+	if (!FNetworkVersion::GetLocalNetworkVersionOverride.IsBound())
+	{
+		FNetworkVersion::GetLocalNetworkVersionOverride.BindLambda([]() -> uint32
+		{
+			uint32 V = FCrc::StrCrc32(TEXT("CombatForge"));
+			V = FCrc::TypeCrc32(static_cast<uint32>(ENGINE_MAJOR_VERSION), V);
+			V = FCrc::TypeCrc32(static_cast<uint32>(ENGINE_MINOR_VERSION), V);
+			V = FCrc::TypeCrc32(static_cast<uint32>(PFBuild::NetProtocol), V);
+			return V;
+		});
+	}
 
 	// Frame cap from OUR pref (default 144) — uncapped rendering pegs any GPU at ~100% (an RTX 5090 sat at
 	// 86-90% drawing 300+ fps of a simple arena) for zero gameplay gain. Applied every boot so players who
