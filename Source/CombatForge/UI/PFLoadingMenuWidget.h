@@ -9,6 +9,7 @@
 #include "Voting/PFRatingSubsystem.h"
 #include "Player/PFCharacterCustomization.h"   // FPFCharacterConfig
 #include "Combat/PFWeaponCatalog.h"            // FPFWeaponConfig
+#include "Online/PFBackendSubsystem.h"         // FPFBackendServerInfo (browser rows member)
 #include "PFLoadingMenuWidget.generated.h"
 
 class UButton;
@@ -229,6 +230,23 @@ private:
 	UFUNCTION() void OnJoinLanClicked();   // connect to the host IP typed in the join box
 	UFUNCTION() void OnStopHostingClicked();   // back to standalone (drops joined clients; frees hosting)
 
+	// ---- ONLINE (combatforge-api: account + server browser + quick play + match codes) ----
+	UFUNCTION() void OnLoginClicked();       // logged out: device-link flow; logged in: sign out
+	UFUNCTION() void OnQuickPlayClicked();   // GET /v1/quickplay → open addr:port
+	UFUNCTION() void OnServerListClicked();  // refresh + toggle the browser rows
+	UFUNCTION() void OnJoinCodeClicked();    // 6-char private match code → GET /v1/join/:code
+	UFUNCTION() void OnServerRow0Clicked();  // fixed row handlers: dynamic delegates need UFUNCTIONs,
+	UFUNCTION() void OnServerRow1Clicked();  // so the browser shows the top BrowserRowCount servers
+	UFUNCTION() void OnServerRow2Clicked();
+	UFUNCTION() void OnServerRow3Clicked();
+	UFUNCTION() void OnServerRow4Clicked();
+	UFUNCTION() void OnServerRow5Clicked();
+	void JoinBrowserRow(int32 Index);
+	void JoinBackendServer(const struct FPFBackendServerInfo& Info);
+	void RebuildServerRows();
+	void RefreshOnlinePanel();               // login/quick-play/browser enabled-state + account line
+	class UPFBackendSubsystem* GetBackend() const;
+
 	/** Apply Play-Only + Skirmish + 4v4 + bots + auto map (first-session default). */
 	void ApplyQuickStartPreset();
 
@@ -239,6 +257,21 @@ private:
 	UPROPERTY() TObjectPtr<UButton> HostLanButton;
 	UPROPERTY() TObjectPtr<class UEditableTextBox> JoinIpBox;
 	UPROPERTY() TObjectPtr<UButton> JoinLanButton;
+
+	// ONLINE panel (accounts required for all listed/matchmade play — Tom 2026-07-17)
+	static constexpr int32 BrowserRowCount = 6;
+	UPROPERTY() TObjectPtr<UTextBlock> AccountStatusText;
+	UPROPERTY() TObjectPtr<UButton> LoginButton;
+	UPROPERTY() TObjectPtr<UTextBlock> LoginLabel;
+	UPROPERTY() TObjectPtr<UButton> QuickPlayButton;
+	UPROPERTY() TObjectPtr<UButton> ServerListButton;
+	UPROPERTY() TObjectPtr<class UEditableTextBox> JoinCodeBox;
+	UPROPERTY() TObjectPtr<UButton> JoinCodeButton;
+	UPROPERTY() TObjectPtr<UVerticalBox> ServerRowsBox;
+	UPROPERTY() TArray<TObjectPtr<UButton>> ServerRowButtons;
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> ServerRowLabels;
+	TArray<struct FPFBackendServerInfo> BrowserRows;   // parallel to the visible row buttons
+	bool bServerListOpen = false;
 	UPROPERTY() TObjectPtr<UTextBlock> QuickStartLabel;
 	UPROPERTY() TObjectPtr<UTextBlock> StatusText;
 	UPROPERTY() TObjectPtr<UProgressBar> ProgressBar;
@@ -347,6 +380,9 @@ private:
 	float ShaderWaitAccum = 0.f;
 	bool bWarmupComplete = false;
 	bool bDismissed = false;
+	/** Last-seen leader state — NativeTick re-styles the leader-only rows when it flips
+	 *  (dedicated: MatchLeader replicates in late, or migrates when the old leader leaves). */
+	bool bWasHostLastTick = false;
 
 	/** Soft paths to force-load so first in-game hit doesn't compile mid-fight. */
 	TArray<FString> PreloadPaths;

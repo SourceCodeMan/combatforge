@@ -611,8 +611,9 @@ void UPFLobbyWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 
 bool UPFLobbyWidget::IsLocalHost() const
 {
-	const APlayerController* PC = GetOwningPlayer();
-	return PC && PC->IsLocalController() && PC->HasAuthority();
+	// Match-leader aware (dedicated servers) — see ACombatForgePlayerController::IsHostController.
+	const ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(GetOwningPlayer());
+	return PC && PC->IsHostController();
 }
 
 void UPFLobbyWidget::NotifyRowClicked(ACombatForgePlayerState* ClickedPlayerState)

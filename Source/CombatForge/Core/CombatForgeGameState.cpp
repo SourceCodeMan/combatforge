@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "Core/CombatForgePlayerState.h"
+#include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
 
 namespace
@@ -33,6 +34,7 @@ void ACombatForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(ACombatForgeGameState, ElimFeed);
 	DOREPLIFETIME(ACombatForgeGameState, VoteTally);
 	DOREPLIFETIME(ACombatForgeGameState, MatchId);
+	DOREPLIFETIME(ACombatForgeGameState, MatchLeader);
 	DOREPLIFETIME(ACombatForgeGameState, TargetTeamSize);
 	DOREPLIFETIME(ACombatForgeGameState, bFillWithBots);
 	DOREPLIFETIME(ACombatForgeGameState, RoundWinsToTake);
@@ -235,6 +237,31 @@ void ACombatForgeGameState::ServerSetMatchId(const FString& NewMatchId)
 	}
 	MatchId = NewMatchId;
 	ForceNetUpdate();
+}
+
+bool ACombatForgeGameState::IsMatchLeader(const APlayerController* PC) const
+{
+	if (!PC || !MatchLeader)
+	{
+		return false;
+	}
+	return PC->PlayerState == MatchLeader;
+}
+
+void ACombatForgeGameState::ServerSetMatchLeader(ACombatForgePlayerState* NewLeader)
+{
+	if (!HasAuthority() || MatchLeader == NewLeader)
+	{
+		return;
+	}
+	MatchLeader = NewLeader;
+	OnRep_MatchLeader();   // listen host broadcasts too (§5 R9)
+	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::OnRep_MatchLeader()
+{
+	OnMatchLeaderChangedEvent.Broadcast();
 }
 
 void ACombatForgeGameState::ServerSetTargetTeamSize(uint8 NewSize)

@@ -205,11 +205,21 @@ protected:
 	static bool IsActiveRosterMember(const ACombatForgePlayerState* PS);
 	/** Destroy orphaned human PlayerStates that no longer own a Controller. */
 	void ScrubGhostPlayerStates(const ACombatForgePlayerState* KeepPS = nullptr);
+	/** Keep GameState->MatchLeader pointing at a connected human (first-joiner wins; migrates on
+	 *  leave). On a listen server this is always the host; on dedicated it is what makes the whole
+	 *  match-config surface work at all (multiplayer-plan W1.1). */
+	void RefreshMatchLeader(const ACombatForgePlayerState* ExcludePS = nullptr);
+	/** Connected human count (bots + ghosts + an in-flight leaver excluded). */
+	int32 CountHumans(const ACombatForgePlayerState* ExcludePS = nullptr) const;
 	/** Periodic host log line for crash triage (who is connected, phase, scores). */
 	void LogCrashBreadcrumb();
 	uint8 FindFreeRosterIndex() const;
 	void ComputeEffectiveScaling();
 	FPFMatchResult MakeMatchResult(uint8 MatchWinner) const;
+	/** Frozen match-report wire format (combatforge-api /v1/match-report; progression-plan §1).
+	 *  Always archived to Saved/MatchReports/; on a fleet box it is also queued + POSTed
+	 *  (idempotent on matchId server-side, so crash-resends are harmless). */
+	void EmitMatchReport() const;
 	static void SanitizeVoteIds(TArray<uint8>& InOutLiked, TArray<uint8>& InOutDisliked);
 
 	// ---- (intra) runtime state ----

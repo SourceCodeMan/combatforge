@@ -44,7 +44,11 @@ elseif (-not $PreferEditor -and $GameExe) {
 	$Mode = "game-server"
 	$Exe = $GameExe
 	$WorkDir = Split-Path $Exe -Parent
-	$Args = @($Map, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR")
+	# VERIFIED 2026-07-17: on a GAME exe, "-server" alone boots a NON-listening headless
+	# standalone (LogNet shows a plain Browse, no ListenURL) — "?listen" on the map URL is what
+	# actually opens the port. The local phantom player is excluded from leader/human counts by
+	# ACombatForgePlayerState::IsHeadlessServerPhantom (nullrhi machines only).
+	$Args = @("$Map?listen", "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR")
 	if ($Exe -match "[\\/]Binaries[\\/]Win64[\\/]") {
 		$Args += "-project=$UProject"
 	}

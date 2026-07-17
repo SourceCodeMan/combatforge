@@ -605,8 +605,20 @@ void ACombatForgePlayerController::OnADSWhileDead()
 
 bool ACombatForgePlayerController::IsHostController() const
 {
-	// Listen host = the one locally-controlled PC that also has authority (02 D12: no OSS).
-	return HasAuthority() && IsLocalPlayerController();
+	// Match-config powers (type/mode/format/map + force start). Two ways to hold them:
+	//  1) Listen host — the locally-controlled PC that also has authority (02 D12), unchanged.
+	//  2) The replicated MATCH LEADER (GameState->MatchLeader, assigned by the GameMode) — this is
+	//     what makes the whole surface work on a DEDICATED server, where no player has authority.
+	// Works correctly on every machine: the server evaluates it for a remote client's PC inside
+	// the ServerHost* guards (branch 2 via that PC's PlayerState), and clients evaluate it for
+	// their UI (branch 2 via the replicated field). Behavior on listen servers is identical to
+	// before — the host is always the first human, so the leader IS the host.
+	if (HasAuthority() && IsLocalPlayerController())
+	{
+		return true;
+	}
+	const ACombatForgeGameState* GS = GetPFGameState();
+	return GS && GS->IsMatchLeader(this);
 }
 
 void ACombatForgePlayerController::ServerSetReady_Implementation(bool bNewReady)

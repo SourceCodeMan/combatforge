@@ -1372,6 +1372,137 @@ void UPFLoadingMenuWidget::BuildTree()
 		UVerticalBox* MpBox = WidgetTree->ConstructWidget<UVerticalBox>();
 		if (Net == NM_Standalone)
 		{
+			// ---- ONLINE (hosted servers via api.playcombatforge.com; account required) ----
+			AccountStatusText = WidgetTree->ConstructWidget<UTextBlock>();
+			AccountStatusText->SetFont(PFLoadFont(12, false));
+			AccountStatusText->SetJustification(ETextJustify::Center);
+			AccountStatusText->SetAutoWrapText(true);
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(AccountStatusText))
+			{
+				V->SetHorizontalAlignment(HAlign_Fill);
+				V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			}
+
+			UHorizontalBox* OnlineRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+			LoginButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("LoginBtn"));
+			LoginButton->SetBackgroundColor(FLinearColor(0.5f, 0.36f, 0.14f, 1.f));
+			LoginButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnLoginClicked);
+			LoginLabel = WidgetTree->ConstructWidget<UTextBlock>();
+			LoginLabel->SetText(FText::FromString(TEXT("  LOG IN  ")));
+			LoginLabel->SetFont(PFLoadFont(13, true));
+			LoginLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			LoginButton->AddChild(LoginLabel);
+			if (UHorizontalBoxSlot* H = OnlineRow->AddChildToHorizontalBox(LoginButton))
+			{
+				H->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+				H->SetVerticalAlignment(VAlign_Center);
+			}
+
+			QuickPlayButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("QuickPlayBtn"));
+			QuickPlayButton->SetBackgroundColor(FLinearColor(0.2f, 0.42f, 0.62f, 1.f));
+			QuickPlayButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuickPlayClicked);
+			UTextBlock* QpLab = WidgetTree->ConstructWidget<UTextBlock>();
+			QpLab->SetText(FText::FromString(TEXT("  QUICK PLAY  ")));
+			QpLab->SetFont(PFLoadFont(13, true));
+			QpLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			QuickPlayButton->AddChild(QpLab);
+			if (UHorizontalBoxSlot* H = OnlineRow->AddChildToHorizontalBox(QuickPlayButton))
+			{
+				H->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+				H->SetVerticalAlignment(VAlign_Center);
+			}
+
+			ServerListButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ServerListBtn"));
+			ServerListButton->SetBackgroundColor(FLinearColor(0.26f, 0.28f, 0.34f, 1.f));
+			ServerListButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerListClicked);
+			UTextBlock* SlLab = WidgetTree->ConstructWidget<UTextBlock>();
+			SlLab->SetText(FText::FromString(TEXT("  SERVERS  ")));
+			SlLab->SetFont(PFLoadFont(13, true));
+			SlLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ServerListButton->AddChild(SlLab);
+			if (UHorizontalBoxSlot* H = OnlineRow->AddChildToHorizontalBox(ServerListButton))
+			{
+				H->SetVerticalAlignment(VAlign_Center);
+			}
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(OnlineRow))
+			{
+				V->SetHorizontalAlignment(HAlign_Center);
+				V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			}
+
+			// Match code row: friends' private matches (6 characters, from the match host).
+			UHorizontalBox* CodeRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+			JoinCodeBox = WidgetTree->ConstructWidget<UEditableTextBox>();
+			JoinCodeBox->SetHintText(FText::FromString(TEXT("match code")));
+			JoinCodeBox->WidgetStyle.SetFont(PFLoadFont(13, false));
+			JoinCodeBox->WidgetStyle.SetForegroundColor(FSlateColor(FLinearColor(0.06f, 0.06f, 0.08f)));
+			JoinCodeBox->SetForegroundColor(FLinearColor(0.06f, 0.06f, 0.08f));
+			USizeBox* CodeSizer = WidgetTree->ConstructWidget<USizeBox>();
+			CodeSizer->SetWidthOverride(210.f);
+			CodeSizer->SetContent(JoinCodeBox);
+			if (UHorizontalBoxSlot* H = CodeRow->AddChildToHorizontalBox(CodeSizer))
+			{
+				H->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+				H->SetVerticalAlignment(VAlign_Center);
+				H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			}
+			JoinCodeButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("JoinCodeBtn"));
+			JoinCodeButton->SetBackgroundColor(FLinearColor(0.16f, 0.24f, 0.4f, 1.f));
+			JoinCodeButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnJoinCodeClicked);
+			UTextBlock* CodeLab = WidgetTree->ConstructWidget<UTextBlock>();
+			CodeLab->SetText(FText::FromString(TEXT("  GO  ")));
+			CodeLab->SetFont(PFLoadFont(13, true));
+			CodeLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			JoinCodeButton->AddChild(CodeLab);
+			if (UHorizontalBoxSlot* H = CodeRow->AddChildToHorizontalBox(JoinCodeButton))
+			{
+				H->SetVerticalAlignment(VAlign_Center);
+			}
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(CodeRow))
+			{
+				V->SetHorizontalAlignment(HAlign_Fill);
+				V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			}
+
+			// Collapsible server-browser rows (SERVERS toggles; rows fill from GET /v1/servers).
+			ServerRowsBox = WidgetTree->ConstructWidget<UVerticalBox>();
+			ServerRowButtons.Reset();
+			ServerRowLabels.Reset();
+			for (int32 RowIdx = 0; RowIdx < BrowserRowCount; ++RowIdx)
+			{
+				UButton* Row = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(),
+					*FString::Printf(TEXT("ServerRow%dBtn"), RowIdx));
+				Row->SetBackgroundColor(FLinearColor(0.14f, 0.16f, 0.2f, 1.f));
+				switch (RowIdx)
+				{
+				case 0: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow0Clicked); break;
+				case 1: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow1Clicked); break;
+				case 2: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow2Clicked); break;
+				case 3: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow3Clicked); break;
+				case 4: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow4Clicked); break;
+				default: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow5Clicked); break;
+				}
+				UTextBlock* RowLab = WidgetTree->ConstructWidget<UTextBlock>();
+				RowLab->SetFont(PFLoadFont(12, false));
+				RowLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.87f, 0.92f)));
+				Row->AddChild(RowLab);
+				Row->SetVisibility(ESlateVisibility::Collapsed);
+				if (UVerticalBoxSlot* V = ServerRowsBox->AddChildToVerticalBox(Row))
+				{
+					V->SetHorizontalAlignment(HAlign_Fill);
+					V->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+				}
+				ServerRowButtons.Add(Row);
+				ServerRowLabels.Add(RowLab);
+			}
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(ServerRowsBox))
+			{
+				V->SetHorizontalAlignment(HAlign_Fill);
+				V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+			}
+			RefreshOnlinePanel();
+
+			// ---- LAN (no account needed — offline path stays free) ----
 			HostLanButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("HostLanBtn"));
 			HostLanButton->SetBackgroundColor(FLinearColor(0.16f, 0.34f, 0.2f, 1.f));
 			HostLanButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnHostLanClicked);
@@ -1766,6 +1897,17 @@ void UPFLoadingMenuWidget::NativeConstruct()
 		PC->bShowMouseCursor = true;
 	}
 
+	// Backend account events → the ONLINE panel (status line + button states).
+	if (UPFBackendSubsystem* Backend = GetBackend())
+	{
+		Backend->OnAuthChanged.AddUObject(this, &UPFLoadingMenuWidget::RefreshOnlinePanel);
+		Backend->OnStatus.AddWeakLambda(this, [this](const FString& Line)
+		{
+			SetStatus(Line);
+			RefreshOnlinePanel();
+		});
+	}
+
 	SeedFromGameState();
 	ReloadMapCatalog();
 	// Host first paint: default UI toward a friendly first session if still Creative default.
@@ -1793,6 +1935,11 @@ void UPFLoadingMenuWidget::NativeDestruct()
 	{
 		CharPreviewActor->Destroy();
 		CharPreviewActor = nullptr;
+	}
+	if (UPFBackendSubsystem* Backend = GetBackend())
+	{
+		Backend->OnAuthChanged.RemoveAll(this);
+		Backend->OnStatus.RemoveAll(this);
 	}
 	Super::NativeDestruct();
 }
@@ -1855,11 +2002,24 @@ void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 		RunWarmupStep();
 	}
 	// Host can still change while waiting on Enter; clients just mirror GS.
-	if (!IsLocalHost())
+	const bool bHostNow = IsLocalHost();
+	if (!bHostNow)
 	{
 		SeedFromGameState();
 		RefreshSetupLabels();
 		RefreshMapPicker();
+	}
+	// Leadership can arrive AFTER construction (dedicated: MatchLeader replicates in, or the old
+	// leader left and the crown migrated here). Re-style the leader-only rows exactly once per flip.
+	if (bHostNow != bWasHostLastTick)
+	{
+		bWasHostLastTick = bHostNow;
+		RefreshSetupLabels();
+		RefreshMapPicker();
+		if (QuickStartButton)
+		{
+			QuickStartButton->SetIsEnabled(bHostNow);
+		}
 	}
 }
 
@@ -1873,8 +2033,10 @@ void UPFLoadingMenuWidget::SetStatus(const FString& Line)
 
 bool UPFLoadingMenuWidget::IsLocalHost() const
 {
-	const APlayerController* PC = GetOwningPlayer();
-	return PC && PC->HasAuthority() && PC->IsLocalPlayerController();
+	// Match-leader aware (dedicated servers): the PC predicate covers listen host AND the
+	// replicated MatchLeader, so leader clients get the full match-config surface.
+	const ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(GetOwningPlayer());
+	return PC && PC->IsHostController();
 }
 
 void UPFLoadingMenuWidget::SeedFromGameState()
@@ -2315,6 +2477,234 @@ void UPFLoadingMenuWidget::OnJoinLanClicked()
 		SetStatus(FString::Printf(TEXT("Connecting to %s…"), *Ip));
 		PC->ConsoleCommand(FString::Printf(TEXT("open %s"), *Ip));
 	}
+}
+
+// ---------------------------------------------------------------------------
+// ONLINE panel (combatforge-api: account, quick play, browser, match codes)
+// ---------------------------------------------------------------------------
+
+UPFBackendSubsystem* UPFLoadingMenuWidget::GetBackend() const
+{
+	const UGameInstance* GI = GetGameInstance();
+	return GI ? GI->GetSubsystem<UPFBackendSubsystem>() : nullptr;
+}
+
+void UPFLoadingMenuWidget::RefreshOnlinePanel()
+{
+	UPFBackendSubsystem* Backend = GetBackend();
+	const bool bLoggedIn = Backend && Backend->IsLoggedIn();
+	if (AccountStatusText)
+	{
+		FString Line;
+		if (Backend && Backend->IsDeviceLoginActive())
+		{
+			Line = FString::Printf(TEXT("Code %s — approve at playcombatforge.com/link"),
+				*Backend->GetPendingUserCode());
+		}
+		else if (bLoggedIn)
+		{
+			const FPFBackendProfile& P = Backend->GetProfile();
+			Line = FString::Printf(TEXT("Signed in as %s · Level %d"), *P.DisplayName, P.Level);
+		}
+		else
+		{
+			Line = TEXT("ONLINE — log in to browse hosted servers");
+		}
+		AccountStatusText->SetText(FText::FromString(Line));
+		AccountStatusText->SetColorAndOpacity(FSlateColor(bLoggedIn
+			? FLinearColor(0.45f, 0.9f, 0.5f) : FLinearColor(0.6f, 0.62f, 0.68f)));
+	}
+	if (LoginLabel)
+	{
+		LoginLabel->SetText(FText::FromString(bLoggedIn ? TEXT("  LOG OUT  ") : TEXT("  LOG IN  ")));
+	}
+	if (QuickPlayButton)
+	{
+		QuickPlayButton->SetIsEnabled(bLoggedIn);
+	}
+	if (ServerListButton)
+	{
+		ServerListButton->SetIsEnabled(bLoggedIn);
+	}
+	if (JoinCodeButton)
+	{
+		JoinCodeButton->SetIsEnabled(bLoggedIn);
+	}
+}
+
+void UPFLoadingMenuWidget::OnLoginClicked()
+{
+	UPFBackendSubsystem* Backend = GetBackend();
+	if (!Backend)
+	{
+		return;
+	}
+	if (Backend->IsLoggedIn())
+	{
+		Backend->Logout();
+	}
+	else if (Backend->IsDeviceLoginActive())
+	{
+		Backend->CancelDeviceLogin();
+	}
+	else
+	{
+		Backend->BeginDeviceLogin();
+	}
+	RefreshOnlinePanel();
+}
+
+void UPFLoadingMenuWidget::OnQuickPlayClicked()
+{
+	UPFBackendSubsystem* Backend = GetBackend();
+	if (!Backend || !Backend->IsLoggedIn())
+	{
+		return;
+	}
+	SetStatus(TEXT("Finding a match…"));
+	TWeakObjectPtr<UPFLoadingMenuWidget> WeakThis(this);
+	Backend->RequestQuickPlay([WeakThis](bool bOk, const FPFBackendServerInfo& Info)
+	{
+		if (UPFLoadingMenuWidget* Self = WeakThis.Get())
+		{
+			if (bOk)
+			{
+				Self->JoinBackendServer(Info);
+			}
+			else
+			{
+				Self->SetStatus(TEXT("No open servers right now — try SERVERS or host a LAN game."));
+			}
+		}
+	});
+}
+
+void UPFLoadingMenuWidget::OnServerListClicked()
+{
+	UPFBackendSubsystem* Backend = GetBackend();
+	if (!Backend || !Backend->IsLoggedIn())
+	{
+		return;
+	}
+	// Toggle closed without a refetch; opening always refetches (10 s of staleness max matters
+	// little at our scale, but a click should always show live data).
+	if (bServerListOpen)
+	{
+		bServerListOpen = false;
+		BrowserRows.Reset();
+		RebuildServerRows();
+		return;
+	}
+	SetStatus(TEXT("Fetching servers…"));
+	TWeakObjectPtr<UPFLoadingMenuWidget> WeakThis(this);
+	Backend->FetchServers([WeakThis](bool bOk, const TArray<FPFBackendServerInfo>& Servers)
+	{
+		UPFLoadingMenuWidget* Self = WeakThis.Get();
+		if (!Self)
+		{
+			return;
+		}
+		if (!bOk)
+		{
+			Self->SetStatus(TEXT("Couldn't fetch the server list — try again."));
+			return;
+		}
+		Self->bServerListOpen = true;
+		Self->BrowserRows = Servers;
+		Self->RebuildServerRows();
+		Self->SetStatus(Servers.Num() > 0
+			? FString::Printf(TEXT("%d server%s online — click one to join."),
+				Servers.Num(), Servers.Num() == 1 ? TEXT("") : TEXT("s"))
+			: FString(TEXT("No servers online right now.")));
+	});
+}
+
+void UPFLoadingMenuWidget::RebuildServerRows()
+{
+	for (int32 RowIdx = 0; RowIdx < ServerRowButtons.Num(); ++RowIdx)
+	{
+		UButton* Row = ServerRowButtons[RowIdx];
+		UTextBlock* Lab = ServerRowLabels.IsValidIndex(RowIdx) ? ServerRowLabels[RowIdx].Get() : nullptr;
+		if (!Row)
+		{
+			continue;
+		}
+		if (bServerListOpen && BrowserRows.IsValidIndex(RowIdx))
+		{
+			const FPFBackendServerInfo& Info = BrowserRows[RowIdx];
+			const bool bCompatible = Info.NetProtocol == PFBuild::NetProtocol;
+			const bool bFull = Info.Players >= Info.MaxPlayers;
+			if (Lab)
+			{
+				Lab->SetText(FText::FromString(FString::Printf(TEXT(" %s   %s · %s   %d/%d%s"),
+					*Info.Name, *Info.Map, *Info.Mode, Info.Players, Info.MaxPlayers,
+					!bCompatible ? TEXT("   (update needed)") : bFull ? TEXT("   (full)") : TEXT(""))));
+			}
+			Row->SetVisibility(ESlateVisibility::Visible);
+			Row->SetIsEnabled(bCompatible && !bFull);
+		}
+		else
+		{
+			Row->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+}
+
+void UPFLoadingMenuWidget::OnServerRow0Clicked() { JoinBrowserRow(0); }
+void UPFLoadingMenuWidget::OnServerRow1Clicked() { JoinBrowserRow(1); }
+void UPFLoadingMenuWidget::OnServerRow2Clicked() { JoinBrowserRow(2); }
+void UPFLoadingMenuWidget::OnServerRow3Clicked() { JoinBrowserRow(3); }
+void UPFLoadingMenuWidget::OnServerRow4Clicked() { JoinBrowserRow(4); }
+void UPFLoadingMenuWidget::OnServerRow5Clicked() { JoinBrowserRow(5); }
+
+void UPFLoadingMenuWidget::JoinBrowserRow(int32 Index)
+{
+	if (BrowserRows.IsValidIndex(Index))
+	{
+		JoinBackendServer(BrowserRows[Index]);
+	}
+}
+
+void UPFLoadingMenuWidget::JoinBackendServer(const FPFBackendServerInfo& Info)
+{
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		const FString Address = Info.JoinAddress();
+		UE_LOG(CombatForgeLog, Log, TEXT("Menu: joining online server %s (%s)"), *Info.Name, *Address);
+		SetStatus(FString::Printf(TEXT("Connecting to %s…"), *Info.Name));
+		PC->ConsoleCommand(FString::Printf(TEXT("open %s"), *Address));
+	}
+}
+
+void UPFLoadingMenuWidget::OnJoinCodeClicked()
+{
+	UPFBackendSubsystem* Backend = GetBackend();
+	if (!Backend || !Backend->IsLoggedIn())
+	{
+		return;
+	}
+	const FString Code = JoinCodeBox ? JoinCodeBox->GetText().ToString().TrimStartAndEnd() : FString();
+	if (Code.Len() != 6)
+	{
+		SetStatus(TEXT("Match codes are 6 characters (ask the match host)."));
+		return;
+	}
+	SetStatus(TEXT("Looking up the match…"));
+	TWeakObjectPtr<UPFLoadingMenuWidget> WeakThis(this);
+	Backend->RequestJoinByCode(Code, [WeakThis](bool bOk, const FPFBackendServerInfo& Info)
+	{
+		if (UPFLoadingMenuWidget* Self = WeakThis.Get())
+		{
+			if (bOk)
+			{
+				Self->JoinBackendServer(Info);
+			}
+			else
+			{
+				Self->SetStatus(TEXT("No match with that code — check it with the host."));
+			}
+		}
+	});
 }
 
 void UPFLoadingMenuWidget::OnQuickStartClicked()

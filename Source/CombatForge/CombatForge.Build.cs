@@ -27,8 +27,11 @@ public class CombatForge : ModuleRules
 			"RenderCore",                    // GShaderCompilingManager / loading-screen shader drain
 			"RHI",                           // shader pipeline cache helpers
 			"AssetRegistry",                 // UObjectLibrary part enumeration (PFCharacterCustomization)
-			"Niagara"                        // muzzle / impact VFX (soft-ref systems + mesh fallback)
+			"Niagara",                       // muzzle / impact VFX (soft-ref systems + mesh fallback)
+			"HTTP",                          // combatforge-api client (accounts / server browser / reports)
+			"OpenSSL"                        // HMAC-SHA256 match-report signing (fleet mode only)
 		});
-		// No private-only deps. NOT needed: OnlineSubsystem (02 D12), GameplayAbilities (overkill).
+		// No private-only deps. NOT needed: OnlineSubsystem (02 D12) — the backend is plain REST
+		// against api.playcombatforge.com (docs/multiplayer-plan.md), GameplayAbilities (overkill).
 	}
 }

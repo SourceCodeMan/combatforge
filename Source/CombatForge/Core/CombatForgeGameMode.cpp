@@ -22,7 +22,12 @@
 #include "Objectives/PFControlPointActor.h"
 #include "Objectives/PFFlagActor.h"
 #include "Objectives/PFObjectiveLayout.h"
+#include "Online/PFBackendSubsystem.h"
 #include "Voting/PFRatingSubsystem.h"
+
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 #include "GameFramework/PawnMovementComponent.h"
 #include "Engine/NetDriver.h"
@@ -124,6 +129,14 @@ void ACombatForgeGameMode::BeginPlay()
 		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks on boot menu
 		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
 		GS->ServerSetArenaMap(DefaultArenaMap);         // Warehouse default; must match SpawnArenaActors' pick
+	}
+
+	// Fleet directory: dedicated boxes with a provisioned key register + heartbeat; everyone
+	// else (every player install, every listen host) this is a no-op — see PFBackendSubsystem.
+	if (UPFBackendSubsystem* Backend = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UPFBackendSubsystem>() : nullptr)
+	{
+		Backend->FleetRegisterIfServer(GetWorld());
 	}
 
 #if !UE_BUILD_SHIPPING
@@ -403,6 +416,9 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: %s joined (team %d, roster %d)"),
 			*PS->GetPlayerName(), PS->TeamId, PS->RosterIndex);
 	}
+
+	// First human in becomes (or stays) the match leader — on listen that's always the host.
+	RefreshMatchLeader();
 }
 
 void ACombatForgeGameMode::Logout(AController* Exiting)
@@ -460,6 +476,72 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 	CheckHardpointAbandon();
 	NotifyReadyChangedInternal(ExitingPS);
 	CheckAllVotesIn(ExitingPS);
+
+	// Leader migration + the empty-server guard (dedicated): if the leaver was the match leader,
+	// hand the crown to the next human; and with NO humans left a bot-filled match must not keep
+	// playing itself forever — tear it down to a fresh Lobby (multiplayer-plan W1.2).
+	RefreshMatchLeader(ExitingPS);
+	if (CountHumans(ExitingPS) == 0)
+	{
+		if (ACombatForgeGameState* GS = GetPFGameState(); GS && GS->Phase != EPFMatchPhase::Lobby)
+		{
+			UE_LOG(CombatForgeLog, Log, TEXT("GameMode: last human left mid-match — returning to Lobby"));
+			HostForceReturnToLobby();
+		}
+	}
+}
+
+void ACombatForgeGameMode::RefreshMatchLeader(const ACombatForgePlayerState* ExcludePS)
+{
+	ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return;
+	}
+	// Current leader still valid? Keep them — the crown only moves when it has to.
+	ACombatForgePlayerState* Leader = GS->MatchLeader;
+	if (IsValid(Leader) && !Leader->IsABot() && !Leader->IsHeadlessServerPhantom()
+		&& Leader != ExcludePS && IsActiveRosterMember(Leader))
+	{
+		return;
+	}
+	ACombatForgePlayerState* Next = nullptr;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+		// A headless pilot box's local phantom never wears the crown — the first REAL joiner does.
+		if (PS && PS != ExcludePS && !PS->IsABot() && !PS->IsHeadlessServerPhantom()
+			&& IsActiveRosterMember(PS))
+		{
+			Next = PS;
+			break;   // PlayerArray is join-ordered: first human in wears the crown
+		}
+	}
+	GS->ServerSetMatchLeader(Next);
+	if (Next)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: match leader -> %s"), *Next->GetPlayerName());
+	}
+}
+
+int32 ACombatForgeGameMode::CountHumans(const ACombatForgePlayerState* ExcludePS) const
+{
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return 0;
+	}
+	int32 Humans = 0;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+		if (PS && PS != ExcludePS && !PS->IsABot() && !PS->IsHeadlessServerPhantom()
+			&& IsActiveRosterMember(PS))
+		{
+			++Humans;
+		}
+	}
+	return Humans;
 }
 
 void ACombatForgeGameMode::RestartPlayer(AController* NewPlayer)
@@ -847,6 +929,7 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		{
 			Rating->CommitMatchRecord(PendingMatchResult);
 		}
+		EmitMatchReport();   // frozen wire format: local archive + fleet POST (progression-plan §1)
 		GetWorldTimerManager().SetTimer(PhaseTimerHandle,
 			FTimerDelegate::CreateUObject(this, &ACombatForgeGameMode::SetPhase, EPFMatchPhase::Lobby),
 			ResultsDuration, false);
@@ -2802,6 +2885,91 @@ FPFMatchResult ACombatForgeGameMode::MakeMatchResult(uint8 MatchWinner) const
 	}
 	Result.bSuddenDeath = bSuddenDeathPlayed;   // always false in Skirmish / FFA
 	return Result;
+}
+
+void ACombatForgeGameMode::EmitMatchReport() const
+{
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchId.IsEmpty())
+	{
+		return;
+	}
+
+	// Per-player "builder" = live pieces attributed to that roster index right now (the arena is
+	// still standing at Vote→Results; ClearAll only runs at the return to Lobby).
+	TMap<uint8, int32> PiecesByRoster;
+	if (BuildGrid)
+	{
+		for (const FPFBuildPieceRec& Rec : BuildGrid->Pieces.Items)
+		{
+			++PiecesByRoster.FindOrAdd(Rec.OwnerIdx);
+		}
+	}
+
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("matchId"), GS->MatchId);
+	Root->SetStringField(TEXT("mode"),
+		StaticEnum<EPFMatchType>()->GetNameStringByValue((int64)GS->MatchType));
+	Root->SetStringField(TEXT("map"), GS->SelectedCommunityMapLabel.IsEmpty()
+		? StaticEnum<EPFArenaMap>()->GetNameStringByValue((int64)GS->ArenaMap)
+		: GS->SelectedCommunityMapLabel);
+	Root->SetNumberField(TEXT("endedAt"), FDateTime::UtcNow().ToUnixTimestamp());
+	Root->SetNumberField(TEXT("durationSec"), PendingMatchResult.MatchDurationSec);
+	// Wire format wants 255 for draw/none; FFA winners are roster indices, which the backend
+	// treats the same as a team id for the per-player "won" comparison below.
+	Root->SetNumberField(TEXT("winnerTeam"), PendingMatchResult.WinnerTeam);
+	Root->SetNumberField(TEXT("netProtocol"), PFBuild::NetProtocol);
+
+	TArray<TSharedPtr<FJsonValue>> Players;
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+		if (!PS || PS->PlayerGuidHash.IsEmpty() || PS->IsHeadlessServerPhantom())
+		{
+			continue;   // bots have no guid hash; humans without one never completed the join;
+		}	            // a pilot box's phantom carries the BOX's install guid — never report it
+		const TSharedRef<FJsonObject> P = MakeShared<FJsonObject>();
+		P->SetStringField(TEXT("guidHash"), PS->PlayerGuidHash);
+		P->SetNumberField(TEXT("team"), PS->TeamId);
+		P->SetNumberField(TEXT("elims"), PS->Eliminations);
+		P->SetNumberField(TEXT("timesElim"), PS->TimesEliminated);
+		P->SetNumberField(TEXT("score"), PS->MatchScore);
+		P->SetNumberField(TEXT("tags"), PS->TagCount);
+		P->SetNumberField(TEXT("objective"), 0);   // dedicated objective counter: fast-follow
+		P->SetNumberField(TEXT("builder"), PiecesByRoster.FindRef(PS->RosterIndex));
+		P->SetBoolField(TEXT("completed"), IsActiveRosterMember(PS));   // still connected at commit
+		P->SetBoolField(TEXT("isBot"), PS->IsABot());
+		Players.Add(MakeShared<FJsonValueObject>(P));
+	}
+	if (Players.Num() == 0)
+	{
+		return;   // bot-only scrimmage — nothing worth reporting
+	}
+	Root->SetArrayField(TEXT("players"), Players);
+
+	FString Json;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
+	FJsonSerializer::Serialize(Root, Writer);
+
+	// Local archive ALWAYS (frozen schema exercised by every real playtest from today on).
+	const FString Archive = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("MatchReports"),
+		GS->MatchId + TEXT(".json"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Archive), /*Tree=*/true);
+	FFileHelper::SaveStringToFile(Json, *Archive);
+
+	// Fleet box: queue + POST (queue file survives a crash; the API dedupes on matchId).
+	if (UPFBackendSubsystem* Backend = GetGameInstance()
+		? GetGameInstance()->GetSubsystem<UPFBackendSubsystem>() : nullptr)
+	{
+		if (Backend->IsFleetActive())
+		{
+			const FString Pending = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PendingReports"),
+				GS->MatchId + TEXT(".json"));
+			IFileManager::Get().MakeDirectory(*FPaths::GetPath(Pending), /*Tree=*/true);
+			FFileHelper::SaveStringToFile(Json, *Pending);
+			Backend->SendMatchReport(Json, Pending);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

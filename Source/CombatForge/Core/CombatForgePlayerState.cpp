@@ -4,7 +4,19 @@
 
 #include "CombatForge.h"
 #include "Player/CombatForgeCharacter.h"
+#include "GameFramework/PlayerController.h"
+#include "Misc/App.h"
 #include "Net/UnrealNetwork.h"
+
+bool ACombatForgePlayerState::IsHeadlessServerPhantom() const
+{
+	if (FApp::CanEverRender() || IsABot())
+	{
+		return false;   // rendering machine: any local player is a real human at a screen
+	}
+	const APlayerController* PC = Cast<APlayerController>(GetOwner());
+	return PC && PC->IsLocalController();
+}
 
 namespace
 {

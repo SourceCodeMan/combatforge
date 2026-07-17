@@ -129,8 +129,14 @@ protected:
 	// ---- (intra) spectate (server side) ----
 	void SpectateNearestTeammate();
 	void GatherLivingTeammatePawns(TArray<ACombatForgeCharacter*>& OutPawns) const;
-	bool IsHostController() const;
 	ACombatForgeGameState* GetPFGameState() const;
+
+public:
+	/** Match-config powers: listen host OR the replicated MatchLeader (dedicated). The widget
+	 *  IsLocalHost() predicates all resolve through this — one truth for RPC guards + UI. */
+	bool IsHostController() const;
+
+protected:
 
 private:
 	UPROPERTY() TObjectPtr<UPFInputConfig>    InputConfig;   // GC root for all input objects (02 R1)

@@ -65,6 +65,12 @@ public:
 	void ServerSetOutForRound();                             // Elimination: out until next round
 	void ServerClearOutState();                              // back in play / round reset
 
+	/** True for the phantom LOCAL player a headless pilot box (game exe + ?listen + -nullrhi)
+	 *  carries: it holds a controller but no human sits behind it. Excluded from match-leader
+	 *  assignment, human counts, and heartbeat player counts (multiplayer-plan Phase 0). Always
+	 *  false on rendering machines and on true dedicated servers (no local players there). */
+	bool IsHeadlessServerPhantom() const;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void PostInitializeComponents() override;
 

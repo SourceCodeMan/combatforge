@@ -9,6 +9,8 @@
 
 class ACombatForgePlayerState;
 
+DECLARE_MULTICAST_DELEGATE(FPFOnMatchLeaderChanged);
+
 /**
  * Replicated match truth (contract §3.2). The GameMode (server) is the only writer, through
  * the ServerSet* setters below; clients react exclusively via OnReps. Every ServerSet* setter
@@ -53,6 +55,11 @@ public:
 	UPROPERTY(Replicated)                       FString SelectedCommunityMapLabel;
 	/** Pieces injected at Lobby→Build (Improvement whole map, or Creative all-bot half). HUD reads this. */
 	UPROPERTY(Replicated)                       uint16 CommunityBasePieces = 0;
+	/** Match leader: the player who configures the match (type/mode/format/map) and can force-start.
+	 *  On a LISTEN server this is always the host; on a DEDICATED server the GameMode assigns the
+	 *  first human at PostLogin and migrates it at Logout. Every Host* RPC guard + every host-only
+	 *  UI predicate resolves through this (multiplayer-plan W1.1) — never through raw authority. */
+	UPROPERTY(ReplicatedUsing=OnRep_MatchLeader) TObjectPtr<ACombatForgePlayerState> MatchLeader;
 
 	// ---- Client-safe helpers ----
 	float GetPhaseTimeRemaining() const;   // PhaseEndServerTime - GetServerWorldTimeSeconds(), clamped ≥ 0
@@ -60,6 +67,8 @@ public:
 	bool  IsFireAllowed()  const;          // Lobby || (Combat && Live)   (T21) — same predicate client & server
 	bool  IsBuildAllowed() const;          // Build only
 	ACombatForgePlayerState* FindPlayerByRosterIndex(uint8 RosterIndex) const;
+	/** Is this controller the match leader? Safe on every machine (reads the replicated field). */
+	bool  IsMatchLeader(const APlayerController* PC) const;
 
 	// ---- Server-side setters (set property + manually invoke OnRep on listen host — R7) ----
 	void ServerSetPhase(EPFMatchPhase NewPhase, float EndServerTime);       // GameMode only
@@ -82,6 +91,7 @@ public:
 	void ServerSetMatchType(EPFMatchType NewType);           // Lobby only (GameMode gates)
 	void ServerSetArenaMap(EPFArenaMap NewMap);              // Lobby only (GameMode gates + respawns shell)
 	void ServerSetSelectedCommunityMap(const FString& FileName, const FString& Label);
+	void ServerSetMatchLeader(ACombatForgePlayerState* NewLeader);   // GameMode only (PostLogin/Logout)
 	void ServerSetCommunityBasePieces(uint16 Count);         // Lobby→Build inject result
 	void ServerResetMatchState();                            // Lobby→Build: wins/feed/tally/round wiped
 
@@ -92,6 +102,7 @@ public:
 	FPFOnElimFeedChanged     OnElimFeedChangedEvent;
 	FPFOnVoteTallyChanged    OnVoteTallyChangedEvent;
 	FPFOnAliveCountsChanged  OnAliveCountsChangedEvent;
+	FPFOnMatchLeaderChanged  OnMatchLeaderChangedEvent;   // menus re-style their leader-only rows
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -102,4 +113,5 @@ protected:
 	UFUNCTION() void OnRep_AliveCounts();
 	UFUNCTION() void OnRep_ElimFeed();
 	UFUNCTION() void OnRep_VoteTally();
+	UFUNCTION() void OnRep_MatchLeader();
 };
