@@ -59,6 +59,7 @@ void APFBombActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(APFBombActor, DetonateServerTime);
 	DOREPLIFETIME(APFBombActor, DefuseAccumSeconds);
 	DOREPLIFETIME(APFBombActor, bDetonated);
+	DOREPLIFETIME(APFBombActor, bArmed);
 }
 
 void APFBombActor::BeginPlay()
@@ -108,6 +109,10 @@ void APFBombActor::ServerSetDefuser(APawn* Defuser, bool bActive)
 	}
 	if (bActive)
 	{
+		if (DefuserWeak.Get() != Defuser)
+		{
+			DefuseAccumSeconds = 0.f;   // a takeover never inherits the previous holder's progress
+		}
 		DefuserWeak = Defuser;
 		bDefuserHeld = true;
 	}
@@ -138,8 +143,11 @@ void APFBombActor::Tick(float DeltaSeconds)
 		{
 			const UPFHealthComponent* Health = Defuser->GetHealth();
 			const ACombatForgePlayerState* PS = Defuser->GetPlayerState<ACombatForgePlayerState>();
+			// ANYONE except the planter may defuse (review wf_e923820a): a team gate broke FFA entirely
+			// (roster TeamIds > 1) and left a griefer's OWN team with zero counterplay against a bomb on
+			// their own fort. The planter alone can never defuse their own bomb.
 			bValid = (Health == nullptr || !Health->bEliminated)
-				&& PS != nullptr && PS->TeamId <= 1 && PS->TeamId != PlanterTeam
+				&& PS != nullptr && PS != PlanterPS.Get()
 				&& FVector::DistSquared(Defuser->GetActorLocation(), GetActorLocation())
 					<= FMath::Square(DefuseRangeUU);
 		}
@@ -167,6 +175,11 @@ void APFBombActor::UpdateLabel()
 	}
 	const UWorld* World = GetWorld();
 	const ACombatForgeGameState* GS = World ? World->GetGameState<ACombatForgeGameState>() : nullptr;
+	if (PlanterTeam <= 1)
+	{
+		// Tint from the REPLICATED team here (not just in server-side ServerArm) so clients see it too.
+		CountdownText->SetTextRenderColor(PFColors::ForTeam(PlanterTeam).ToFColor(true));
+	}
 	if (GS)
 	{
 		if (DefuseAccumSeconds > 0.05f)
@@ -198,9 +211,16 @@ void APFBombActor::ServerDetonate()
 		return;
 	}
 	bDetonated = true;
-	if (APFBuildGrid* Grid = GridWeak.Get())
+	// Belt-and-braces phase guard: only remove the piece while the match is still in COMBAT. If a phase
+	// transition raced the fuse (bombs are normally destroyed at Combat exit), detonating into a cleared /
+	// rebuilt grid would delete a recycled-id piece that was never bombed.
+	const ACombatForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
+	if (GS && GS->Phase == EPFMatchPhase::Combat)
 	{
-		Grid->ServerRemovePieceForMatch(TargetPieceId);   // also clears the piece's bomb registry entry
+		if (APFBuildGrid* Grid = GridWeak.Get())
+		{
+			Grid->ServerRemovePieceForMatch(TargetPieceId);   // also clears the piece's bomb registry entry
+		}
 	}
 	PlayDetonationLocal();   // host cosmetics; clients replay via OnRep_Detonated
 	ForceNetUpdate();

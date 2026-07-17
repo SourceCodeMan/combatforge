@@ -2151,9 +2151,13 @@ void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, ui
 {
 	ACombatForgeGameState* GS = GetGameState<ACombatForgeGameState>();
 	ACombatForgePlayerState* PlanterPS = Planter ? Planter->GetPlayerState<ACombatForgePlayerState>() : nullptr;
-	if (!GS || !PlanterPS || !BuildGrid || !GS->IsFireAllowed())
+	// EXPLICIT Combat phase, not just IsFireAllowed(): IsFireAllowed is also true in LOBBY (warm-up pen fire,
+	// T21) — a lobby plant would survive Lobby→Build ClearAll, and its 15s fuse would then detonate a
+	// RECYCLED PieceId belonging to a different, innocent piece (review wf_e923820a).
+	if (!GS || !PlanterPS || !BuildGrid
+		|| GS->Phase != EPFMatchPhase::Combat || !GS->IsFireAllowed())
 	{
-		return;   // combat-live only, same gate as weapons
+		return;   // combat-live only
 	}
 	FPFBuildPieceRec Rec;
 	if (!BuildGrid->FindPieceById(PieceId, Rec))

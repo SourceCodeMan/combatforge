@@ -112,8 +112,11 @@ private:
 	uint8 bWantsToADSPF : 1;
 	uint8 bWantsToMantlePF : 1;
 
-	// Mantle simulation state. Like the slide timers, NOT part of saved moves — the interp is fully
-	// deterministic from (start, target, elapsed), so a rare mid-climb correction replays within tolerance.
+	// Mantle simulation state. UNLIKE the slide timers this IS carried in FSavedMove_PF (review
+	// wf_e923820a): a correction replay would otherwise double-advance MantleElapsed (early snap →
+	// sustained correction storm), and a server-forced CMOVE_Mantle mode-apply on a client that never
+	// ran EnterMantle would interp toward a zero/stale target. PrepMoveFor restores these per replayed
+	// move; PhysMantle's zero/far-target guard degrades the forced-mode case to falling.
 	FVector MantleStart = FVector::ZeroVector;
 	FVector MantleTarget = FVector::ZeroVector;
 	float MantleElapsed = 0.f;
@@ -138,6 +141,12 @@ public:
 	uint8 bSavedWantsToSprint : 1;
 	uint8 bSavedWantsToADS : 1;
 	uint8 bSavedWantsToMantle : 1;   // FLAG_Custom_2
+
+	// Mantle sim state snapshot — restored by PrepMoveFor so correction replays re-run PhysMantle with the
+	// state each move ORIGINALLY had (no double-advanced elapsed, no stale target on a forced mode-apply).
+	FVector SavedMantleStart = FVector::ZeroVector;
+	FVector SavedMantleTarget = FVector::ZeroVector;
+	float SavedMantleElapsed = 0.f;
 
 	FSavedMove_PF();
 

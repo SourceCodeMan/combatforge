@@ -278,6 +278,10 @@ void UPFCharacterMovementComponent::EnterMantle(const FVector& StandTarget)
 	MantleTarget  = StandTarget;
 	MantleElapsed = 0.f;
 	Velocity      = FVector::ZeroVector;   // the interp owns the motion for MantleTime
+	// The climb target/clearance were computed for the STANDING capsule (DetectMantleLedge); dropping the
+	// crouch intent here keeps the capsule state deterministic through the mode change (a mid-climb forced
+	// un-crouch would re-expand the capsule into the ledge).
+	bWantsToCrouch = false;
 	SetMovementMode(MOVE_Custom, CMOVE_Mantle);
 }
 
@@ -434,6 +438,17 @@ void UPFCharacterMovementComponent::PhysMantle(float deltaTime, int32 Iterations
 		return;
 	}
 
+	// Stale-target guard (review wf_e923820a): a network mode-apply can put a machine into CMOVE_Mantle
+	// WITHOUT it having run EnterMantle (e.g. a client receiving a server correction whose mode is Mantle),
+	// leaving MantleTarget zero/ancient — interpolating there would glide the pawn across the map. Bail to
+	// falling; the authoritative position stream carries the actual climb.
+	if (MantleTarget.IsNearlyZero()
+		|| FVector::DistSquared(MantleTarget, UpdatedComponent->GetComponentLocation()) > FMath::Square(600.f))
+	{
+		SetMovementMode(MOVE_Falling);
+		return;
+	}
+
 	Iterations++;
 	bJustTeleported = true;   // interp-driven: never derive velocity from the positional delta
 
@@ -479,15 +494,19 @@ bool UPFCharacterMovementComponent::DetectMantleLedge(FVector& OutStandTarget) c
 	{
 		return false;
 	}
-	const float Radius     = Capsule->GetScaledCapsuleRadius();
-	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float Radius = Capsule->GetScaledCapsuleRadius();
+	// Feet come from the LIVE capsule (crouched or not), but the target + clearance use the STANDING dims:
+	// EnterMantle drops the crouch, so the capsule that arrives at the ledge is the 88 one — sizing the
+	// clearance for a crouched 58 capsule would embed the re-expanded capsule in the ledge (review wf_e923820a).
+	const float CurHalfHeight   = Capsule->GetScaledCapsuleHalfHeight();
+	const float StandHalfHeight = FMath::Max(CurHalfHeight, CharacterOwner->GetDefaultHalfHeight());
 	const FVector Loc  = UpdatedComponent->GetComponentLocation();
 	const FVector Fwd  = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
 	if (Fwd.IsNearlyZero())
 	{
 		return false;
 	}
-	const float FeetZ = Loc.Z - HalfHeight;
+	const float FeetZ = Loc.Z - CurHalfHeight;
 
 	// STATIC world geometry only (build pieces + shell are ECC_WorldStatic objects): pawns can't be mantled,
 	// and — critically — static-only keeps the test deterministic between client prediction + server replay.
@@ -527,17 +546,29 @@ bool UPFCharacterMovementComponent::DetectMantleLedge(FVector& OutStandTarget) c
 
 	// 3) End position: capsule centered just past the face, fully ABOVE the ledge top (so a thin 20uu wall is
 	//    vaulted and a thick slab is stood on). Verify capsule clearance there AND at the top-of-rise corner
-	//    (start XY at target Z) so the climb path can't tunnel into a roof or another pawn.
+	//    (start XY at target Z) so the climb can't end inside a roof or another pawn.
 	const FVector StandTarget(
 		WallHit.ImpactPoint.X + Fwd.X * (Radius + 20.f),
 		WallHit.ImpactPoint.Y + Fwd.Y * (Radius + 20.f),
-		LedgeTopZ + HalfHeight + 4.f);
-	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+		LedgeTopZ + StandHalfHeight + 4.f);
+	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(Radius, StandHalfHeight);
 	const FVector RiseCorner(Loc.X, Loc.Y, StandTarget.Z);
 	if (World->OverlapBlockingTestByChannel(RiseCorner, FQuat::Identity, ECC_Pawn, CapsuleShape, Params)
 		|| World->OverlapBlockingTestByChannel(StandTarget, FQuat::Identity, ECC_Pawn, CapsuleShape, Params))
 	{
 		return false;   // no headroom (roof) or the landing spot is occupied
+	}
+
+	// 4) Sweep the actual L-shaped climb path (up, then over) with a slightly SHRUNK capsule: the interp runs
+	//    with collision off, so anything solid between the endpoints would be tunneled through — e.g. climbing
+	//    out through the roof of a sealed fort (review wf_e923820a). The shrink keeps a flush wall-scrape from
+	//    false-blocking the vertical rise.
+	const FCollisionShape SweptShape = FCollisionShape::MakeCapsule(
+		FMath::Max(10.f, Radius - 8.f), FMath::Max(10.f, StandHalfHeight - 8.f));
+	if (World->SweepTestByChannel(Loc, RiseCorner, FQuat::Identity, ECC_Pawn, SweptShape, Params)
+		|| World->SweepTestByChannel(RiseCorner, StandTarget, FQuat::Identity, ECC_Pawn, SweptShape, Params))
+	{
+		return false;   // something solid crosses the climb path
 	}
 
 	OutStandTarget = StandTarget;
@@ -591,6 +622,9 @@ void FSavedMove_PF::Clear()
 	bSavedWantsToSprint = false;
 	bSavedWantsToADS = false;
 	bSavedWantsToMantle = false;
+	SavedMantleStart = FVector::ZeroVector;
+	SavedMantleTarget = FVector::ZeroVector;
+	SavedMantleElapsed = 0.f;
 }
 
 uint8 FSavedMove_PF::GetCompressedFlags() const
@@ -620,6 +654,14 @@ bool FSavedMove_PF::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InC
 	{
 		return false;
 	}
+	// Never combine moves whose mantle sim state differs — each mid-climb move must replay with the
+	// elapsed/target it originally had (both are all-zero outside a mantle, so normal moves still combine).
+	if (SavedMantleElapsed != NewMovePF->SavedMantleElapsed
+		|| SavedMantleTarget != NewMovePF->SavedMantleTarget
+		|| SavedMantleStart != NewMovePF->SavedMantleStart)
+	{
+		return false;
+	}
 	return Super::CanCombineWith(NewMove, InCharacter, MaxDelta);
 }
 
@@ -632,6 +674,9 @@ void FSavedMove_PF::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& 
 		bSavedWantsToSprint = CMC->bWantsToSprintPF;
 		bSavedWantsToADS = CMC->bWantsToADSPF;
 		bSavedWantsToMantle = CMC->bWantsToMantlePF;
+		SavedMantleStart = CMC->MantleStart;
+		SavedMantleTarget = CMC->MantleTarget;
+		SavedMantleElapsed = CMC->MantleElapsed;
 	}
 }
 
@@ -644,6 +689,9 @@ void FSavedMove_PF::PrepMoveFor(ACharacter* C)
 		CMC->bWantsToSprintPF = bSavedWantsToSprint;
 		CMC->bWantsToADSPF = bSavedWantsToADS;
 		CMC->bWantsToMantlePF = bSavedWantsToMantle;
+		CMC->MantleStart = SavedMantleStart;
+		CMC->MantleTarget = SavedMantleTarget;
+		CMC->MantleElapsed = SavedMantleElapsed;
 	}
 }
 

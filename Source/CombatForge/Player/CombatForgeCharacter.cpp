@@ -1047,21 +1047,18 @@ void ACombatForgeCharacter::OnInteractPressed()
 	{
 		return;
 	}
-	// Defuse first: if an armed ENEMY bomb is in reach, F becomes hold-to-defuse (8 s, server-validated).
-	// The client scan is UX only — ServerBeginDefuse re-finds and re-validates the bomb authoritatively.
+	// Defuse first: if an armed bomb is in reach, F becomes hold-to-defuse (8 s). The client scan is armed +
+	// range ONLY (bArmed replicates; team/planter validity is decided by ServerBeginDefuse + the bomb's own
+	// Tick — a client-side team gate broke FFA and, worse, read server-only state).
+	for (TActorIterator<APFBombActor> It(World); It; ++It)
 	{
-		const ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
-		const uint8 MyTeam = MyPS ? MyPS->TeamId : 255;
-		for (TActorIterator<APFBombActor> It(World); It; ++It)
+		const APFBombActor* Bomb = *It;
+		if (Bomb && Bomb->IsArmed()
+			&& FVector::DistSquared(GetActorLocation(), Bomb->GetActorLocation())
+				<= FMath::Square(APFBombActor::DefuseRangeUU))
 		{
-			const APFBombActor* Bomb = *It;
-			if (Bomb && Bomb->IsArmed() && MyTeam <= 1 && Bomb->GetPlanterTeam() != MyTeam
-				&& FVector::DistSquared(GetActorLocation(), Bomb->GetActorLocation())
-					<= FMath::Square(APFBombActor::DefuseRangeUU))
-			{
-				ServerBeginDefuse();
-				return;
-			}
+			ServerBeginDefuse();
+			return;
 		}
 	}
 	// Otherwise: nearest available ammo barrel in interact range.
@@ -1162,19 +1159,19 @@ void ACombatForgeCharacter::ServerBeginDefuse_Implementation()
 {
 	UWorld* World = GetWorld();
 	const ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
-	const uint8 MyTeam = MyPS ? MyPS->TeamId : 255;
-	if (!World || MyTeam > 1 || (HealthComponent != nullptr && HealthComponent->bEliminated))
+	if (!World || MyPS == nullptr || (HealthComponent != nullptr && HealthComponent->bEliminated))
 	{
 		return;
 	}
-	// Authoritative re-find: nearest armed enemy bomb in defuse range. The bomb's own Tick keeps
-	// re-validating range/alive/team while the hold accumulates.
+	// Authoritative re-find: nearest armed bomb in defuse range that ISN'T MINE (anyone but the planter may
+	// defuse — works in FFA and gives a griefed team counterplay). The bomb's own Tick keeps re-validating
+	// range/alive/identity while the hold accumulates.
 	APFBombActor* Best = nullptr;
 	float BestDistSq = FMath::Square(APFBombActor::DefuseRangeUU);
 	for (TActorIterator<APFBombActor> It(World); It; ++It)
 	{
 		APFBombActor* Bomb = *It;
-		if (!Bomb || !Bomb->IsArmed() || Bomb->GetPlanterTeam() == MyTeam)
+		if (!Bomb || !Bomb->IsArmed() || Bomb->GetPlanterPS() == MyPS)
 		{
 			continue;
 		}
@@ -1553,6 +1550,13 @@ void ACombatForgeCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode
 void ACombatForgeCharacter::Landed(const FHitResult& Hit)
 {
 	Super::Landed(Hit);
+
+	// A held-but-whiffed mantle press must not stay latched past the landing (a later walk-off-a-ledge
+	// would silently auto-mantle). Runs symmetrically in both sides' sims, like the rest of Landed().
+	if (PFMovement != nullptr)
+	{
+		PFMovement->SetWantsToMantle(false);
+	}
 
 	// Landing dip on falls > 300 uu (04 §1.3), local camera only.
 	const float FallDistance = FallStartPeakZ - GetActorLocation().Z;

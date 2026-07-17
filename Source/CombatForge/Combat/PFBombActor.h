@@ -66,9 +66,11 @@ protected:
 	UPROPERTY(Replicated) float DetonateServerTime = 0.f;   // GameState server-time of the boom
 	UPROPERTY(Replicated) float DefuseAccumSeconds = 0.f;
 	UPROPERTY(ReplicatedUsing=OnRep_Detonated) bool bDetonated = false;
+	/** REPLICATED — the client-side F-press pre-scan reads IsArmed(); a server-only flag left joined
+	 *  clients unable to ever begin a defuse (review wf_e923820a). */
+	UPROPERTY(Replicated) bool bArmed = false;
 
 	// Server-only.
-	bool bArmed = false;
 	uint16 TargetPieceId = 0;
 	TWeakObjectPtr<APFBuildGrid> GridWeak;
 	TWeakObjectPtr<ACombatForgePlayerState> PlanterPS;
