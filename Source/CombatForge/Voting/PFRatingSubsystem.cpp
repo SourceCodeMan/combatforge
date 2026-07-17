@@ -530,11 +530,16 @@ bool UPFRatingSubsystem::PickCommunityHalf(TArray<FPFBuildPieceRec>& OutHalf, ui
 			switch (Out.Type)
 			{
 			case EPFPieceType::Wall:
+			case EPFPieceType::WallWindow:
+			case EPFPieceType::WallDoor:
+			case EPFPieceType::WallDoorOneWay:
 				// Thin edges: E-edge (Rot 1) sits one cell further in X; wall rotation is preserved.
+				// One-way front face flips with the half-mirror so the door still faces the mirrored approach.
 				Out.X = static_cast<int16>((Out.Rot == 1) ? (FieldSubX - 2 * CellSub - Out.X)
 				                                          : (FieldSubX - CellSub - Out.X));
 				break;
 			case EPFPieceType::Floor:
+			case EPFPieceType::FloorTrap:
 			case EPFPieceType::Ramp:
 			case EPFPieceType::Roof:
 				Out.X = static_cast<int16>(FieldSubX - CellSub - Out.X);

@@ -31,15 +31,19 @@ const TCHAR* UPFBuildHUDWidget::ToolDisplayName(EPFBuildTool Tool)
 {
 	switch (Tool)
 	{
-	case EPFBuildTool::Wall:       return TEXT("Wall");
-	case EPFBuildTool::Floor:      return TEXT("Floor");
-	case EPFBuildTool::Ramp:       return TEXT("Ramp");
-	case EPFBuildTool::Roof:       return TEXT("Roof");
-	case EPFBuildTool::PropCan:    return TEXT("Barrel");
-	case EPFBuildTool::PropDorito: return TEXT("Crate");
-	case EPFBuildTool::PropSnake:  return TEXT("Boxes");
-	case EPFBuildTool::Delete:     return TEXT("Delete");
-	default:                       return TEXT("?");
+	case EPFBuildTool::Wall:           return TEXT("Wall");
+	case EPFBuildTool::Floor:          return TEXT("Floor");
+	case EPFBuildTool::Ramp:           return TEXT("Ramp");
+	case EPFBuildTool::Roof:           return TEXT("Roof");
+	case EPFBuildTool::PropCan:        return TEXT("Barrel");
+	case EPFBuildTool::PropDorito:     return TEXT("Crate");
+	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
+	case EPFBuildTool::WallWindow:     return TEXT("Window");
+	case EPFBuildTool::WallDoor:       return TEXT("Door");
+	case EPFBuildTool::WallDoorOneWay: return TEXT("1-Way Door");
+	case EPFBuildTool::FloorTrap:      return TEXT("Trap Floor");
+	case EPFBuildTool::Delete:         return TEXT("Delete");
+	default:                           return TEXT("?");
 	}
 }
 
@@ -56,7 +60,7 @@ const TCHAR* UPFBuildHUDWidget::DenyReasonText(EPFDenyReason Reason)
 	case EPFDenyReason::HeightCap:    return TEXT("HEIGHT CAP");
 	case EPFDenyReason::RateLimited:  return TEXT("TOO FAST");
 	case EPFDenyReason::NotYourTeam:  return TEXT("NOT YOUR TEAM'S PIECE");
-	case EPFDenyReason::SealsMap:     return TEXT("LEAVE A LANE — CAN'T SEAL THE MAP");
+
 	case EPFDenyReason::InvalidPiece: return TEXT("INVALID PIECE");
 	case EPFDenyReason::NotFound:     return TEXT("PIECE NOT FOUND");
 	default:                          return TEXT("DENIED");
@@ -188,7 +192,7 @@ void UPFBuildHUDWidget::BuildTree()
 	// Controls hint — bottom left. (Improvement: delete works on team base pieces too.)
 	HintText = WidgetTree->ConstructWidget<UTextBlock>();
 	HintText->SetText(FText::FromString(
-		TEXT("F1-F4 pieces  ·  Q wheel  ·  LMB place  ·  R rotate  ·  X delete  ·  F ready")));
+		TEXT("F1-F4  ·  Q wheel (window/door/trap)  ·  LMB place  ·  X delete  ·  F ready")));
 	HintText->SetFont(PFBuildFont(12, false));
 	HintText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(HintText))

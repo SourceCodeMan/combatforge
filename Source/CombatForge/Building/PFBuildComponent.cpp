@@ -31,10 +31,11 @@
 
 namespace
 {
-	// Mouse-wheel / cycle order (03 §3): Wall→Floor→Ramp→Roof→Can→Dorito→Snake→Delete→Wall…
-	constexpr EPFBuildTool GCycleOrder[8] =
+	// Mouse-wheel / cycle order: classic structural → specials → props → delete.
+	constexpr EPFBuildTool GCycleOrder[12] =
 	{
 		EPFBuildTool::Wall, EPFBuildTool::Floor, EPFBuildTool::Ramp, EPFBuildTool::Roof,
+		EPFBuildTool::WallWindow, EPFBuildTool::WallDoor, EPFBuildTool::WallDoorOneWay, EPFBuildTool::FloorTrap,
 		EPFBuildTool::PropCan, EPFBuildTool::PropDorito, EPFBuildTool::PropSnake, EPFBuildTool::Delete
 	};
 }
@@ -140,8 +141,9 @@ void UPFBuildComponent::OnCyclePiece(const FInputActionValue& Value)
 	{
 		return;
 	}
+	constexpr int32 N = UE_ARRAY_COUNT(GCycleOrder);
 	int32 Idx = 0;
-	for (int32 I = 0; I < 8; ++I)
+	for (int32 I = 0; I < N; ++I)
 	{
 		if (GCycleOrder[I] == EquippedTool)
 		{
@@ -149,18 +151,19 @@ void UPFBuildComponent::OnCyclePiece(const FInputActionValue& Value)
 			break;
 		}
 	}
-	Idx = (Idx + (Axis > 0.f ? 1 : 7)) % 8;
+	Idx = (Idx + (Axis > 0.f ? 1 : (N - 1))) % N;
 	EquipTool(GCycleOrder[Idx]);
 }
 
 EPFBuildTool UPFBuildComponent::CycleNeighbor(int32 Dir) const
 {
+	constexpr int32 N = UE_ARRAY_COUNT(GCycleOrder);
 	int32 Idx = 0;
-	for (int32 I = 0; I < 8; ++I)
+	for (int32 I = 0; I < N; ++I)
 	{
 		if (GCycleOrder[I] == EquippedTool) { Idx = I; break; }
 	}
-	Idx = (Idx + (Dir > 0 ? 1 : 7)) % 8;
+	Idx = (Idx + (Dir > 0 ? 1 : (N - 1))) % N;
 	return GCycleOrder[Idx];
 }
 
@@ -285,6 +288,9 @@ bool UPFBuildComponent::ComputeSnappedSlot(EPFPieceType Type, const FVector& Anc
 	switch (Type)
 	{
 	case EPFPieceType::Wall:
+	case EPFPieceType::WallWindow:
+	case EPFPieceType::WallDoor:
+	case EPFPieceType::WallDoorOneWay:
 	{
 		int32 Cx = 0, Cy = 0, Level = 0;
 		uint8 Edge = 0;
@@ -296,6 +302,7 @@ bool UPFBuildComponent::ComputeSnappedSlot(EPFPieceType Type, const FVector& Anc
 		return true;
 	}
 	case EPFPieceType::Floor:
+	case EPFPieceType::FloorTrap:
 	case EPFPieceType::Ramp:
 	case EPFPieceType::Roof:
 	{
@@ -332,7 +339,17 @@ void UPFBuildComponent::UpdatePlacementGhostAndTurbo(const FVector& CamLoc, cons
 		? Hit.ImpactPoint + Hit.ImpactNormal * 8.f
 		: CamLoc + CamRot.Vector() * 800.f;
 
+	if (EquippedTool == EPFBuildTool::Delete)
+	{
+		SetGhostVisible(false);
+		return;
+	}
 	const EPFPieceType Type = static_cast<EPFPieceType>(EquippedTool);
+	if (Type >= EPFPieceType::MAX_Count)
+	{
+		SetGhostVisible(false);
+		return;
+	}
 	int16 X = 0, Y = 0, Z = 0;
 	uint8 Rot = 0;
 	if (!ComputeSnappedSlot(Type, AnchorP, CamRot.Yaw, X, Y, Z, Rot))

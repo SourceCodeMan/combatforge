@@ -76,10 +76,10 @@ private:
 	/** Tracks our SetIgnoreLookInput(true) so we always pair the release. */
 	bool bLookInputIgnored = false;
 
-	static constexpr int32 NumSectors = 8;
+	static constexpr int32 NumSectors = 12;   // Wall..Delete including window/door/trap
 	static constexpr float DeadZonePx = 90.f;
-	static constexpr float SelectMaxPx = 280.f;
-	static constexpr float SectorRadiusPx = 185.f;
+	static constexpr float SelectMaxPx = 300.f;
+	static constexpr float SectorRadiusPx = 200.f;
 	/** Raw mouse-delta units -> wheel-cursor pixels. */
 	static constexpr float MouseToCursorScale = 1.5f;
 };

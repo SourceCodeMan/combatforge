@@ -47,11 +47,15 @@ namespace
 			switch (OutRec.Type)
 			{
 			case EPFPieceType::Wall:
+			case EPFPieceType::WallWindow:
+			case EPFPieceType::WallDoor:
+			case EPFPieceType::WallDoorOneWay:
 				OutRec.X = static_cast<int16>((OutRec.Rot == 1)
 					? (FieldSubX - 2 * CellSub - OutRec.X)
 					: (FieldSubX - CellSub - OutRec.X));
 				break;
 			case EPFPieceType::Floor:
+			case EPFPieceType::FloorTrap:
 			case EPFPieceType::Ramp:
 			case EPFPieceType::Roof:
 				OutRec.X = static_cast<int16>(FieldSubX - CellSub - OutRec.X);

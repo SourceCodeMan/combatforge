@@ -232,7 +232,11 @@ bool FPFArenaSerialization::ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
 		(*Obj)->TryGetNumberField(TEXT("own"), Own);
 		(*Obj)->TryGetNumberField(TEXT("team"), Team);
 
-		const int32 MaxRot = (T == static_cast<int32>(EPFPieceType::Wall)) ? 1 : 3;   // walls: N/E only
+		const bool bWallLike = (T == static_cast<int32>(EPFPieceType::Wall)
+			|| T == static_cast<int32>(EPFPieceType::WallWindow)
+			|| T == static_cast<int32>(EPFPieceType::WallDoor)
+			|| T == static_cast<int32>(EPFPieceType::WallDoorOneWay));
+		const int32 MaxRot = bWallLike ? 1 : 3;   // wall-like: N/E only
 		if (T < 0 || T >= static_cast<int32>(EPFPieceType::MAX_Count) || Team < 0 || Team > 1
 			|| R < 0 || R > MaxRot
 			|| X < -1000 || X > 1000 || Y < -1000 || Y > 1000 || Z < -1000 || Z > 1000)

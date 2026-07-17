@@ -30,26 +30,48 @@ enum class EPFGrenadeType : uint8 { Frag = 0, Smoke = 1 };
 UENUM(BlueprintType)
 enum class EPFPieceType : uint8
 {
+	// Classic structural (0–3) + props (4–6) keep stable wire/disk IDs for existing arena JSON.
 	Wall = 0, Floor = 1, Ramp = 2, Roof = 3,
 	PropCan = 4, PropDorito = 5, PropSnake = 6,
-	MAX_Count = 7 UMETA(Hidden)
+	// Special structural pieces (runtime actors — window hole, doors, trap floor).
+	WallWindow = 7, WallDoor = 8, WallDoorOneWay = 9, FloorTrap = 10,
+	MAX_Count = 11 UMETA(Hidden)
 };
-// Structural = Wall..Roof; Prop = PropCan..PropSnake. Helper:
-FORCEINLINE bool PFIsProp(EPFPieceType T) { return T >= EPFPieceType::PropCan && T <= EPFPieceType::PropSnake; }
+// Props only — special pieces spend structural budget and occupy wall/floor slots.
+FORCEINLINE bool PFIsProp(EPFPieceType T)
+{
+	return T == EPFPieceType::PropCan || T == EPFPieceType::PropDorito || T == EPFPieceType::PropSnake;
+}
+FORCEINLINE bool PFIsWallLike(EPFPieceType T)
+{
+	return T == EPFPieceType::Wall || T == EPFPieceType::WallWindow
+		|| T == EPFPieceType::WallDoor || T == EPFPieceType::WallDoorOneWay;
+}
+FORCEINLINE bool PFIsFloorLike(EPFPieceType T)
+{
+	return T == EPFPieceType::Floor || T == EPFPieceType::FloorTrap;
+}
+FORCEINLINE bool PFIsSpecialBuildPiece(EPFPieceType T)
+{
+	return T == EPFPieceType::WallWindow || T == EPFPieceType::WallDoor
+		|| T == EPFPieceType::WallDoorOneWay || T == EPFPieceType::FloorTrap;
+}
 
-UENUM(BlueprintType)  // client-side equip slot; values 0..6 static_cast to EPFPieceType
+UENUM(BlueprintType)  // client equip; place tools 0..10 static_cast to EPFPieceType (Delete is not a piece)
 enum class EPFBuildTool : uint8
 {
 	Wall = 0, Floor = 1, Ramp = 2, Roof = 3,
-	PropCan = 4, PropDorito = 5, PropSnake = 6, Delete = 7
+	PropCan = 4, PropDorito = 5, PropSnake = 6,
+	WallWindow = 7, WallDoor = 8, WallDoorOneWay = 9, FloorTrap = 10,
+	Delete = 11
 };
 
 UENUM()
 enum class EPFDenyReason : uint8
 {
 	None = 0, WrongPhase, OutOfBudget, SlotOccupied, Overlapping, OutOfPlot,
-	NoAnchor, HeightCap, RateLimited, NotYourTeam, InvalidPiece, NotFound,
-	SealsMap   // would sever cross-map passage / wall off an objective (connectivity guard)
+	NoAnchor, HeightCap, RateLimited, NotYourTeam, InvalidPiece, NotFound
+	// SealsMap removed: full wall-off allowed; breach with the mid-field bomb.
 };
 
 // Locational hit model (Tom 2026-07-15): out at 3 head / 5 chest / 8 limb / 10 total hits.

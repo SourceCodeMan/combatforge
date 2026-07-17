@@ -349,9 +349,13 @@ FVector APFBombActor::FaceAxisForPiece(EPFPieceType Type, uint8 Rot)
 	switch (Type)
 	{
 	case EPFPieceType::Wall:
+	case EPFPieceType::WallWindow:
+	case EPFPieceType::WallDoor:
+	case EPFPieceType::WallDoorOneWay:
 		// N edge (rot 0): plane in XZ → both rooms along ±Y. E edge (rot 1): plane in YZ → ±X.
 		return (Rot == 1) ? FVector(1.f, 0.f, 0.f) : FVector(0.f, 1.f, 0.f);
 	case EPFPieceType::Floor:
+	case EPFPieceType::FloorTrap:
 	case EPFPieceType::Roof:
 		return FVector(0.f, 0.f, 1.f);
 	case EPFPieceType::Ramp:

@@ -404,14 +404,18 @@ const TCHAR* DisplayName(EPFPieceType Type)
 {
 	switch (Type)
 	{
-	case EPFPieceType::Wall:       return TEXT("Wall");
-	case EPFPieceType::Floor:      return TEXT("Floor");
-	case EPFPieceType::Ramp:       return TEXT("Ramp");
-	case EPFPieceType::Roof:       return TEXT("Roof");
-	case EPFPieceType::PropCan:    return TEXT("Barrel");
-	case EPFPieceType::PropDorito: return TEXT("Crate");
-	case EPFPieceType::PropSnake:  return TEXT("Boxes");
-	default:                       return TEXT("?");
+	case EPFPieceType::Wall:           return TEXT("Wall");
+	case EPFPieceType::Floor:          return TEXT("Floor");
+	case EPFPieceType::Ramp:           return TEXT("Ramp");
+	case EPFPieceType::Roof:           return TEXT("Roof");
+	case EPFPieceType::PropCan:        return TEXT("Barrel");
+	case EPFPieceType::PropDorito:     return TEXT("Crate");
+	case EPFPieceType::PropSnake:      return TEXT("Boxes");
+	case EPFPieceType::WallWindow:     return TEXT("Window");
+	case EPFPieceType::WallDoor:       return TEXT("Door");
+	case EPFPieceType::WallDoorOneWay: return TEXT("1-Way Door");
+	case EPFPieceType::FloorTrap:      return TEXT("Trap Floor");
+	default:                           return TEXT("?");
 	}
 }
 
@@ -419,15 +423,19 @@ const TCHAR* DisplayName(EPFBuildTool Tool)
 {
 	switch (Tool)
 	{
-	case EPFBuildTool::Wall:       return TEXT("Wall");
-	case EPFBuildTool::Floor:      return TEXT("Floor");
-	case EPFBuildTool::Ramp:       return TEXT("Ramp");
-	case EPFBuildTool::Roof:       return TEXT("Roof");
-	case EPFBuildTool::PropCan:    return TEXT("Barrel");
-	case EPFBuildTool::PropDorito: return TEXT("Crate");
-	case EPFBuildTool::PropSnake:  return TEXT("Boxes");
-	case EPFBuildTool::Delete:     return TEXT("Delete");
-	default:                       return TEXT("?");
+	case EPFBuildTool::Wall:           return TEXT("Wall");
+	case EPFBuildTool::Floor:          return TEXT("Floor");
+	case EPFBuildTool::Ramp:           return TEXT("Ramp");
+	case EPFBuildTool::Roof:           return TEXT("Roof");
+	case EPFBuildTool::PropCan:        return TEXT("Barrel");
+	case EPFBuildTool::PropDorito:     return TEXT("Crate");
+	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
+	case EPFBuildTool::WallWindow:     return TEXT("Window");
+	case EPFBuildTool::WallDoor:       return TEXT("Door");
+	case EPFBuildTool::WallDoorOneWay: return TEXT("1-Way Door");
+	case EPFBuildTool::FloorTrap:      return TEXT("Trap Floor");
+	case EPFBuildTool::Delete:         return TEXT("Delete");
+	default:                           return TEXT("?");
 	}
 }
 
@@ -562,8 +570,14 @@ EPFSurfaceRole RoleForPieceType(EPFPieceType Type)
 {
 	switch (Type)
 	{
-	case EPFPieceType::Wall:  return EPFSurfaceRole::WallConcrete;
-	case EPFPieceType::Floor: return EPFSurfaceRole::FloorConcrete;
+	case EPFPieceType::Wall:
+	case EPFPieceType::WallWindow:
+	case EPFPieceType::WallDoor:
+	case EPFPieceType::WallDoorOneWay:
+		return EPFSurfaceRole::WallConcrete;
+	case EPFPieceType::Floor:
+	case EPFPieceType::FloorTrap:
+		return EPFSurfaceRole::FloorConcrete;
 	case EPFPieceType::Ramp:  return EPFSurfaceRole::MetalRusty;
 	case EPFPieceType::Roof:  return EPFSurfaceRole::MetalRoof;
 	default:                  return EPFSurfaceRole::FloorConcrete;

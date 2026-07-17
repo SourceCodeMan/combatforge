@@ -106,7 +106,11 @@ struct COMBATFORGE_API FPFGridMath
 		switch (Type)
 		{
 		case EPFPieceType::Wall:
+		case EPFPieceType::WallWindow:
+		case EPFPieceType::WallDoor:
+		case EPFPieceType::WallDoorOneWay:
 			// Cube (4.0, 0.2, 3.0) = 400×20×300 on the canonical edge, base at level Z.
+			// Special walls use the same ghost footprint; runtime actors own the real collision.
 			if (Rot == 0)   // N edge: runs along X at y = corner + 400
 			{
 				return FTransform(FRotator::ZeroRotator,
@@ -117,6 +121,7 @@ struct COMBATFORGE_API FPFGridMath
 				FVector(Wx + 400.f, Wy + 200.f, Wz + 150.f), FVector(4.f, 0.2f, 3.f));
 
 		case EPFPieceType::Floor:
+		case EPFPieceType::FloorTrap:
 			// Cube (4.0, 4.0, 0.2) = 400×400×20, TOP at level Z (T25) → center 10 below.
 			return FTransform(FRotator::ZeroRotator,
 				FVector(Wx + 200.f, Wy + 200.f, Wz - 10.f), FVector(4.f, 4.f, 0.2f));
@@ -163,6 +168,9 @@ struct COMBATFORGE_API FPFGridMath
 		switch (Type)
 		{
 		case EPFPieceType::Wall:
+		case EPFPieceType::WallWindow:
+		case EPFPieceType::WallDoor:
+		case EPFPieceType::WallDoorOneWay:
 			if (Rot > 1)
 			{
 				return false;
@@ -178,6 +186,7 @@ struct COMBATFORGE_API FPFGridMath
 			return true;
 
 		case EPFPieceType::Floor:
+		case EPFPieceType::FloorTrap:
 			Out = FBox(FVector(Wx, Wy, Wz - 20.f), FVector(Wx + 400.f, Wy + 400.f, Wz));
 			return true;
 

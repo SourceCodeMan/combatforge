@@ -119,6 +119,7 @@ protected:
 	// Refill RPC lives on the PAWN (client-owned) not the barrel (GameMode-owned) so joined clients
 	// route correctly; the barrel still does all authority validation in AuthorityInteract.
 	UFUNCTION(Server, Reliable) void ServerRefillAtBarrel(class APFAmmoBarrel* Barrel);
+	UFUNCTION(Server, Reliable) void ServerToggleBuildDoor(class APFBuildPieceActor* Door);
 	void OnFireSelectPressed();    // V — cycle fire mode
 	void OnThrowFragPressed();     // E — throw frag
 	void OnThrowSmokePressed();    // Q — throw smoke

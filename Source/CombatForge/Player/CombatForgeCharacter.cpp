@@ -20,6 +20,7 @@
 #include "Combat/PFAmmoBarrel.h"
 #include "Combat/PFBombActor.h"
 #include "Combat/PFBombPickup.h"
+#include "Building/PFBuildPieceActor.h"
 #include "Building/PFBuildComponent.h"
 #include "Building/PFBuildGrid.h"          // plant: aimed-piece lookup (FindPieceByHit)
 #include "Core/CombatForgeGameMode.h"      // plant: server route to ServerTryPlantBomb
@@ -1107,6 +1108,33 @@ void ACombatForgeCharacter::OnInteractPressed()
 			return;
 		}
 	}
+	// Doors: F toggles open/close (one-way doors only from the front face).
+	{
+		APFBuildPieceActor* BestDoor = nullptr;
+		float BestDistSq = FMath::Square(APFBuildPieceActor::DoorInteractRangeUU);
+		const FVector Me = GetActorLocation();
+		for (TActorIterator<APFBuildPieceActor> It(World); It; ++It)
+		{
+			APFBuildPieceActor* Door = *It;
+			if (!Door || !Door->CanUserToggleDoor(this))
+			{
+				continue;
+			}
+			// Prefer closest door by actor origin (door center is near the wall).
+			const float D = FVector::DistSquared(Me, Door->GetActorLocation());
+			if (D <= BestDistSq)
+			{
+				BestDistSq = D;
+				BestDoor = Door;
+			}
+		}
+		if (BestDoor)
+		{
+			ServerToggleBuildDoor(BestDoor);
+			return;
+		}
+	}
+
 	// Otherwise: nearest available ammo barrel in interact range.
 	APFAmmoBarrel* Best = nullptr;
 	float BestDistSq = FMath::Square(220.f);
@@ -1138,6 +1166,18 @@ void ACombatForgeCharacter::ServerRefillAtBarrel_Implementation(APFAmmoBarrel* B
 	if (Barrel)
 	{
 		Barrel->AuthorityInteract(this);   // barrel re-validates phase/availability/range on the server
+	}
+}
+
+void ACombatForgeCharacter::ServerToggleBuildDoor_Implementation(APFBuildPieceActor* Door)
+{
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
+	{
+		return;
+	}
+	if (Door)
+	{
+		Door->AuthorityTryToggleDoor(this);   // re-validates range + one-way front face
 	}
 }
 

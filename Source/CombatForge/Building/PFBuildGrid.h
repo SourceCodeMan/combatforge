@@ -114,8 +114,11 @@ public:
 	int32 ActiveLevels() const;
 	int32 ActiveHeightCapUU() const;
 
-	/** ISM hit → piece record, for the client delete-tool highlight. */
+	/** ISM / special-actor hit → piece record, for the client delete-tool highlight + bomb plant. */
 	bool FindPieceByHit(const FHitResult& Hit, uint16& OutPieceId, FPFBuildPieceRec& OutRec) const;
+
+	/** Special piece runtime actor (window/door/trap) lookup by piece id. */
+	class APFBuildPieceActor* FindSpecialPiece(uint16 PieceId) const;
 
 	// ---- Demolition bomb support (breach a walled-off path; live-grid only, never touches the saved arena) ----
 	/** Server/const lookup of a live piece by id (no HitResult). */
@@ -149,17 +152,12 @@ private:
 	void RemovePieceLocal(const FPFBuildPieceRec& Rec);
 	void RegisterOccupancy(const FPFBuildPieceRec& Rec);
 	void UnregisterOccupancy(const FPFBuildPieceRec& Rec);
+	/** Server-only: spawn replicated special piece actor (window/door/trap). */
+	void SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec);
+	void DestroySpecialPieceActor(uint16 PieceId);
 
 	/** Anchor rule (anti-sky-spam, 03 §4): touches terrain or any structural piece; floaters legal. */
 	bool HasAnchor(const FPFPlacementQuery& Q, const FBox& Bounds) const;
-
-	/**
-	 * Connectivity guard: would this WALL sever the ground path across the map, or wall off an objective?
-	 * Edge-flood-fill from team A's spawn column; the map must stay traversable to team B's column AND every
-	 * control point. Only ground-level walls can seal (floors/ramps are walkable; upper walls don't block the
-	 * floor). Prevents a "total blocker" without making anything destructible. Const/read-only (ghost + server).
-	 */
-	bool WouldSealMap(const FPFPlacementQuery& Q) const;
 
 	static int32 ISMCIndexFor(EPFPieceType Type, uint8 Team);
 	static FIntVector WallEdgeKey(int32 Cx, int32 Cy, int32 Level, uint8 EdgeNE);
@@ -194,4 +192,7 @@ private:
 
 	// Pieces with a live demolition bomb attached (server-only; enforces one bomb per piece atomically).
 	TSet<uint16> BombedPieceIds;
+
+	// Special structural pieces (window / door / trap) — server-spawned, replicate to clients.
+	UPROPERTY() TMap<uint16, TObjectPtr<class APFBuildPieceActor>> SpecialPieces;
 };

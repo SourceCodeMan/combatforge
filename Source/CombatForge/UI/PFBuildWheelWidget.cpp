@@ -54,10 +54,11 @@ void UPFBuildWheelWidget::BuildTree()
 	SectorSwatches.Reset();
 	SectorNameTexts.Reset();
 
+	const float SectorDeg = 360.f / static_cast<float>(NumSectors);
 	for (int32 i = 0; i < NumSectors; ++i)
 	{
-		// Sector i's centroid: clockwise from top, 45 degrees each.
-		const float AngleRad = FMath::DegreesToRadians(i * 45.f);
+		// Sector i's centroid: clockwise from top.
+		const float AngleRad = FMath::DegreesToRadians(i * SectorDeg);
 		const FVector2D Pos(FMath::Sin(AngleRad) * SectorRadiusPx, -FMath::Cos(AngleRad) * SectorRadiusPx);
 
 		UBorder* Swatch = WidgetTree->ConstructWidget<UBorder>();
@@ -91,8 +92,8 @@ void UPFBuildWheelWidget::BuildTree()
 		Swatch->SetContent(Box);
 
 		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
-		Sizer->SetWidthOverride(120.f);
-		Sizer->SetHeightOverride(64.f);
+		Sizer->SetWidthOverride(108.f);
+		Sizer->SetHeightOverride(56.f);
 		Sizer->SetContent(Swatch);
 
 		if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(Sizer))
@@ -260,9 +261,10 @@ void UPFBuildWheelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 	if (Radius >= DeadZonePx)
 	{
 		// Clockwise angle from top: up = 0, right = 90.
+		const float SectorDeg = 360.f / static_cast<float>(NumSectors);
 		const float ThetaDeg = FMath::RadiansToDegrees(FMath::Atan2(AccumDelta.X, -AccumDelta.Y));
-		const float Wrapped = FMath::Fmod(ThetaDeg + 360.f + 22.5f, 360.f);
-		NewHover = FMath::Clamp(FMath::FloorToInt(Wrapped / 45.f), 0, NumSectors - 1);
+		const float Wrapped = FMath::Fmod(ThetaDeg + 360.f + SectorDeg * 0.5f, 360.f);
+		NewHover = FMath::Clamp(FMath::FloorToInt(Wrapped / SectorDeg), 0, NumSectors - 1);
 	}
 	SetHoveredSector(NewHover);
 
@@ -281,13 +283,15 @@ FReply UPFBuildWheelWidget::NativeOnKeyDown(const FGeometry& InGeometry, const F
 {
 	if (bWheelOpen)
 	{
-		static const FKey DigitKeys[NumSectors] =
+		// Digits 1-9,0 map first 10 sectors; remaining use mouse only.
+		static const FKey DigitKeys[10] =
 		{
 			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four,
-			EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight
+			EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight,
+			EKeys::Nine, EKeys::Zero
 		};
 		const FKey Key = InKeyEvent.GetKey();
-		for (int32 i = 0; i < NumSectors; ++i)
+		for (int32 i = 0; i < 10 && i < NumSectors; ++i)
 		{
 			if (Key == DigitKeys[i])
 			{

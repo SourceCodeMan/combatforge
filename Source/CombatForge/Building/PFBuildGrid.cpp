@@ -3,9 +3,9 @@
 #include "Building/PFBuildGrid.h"
 
 #include "CombatForge.h"
+#include "Building/PFBuildPieceActor.h"
 #include "Building/PFBuildPieceVisuals.h"
 #include "Building/PFGridMath.h"
-#include "Objectives/PFObjectiveLayout.h"   // connectivity guard: control-point cells
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
 
@@ -13,6 +13,7 @@
 #include "Engine/HitResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -296,7 +297,7 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		return EPFDenyReason::InvalidPiece;
 	}
 	const bool bProp = PFIsProp(Q.Type);
-	if (Q.Type == EPFPieceType::Wall ? (Q.Rot > 1) : (Q.Rot > 3))
+	if (PFIsWallLike(Q.Type) ? (Q.Rot > 1) : (Q.Rot > 3))
 	{
 		return EPFDenyReason::InvalidPiece;
 	}
@@ -334,7 +335,7 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		return EPFDenyReason::OutOfPlot;
 	}
 	const int32 CY = ActiveCellsY();   // per-map grid rows (Warehouse 10, Yard 20)
-	if (Q.Type == EPFPieceType::Wall)
+	if (PFIsWallLike(Q.Type))
 	{
 		// A canonical edge belongs to a team if either adjacent cell is in its plot — keeps the
 		// front-line edges (plot|neutral) symmetric for both teams.
@@ -380,7 +381,7 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 	const int32 MapLevels = ActiveLevels();
 	const int32 MapHeightCap = ActiveHeightCapUU();
 	const int32 Level = Q.Z / 3;
-	if (Q.Type == EPFPieceType::Wall && Level > MapLevels - 2)
+	if (PFIsWallLike(Q.Type) && Level > MapLevels - 2)
 	{
 		return EPFDenyReason::HeightCap;
 	}
@@ -403,12 +404,16 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		switch (Q.Type)
 		{
 		case EPFPieceType::Wall:
+		case EPFPieceType::WallWindow:
+		case EPFPieceType::WallDoor:
+		case EPFPieceType::WallDoorOneWay:
 			if (WallEdges.Contains(WallEdgeKey(Cx, Cy, Level, Q.Rot)))
 			{
 				return EPFDenyReason::SlotOccupied;
 			}
 			break;
 		case EPFPieceType::Floor:
+		case EPFPieceType::FloorTrap:
 			if (FloorSlots.Contains(FIntVector(Cx, Cy, Level)))
 			{
 				return EPFDenyReason::SlotOccupied;
@@ -462,104 +467,8 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		return EPFDenyReason::NoAnchor;
 	}
 
-	// --- Connectivity guard (last / most expensive) --- a wall may not seal the map or an objective off.
-	if (WouldSealMap(Q))
-	{
-		return EPFDenyReason::SealsMap;
-	}
-
+	// No connectivity seal check: forts may fully wall off. Breach with the mid-field bomb.
 	return EPFDenyReason::None;
-}
-
-bool APFBuildGrid::WouldSealMap(const FPFPlacementQuery& Q) const
-{
-	// Only a GROUND-LEVEL barrier can sever the cross-map ground path: a WALL, or a RAMP (its HIGH edge
-	// stands a full wall-height up — a solid 300 uu face a pawn can't cross on the ground, exactly like a
-	// wall). Floors/roofs are walkable, and upper-level pieces don't block the floor. (Spawn columns +
-	// neutral strip are no-build, so those cells always stay open — the flood-fill seeds + crosses there.)
-	const bool bGroundBarrier = (Q.Type == EPFPieceType::Wall) || (Q.Type == EPFPieceType::Ramp);
-	if (!bGroundBarrier || (Q.Z / 3) != 0)
-	{
-		return false;
-	}
-
-	// A ground ramp's high edge sits on its ASCENT side (Rot 0=+X, 1=+Y, 2=-X, 3=-Y). Map it into the same
-	// N/E WallEdgeKey space walls use, canonicalizing the -X/-Y sides onto the neighbor cell's E/N edge
-	// (a ramp's Rot is a 4-way ascent index, NOT a 2-way wall edge, so it can't go through WallEdgeKey raw).
-	auto RampHighEdgeKey = [](int32 Cx, int32 Cy, uint8 Rot) -> FIntVector
-	{
-		switch (Rot)
-		{
-		case 0:  return WallEdgeKey(Cx,     Cy,     0, 1);   // +X → E edge of (Cx,Cy)
-		case 1:  return WallEdgeKey(Cx,     Cy,     0, 0);   // +Y → N edge of (Cx,Cy)
-		case 2:  return WallEdgeKey(Cx - 1, Cy,     0, 1);   // -X → E edge of (Cx-1,Cy)
-		default: return WallEdgeKey(Cx,     Cy - 1, 0, 0);   // -Y → N edge of (Cx,Cy-1)
-		}
-	};
-
-	const int32 QCx = Q.X / PFGrid::SubPerCell;
-	const int32 QCy = Q.Y / PFGrid::SubPerCell;
-	const FIntVector NewEdge = (Q.Type == EPFPieceType::Ramp)
-		? RampHighEdgeKey(QCx, QCy, Q.Rot)
-		: WallEdgeKey(QCx, QCy, 0, Q.Rot);
-
-	// Existing ground ramps block their high edge too — collect them once (few pieces on a 16×10 grid).
-	TSet<FIntVector> RampEdges;
-	for (const FPFBuildPieceRec& Rec : Pieces.Items)
-	{
-		if (Rec.Type == EPFPieceType::Ramp && (Rec.Z / 3) == 0)
-		{
-			RampEdges.Add(RampHighEdgeKey(Rec.X / PFGrid::SubPerCell, Rec.Y / PFGrid::SubPerCell, Rec.Rot));
-		}
-	}
-
-	auto EdgeBlocked = [this, &NewEdge, &RampEdges](int32 Cx, int32 Cy, uint8 EdgeNE) -> bool
-	{
-		const FIntVector Key = WallEdgeKey(Cx, Cy, 0, EdgeNE);
-		return Key == NewEdge || WallEdges.Contains(Key) || RampEdges.Contains(Key);
-	};
-
-	constexpr int32 GW = PFGrid::CellsX;      // columns (X) — frozen 16-wide on every map
-	constexpr int32 MaxGH = PFGrid::MaxCellsY;// arrays sized for the LARGEST map (Yard 20)
-	const int32 GH = ActiveCellsY();          // runtime rows for THIS map (Warehouse 10, Yard 20)
-	bool Visited[GW * MaxGH] = {};
-	int32 Queue[GW * MaxGH];
-	int32 Tail = 0;
-
-	// Seed at team A's spawn column, field mid-Y.
-	const int32 StartIdx = 0 * GH + (GH / 2);
-	Visited[StartIdx] = true;
-	Queue[Tail++] = StartIdx;
-
-	auto TryVisit = [&](int32 NX, int32 NY)
-	{
-		const int32 NI = NX * GH + NY;
-		if (!Visited[NI]) { Visited[NI] = true; Queue[Tail++] = NI; }
-	};
-	for (int32 Head = 0; Head < Tail; ++Head)
-	{
-		const int32 Cx = Queue[Head] / GH;
-		const int32 Cy = Queue[Head] % GH;
-		if (Cx + 1 < GW && !EdgeBlocked(Cx, Cy, 1))     { TryVisit(Cx + 1, Cy); }   // E: E-edge of (Cx,Cy)
-		if (Cx - 1 >= 0 && !EdgeBlocked(Cx - 1, Cy, 1)) { TryVisit(Cx - 1, Cy); }   // W: E-edge of (Cx-1,Cy)
-		if (Cy + 1 < GH && !EdgeBlocked(Cx, Cy, 0))     { TryVisit(Cx, Cy + 1); }   // N: N-edge of (Cx,Cy)
-		if (Cy - 1 >= 0 && !EdgeBlocked(Cx, Cy - 1, 0)) { TryVisit(Cx, Cy - 1); }   // S: N-edge of (Cx,Cy-1)
-	}
-
-	// Cross-map: team B's spawn column must remain reachable.
-	bool bReachB = false;
-	for (int32 Y = 0; Y < GH; ++Y) { if (Visited[PFGrid::SpawnColB * GH + Y]) { bReachB = true; break; } }
-	if (!bReachB) { return true; }
-
-	// Objectives: every control point must remain reachable (CTF flag homes sit in spawn columns → covered).
-	for (int32 i = 0; i < PFObjectiveLayout::ControlPointCount; ++i)
-	{
-		const FVector Loc = PFObjectiveLayout::ControlPointLocation(i, GH);
-		const int32 Ox = FMath::Clamp(FMath::FloorToInt32(Loc.X / static_cast<float>(PFGrid::CellUU)), 0, GW - 1);
-		const int32 Oy = FMath::Clamp(FMath::FloorToInt32(Loc.Y / static_cast<float>(PFGrid::CellUU)), 0, GH - 1);
-		if (!Visited[Ox * GH + Oy]) { return true; }
-	}
-	return false;
 }
 
 bool APFBuildGrid::HasAnchor(const FPFPlacementQuery& Q, const FBox& Bounds) const
@@ -802,6 +711,25 @@ void APFBuildGrid::ClearAll()
 		InstanceToPiece[K].Empty();
 	}
 	PieceToInstance.Empty();
+	// Destroy special runtime actors (doors / windows / traps).
+	for (auto& Pair : SpecialPieces)
+	{
+		if (IsValid(Pair.Value))
+		{
+			Pair.Value->Destroy();
+		}
+	}
+	SpecialPieces.Empty();
+	if (GetWorld())
+	{
+		for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
+		{
+			if (*It)
+			{
+				(*It)->Destroy();
+			}
+		}
+	}
 	FloorSlots.Empty();
 	InclineSlots.Empty();
 	WallEdges.Empty();
@@ -852,21 +780,40 @@ void APFBuildGrid::ServerInjectPieces(const TArray<FPFBuildPieceRec>& InPieces)
 void APFBuildGrid::AddPieceLocal(const FPFBuildPieceRec& Rec)
 {
 	EnsurePieceVisualsApplied();   // clients rebuild via PostReplicatedAdd, which can precede BeginPlay
-	const int32 K = ISMCIndexFor(Rec.Type, Rec.Team);
-	if (PieceISMCs[K])
-	{
-		const FTransform T = PFBuildPieceVisuals::PieceWorldTransform(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
-		const int32 InstanceIdx = PieceISMCs[K]->AddInstance(T, /*bWorldSpace=*/true);
-		InstanceToPiece[K].Add(InstanceIdx, Rec.PieceId);
-		PieceToInstance.Add(Rec.PieceId, InstanceIdx);
-	}
 	RegisterOccupancy(Rec);
+
+	// Window / door / trap: server-spawned replicated actor owns collision + state (not an ISM).
+	if (PFIsSpecialBuildPiece(Rec.Type))
+	{
+		if (HasAuthority())
+		{
+			SpawnSpecialPieceActor(Rec);
+		}
+		return;
+	}
+
+	const int32 K = ISMCIndexFor(Rec.Type, Rec.Team);
+	if (K < 0 || K >= 14 || !PieceISMCs[K])
+	{
+		return;
+	}
+	const FTransform T = PFBuildPieceVisuals::PieceWorldTransform(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
+	const int32 InstanceIdx = PieceISMCs[K]->AddInstance(T, /*bWorldSpace=*/true);
+	InstanceToPiece[K].Add(InstanceIdx, Rec.PieceId);
+	PieceToInstance.Add(Rec.PieceId, InstanceIdx);
 }
 
 void APFBuildGrid::RemovePieceLocal(const FPFBuildPieceRec& Rec)
 {
+	if (PFIsSpecialBuildPiece(Rec.Type))
+	{
+		DestroySpecialPieceActor(Rec.PieceId);
+		UnregisterOccupancy(Rec);
+		return;
+	}
+
 	const int32 K = ISMCIndexFor(Rec.Type, Rec.Team);
-	if (PieceISMCs[K])
+	if (K >= 0 && K < 14 && PieceISMCs[K])
 	{
 		if (const int32* InstancePtr = PieceToInstance.Find(Rec.PieceId))
 		{
@@ -894,6 +841,71 @@ void APFBuildGrid::RemovePieceLocal(const FPFBuildPieceRec& Rec)
 	UnregisterOccupancy(Rec);
 }
 
+void APFBuildGrid::SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec)
+{
+	if (!HasAuthority() || !GetWorld())
+	{
+		return;
+	}
+	DestroySpecialPieceActor(Rec.PieceId);   // belt+braces
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = this;
+	APFBuildPieceActor* Actor = GetWorld()->SpawnActor<APFBuildPieceActor>(
+		APFBuildPieceActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	if (!Actor)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("BuildGrid: failed to spawn special piece %u type %d"),
+			Rec.PieceId, static_cast<int32>(Rec.Type));
+		return;
+	}
+	Actor->InitFromRecord(Rec);
+	SpecialPieces.Add(Rec.PieceId, Actor);
+}
+
+void APFBuildGrid::DestroySpecialPieceActor(uint16 PieceId)
+{
+	if (TObjectPtr<APFBuildPieceActor>* Found = SpecialPieces.Find(PieceId))
+	{
+		if (IsValid(*Found))
+		{
+			(*Found)->Destroy();
+		}
+		SpecialPieces.Remove(PieceId);
+	}
+	// Clients: actor may only exist via replication — also scan by id.
+	if (!HasAuthority() && GetWorld())
+	{
+		for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
+		{
+			if (*It && (*It)->GetPieceId() == PieceId)
+			{
+				(*It)->Destroy();
+				break;
+			}
+		}
+	}
+}
+
+APFBuildPieceActor* APFBuildGrid::FindSpecialPiece(uint16 PieceId) const
+{
+	if (const TObjectPtr<APFBuildPieceActor>* Found = SpecialPieces.Find(PieceId))
+	{
+		return Found->Get();
+	}
+	if (GetWorld())
+	{
+		for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
+		{
+			if (*It && (*It)->GetPieceId() == PieceId)
+			{
+				return *It;
+			}
+		}
+	}
+	return nullptr;
+}
+
 void APFBuildGrid::RegisterOccupancy(const FPFBuildPieceRec& Rec)
 {
 	FBox Bounds(ForceInit);
@@ -911,9 +923,13 @@ void APFBuildGrid::RegisterOccupancy(const FPFBuildPieceRec& Rec)
 	switch (Rec.Type)
 	{
 	case EPFPieceType::Wall:
+	case EPFPieceType::WallWindow:
+	case EPFPieceType::WallDoor:
+	case EPFPieceType::WallDoorOneWay:
 		WallEdges.Add(WallEdgeKey(Cx, Cy, Level, Rec.Rot), Rec.PieceId);
 		break;
 	case EPFPieceType::Floor:
+	case EPFPieceType::FloorTrap:
 		FloorSlots.Add(FIntVector(Cx, Cy, Level), Rec.PieceId);
 		break;
 	case EPFPieceType::Ramp:
@@ -940,9 +956,13 @@ void APFBuildGrid::UnregisterOccupancy(const FPFBuildPieceRec& Rec)
 	switch (Rec.Type)
 	{
 	case EPFPieceType::Wall:
+	case EPFPieceType::WallWindow:
+	case EPFPieceType::WallDoor:
+	case EPFPieceType::WallDoorOneWay:
 		WallEdges.Remove(WallEdgeKey(Cx, Cy, Level, Rec.Rot));
 		break;
 	case EPFPieceType::Floor:
+	case EPFPieceType::FloorTrap:
 		FloorSlots.Remove(FIntVector(Cx, Cy, Level));
 		break;
 	case EPFPieceType::Ramp:
@@ -962,7 +982,27 @@ void APFBuildGrid::UnregisterOccupancy(const FPFBuildPieceRec& Rec)
 bool APFBuildGrid::FindPieceByHit(const FHitResult& Hit, uint16& OutPieceId, FPFBuildPieceRec& OutRec) const
 {
 	const UPrimitiveComponent* HitComp = Hit.GetComponent();
-	if (!HitComp || Hit.Item < 0)
+	if (!HitComp)
+	{
+		return false;
+	}
+
+	// Special piece actors (window / door / trap) — any of their mesh comps.
+	if (const APFBuildPieceActor* Special = Cast<APFBuildPieceActor>(Hit.GetActor()))
+	{
+		const uint16 Id = Special->GetPieceId();
+		for (const FPFBuildPieceRec& Rec : Pieces.Items)
+		{
+			if (Rec.PieceId == Id)
+			{
+				OutPieceId = Id;
+				OutRec = Rec;
+				return true;
+			}
+		}
+	}
+
+	if (Hit.Item < 0)
 	{
 		return false;
 	}
