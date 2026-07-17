@@ -9,3 +9,6 @@ Content/Bandits/** filter=lfs diff=lfs merge=lfs -text
 *.command text eol=lf
 *.sh text eol=lf
 *.bat text eol=crlf
+
+# Modern Weapons pack (Fab paid content — private repo only)
+Content/MarketplaceBlockout/** filter=lfs diff=lfs merge=lfs -text

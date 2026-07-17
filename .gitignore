@@ -66,5 +66,5 @@ Content/NiagaraExamples/
 _parked_content/
 # Shooter Rifle Animations Fab pack (local paid content, like Bandits)
 Content/RifleAnims/
-# Modern Weapons MarketplaceBlockout pack (local paid content — soft-loaded when present)
-Content/MarketplaceBlockout/
+# Modern Weapons MarketplaceBlockout pack: TRACKED via LFS (private repo, same as Bandits/Scene_Warehouse)
+
