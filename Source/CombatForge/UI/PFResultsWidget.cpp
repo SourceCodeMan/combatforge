@@ -71,7 +71,33 @@ void UPFResultsWidget::BuildTree()
 	AddCentered(WinnerText, 38, true, FLinearColor::White, FMargin(0.f, 0.f, 0.f, 4.f));
 	AddCentered(ModeText, 14, true, FLinearColor(1.f, 1.f, 1.f, 0.55f), FMargin(0.f, 0.f, 0.f, 8.f));
 	AddCentered(ScoreText, 18, false, FLinearColor(1.f, 1.f, 1.f, 0.85f), FMargin(0.f, 0.f, 0.f, 20.f));
-	AddCentered(MVPText, 18, true, FLinearColor(1.f, 0.85f, 0.2f), FMargin(0.f, 0.f, 0.f, 20.f));
+	AddCentered(MVPText, 18, true, FLinearColor(1.f, 0.85f, 0.2f), FMargin(0.f, 0.f, 0.f, 12.f));
+
+	// --- After-action scoreboard: header + fixed pool of per-player rows (team-colored, monospace) ---
+	ScoreboardHeader = WidgetTree->ConstructWidget<UTextBlock>();
+	ScoreboardHeader->SetFont(FCoreStyle::GetDefaultFontStyle(FName("Mono"), 12));
+	ScoreboardHeader->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
+	ScoreboardHeader->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(ScoreboardHeader))
+	{
+		VSlot->SetHorizontalAlignment(HAlign_Center);
+		VSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+	}
+	ScoreboardRows.Reset();
+	for (int32 i = 0; i < ScoreboardRowCount; ++i)
+	{
+		UTextBlock* Row = WidgetTree->ConstructWidget<UTextBlock>();
+		Row->SetFont(FCoreStyle::GetDefaultFontStyle(FName("Mono"), 14));
+		Row->SetJustification(ETextJustify::Center);
+		Row->SetVisibility(ESlateVisibility::Collapsed);
+		if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(Row))
+		{
+			VSlot->SetHorizontalAlignment(HAlign_Center);
+			VSlot->SetPadding(FMargin(0.f, 1.f, 0.f, (i == ScoreboardRowCount - 1) ? 18.f : 1.f));
+		}
+		ScoreboardRows.Add(Row);
+	}
+
 	AddCentered(TallyText, 22, true, FLinearColor::White, FMargin(0.f, 0.f, 0.f, 4.f));
 	AddCentered(CategoryText, 14, false, FLinearColor(1.f, 1.f, 1.f, 0.7f), FMargin(0.f, 0.f, 0.f, 14.f));
 	AddCentered(ArenaIdText, 12, false, FLinearColor(1.f, 1.f, 1.f, 0.45f), FMargin(0.f, 0.f, 0.f, 22.f));
@@ -224,8 +250,68 @@ void UPFResultsWidget::RefreshAll()
 	}
 	RefreshResult(*GS);
 	RefreshMVP(*GS);
+	RefreshScoreboard(*GS);
 	RefreshTally(*GS);
 	RefreshArenaId(*GS);
+}
+
+void UPFResultsWidget::RefreshScoreboard(const ACombatForgeGameState& GS)
+{
+	if (!ScoreboardHeader)
+	{
+		return;
+	}
+	const bool bFFA = (GS.MatchType == EPFMatchType::FreeForAll);
+	ScoreboardHeader->SetText(FText::FromString(FString::Printf(
+		TEXT("%-14s %3s %3s %5s"), TEXT("PLAYER"), TEXT("E"), TEXT("D"), bFFA ? TEXT("TAGS") : TEXT("PTS"))));
+
+	// Team A block, then Team B (FFA: single group); within a team, best score first, elims tiebreak.
+	auto ScoreOf = [bFFA](const ACombatForgePlayerState& P) -> int32
+	{
+		return bFFA ? static_cast<int32>(P.TagCount) : P.MatchScore;
+	};
+	TArray<const ACombatForgePlayerState*> Players;
+	for (APlayerState* PSBase : GS.PlayerArray)
+	{
+		if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
+		{
+			Players.Add(PS);
+		}
+	}
+	Players.Sort([bFFA, &ScoreOf](const ACombatForgePlayerState& A, const ACombatForgePlayerState& B)
+	{
+		if (!bFFA)
+		{
+			const uint8 TA = (A.TeamId <= 1) ? A.TeamId : 2;
+			const uint8 TB = (B.TeamId <= 1) ? B.TeamId : 2;
+			if (TA != TB) { return TA < TB; }
+		}
+		const int32 SA = ScoreOf(A), SB = ScoreOf(B);
+		if (SA != SB) { return SA > SB; }
+		if (A.Eliminations != B.Eliminations) { return A.Eliminations > B.Eliminations; }
+		return A.GetPlayerName() < B.GetPlayerName();
+	});
+
+	for (int32 i = 0; i < ScoreboardRows.Num(); ++i)
+	{
+		UTextBlock* Row = ScoreboardRows[i].Get();
+		if (!Row)
+		{
+			continue;
+		}
+		if (i < Players.Num())
+		{
+			const ACombatForgePlayerState* P = Players[i];
+			Row->SetText(FText::FromString(FString::Printf(TEXT("%-14.14s %3d %3d %5d"),
+				*P->GetPlayerName(), P->Eliminations, P->TimesEliminated, ScoreOf(*P))));
+			Row->SetColorAndOpacity(FSlateColor(bFFA ? FLinearColor::White : PFColors::ForTeam(P->TeamId % 2)));
+			Row->SetVisibility(ESlateVisibility::HitTestInvisible);
+		}
+		else
+		{
+			Row->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
 }
 
 void UPFResultsWidget::RefreshResult(const ACombatForgeGameState& GS)

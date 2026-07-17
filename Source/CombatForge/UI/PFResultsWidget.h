@@ -10,6 +10,7 @@ class ACombatForgeGameState;
 class UButton;
 class USizeBox;
 class UTextBlock;
+class UVerticalBox;
 
 /**
  * Results panel (contract §3.6; 15 s Results phase):
@@ -41,6 +42,7 @@ private:
 	void RefreshAll();
 	void RefreshResult(const ACombatForgeGameState& GS);
 	void RefreshMVP(const ACombatForgeGameState& GS);
+	void RefreshScoreboard(const ACombatForgeGameState& GS);
 	void RefreshTally(const ACombatForgeGameState& GS);
 	void RefreshArenaId(const ACombatForgeGameState& GS);
 
@@ -51,6 +53,9 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> ModeText;
 	UPROPERTY() TObjectPtr<UTextBlock> ScoreText;
 	UPROPERTY() TObjectPtr<UTextBlock> MVPText;
+	/** After-action scoreboard: a header + a fixed pool of per-player rows (team-colored). */
+	UPROPERTY() TObjectPtr<UTextBlock> ScoreboardHeader;
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> ScoreboardRows;
 	UPROPERTY() TObjectPtr<UTextBlock> TallyText;
 	UPROPERTY() TObjectPtr<UTextBlock> CategoryText;
 	UPROPERTY() TObjectPtr<UTextBlock> ArenaIdText;
@@ -66,4 +71,5 @@ private:
 
 	float PollAccum = 0.f;
 	static constexpr float PollInterval = 0.5f;
+	static constexpr int32 ScoreboardRowCount = 12;   // max match roster (PFGrid::MaxRosterSlots)
 };
