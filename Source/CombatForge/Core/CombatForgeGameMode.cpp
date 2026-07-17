@@ -14,6 +14,7 @@
 #include "Combat/PFTargetDummy.h"
 #include "Combat/PFAmmoBarrel.h"
 #include "Combat/PFBombActor.h"
+#include "Combat/PFBombPickup.h"
 #include "Building/PFArenaShell.h"
 #include "Building/PFGridMath.h"   // bomb spawn point = the target piece's AABB center
 #include "Building/PFYardShell.h"
@@ -1322,6 +1323,11 @@ void ACombatForgeGameMode::RespawnCombatant(ACombatForgePlayerState* PS, uint8 R
 		{
 			Weapon->ServerResetLoadout();     // corpse-reused pawn: refill mag + reserve + grenades
 		}
+		// Bomb charges are mid-field pickups only — never persist through death/respawn.
+		if (Pawn->IsCarryingBomb())
+		{
+			Pawn->ConsumeBombCharge();
+		}
 		TeleportPawnTo(Pawn, GetSpawnTransform(PS));
 	}
 	else if (AController* Ctrl = PS->GetOwningController())
@@ -1615,6 +1621,8 @@ void ACombatForgeGameMode::BeginLiveRound()
 
 	// Fresh ammo stations each Live (4 random field spots).
 	SpawnAmmoBarrels();
+	// Mid-field bomb charge — players must walk to center and pick up (F); not granted at spawn.
+	SpawnBombPickup();
 
 	if (GS->MatchType == EPFMatchType::Skirmish)
 	{
@@ -2162,10 +2170,15 @@ void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, ui
 	// EXPLICIT Combat phase, not just IsFireAllowed(): IsFireAllowed is also true in LOBBY (warm-up pen fire,
 	// T21) — a lobby plant would survive Lobby→Build ClearAll, and its 15s fuse would then detonate a
 	// RECYCLED PieceId belonging to a different, innocent piece (review wf_e923820a).
-	if (!GS || !PlanterPS || !BuildGrid
+	if (!GS || !PlanterPS || !BuildGrid || !Planter
 		|| GS->Phase != EPFMatchPhase::Combat || !GS->IsFireAllowed())
 	{
 		return;   // combat-live only
+	}
+	// Must have claimed a mid-field charge — no free plants at spawn.
+	if (!Planter->IsCarryingBomb())
+	{
+		return;
 	}
 	FPFBuildPieceRec Rec;
 	if (!BuildGrid->FindPieceById(PieceId, Rec))
@@ -2203,6 +2216,13 @@ void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, ui
 		return;
 	}
 
+	// Consume the charge only once placement is fully validated — failed plants keep the charge.
+	if (!Planter->ConsumeBombCharge())
+	{
+		BuildGrid->ClearPieceBomb(PieceId);
+		return;
+	}
+
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Params.Owner = this;
@@ -2210,6 +2230,8 @@ void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, ui
 		APFBombActor::StaticClass(), Center, FRotator::ZeroRotator, Params);
 	if (!Bomb)
 	{
+		// Refund the charge if spawn fails so the player isn't soft-locked.
+		Planter->GrantBombCharge();
 		BuildGrid->ClearPieceBomb(PieceId);
 		return;
 	}
@@ -2217,8 +2239,78 @@ void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, ui
 	ActiveBombs.Add(Bomb);
 }
 
+void ACombatForgeGameMode::SpawnBombPickup()
+{
+	if (!HasAuthority() || !ArenaShell)
+	{
+		return;
+	}
+	DestroyBombPickup();
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = this;
+	const FVector Center = ArenaShell->GetFieldCenter();   // Z=0 floor; pickup hovers above
+	BombPickup = World->SpawnActor<APFBombPickup>(
+		APFBombPickup::StaticClass(), Center, FRotator::ZeroRotator, Params);
+	if (BombPickup)
+	{
+		BombPickup->ServerActivateAt(Center);
+		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: bomb pickup at field center (%.0f, %.0f)"),
+			Center.X, Center.Y);
+	}
+}
+
+void ACombatForgeGameMode::DestroyBombPickup()
+{
+	GetWorldTimerManager().ClearTimer(BombPickupRespawnHandle);
+	if (IsValid(BombPickup))
+	{
+		BombPickup->Destroy();
+	}
+	BombPickup = nullptr;
+}
+
+void ACombatForgeGameMode::NotifyBombPickupTaken()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	// 5 s until the next floating charge appears — unlimited supply, one available at a time.
+	GetWorldTimerManager().ClearTimer(BombPickupRespawnHandle);
+	GetWorldTimerManager().SetTimer(BombPickupRespawnHandle, this,
+		&ACombatForgeGameMode::RespawnBombPickup, BombPickupRespawnSec, false);
+}
+
+void ACombatForgeGameMode::RespawnBombPickup()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat || !GS->IsFireAllowed())
+	{
+		return;   // combat ended while waiting — leave it gone
+	}
+	// Re-activate the existing actor if still valid; otherwise spawn a fresh one.
+	if (IsValid(BombPickup) && ArenaShell)
+	{
+		BombPickup->ServerActivateAt(ArenaShell->GetFieldCenter());
+		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: bomb pickup respawned at center"));
+		return;
+	}
+	SpawnBombPickup();
+}
+
 void ACombatForgeGameMode::DestroyBombs()
 {
+	DestroyBombPickup();
 	for (APFBombActor* B : ActiveBombs)
 	{
 		if (IsValid(B))

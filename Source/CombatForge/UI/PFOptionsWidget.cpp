@@ -822,7 +822,7 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 	AddHowToLine(Box, TEXT("COMBAT"), 15, true, Head);
 	AddHowToLine(Box, TEXT("LMB  fire  ·  RMB  aim  ·  V  fire mode  ·  R  reload  ·  F  refill at ammo barrels"), 13, false, Key);
 	AddHowToLine(Box, TEXT("E  frag  ·  Q  smoke  ·  B  melee tag  ·  Scroll  swap pistol  ·  Rifle 30rd / SMG 25rd / Pistol 18rd"), 13, false, Key);
-	AddHowToLine(Box, TEXT("G  plant a breach bomb on an aimed build piece (15s) — enemies HOLD F for 8s to defuse. The boom removes that piece for the match."), 13, false, Key);
+	AddHowToLine(Box, TEXT("Mid-field floating BOMB — F grab · G plant on a piece (15s fuse) — enemies HOLD F 8s to defuse. Boom removes that piece for the match."), 13, false, Key);
 	AddHowToLine(Box, TEXT("You're OUT at 3 head, 5 chest, 8 limb, or 10 total hits — whichever comes first (HUD pips + H/C/L readout). Showdown rounds: one hit."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD PHASE"), 15, true, Head);

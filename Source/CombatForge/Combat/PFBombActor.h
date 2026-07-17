@@ -4,10 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Engine/NetSerialization.h"
+#include "Core/CombatForgeTypes.h"
 #include "PFBombActor.generated.h"
 
 class APFBuildGrid;
 class ACombatForgePlayerState;
+class UPFWeaponComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 
@@ -15,11 +18,11 @@ class UTextRenderComponent;
  * Demolition bomb (anti-griefing breach): planted on a structural build piece during Combat with a 15 s fuse.
  * An ENEMY of the planter can defuse by holding F for a continuous 8 s. On detonation the ONE targeted piece
  * is removed from the LIVE grid for the rest of the match (APFBuildGrid::ServerRemovePieceForMatch) — the
- * saved arena is never touched, so the piece returns next match — AND a frag-style radial BB burst
- * (FragBBCount pellets, same hit → ApplyPaintHit pipeline as the grenade) paints anyone nearby. Cover
- * blocks it; teammates are immune (B12). Server-authoritative throughout: plant and defuse route through
- * the interacting PAWN's Server RPCs (the barrel pattern — this actor is GameMode-owned, so a client RPC
- * issued directly on it would be dropped).
+ * saved arena is never touched, so the piece returns next match — AND a dual-sided full-sphere BB burst
+ * (FragBBCount pellets from BOTH faces of the piece) paints anyone nearby on either side. Remaining cover
+ * still blocks individual pellets; teammates are immune (B12). Server-authoritative throughout: plant and
+ * defuse route through the interacting PAWN's Server RPCs (the barrel pattern — this actor is GameMode-owned,
+ * so a client RPC issued directly on it would be dropped).
  */
 UCLASS()
 class COMBATFORGE_API APFBombActor : public AActor
@@ -44,25 +47,45 @@ public:
 	static constexpr float FuseSeconds       = 15.f;
 	static constexpr float DefuseHoldSeconds = 8.f;
 	static constexpr float DefuseRangeUU     = 260.f;   // hold-F reach (slightly over barrel interact range)
-	/** Radial BB count on detonation — same pipeline as the frag grenade (90), dialed up for a breach charge. */
-	static constexpr int32 FragBBCount       = 300;
+	/** Radial BB count on detonation — same pipeline as the frag grenade (90), dialed way up for a breach charge. */
+	static constexpr int32 FragBBCount       = 1000;
+	/** Spawn this many authoritative BBs per frame (spreads the cost — 1000 in one frame hitch the host). */
+	static constexpr int32 BurstBatchSize    = 80;
+	/** Seconds between batches (~1 frame at 60 Hz). */
+	static constexpr float BurstBatchInterval = 0.016f;
+	/** Distance past the piece center along the face normal for each side's spawn origin (uu). Puts
+	 *  the burst into BOTH rooms instead of half the pellets dying into the wall/floor plane. */
+	static constexpr float BurstSideOffsetUU = 40.f;
+	/** Hard radius for the guaranteed proximity paint (uu) — standing on the charge always hurts. */
+	static constexpr float ProximityPaintRadiusUU = 280.f;
+	/** Client cosmetic tracers only (pool is 64) — never loop FragBBCount times on remotes. */
+	static constexpr int32 CosmeticTracerCount = 64;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutReplicatedProps) const override;
 
 	void ServerDetonate();
 	void ServerDefused();
 	UFUNCTION() void OnRep_Detonated();
 	/** Boom cosmetics on THIS machine (host directly, clients via OnRep) — frag audio + cosmetic BB spray. */
 	void PlayDetonationLocal();
-	/** Server: authoritative BB burst (damage / elim / splat) — same path as APFGrenadeProjectile frag. */
-	void SpawnFragBurst(const FVector& At, uint32 Seed);
-	/** Non-host clients: cosmetic tracers from the shared BurstSeed so they line up with server BBs. */
-	void SpawnCosmeticFragBurst(const FVector& At, uint32 Seed);
+	/** Kick off the multi-frame BB spray (first batch now, rest on timer). */
+	void BeginFragBurst(const FVector& Center);
+	/** One batch of authoritative BBs; timer drives until FragBBCount is reached. */
+	void SpawnFragBurstBatch();
+	/** Non-host clients: capped cosmetic tracers (not 1000 spawns). */
+	void SpawnCosmeticFragBurst(const FVector& Center, const FVector& FaceAxis, uint32 Seed);
+	/** Guaranteed close-range paint: any non-teammate (and the planter) inside radius takes a hit. */
+	void ApplyProximityPaint(const FVector& Center);
+	/** Unit normal through the piece face: wall ±N/E, floor/roof ±Z, ramp ±sideways. */
+	static FVector FaceAxisForPiece(EPFPieceType Type, uint8 Rot);
 	void UpdateLabel();
+
+	/** Soft-load Bandits grenade mesh (red preferred) so the planted charge isn't a graybox cylinder. */
+	void SoftLoadMesh();
 
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> Root;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Mesh;
@@ -79,6 +102,8 @@ protected:
 	UPROPERTY(Replicated) bool bArmed = false;
 	/** Shared frag-spread seed so remote cosmetic tracers match the server BB directions. */
 	UPROPERTY(Replicated) uint32 BurstSeed = 0;
+	/** Face normal of the bombed piece — dual-side burst origins sit at Center ± Axis * Offset. */
+	UPROPERTY(Replicated) FVector_NetQuantizeNormal BurstAxis = FVector(0.f, 0.f, 1.f);
 
 	// Server-only.
 	uint16 TargetPieceId = 0;
@@ -87,4 +112,11 @@ protected:
 	TWeakObjectPtr<APawn> DefuserWeak;
 	bool bDefuserHeld = false;
 	FTimerHandle FuseTimer;
+
+	// Deferred BB spray (server): avoid SpawnActor×1000 on the detonation frame.
+	FVector BurstCenter = FVector::ZeroVector;
+	int32 BurstNextIndex = 0;
+	TWeakObjectPtr<UPFWeaponComponent> BurstWeaponWeak;
+	TWeakObjectPtr<APawn> BurstPlanterPawnWeak;
+	FTimerHandle BurstTimer;
 };

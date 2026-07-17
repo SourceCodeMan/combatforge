@@ -58,6 +58,8 @@ private:
 	void HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint8 LimbHits, uint8 TotalHits);
 	void HandleFireModeChanged(EPFFireMode NewMode);
 	void HandleGrenadeCountChanged(uint8 Frag, uint8 Smoke);
+	/** Polls bound pawn bCarryingBomb (replicated) — show/hide BOMB · G. */
+	void UpdateBombCarryIndicator();
 
 	void UpdateCrosshair();
 	void UpdateBanner(float InDeltaTime);
@@ -81,6 +83,8 @@ private:
 	UPROPERTY() TObjectPtr<UProgressBar> ReloadBar;
 	UPROPERTY() TObjectPtr<UTextBlock> FireModeText;
 	UPROPERTY() TObjectPtr<UTextBlock> GrenadeText;
+	/** Visible only while the local pawn holds a mid-field bomb charge (G to plant). */
+	UPROPERTY() TObjectPtr<UTextBlock> BombCarryText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundTimerText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundNumberText;
 	UPROPERTY() TObjectPtr<UTextBlock> AliveTextA;

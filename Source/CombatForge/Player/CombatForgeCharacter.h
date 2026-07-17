@@ -83,6 +83,13 @@ public:
 	/** Hide FP viewmodel + TP rifle during BuildPhase (marker away while placing). */
 	void UpdateBuildPhaseWeaponVisibility();
 
+	// ---- Demolition bomb (mid-field pickup only — not granted at spawn) ----
+	bool IsCarryingBomb() const { return bCarryingBomb; }
+	/** Authority: grant one plantable charge (from the mid-field floating pickup). */
+	void GrantBombCharge();
+	/** Authority: consume a carried charge (returns false if none). */
+	bool ConsumeBombCharge();
+
 	// ---- AActor / ACharacter ----
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
@@ -120,13 +127,14 @@ protected:
 	// eliminated outright (the tag). Client requests; server re-validates the cooldown + range + team.
 	UFUNCTION(Server, Reliable) void ServerMelee();
 
-	// ---- Demolition bomb (breach a blocked path) ----
-	void OnPlantPressed();         // G — plant a bomb on the aimed structural build piece (Combat only)
+	// ---- Demolition bomb plant / defuse (charges from mid-field F pickup) ----
+	void OnPlantPressed();         // G — plant a carried bomb on the aimed structural build piece (Combat only)
 	void OnInteractReleased();     // F released — stop defusing (barrel refill is tap-only, unaffected)
 	// Pawn-routed Server RPCs (the bomb + GameMode have no owning client connection — barrel pattern).
 	UFUNCTION(Server, Reliable) void ServerPlantBomb(uint16 PieceId);
 	UFUNCTION(Server, Reliable) void ServerBeginDefuse();
 	UFUNCTION(Server, Reliable) void ServerEndDefuse();
+	UFUNCTION(Server, Reliable) void ServerClaimBombPickup(class APFBombPickup* Pickup);
 	// Dev pose-tuning drag (gated by pf.WeaponDrag): hold MIDDLE MOUSE and move to slide the FP weapon in 3D.
 	// Not ADS = edits the held pose (FPLoc); ADS = edits the ADS pose. Shift = depth, Ctrl = rotate. On
 	// release, prints the pf.WeaponFP / pf.WeaponADS line to paste into PFWeaponCatalog.cpp.
@@ -454,6 +462,8 @@ private:
 	// Demolition bomb: the bomb this pawn is currently holding F on (server-side), + plant debounce.
 	TWeakObjectPtr<class APFBombActor> DefusingBomb;
 	double LastPlantTime = -100.0;
+	/** One plantable charge from the mid-field pickup (not granted at spawn). Replicated for HUD. */
+	UPROPERTY(Replicated) bool bCarryingBomb = false;
 
 	// Melee tag: last swing time (server + owning client) for the cooldown gate, and its tuning.
 	double LastMeleeTime = -100.0;

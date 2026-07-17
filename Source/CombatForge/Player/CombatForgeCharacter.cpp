@@ -19,6 +19,7 @@
 #include "Combat/PFCombatVFX.h"
 #include "Combat/PFAmmoBarrel.h"
 #include "Combat/PFBombActor.h"
+#include "Combat/PFBombPickup.h"
 #include "Building/PFBuildComponent.h"
 #include "Building/PFBuildGrid.h"          // plant: aimed-piece lookup (FindPieceByHit)
 #include "Core/CombatForgeGameMode.h"      // plant: server route to ServerTryPlantBomb
@@ -1081,6 +1082,31 @@ void ACombatForgeCharacter::OnInteractPressed()
 			return;
 		}
 	}
+	// Mid-field floating bomb charge (F to pick up — not granted at spawn).
+	{
+		APFBombPickup* BestPickup = nullptr;
+		float BestDistSq = FMath::Square(APFBombPickup::InteractRangeUU);
+		const FVector Me = GetActorLocation();
+		for (TActorIterator<APFBombPickup> It(World); It; ++It)
+		{
+			APFBombPickup* P = *It;
+			if (!P || !P->IsAvailable())
+			{
+				continue;
+			}
+			const float D = FVector::DistSquared(Me, P->GetActorLocation());
+			if (D <= BestDistSq)
+			{
+				BestDistSq = D;
+				BestPickup = P;
+			}
+		}
+		if (BestPickup)
+		{
+			ServerClaimBombPickup(BestPickup);
+			return;
+		}
+	}
 	// Otherwise: nearest available ammo barrel in interact range.
 	APFAmmoBarrel* Best = nullptr;
 	float BestDistSq = FMath::Square(220.f);
@@ -1123,9 +1149,35 @@ void ACombatForgeCharacter::OnInteractReleased()
 	}
 }
 
+void ACombatForgeCharacter::GrantBombCharge()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	bCarryingBomb = true;
+	ForceNetUpdate();
+}
+
+bool ACombatForgeCharacter::ConsumeBombCharge()
+{
+	if (!HasAuthority() || !bCarryingBomb)
+	{
+		return false;
+	}
+	bCarryingBomb = false;
+	ForceNetUpdate();
+	return true;
+}
+
 void ACombatForgeCharacter::OnPlantPressed()
 {
 	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	// Must have claimed a mid-field charge first (G is a no-op without one).
+	if (!bCarryingBomb)
 	{
 		return;
 	}
@@ -1169,9 +1221,25 @@ void ACombatForgeCharacter::ServerPlantBomb_Implementation(uint16 PieceId)
 	{
 		return;
 	}
+	if (!bCarryingBomb)
+	{
+		return;   // no free plants — mid-field pickup only
+	}
 	if (ACombatForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ACombatForgeGameMode>() : nullptr)
 	{
-		GM->ServerTryPlantBomb(this, PieceId);   // phase / piece / one-per-piece / one-per-planter / range
+		GM->ServerTryPlantBomb(this, PieceId);   // consumes charge on successful plant
+	}
+}
+
+void ACombatForgeCharacter::ServerClaimBombPickup_Implementation(APFBombPickup* Pickup)
+{
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
+	{
+		return;
+	}
+	if (Pickup)
+	{
+		Pickup->AuthorityInteract(this);
 	}
 }
 
@@ -1990,6 +2058,7 @@ void ACombatForgeCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ACombatForgeCharacter, KitRep);
 	DOREPLIFETIME(ACombatForgeCharacter, bSecondaryActive);   // pistol-secondary: every machine re-equips the gun mesh
+	DOREPLIFETIME(ACombatForgeCharacter, bCarryingBomb);      // mid-field pickup charge (not spawn-default)
 }
 
 void ACombatForgeCharacter::PawnClientRestart()

@@ -3,13 +3,16 @@
 #include "Player/PFCharacterPreviewActor.h"
 
 #include "CombatForge.h"
+#include "Combat/PFWeaponCatalog.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/PointLightComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Scene.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Animation/AnimSequence.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -34,9 +37,20 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyFinder(
 		TEXT("/Game/Bandits/Mesh/Body/SKM_Body.SKM_Body"));
 	if (BodyFinder.Succeeded()) { BodyMeshAsset = BodyFinder.Object; }
-	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleFinder(
+	// Prefer two-hand RIFLE idle so both hands pose for a gun (unarmed A_MM_Idle leaves the left
+	// arm hanging and the weapon looks casually pointed down). Soft-fallback if the pack is missing.
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleIdleFinder(
+		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_Idle.AS_Rifle_Idle"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> UnarmedIdleFinder(
 		TEXT("/Game/Bandits/Demo/Animations/A_MM_Idle.A_MM_Idle"));
-	if (IdleFinder.Succeeded()) { IdleAnimAsset = IdleFinder.Object; }
+	if (RifleIdleFinder.Succeeded())
+	{
+		IdleAnimAsset = RifleIdleFinder.Object;
+	}
+	else if (UnarmedIdleFinder.Succeeded())
+	{
+		IdleAnimAsset = UnarmedIdleFinder.Object;
+	}
 
 	auto MakePart = [this](const FString& CompName) -> USkeletalMeshComponent*
 	{
@@ -57,6 +71,13 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	{
 		if (USkeletalMeshComponent* C = MakePart(FString::Printf(TEXT("PreviewSlot%d"), i))) { SlotComps.Add(C); }
 	}
+
+	// Selected gun sits on the right hand (same socket resolution the live pawn uses).
+	WeaponMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PreviewWeapon"));
+	WeaponMeshComp->SetupAttachment(BaseMesh);
+	WeaponMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMeshComp->SetCastShadow(true);
+	WeaponMeshComp->SetVisibility(false);
 
 	// Fixed capture rig in front of the turntable, looking back at the character. Renders ONLY this actor
 	// (dark backdrop), fixed manual exposure so the frame doesn't pump as the character spins.
@@ -122,6 +143,7 @@ void APFCharacterPreviewActor::BeginPlay()
 		Capture->TextureTarget = RenderTarget;
 	}
 	ApplyConfig(PFChar::LoadConfig());
+	ApplyWeapon(PFWeapon::LoadConfig());
 }
 
 void APFCharacterPreviewActor::EnsureRenderTarget()
@@ -189,6 +211,87 @@ void APFCharacterPreviewActor::ApplyConfig(const FPFCharacterConfig& Config)
 		const int32 Sel = Config.Slots.IsValidIndex(s) ? Config.Slots[s] : -1;
 		USkeletalMesh* M = (Sel >= 0) ? PFChar::LoadPart(s, Sel) : nullptr;
 		Mount(SlotComps[s], M);
+	}
+	// Keep the current gun mounted after clothing refresh (slot swap rebuilds leader poses).
+	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr)
+	{
+		AttachPreviewWeapon();
+	}
+}
+
+void APFCharacterPreviewActor::ApplyWeapon(const FPFWeaponConfig& Config)
+{
+	if (WeaponMeshComp == nullptr)
+	{
+		return;
+	}
+	const FPFWeaponDef& Def = PFWeapon::Weapon(Config.Category, Config.Index);
+	UStaticMesh* Wpn = PFWeapon::LoadMesh(Def);
+	if (Wpn == nullptr)
+	{
+		WeaponMeshComp->SetStaticMesh(nullptr);
+		WeaponMeshComp->SetVisibility(false);
+		return;
+	}
+	WeaponMeshComp->SetStaticMesh(Wpn);
+	// Preserve authored materials (Modern Weapons pack + Bandits); clear stale overrides.
+	const int32 Mats = WeaponMeshComp->GetNumMaterials();
+	for (int32 i = 0; i < Mats; ++i)
+	{
+		WeaponMeshComp->SetMaterial(i, nullptr);
+	}
+	if (UMaterialInterface* Override = PFWeapon::LoadMaterial(Def))
+	{
+		for (int32 i = 0; i < Mats; ++i)
+		{
+			WeaponMeshComp->SetMaterial(i, Override);
+		}
+	}
+	WeaponMeshComp->SetVisibility(true);
+	AttachPreviewWeapon();
+}
+
+void APFCharacterPreviewActor::AttachPreviewWeapon()
+{
+	if (WeaponMeshComp == nullptr || BaseMesh == nullptr || WeaponMeshComp->GetStaticMesh() == nullptr)
+	{
+		return;
+	}
+	// Same hand-socket priority list the live pawn uses (hand_r / weapon sockets).
+	if (CachedWeaponBone.IsNone())
+	{
+		static const FName Candidates[] = {
+			TEXT("hand_rSocket"), TEXT("weapon_r"), TEXT("WeaponPoint"),
+			TEXT("hand_r"), TEXT("Hand_R"), TEXT("RightHand"),
+			TEXT("ik_hand_gun"), TEXT("ik_hand_r"), TEXT("HandR"),
+		};
+		for (const FName& N : Candidates)
+		{
+			if (BaseMesh->DoesSocketExist(N) || BaseMesh->GetBoneIndex(N) != INDEX_NONE)
+			{
+				CachedWeaponBone = N;
+				break;
+			}
+		}
+	}
+	if (!CachedWeaponBone.IsNone())
+	{
+		WeaponMeshComp->AttachToComponent(BaseMesh,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale, CachedWeaponBone);
+		// Two-hand combat ready in hand_r space (pairs with AS_Rifle_Idle): stock into the
+		// shoulder plane, barrel level/forward — not the casual one-hand hang used for live TP.
+		// Bandit hand_r: +Y is roughly palm-forward; mesh +Y is barrel-forward on our catalog guns.
+		WeaponMeshComp->SetRelativeLocation(FVector(2.f, 12.f, 3.f));
+		WeaponMeshComp->SetRelativeRotation(FRotator(-8.f, 95.f, 8.f));
+		WeaponMeshComp->SetRelativeScale3D(FVector(0.9f));
+	}
+	else
+	{
+		// Across-chest ready if the body has no hand bone.
+		WeaponMeshComp->AttachToComponent(BaseMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		WeaponMeshComp->SetRelativeLocation(FVector(12.f, 18.f, 35.f));
+		WeaponMeshComp->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
+		WeaponMeshComp->SetRelativeScale3D(FVector(0.9f));
 	}
 }
 

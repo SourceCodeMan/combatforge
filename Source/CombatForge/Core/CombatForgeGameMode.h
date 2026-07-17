@@ -137,11 +137,17 @@ protected:
 	/** 4 ammo barrels at random field spots each combat start (refill mag+reserve). */
 	void SpawnAmmoBarrels();
 	void DestroyAmmoBarrels();
+	/** Mid-field floating bomb charge (not spawn-default — pick up with F, plant with G). */
+	void SpawnBombPickup();
+	void DestroyBombPickup();
+	void RespawnBombPickup();   // timer callback: put another charge at center after pickup delay
 
 public:
 	/** Server: plant a demolition bomb on a structural build piece (validated: combat-live, piece exists,
-	 *  structural, one bomb per piece, one active bomb per planter). Called from the pawn's ServerPlantBomb. */
+	 *  structural, one bomb per piece, planter is carrying a charge). Called from the pawn's ServerPlantBomb. */
 	void ServerTryPlantBomb(class ACombatForgeCharacter* Planter, uint16 PieceId);
+	/** Pickup claimed — hide it and schedule a new one after 5 s. */
+	void NotifyBombPickupTaken();
 
 protected:
 	void DestroyBombs();
@@ -228,6 +234,9 @@ protected:
 
 	UPROPERTY() TArray<TObjectPtr<class APFAmmoBarrel>> AmmoBarrels;
 	UPROPERTY() TArray<TObjectPtr<class APFBombActor>> ActiveBombs;   // live demolition bombs (combat only)
+	UPROPERTY() TObjectPtr<class APFBombPickup> BombPickup;           // mid-field floating charge (one at a time)
+	FTimerHandle BombPickupRespawnHandle;
+	static constexpr float BombPickupRespawnSec = 5.f;
 
 	// Effective match scaling (T15), computed at Lobby→Build from connected team sizes:
 	uint8 EffectiveRoundWinsToTake = 4;

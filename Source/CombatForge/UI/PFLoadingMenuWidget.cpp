@@ -270,7 +270,7 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 
 	AddHowToLine(Box, TEXT("COMBAT"), 14, true, Head);
 	AddHowToLine(Box, TEXT("LMB fire · RMB aim · V fire mode · R reload · F refill at barrels · E frag · Q smoke · B melee · Scroll pistol"), 12, false, Key);
-	AddHowToLine(Box, TEXT("G plant a breach bomb on a build piece (15s fuse) · enemies HOLD F 8s to defuse · boom removes that piece for the match"), 12, false, Key);
+	AddHowToLine(Box, TEXT("Mid-field floating BOMB — F to grab · G plant on a build piece (15s fuse) · enemies HOLD F 8s to defuse · boom removes that piece for the match"), 12, false, Key);
 	AddHowToLine(Box, TEXT("OUT at 3 head, 5 chest, 8 limb, or 10 total hits (HUD pips + H/C/L). Showdown: one hit."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD"), 14, true, Head);
@@ -481,12 +481,14 @@ void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 	if (TabCharacter)     { TabCharacter->SetBackgroundColor(ActiveMenuTab == 3 ? Hot : Cold); }
 	if (OptionsTabButton) { OptionsTabButton->SetBackgroundColor(ActiveMenuTab == 4 ? Hot : Cold); }
 
-	// Only run the render-target capture while the CHARACTER tab is visible.
-	if (ActiveMenuTab == 3)
+	// Live character+gun studio while CHARACTER (or LOADOUT) is open — same preview model both places.
+	if (ActiveMenuTab == 2 || ActiveMenuTab == 3)
 	{
 		EnsureCharPreview();
 		if (CharPreviewActor != nullptr)
 		{
+			CharPreviewActor->ApplyConfig(CharConfig);
+			CharPreviewActor->ApplyWeapon(WeaponConfig);
 			CharPreviewActor->SetPreviewActive(true);
 		}
 	}
@@ -532,21 +534,39 @@ void UPFLoadingMenuWidget::OnCrosshairCycle()
 void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 {
 	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
-	Sub->SetText(FText::FromString(TEXT("Local preferences — saved to this PC, applied when you spawn.")));
+	Sub->SetText(FText::FromString(TEXT("Pick a weapon — live preview on the right. Saved to this class slot.")));
 	Sub->SetFont(PFLoadFont(13, false));
 	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
 	Sub->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Sub))
 	{
-		V->SetPadding(FMargin(0.f, 4.f, 0.f, 16.f));
+		V->SetPadding(FMargin(0.f, 4.f, 0.f, 12.f));
 		V->SetHorizontalAlignment(HAlign_Center);
 	}
 
-	BuildWeaponPicker(Col);   // < Category > / < Weapon > steppers at the top of the loadout
+	// Same 3D studio as CHARACTER: character + selected gun. Drag on the image to turn.
+	UHorizontalBox* Body = WidgetTree->ConstructWidget<UHorizontalBox>();
+	LoadoutPreviewImage = WidgetTree->ConstructWidget<UImage>();
+	LoadoutPreviewImage->SetColorAndOpacity(FLinearColor::White);
+	LoadoutPreviewImage->SetVisibility(ESlateVisibility::Visible);
+	USizeBox* PreviewSizer = WidgetTree->ConstructWidget<USizeBox>();
+	PreviewSizer->SetWidthOverride(280.f);
+	PreviewSizer->SetHeightOverride(360.f);
+	PreviewSizer->SetContent(LoadoutPreviewImage);
+	if (UHorizontalBoxSlot* H = Body->AddChildToHorizontalBox(PreviewSizer))
+	{
+		H->SetPadding(FMargin(4.f, 0.f, 12.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+	UVerticalBox* Right = WidgetTree->ConstructWidget<UVerticalBox>();
+	if (UHorizontalBoxSlot* H = Body->AddChildToHorizontalBox(Right))
+	{
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+	BuildWeaponPicker(Right);
 
-	// (No MARKER preset row — mag size / ROF / accuracy are per-weapon in the catalog now; the preset was a lie.)
-
-	// Crosshair row
+	// Crosshair row (local pref, not per-weapon)
 	{
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
@@ -571,25 +591,30 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 			H->SetPadding(FMargin(8.f, 0.f));
 		}
-		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Row))
+		if (UVerticalBoxSlot* V = Right->AddChildToVerticalBox(Row))
 		{
-			V->SetPadding(FMargin(40.f, 6.f));
+			V->SetPadding(FMargin(24.f, 8.f, 8.f, 0.f));
 			V->SetHorizontalAlignment(HAlign_Fill);
 		}
 	}
 
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Body))
+	{
+		V->SetPadding(FMargin(0.f, 4.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+
 	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
-	Hint->SetText(FText::FromString(TEXT("Click a row to cycle · saved instantly · team color is fixed")));
+	Hint->SetText(FText::FromString(TEXT("Drag the preview to rotate · weapon saved to this class slot")));
 	Hint->SetFont(PFLoadFont(12, false));
 	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
 	Hint->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Hint))
 	{
-		V->SetPadding(FMargin(0.f, 16.f, 0.f, 0.f));
+		V->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
 		V->SetHorizontalAlignment(HAlign_Center);
 	}
 
-	// Seed working values from saved prefs + paint the labels.
 	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
 	RefreshLoadoutLabels();
 }
@@ -701,6 +726,16 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 	if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()))
 	{
 		Char->ReapplyWeaponLoadout();
+	}
+	// Menu studio: show the selected gun in the character's hand (same model as the CHARACTER tab).
+	EnsureCharPreview();
+	if (CharPreviewActor != nullptr)
+	{
+		CharPreviewActor->ApplyWeapon(WeaponConfig);
+		if (ActiveMenuTab == 2 || ActiveMenuTab == 3)
+		{
+			CharPreviewActor->SetPreviewActive(true);
+		}
 	}
 	RefreshWeaponLabels();
 }
@@ -917,6 +952,7 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 	if (CharPreviewActor != nullptr)
 	{
 		CharPreviewActor->ApplyConfig(CharConfig);
+		CharPreviewActor->ApplyWeapon(WeaponConfig);
 	}
 	RefreshCharacterLabels();
 	RefreshWeaponLabels();
@@ -966,14 +1002,21 @@ void UPFLoadingMenuWidget::EnsureCharPreview()
 		return;
 	}
 	CharPreviewActor->ApplyConfig(CharConfig);
-	if (CharPreviewImage != nullptr && CharPreviewActor->GetRenderTarget() != nullptr)
+	CharPreviewActor->ApplyWeapon(WeaponConfig);
+	auto BindPreview = [this](UImage* Img, float W, float H)
 	{
+		if (Img == nullptr || CharPreviewActor == nullptr || CharPreviewActor->GetRenderTarget() == nullptr)
+		{
+			return;
+		}
 		FSlateBrush Brush;
 		Brush.SetResourceObject(CharPreviewActor->GetRenderTarget());
-		Brush.ImageSize = FVector2D(300.f, 400.f);
+		Brush.ImageSize = FVector2D(W, H);
 		Brush.DrawAs = ESlateBrushDrawType::Image;
-		CharPreviewImage->SetBrush(Brush);
-	}
+		Img->SetBrush(Brush);
+	};
+	BindPreview(CharPreviewImage, 300.f, 400.f);
+	BindPreview(LoadoutPreviewImage, 280.f, 360.f);
 }
 
 void UPFLoadingMenuWidget::NotifyCharSlotStep(int32 SlotIdx, int32 Dir)
@@ -1757,15 +1800,19 @@ void UPFLoadingMenuWidget::NativeDestruct()
 FReply UPFLoadingMenuWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
 	// Start a rotate-drag only if the press lands on the character preview.
-	if (ActiveMenuTab == 3 && CharPreviewActor != nullptr && CharPreviewImage != nullptr
+	if ((ActiveMenuTab == 2 || ActiveMenuTab == 3) && CharPreviewActor != nullptr
 		&& InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
-		const FGeometry& ImgGeo = CharPreviewImage->GetCachedGeometry();
-		if (ImgGeo.IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+		UImage* Img = (ActiveMenuTab == 2) ? LoadoutPreviewImage.Get() : CharPreviewImage.Get();
+		if (Img != nullptr)
 		{
-			bPreviewDragging = true;
-			PreviewDragLastX = InMouseEvent.GetScreenSpacePosition().X;
-			return FReply::Handled().CaptureMouse(TakeWidget());
+			const FGeometry& ImgGeo = Img->GetCachedGeometry();
+			if (ImgGeo.IsUnderLocation(InMouseEvent.GetScreenSpacePosition()))
+			{
+				bPreviewDragging = true;
+				PreviewDragLastX = InMouseEvent.GetScreenSpacePosition().X;
+				return FReply::Handled().CaptureMouse(TakeWidget());
+			}
 		}
 	}
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);

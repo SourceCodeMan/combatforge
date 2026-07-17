@@ -73,9 +73,9 @@ protected:
 	// Kid-test difficulty: Skill picks the numbers in ApplySkill(); ReactionDelay is the "notice" gap
 	// before a freshly-acquired target may be fired on. Default Rookie = easy bots for the kids' session.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") EPFBotSkill Skill = EPFBotSkill::Rookie;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ReactionDelay = 0.6f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ReactionDelay = 0.44f;  // notice gap before fire (ApplySkill overrides; ~25% slower acquire)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float CombatMemorySec = 1.5f;   // still "in combat" this long after last engageable contact → no reaction re-arm
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimTurnRate = 2.5f;      // control-rotation ease speed (low = laggy aim, misses strafers)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimTurnRate = 1.875f;    // control-rotation ease speed (low = laggy aim; ApplySkill overrides)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float AimJitterInterval = 0.6f;// how often the random aim error is re-rolled
 
 	// Close-quarters engagement: a bot must reliably turn on + hit an enemy in its face. Inside PointBlankUU an

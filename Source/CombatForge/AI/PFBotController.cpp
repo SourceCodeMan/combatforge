@@ -174,15 +174,15 @@ void APFBotController::ApplySkill()
 	// Skill difficulty comes from aim error / turn rate / reaction, not from refusing to fire at distance.
 	switch (Effective)
 	{
-	// Reaction gaps cut ~40-50% (playtest: bots felt sluggish to notice you). Difficulty separation now leans
-	// harder on aim error / turn rate than on the notice delay.
+	// Aim acquire ~25% slower than prior (Tom 2026-07-17: bots felt OP) — turn rate ×0.75, reaction ×1.25.
+	// Difficulty still separates mainly on aim error / turn rate; engage ranges stay cross-map.
 	case EPFBotSkill::Rookie:
-		AimErrorDeg = 14.f;  AimTurnRate = 2.5f;  ReactionDelay = 0.35f;  EngageRangeUU = 7000.f;  break;
+		AimErrorDeg = 14.f;  AimTurnRate = 1.875f;  ReactionDelay = 0.44f;  EngageRangeUU = 7000.f;  break;
 	case EPFBotSkill::Sharpshooter:
-		AimErrorDeg = 1.5f;  AimTurnRate = 11.f;  ReactionDelay = 0.07f;  EngageRangeUU = 8500.f;  break;
+		AimErrorDeg = 1.5f;  AimTurnRate = 8.25f;   ReactionDelay = 0.09f;  EngageRangeUU = 8500.f;  break;
 	case EPFBotSkill::Regular:
 	default:
-		AimErrorDeg = 4.5f;  AimTurnRate = 6.5f;  ReactionDelay = 0.16f;  EngageRangeUU = 8000.f;  break;
+		AimErrorDeg = 4.5f;  AimTurnRate = 4.875f;  ReactionDelay = 0.20f;  EngageRangeUU = 8000.f;  break;
 	}
 }
 

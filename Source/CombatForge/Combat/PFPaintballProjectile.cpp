@@ -87,14 +87,15 @@ APFPaintballProjectile::APFPaintballProjectile()
 }
 
 void APFPaintballProjectile::InitProjectile(const FVector& Origin, const FVector& SpreadedDir,
-	uint8 Team, bool bAuthoritative, UPFWeaponComponent* SourceWeapon, uint32 ShotIndex)
+	uint8 Team, bool bAuthoritative, UPFWeaponComponent* SourceWeapon, uint32 ShotIndex,
+	bool bIgnoreShooter)
 {
 	TeamId = Team;
 	ShotIndexStored = ShotIndex;
 	bAuthoritativeMode = bAuthoritative;
 	SourceWeaponWeak = SourceWeapon;
 	// Prefer the weapon owner; fall back to Instigator so weaponless sources (bomb after planter
-	// recycled) still credit the right shooter and ignore them for self-splat.
+	// recycled) still credit the right shooter.
 	ShooterActorWeak = SourceWeapon ? SourceWeapon->GetOwner() : GetInstigator();
 
 	// Ballistic numbers come from the weapon config so a data-only tune reaches both modes.
@@ -128,11 +129,15 @@ void APFPaintballProjectile::InitProjectile(const FVector& Origin, const FVector
 		BallMID->SetVectorParameterValue(TEXT("Color"), PFColors::ForTeam(Team) * EmissiveBoost);
 	}
 
-	// No self-splat, ever (04 §2.4): shooter rides the ignore list in both modes.
+	// Live-fire never self-splats (04 §2.4). Breach-bomb BBs pass bIgnoreShooter=false so the
+	// planter can be painted by their own charge (standing on a planted bomb was a free lunch).
 	CollisionComp->ClearMoveIgnoreActors();
-	if (AActor* Shooter = ShooterActorWeak.Get())
+	if (bIgnoreShooter)
 	{
-		CollisionComp->IgnoreActorWhenMoving(Shooter, true);
+		if (AActor* Shooter = ShooterActorWeak.Get())
+		{
+			CollisionComp->IgnoreActorWhenMoving(Shooter, true);
+		}
 	}
 
 	if (bAuthoritativeMode)
@@ -246,9 +251,12 @@ void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 	if (VictimHealth != nullptr && !VictimHealth->bEliminated)
 	{
 		const uint8 VictimTeam = VictimTeamOf(HitActor);
-		if (VictimTeam != 255 && VictimTeam == TeamId)
+		// B12: teammates are immune — but the SHOOTER themselves can still be tagged (own grenade /
+		// breach charge self-risk). Without this exception a planter standing on their bomb took 0 dmg.
+		const bool bHitSelf = (HitActor != nullptr && HitActor == ShooterActorWeak.Get());
+		if (VictimTeam != 255 && VictimTeam == TeamId && !bHitSelf)
 		{
-			// Friendly fire (B12): cosmetic splat only — no damage, no hit event, no hitmarker.
+			// Friendly fire: cosmetic splat only — no damage, no hit event, no hitmarker.
 			if (Weapon != nullptr)
 			{
 				Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);

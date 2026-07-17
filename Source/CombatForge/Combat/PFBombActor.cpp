@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "Building/PFBuildGrid.h"
+#include "Building/PFGridMath.h"
 #include "Combat/PFCombatAudio.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFPaintballProjectile.h"
@@ -14,8 +15,10 @@
 #include "Core/CombatForgeTypes.h"
 #include "Player/CombatForgeCharacter.h"
 
+#include "CollisionQueryParams.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -23,6 +26,7 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UObject/SoftObjectPath.h"
 
 APFBombActor::APFBombActor()
 {
@@ -37,7 +41,8 @@ APFBombActor::APFBombActor()
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(Root);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Mesh->SetCastShadow(false);
+	Mesh->SetCastShadow(true);
+	// Hard CDO fallback only — SoftLoadMesh swaps in the Bandits grenade when content is present.
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (CylFinder.Succeeded())
 	{
@@ -64,19 +69,53 @@ void APFBombActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(APFBombActor, bDetonated);
 	DOREPLIFETIME(APFBombActor, bArmed);
 	DOREPLIFETIME(APFBombActor, BurstSeed);
+	DOREPLIFETIME(APFBombActor, BurstAxis);
 }
 
 void APFBombActor::BeginPlay()
 {
 	Super::BeginPlay();
-	// Danger-red body via the verified BasicShapeMaterial "Color" param (module boot-checks it exists).
-	if (Mesh)
+	SoftLoadMesh();
+}
+
+void APFBombActor::SoftLoadMesh()
+{
+	if (!Mesh)
 	{
-		if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+		return;
+	}
+	// Planted charge = real bomb mesh from the Modern Weapons pack (Explosives), not a throwable grenade.
+	// Fallbacks only if the pack is missing from Content/.
+	const TCHAR* Paths[] = {
+		TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Explosives/01/SM_Modern_Weapons_Explosive_01.SM_Modern_Weapons_Explosive_01"),
+		TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Explosives/02/SM_Modern_Weapons_Explosive_02.SM_Modern_Weapons_Explosive_02"),
+		TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Explosives/03/SM_Modern_Weapons_Explosive_03.SM_Modern_Weapons_Explosive_03"),
+		TEXT("/Game/Bandits/Mesh/Weapon/Hand_Granate/SM_Hand_Granate.SM_Hand_Granate"),
+	};
+	for (const TCHAR* Path : Paths)
+	{
+		if (UStaticMesh* M = Cast<UStaticMesh>(FSoftObjectPath(Path).TryLoad()))
 		{
-			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.55f, 0.04f, 0.03f));
+			Mesh->SetStaticMesh(M);
+			// Scale so the tallest axis ≈ 70 uu — C4/charge sized, readable on a wall cell.
+			const FBoxSphereBounds B = M->GetBounds();
+			const float MaxDim = FMath::Max3(B.BoxExtent.X, B.BoxExtent.Y, B.BoxExtent.Z) * 2.f;
+			const float Sc = 70.f / FMath::Max(MaxDim, 1.f);
+			Mesh->SetRelativeScale3D(FVector(Sc));
+			// Center the mesh on the bomb actor (piece AABB center) so dual-side burst still lines up.
+			Mesh->SetRelativeLocation(FVector(-B.Origin.X * Sc, -B.Origin.Y * Sc, -B.Origin.Z * Sc));
+			// Keep authored materials — no BasicShape "Color" override.
+			UE_LOG(CombatForgeLog, Log, TEXT("Bomb: skinned with %s (scale %.2f)"), Path, Sc);
+			return;
 		}
 	}
+	// Cylinder fallback: danger-red via the verified BasicShapeMaterial "Color" param.
+	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+	{
+		MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.55f, 0.04f, 0.03f));
+	}
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("Bomb: Modern Weapons Explosive meshes missing — using red cylinder fallback"));
 }
 
 void APFBombActor::ServerArm(APFBuildGrid* Grid, uint16 PieceId, const FVector& WorldLoc,
@@ -184,6 +223,7 @@ void APFBombActor::UpdateLabel()
 		// Tint from the REPLICATED team here (not just in server-side ServerArm) so clients see it too.
 		CountdownText->SetTextRenderColor(PFColors::ForTeam(PlanterTeam).ToFColor(true));
 	}
+	float FuseRemain = FuseSeconds;
 	if (GS)
 	{
 		if (DefuseAccumSeconds > 0.05f)
@@ -194,13 +234,22 @@ void APFBombActor::UpdateLabel()
 		}
 		else
 		{
-			const int32 Secs = FMath::Max(0, FMath::CeilToInt(DetonateServerTime - GS->GetServerWorldTimeSeconds()));
+			FuseRemain = FMath::Max(0.f, DetonateServerTime - GS->GetServerWorldTimeSeconds());
+			const int32 Secs = FMath::CeilToInt(FuseRemain);
 			CountdownText->SetText(FText::FromString(FString::Printf(TEXT("BOMB  %d"), Secs)));
 		}
 	}
-	// Face the local viewer so the countdown reads from any angle (cosmetic, per-machine).
-	if (const APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr)
+	// Fuse timer spins a full 360° over the 15 s fuse (elapsed fraction of FuseSeconds).
+	// Defusing freezes the spin so the player can still read the % label.
+	if (DefuseAccumSeconds <= 0.05f)
 	{
+		const float Elapsed = FMath::Clamp(FuseSeconds - FuseRemain, 0.f, FuseSeconds);
+		const float SpinYaw = (Elapsed / FuseSeconds) * 360.f;
+		CountdownText->SetWorldRotation(FRotator(0.f, SpinYaw, 0.f));
+	}
+	else if (const APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr)
+	{
+		// While defusing: face the local viewer so the % reads cleanly.
 		FVector CamLoc; FRotator CamRot;
 		PC->GetPlayerViewPoint(CamLoc, CamRot);
 		const FVector ToCam = CamLoc - CountdownText->GetComponentLocation();
@@ -214,8 +263,19 @@ void APFBombActor::ServerDetonate()
 	{
 		return;
 	}
-	// Seed BEFORE flipping bDetonated so the OnRep bunch carries a matching BurstSeed for client tracers.
+	// Resolve face axis WHILE the piece still exists so dual-side origins match the real wall/floor plane.
+	FVector Axis = FVector::UpVector;
+	if (APFBuildGrid* Grid = GridWeak.Get())
+	{
+		FPFBuildPieceRec Rec;
+		if (Grid->FindPieceById(TargetPieceId, Rec))
+		{
+			Axis = FaceAxisForPiece(Rec.Type, Rec.Rot);
+		}
+	}
+	// Seed + axis BEFORE flipping bDetonated so the OnRep bunch carries matching dual-origin data for tracers.
 	BurstSeed = static_cast<uint32>(FMath::Rand()) ^ (GetUniqueID() * 2654435761u);
+	BurstAxis = Axis;
 	bDetonated = true;
 	// Belt-and-braces phase guard: only remove the piece while the match is still in COMBAT. If a phase
 	// transition raced the fuse (bombs are normally destroyed at Combat exit), detonating into a cleared /
@@ -228,13 +288,13 @@ void APFBombActor::ServerDetonate()
 			Grid->ServerRemovePieceForMatch(TargetPieceId);   // also clears the piece's bomb registry entry
 		}
 	}
-	// Same radial BB burst as the frag grenade (cover blocks, teammates immune) — 300 pellets for a
-	// breach charge so anyone camping the wall gets painted when it goes.
+	// Proximity paint is instant (cheap). BB spray is multi-frame so detonation never hitch-spawns 1000 actors.
 	const FVector At = GetActorLocation();
-	SpawnFragBurst(At, BurstSeed);
+	ApplyProximityPaint(At);
+	BeginFragBurst(At);
 	PlayDetonationLocal();   // host cosmetics/audio; clients replay via OnRep_Detonated
 	ForceNetUpdate();
-	SetLifeSpan(0.8f);       // linger long enough for the OnRep to land on clients
+	// Actor must outlive the batched burst (~13 frames) + OnRep delivery; Destroy when the spray finishes.
 }
 
 void APFBombActor::ServerDefused()
@@ -244,6 +304,7 @@ void APFBombActor::ServerDefused()
 		return;
 	}
 	GetWorldTimerManager().ClearTimer(FuseTimer);
+	GetWorldTimerManager().ClearTimer(BurstTimer);
 	if (APFBuildGrid* Grid = GridWeak.Get())
 	{
 		Grid->ClearPieceBomb(TargetPieceId);
@@ -268,7 +329,7 @@ void APFBombActor::PlayDetonationLocal()
 	// Host already has the authoritative BB spray as its visual; only remote clients need cosmetics.
 	if (!HasAuthority())
 	{
-		SpawnCosmeticFragBurst(At, BurstSeed);
+		SpawnCosmeticFragBurst(At, BurstAxis, BurstSeed);
 	}
 	// Boom audio through the LOCAL player's combat audio (the grenade detonation pattern).
 	const UWorld* World = GetWorld();
@@ -283,53 +344,173 @@ void APFBombActor::PlayDetonationLocal()
 	}
 }
 
-void APFBombActor::SpawnFragBurst(const FVector& At, uint32 Seed)
+FVector APFBombActor::FaceAxisForPiece(EPFPieceType Type, uint8 Rot)
+{
+	switch (Type)
+	{
+	case EPFPieceType::Wall:
+		// N edge (rot 0): plane in XZ → both rooms along ±Y. E edge (rot 1): plane in YZ → ±X.
+		return (Rot == 1) ? FVector(1.f, 0.f, 0.f) : FVector(0.f, 1.f, 0.f);
+	case EPFPieceType::Floor:
+	case EPFPieceType::Roof:
+		return FVector(0.f, 0.f, 1.f);
+	case EPFPieceType::Ramp:
+	{
+		// Ascent along Rot×90° (0=+X,1=+Y,2=-X,3=-Y). "Both sides" of the plank = horizontal
+		// left/right of the run so rooms on either side of the ramp get hit.
+		const FVector Along = FRotator(0.f, static_cast<float>(Rot) * 90.f, 0.f).Vector();
+		const FVector Side(-Along.Y, Along.X, 0.f);
+		return Side.GetSafeNormal();
+	}
+	default:
+		return FVector(0.f, 0.f, 1.f);
+	}
+}
+
+void APFBombActor::BeginFragBurst(const FVector& Center)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	BurstCenter = Center;
+	BurstNextIndex = 0;
+	BurstWeaponWeak.Reset();
+	BurstPlanterPawnWeak.Reset();
+	if (ACombatForgePlayerState* PS = PlanterPS.Get())
+	{
+		if (APawn* PlanterPawn = PS->GetPawn())
+		{
+			BurstPlanterPawnWeak = PlanterPawn;
+			if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PlanterPawn))
+			{
+				BurstWeaponWeak = Char->GetWeapon();
+			}
+		}
+	}
+	// First batch on the detonation frame (instant spray start); remainder on a ~1-frame timer.
+	SpawnFragBurstBatch();
+	if (BurstNextIndex < FragBBCount)
+	{
+		GetWorldTimerManager().SetTimer(BurstTimer, this, &APFBombActor::SpawnFragBurstBatch,
+			BurstBatchInterval, /*bLoop=*/true);
+	}
+}
+
+void APFBombActor::SpawnFragBurstBatch()
 {
 	UWorld* World = GetWorld();
 	if (World == nullptr || !HasAuthority())
 	{
+		GetWorldTimerManager().ClearTimer(BurstTimer);
 		return;
 	}
 
-	// Damage/splat routing needs a live weapon component (ResolveAuthoritativeImpact early-outs without
-	// one). Prefer the planter's current pawn — after a mid-fuse respawn that is the new loadout weapon.
-	UPFWeaponComponent* SrcWeapon = nullptr;
-	APawn* PlanterPawn = nullptr;
-	if (ACombatForgePlayerState* PS = PlanterPS.Get())
-	{
-		PlanterPawn = PS->GetPawn();
-		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PlanterPawn))
-		{
-			SrcWeapon = Char->GetWeapon();
-		}
-	}
+	APawn* PlanterPawn = BurstPlanterPawnWeak.Get();
+	UPFWeaponComponent* SrcWeapon = BurstWeaponWeak.Get();
+	const FVector Axis = BurstAxis.GetSafeNormal();
+	const FVector Origins[3] = {
+		BurstCenter + Axis * BurstSideOffsetUU,
+		BurstCenter - Axis * BurstSideOffsetUU,
+		BurstCenter,
+	};
 
-	FRandomStream Stream(Seed);
-	for (int32 i = 0; i < FragBBCount; ++i)
+	const int32 End = FMath::Min(BurstNextIndex + BurstBatchSize, FragBBCount);
+	for (int32 i = BurstNextIndex; i < End; ++i)
 	{
-		FVector Dir = Stream.VRand();
-		if (Dir.Z < 0.f)
-		{
-			Dir.Z = -Dir.Z * 0.5f;   // bias lower hemisphere upward so BBs spray out, not into the floor
-		}
-		Dir = Dir.GetSafeNormal();
+		// Per-index stream so batches stay deterministic without replaying prior VRands.
+		FRandomStream Stream(BurstSeed + static_cast<uint32>(i) * 2654435761u + 1u);
+		const FVector Dir = Stream.VRand().GetSafeNormal();
+		const FVector Origin = Origins[i % 3];
 
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		Params.Owner = PlanterPawn ? static_cast<AActor*>(PlanterPawn) : this;
 		Params.Instigator = PlanterPawn;
 		APFPaintballProjectile* BB = World->SpawnActor<APFPaintballProjectile>(
-			APFPaintballProjectile::StaticClass(), At, Dir.Rotation(), Params);
+			APFPaintballProjectile::StaticClass(), Origin, Dir.Rotation(), Params);
 		if (BB != nullptr)
 		{
-			// Distinct high ShotIndex space so bomb hitmarkers don't collide with live-fire indices.
-			BB->InitProjectile(At, Dir, PlanterTeam, /*bAuthoritative=*/true, SrcWeapon,
-				Seed + static_cast<uint32>(i) + 1u);
+			BB->InitProjectile(Origin, Dir, PlanterTeam, /*bAuthoritative=*/true, SrcWeapon,
+				BurstSeed + static_cast<uint32>(i) + 1u, /*bIgnoreShooter=*/false);
 		}
+	}
+	BurstNextIndex = End;
+
+	if (BurstNextIndex >= FragBBCount)
+	{
+		GetWorldTimerManager().ClearTimer(BurstTimer);
+		// Spray done — linger briefly so late OnReps still fire cosmetics, then go.
+		SetLifeSpan(0.6f);
 	}
 }
 
-void APFBombActor::SpawnCosmeticFragBurst(const FVector& At, uint32 Seed)
+void APFBombActor::ApplyProximityPaint(const FVector& Center)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || !HasAuthority())
+	{
+		return;
+	}
+	APawn* PlanterPawn = nullptr;
+	if (ACombatForgePlayerState* PS = PlanterPS.Get())
+	{
+		PlanterPawn = PS->GetPawn();
+	}
+
+	TArray<FOverlapResult> Overlaps;
+	FCollisionObjectQueryParams ObjParams;
+	ObjParams.AddObjectTypesToQuery(ECC_Pawn);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PFBombProximity), /*bTraceComplex=*/false, this);
+	if (!World->OverlapMultiByObjectType(Overlaps, Center, FQuat::Identity,
+			ObjParams, FCollisionShape::MakeSphere(ProximityPaintRadiusUU), Params))
+	{
+		return;
+	}
+
+	for (const FOverlapResult& O : Overlaps)
+	{
+		AActor* HitActor = O.GetActor();
+		if (!HitActor)
+		{
+			continue;
+		}
+		UPFHealthComponent* Health = HitActor->FindComponentByClass<UPFHealthComponent>();
+		if (!Health || Health->bEliminated)
+		{
+			continue;
+		}
+		// Teammates other than the planter stay immune (B12). Planter self-risk + enemies take the hit.
+		const bool bIsPlanter = (HitActor == PlanterPawn);
+		if (ACombatForgeCharacter* Vic = Cast<ACombatForgeCharacter>(HitActor))
+		{
+			if (const ACombatForgePlayerState* VPS = Vic->GetPlayerState<ACombatForgePlayerState>())
+			{
+				if (VPS->TeamId == PlanterTeam && !bIsPlanter)
+				{
+					continue;
+				}
+			}
+		}
+
+		FPFPaintHitInfo PaintHit;
+		if (PlanterPawn)
+		{
+			PaintHit.ShooterPS = PlanterPawn->GetPlayerState<ACombatForgePlayerState>();
+		}
+		PaintHit.ShooterTeam = PlanterTeam;
+		PaintHit.ImpactPoint = HitActor->GetActorLocation();
+		PaintHit.ImpactNormal = (HitActor->GetActorLocation() - Center).GetSafeNormal();
+		if (PaintHit.ImpactNormal.IsNearlyZero())
+		{
+			PaintHit.ImpactNormal = FVector::UpVector;
+		}
+		PaintHit.ServerTime = static_cast<float>(World->GetTimeSeconds());
+		Health->ApplyPaintHit(PaintHit);
+	}
+}
+
+void APFBombActor::SpawnCosmeticFragBurst(const FVector& Center, const FVector& FaceAxis, uint32 Seed)
 {
 	UWorld* World = GetWorld();
 	if (World == nullptr)
@@ -341,20 +522,24 @@ void APFBombActor::SpawnCosmeticFragBurst(const FVector& At, uint32 Seed)
 	{
 		return;   // dedicated/non-rendering world
 	}
-	// SAME seed + SAME bias as SpawnFragBurst so cosmetic tracers line up with the authoritative BBs.
-	// Cosmetic pool is 64 — extras re-use slots (same tradeoff as the frag grenade).
-	FRandomStream Stream(Seed);
-	for (int32 i = 0; i < FragBBCount; ++i)
+	// Cap at the cosmetic pool size — looping FragBBCount (1000) Acquire calls hitch remotes for no gain.
+	const FVector Axis = FaceAxis.GetSafeNormal();
+	const FVector Origins[3] = {
+		Center + Axis * BurstSideOffsetUU,
+		Center - Axis * BurstSideOffsetUU,
+		Center,
+	};
+	const int32 N = FMath::Min(CosmeticTracerCount, FragBBCount);
+	for (int32 c = 0; c < N; ++c)
 	{
-		FVector Dir = Stream.VRand();
-		if (Dir.Z < 0.f)
-		{
-			Dir.Z = -Dir.Z * 0.5f;
-		}
-		Dir = Dir.GetSafeNormal();
+		// Stride through the full index space so cosmetics sample the same dual-side sphere as the server.
+		const int32 i = (c * FragBBCount) / N;
+		FRandomStream Stream(Seed + static_cast<uint32>(i) * 2654435761u + 1u);
+		const FVector Dir = Stream.VRand().GetSafeNormal();
+		const FVector Origin = Origins[i % 3];
 		if (APFPaintballProjectile* Ball = Splats->AcquireCosmeticProjectile())
 		{
-			Ball->InitProjectile(At, Dir, PlanterTeam, /*bAuthoritative=*/false, /*SourceWeapon=*/nullptr,
+			Ball->InitProjectile(Origin, Dir, PlanterTeam, /*bAuthoritative=*/false, /*SourceWeapon=*/nullptr,
 				Seed + static_cast<uint32>(i) + 1u);
 		}
 	}
@@ -363,5 +548,6 @@ void APFBombActor::SpawnCosmeticFragBurst(const FVector& At, uint32 Seed)
 void APFBombActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(FuseTimer);
+	GetWorldTimerManager().ClearTimer(BurstTimer);
 	Super::EndPlay(EndPlayReason);
 }

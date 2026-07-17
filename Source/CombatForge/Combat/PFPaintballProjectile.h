@@ -40,8 +40,10 @@ public:
 	                           // engine-sphere visual, emissive team MID
 
 	// Single init point; caller applies spread to Dir BEFORE calling (shared stream — B3).
+	// bIgnoreShooter=false for breach bombs so the planter can be tagged by their own charge.
 	void InitProjectile(const FVector& Origin, const FVector& SpreadedDir, uint8 Team,
-	                    bool bAuthoritative, UPFWeaponComponent* SourceWeapon, uint32 ShotIndex);
+	                    bool bAuthoritative, UPFWeaponComponent* SourceWeapon, uint32 ShotIndex,
+	                    bool bIgnoreShooter = true);
 
 	virtual void Tick(float DeltaSeconds) override;
 

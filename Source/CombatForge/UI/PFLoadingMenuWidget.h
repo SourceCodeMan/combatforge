@@ -266,7 +266,8 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> CharSlotValueTexts;
 	UPROPERTY() TArray<TObjectPtr<UPFCharSaveSlotButton>> SaveSlotButtons;   // the 5 create-a-class slots
 	int32 ActiveSaveSlot = 0;
-	UPROPERTY() TObjectPtr<UImage> CharPreviewImage;                       // shows the live 3D render target
+	UPROPERTY() TObjectPtr<UImage> CharPreviewImage;                       // CHARACTER tab: live 3D render target
+	UPROPERTY() TObjectPtr<UImage> LoadoutPreviewImage;                    // LOADOUT tab: same studio (gun in hand)
 	UPROPERTY() TObjectPtr<APFCharacterPreviewActor> CharPreviewActor;     // off-screen studio (lazy-spawned)
 	FPFCharacterConfig CharConfig;
 	bool bPreviewDragging = false;   // left-drag on the preview rotates the character

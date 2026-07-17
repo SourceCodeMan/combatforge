@@ -132,6 +132,21 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetAutoSize(true);
 	}
 
+	// Bomb charge from mid-field pickup (hidden until claimed).
+	BombCarryText = WidgetTree->ConstructWidget<UTextBlock>();
+	BombCarryText->SetText(FText::FromString(TEXT("BOMB · G")));
+	BombCarryText->SetFont(PFCombatFont(15, true));
+	BombCarryText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.35f, 0.12f)));
+	BombCarryText->SetJustification(ETextJustify::Right);
+	BombCarryText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(BombCarryText))
+	{
+		CSlot->SetAnchors(FAnchors(1.f, 1.f));
+		CSlot->SetAlignment(FVector2D(1.f, 1.f));
+		CSlot->SetPosition(FVector2D(-32.f, -128.f));
+		CSlot->SetAutoSize(true);
+	}
+
 	// ---- Top center block: pips / round number / timer / alive counts ----
 	UVerticalBox* TopBox = WidgetTree->ConstructWidget<UVerticalBox>();
 
@@ -719,6 +734,19 @@ void UPFCombatHUDWidget::HandleGrenadeCountChanged(uint8 Frag, uint8 Smoke)
 	GrenadeText->SetText(FText::FromString(FString::Printf(TEXT("FRAG %d   SMOKE %d"), Frag, Smoke)));
 }
 
+void UPFCombatHUDWidget::UpdateBombCarryIndicator()
+{
+	if (!BombCarryText)
+	{
+		return;
+	}
+	const ACombatForgeCharacter* Char = BoundPawn.Get();
+	const bool bShow = (Char != nullptr && Char->IsCarryingBomb());
+	BombCarryText->SetVisibility(bShow
+		? ESlateVisibility::HitTestInvisible
+		: ESlateVisibility::Collapsed);
+}
+
 void UPFCombatHUDWidget::HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint8 LimbHits, uint8 TotalHits)
 {
 	const UPFHealthComponent* Health = BoundHealth.Get();
@@ -1259,6 +1287,7 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 	UpdateBanner(InDeltaTime);
 	UpdateObjectiveStatus();
 	UpdateDominationHUD();
+	UpdateBombCarryIndicator();
 
 	if (const ACombatForgeGameState* GS = BoundGameState.Get())
 	{
