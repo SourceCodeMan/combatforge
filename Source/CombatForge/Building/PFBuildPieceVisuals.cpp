@@ -195,6 +195,13 @@ namespace
 					Slot.FitScale = FVector(Sc, Sc, Sc);
 				}
 			}
+			// Defensive cap: if a mesh's bounds haven't resolved yet (degenerate ~0 extent → MeshSize floored
+			// to 1), FitScale would balloon and render as a giant block. A warehouse prop fit into a ~120–400 uu
+			// footprint from a real-world-scale Megascan never legitimately needs >5×, so clamp per-axis. On a
+			// properly-cooked, up-to-date client this never triggers (real FitScale is ~0.5–2×).
+			Slot.FitScale.X = FMath::Min(Slot.FitScale.X, 5.f);
+			Slot.FitScale.Y = FMath::Min(Slot.FitScale.Y, 5.f);
+			Slot.FitScale.Z = FMath::Min(Slot.FitScale.Z, 5.f);
 		}
 		else
 		{

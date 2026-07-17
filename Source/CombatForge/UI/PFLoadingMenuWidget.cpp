@@ -1658,7 +1658,11 @@ void UPFLoadingMenuWidget::BuildTree()
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(MenuScroll))
 	{
 		S->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
-		S->SetOffsets(FMargin(0.f, 24.f, 0.f, 24.f));
+		// Reserve a bottom band (90px) so scrolled content — the last item is START GAME / QUIT — can never
+		// slide UNDER the floating LinksRow (WEBSITE / DISCORD / COFFEE, ZOrder 2, pinned bottom-center). Before,
+		// at the bottom of a long page START GAME rendered in the same band and the higher-ZOrder link buttons
+		// stole its clicks (offset/dead clickbox). The links stay pinned + clickable; content now stops above them.
+		S->SetOffsets(FMargin(0.f, 24.f, 0.f, 90.f));
 		S->SetZOrder(1);
 	}
 }

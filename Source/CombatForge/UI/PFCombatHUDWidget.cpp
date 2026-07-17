@@ -965,6 +965,26 @@ void UPFCombatHUDWidget::UpdateOutOverlay()
 		Subtitle = TEXT("Waiting to respawn…");
 	}
 
+	// "Who killed who": surface the eliminator's name on our own death board (most recent feed entry that
+	// names us as the victim). The corner kill-feed shows it too, but you're looking here when you die.
+	if (LocalPS && BoundGameState.IsValid())
+	{
+		const ACombatForgeGameState* GS = BoundGameState.Get();
+		const FString LocalName = LocalPS->GetPlayerName();
+		const float Now = GS->GetServerWorldTimeSeconds();
+		for (int32 i = GS->ElimFeed.Num() - 1; i >= 0; --i)
+		{
+			const FPFElimEntry& E = GS->ElimFeed[i];
+			if (E.VictimName == LocalName && (Now - E.ServerTime) < 10.f)
+			{
+				Subtitle = Subtitle.IsEmpty()
+					? FString::Printf(TEXT("Eliminated by %s"), *E.ShooterName)
+					: FString::Printf(TEXT("Eliminated by %s  ·  %s"), *E.ShooterName, *Subtitle);
+				break;
+			}
+		}
+	}
+
 	if (OutSubtitleText)
 	{
 		OutSubtitleText->SetText(FText::FromString(Subtitle));
