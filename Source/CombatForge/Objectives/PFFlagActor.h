@@ -86,6 +86,8 @@ private:
 	TWeakObjectPtr<ACombatForgePlayerState> CarrierPS;
 	FTimerHandle DropReturnTimer;
 
-	/** Seconds on the ground before a dropped flag auto-returns home. */
-	static constexpr float DropReturnDelaySec = 12.f;
+	/** Seconds on the ground before a dropped flag auto-returns home. Tom 2026-07-17: was 12s, which read as
+	 *  "the flag resets when you die". A dropped flag should STAY where the carrier fell (contest it / an ally
+	 *  returns it by touch); this long backstop only recovers a truly-abandoned flag so a match can't soft-lock. */
+	static constexpr float DropReturnDelaySec = 45.f;
 };

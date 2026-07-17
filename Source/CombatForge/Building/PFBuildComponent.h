@@ -38,6 +38,8 @@ public:
 	// ---- Equip state (client-local) ----
 	void EquipTool(EPFBuildTool Tool);   // also the wheel-selection entry point (RootHUD wires it)
 	EPFBuildTool GetEquippedTool() const { return EquippedTool; }
+	/** The tool Dir steps away in the mouse-wheel cycle order (Dir>0 = next / scroll up, Dir<0 = previous). */
+	EPFBuildTool CycleNeighbor(int32 Dir) const;
 
 	// ---- RPC surface (binding) ----
 	UFUNCTION(Server, Reliable) void ServerPlacePiece(EPFPieceType Type, int16 X, int16 Y, int16 Z, uint8 Rot);

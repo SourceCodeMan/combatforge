@@ -60,6 +60,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> ReadyText;
 	UPROPERTY() TObjectPtr<UTextBlock> BudgetText;
 	UPROPERTY() TObjectPtr<UTextBlock> EquippedText;
+	UPROPERTY() TObjectPtr<UTextBlock> PrevPieceText;   // ◄ previous piece (left of the equipped reel)
+	UPROPERTY() TObjectPtr<UTextBlock> NextPieceText;   // next piece ► (right of the equipped reel)
 	UPROPERTY() TObjectPtr<UTextBlock> DenyText;
 	UPROPERTY() TObjectPtr<UTextBlock> HintText;
 

@@ -11,6 +11,8 @@
 #include "Brushes/SlateColorBrush.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
@@ -142,15 +144,44 @@ void UPFBuildHUDWidget::BuildTree()
 		CSlot->SetAutoSize(true);
 	}
 
-	EquippedText = WidgetTree->ConstructWidget<UTextBlock>();
-	EquippedText->SetFont(PFBuildFont(16, false));
-	EquippedText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.85f)));
-	EquippedText->SetJustification(ETextJustify::Right);
-	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(EquippedText))
+	// Bottom-center piece reel — "◄ Prev    CURRENT    Next ►" — so players see which way to scroll to reach
+	// the piece they want (Tom 2026-07-17). Prev/next are dimmer; the equipped piece is bold in the middle.
+	UHorizontalBox* ReelRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+
+	PrevPieceText = WidgetTree->ConstructWidget<UTextBlock>();
+	PrevPieceText->SetFont(PFBuildFont(13, false));
+	PrevPieceText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
+	PrevPieceText->SetJustification(ETextJustify::Right);
+	if (UHorizontalBoxSlot* H = ReelRow->AddChildToHorizontalBox(PrevPieceText))
 	{
-		CSlot->SetAnchors(FAnchors(1.f, 1.f));
-		CSlot->SetAlignment(FVector2D(1.f, 1.f));
-		CSlot->SetPosition(FVector2D(-32.f, -36.f));
+		H->SetVerticalAlignment(VAlign_Center);
+		H->SetPadding(FMargin(0.f, 0.f, 18.f, 0.f));
+	}
+
+	EquippedText = WidgetTree->ConstructWidget<UTextBlock>();
+	EquippedText->SetFont(PFBuildFont(18, true));
+	EquippedText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.95f)));
+	EquippedText->SetJustification(ETextJustify::Center);
+	if (UHorizontalBoxSlot* H = ReelRow->AddChildToHorizontalBox(EquippedText))
+	{
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+
+	NextPieceText = WidgetTree->ConstructWidget<UTextBlock>();
+	NextPieceText->SetFont(PFBuildFont(13, false));
+	NextPieceText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
+	NextPieceText->SetJustification(ETextJustify::Left);
+	if (UHorizontalBoxSlot* H = ReelRow->AddChildToHorizontalBox(NextPieceText))
+	{
+		H->SetVerticalAlignment(VAlign_Center);
+		H->SetPadding(FMargin(18.f, 0.f, 0.f, 0.f));
+	}
+
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(ReelRow))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		CSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		CSlot->SetPosition(FVector2D(0.f, -34.f));
 		CSlot->SetAutoSize(true);
 	}
 
@@ -264,7 +295,15 @@ void UPFBuildHUDWidget::HandleEquippedToolChanged(EPFBuildTool NewTool)
 		EquippedText->SetText(FText::FromString(ToolDisplayName(NewTool)));
 		EquippedText->SetColorAndOpacity(FSlateColor(NewTool == EPFBuildTool::Delete
 			? PFColors::DeleteHighlight
-			: FLinearColor(1.f, 1.f, 1.f, 0.85f)));
+			: FLinearColor(1.f, 1.f, 1.f, 0.95f)));
+	}
+	// Flanking prev/next so you know which way to scroll.
+	if (PrevPieceText && NextPieceText && BoundBuild.IsValid())
+	{
+		PrevPieceText->SetText(FText::FromString(
+			FString::Printf(TEXT("◄ %s"), ToolDisplayName(BoundBuild->CycleNeighbor(-1)))));
+		NextPieceText->SetText(FText::FromString(
+			FString::Printf(TEXT("%s ►"), ToolDisplayName(BoundBuild->CycleNeighbor(+1)))));
 	}
 }
 

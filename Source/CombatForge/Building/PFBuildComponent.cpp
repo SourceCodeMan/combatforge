@@ -153,6 +153,17 @@ void UPFBuildComponent::OnCyclePiece(const FInputActionValue& Value)
 	EquipTool(GCycleOrder[Idx]);
 }
 
+EPFBuildTool UPFBuildComponent::CycleNeighbor(int32 Dir) const
+{
+	int32 Idx = 0;
+	for (int32 I = 0; I < 8; ++I)
+	{
+		if (GCycleOrder[I] == EquippedTool) { Idx = I; break; }
+	}
+	Idx = (Idx + (Dir > 0 ? 1 : 7)) % 8;
+	return GCycleOrder[Idx];
+}
+
 void UPFBuildComponent::OnEquipWall()  { EquipTool(EPFBuildTool::Wall); }
 void UPFBuildComponent::OnEquipFloor() { EquipTool(EPFBuildTool::Floor); }
 void UPFBuildComponent::OnEquipRamp()  { EquipTool(EPFBuildTool::Ramp); }

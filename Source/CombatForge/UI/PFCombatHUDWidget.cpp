@@ -724,11 +724,24 @@ void UPFCombatHUDWidget::HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint
 	const UPFHealthComponent* Health = BoundHealth.Get();
 	const bool bOneHit = (Health != nullptr && Health->bOneHitMode);
 
-	// Pips = total hits you can still take (out at 10 anywhere). Showdown collapses to a single pip.
+	// Locational model: you're OUT when any region maxes (head 3 / chest 5 / limbs 8) OR total hits 10 — not
+	// only at 10. So the bar drains by the CLOSEST region (max damage fraction), and reads empty exactly when
+	// you'd be eliminated (Tom 2026-07-17: the bar still showed pips after a limb-threshold kill).
+	const uint8 HeadOutV  = Health ? Health->HeadOut  : 3;
+	const uint8 ChestOutV = Health ? Health->ChestOut : 5;
+	const uint8 LimbOutV  = Health ? Health->LimbOut  : 8;
+	const uint8 TotalOutV = Health ? Health->TotalOut : 10;
+	float Damage = static_cast<float>(TotalHits) / static_cast<float>(FMath::Max<uint8>(1, TotalOutV));
+	Damage = FMath::Max(Damage, static_cast<float>(HeadHits)  / static_cast<float>(FMath::Max<uint8>(1, HeadOutV)));
+	Damage = FMath::Max(Damage, static_cast<float>(ChestHits) / static_cast<float>(FMath::Max<uint8>(1, ChestOutV)));
+	Damage = FMath::Max(Damage, static_cast<float>(LimbHits)  / static_cast<float>(FMath::Max<uint8>(1, LimbOutV)));
+	if (Health && Health->bEliminated) { Damage = 1.f; }
+
+	// Pips = health remaining by the nearest region. Showdown collapses to a single pip.
 	const int32 PipCount = bOneHit ? 1 : MaxHitPips;
 	const int32 Remaining = bOneHit
 		? (TotalHits > 0 ? 0 : 1)
-		: FMath::Max(0, MaxHitPips - static_cast<int32>(TotalHits));
+		: FMath::Clamp(FMath::CeilToInt(static_cast<float>(MaxHitPips) * (1.f - Damage)), 0, MaxHitPips);
 	for (int32 i = 0; i < HPDots.Num(); ++i)
 	{
 		if (!HPDots[i])
@@ -749,14 +762,14 @@ void UPFCombatHUDWidget::HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint
 		}
 		else
 		{
-			const uint8 HeadOut  = Health ? Health->HeadOut  : 3;
-			const uint8 ChestOut = Health ? Health->ChestOut : 5;
-			const uint8 LimbOut  = Health ? Health->LimbOut  : 8;
 			RegionHitsText->SetText(FText::FromString(FString::Printf(
 				TEXT("H %u/%u   C %u/%u   L %u/%u"),
-				static_cast<uint32>(HeadHits), static_cast<uint32>(HeadOut),
-				static_cast<uint32>(ChestHits), static_cast<uint32>(ChestOut),
-				static_cast<uint32>(LimbHits), static_cast<uint32>(LimbOut))));
+				static_cast<uint32>(HeadHits), static_cast<uint32>(HeadOutV),
+				static_cast<uint32>(ChestHits), static_cast<uint32>(ChestOutV),
+				static_cast<uint32>(LimbHits), static_cast<uint32>(LimbOutV))));
+			// Warn in orange as a region nears its threshold so it's obvious WHERE you're being shot / dying.
+			RegionHitsText->SetColorAndOpacity(FSlateColor(Damage >= 0.6f
+				? FLinearColor(1.f, 0.55f, 0.2f) : FLinearColor(0.85f, 0.85f, 0.85f)));
 		}
 	}
 }
