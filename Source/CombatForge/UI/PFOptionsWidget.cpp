@@ -455,7 +455,7 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 	Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Mouse sensitivity"), 15, false));
 	SensSlider = WidgetTree->ConstructWidget<USlider>();
 	SensSlider->SetMinValue(0.2f);
-	SensSlider->SetMaxValue(3.0f);
+	SensSlider->SetMaxValue(6.0f);   // Tom 2026-07-17: extend to 6 (same scale); the old max (3) is now the default
 	SensSlider->SetStepSize(0.05f);
 	SensSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnSensChanged);
 	if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(SensSlider))
@@ -1056,7 +1056,7 @@ void UPFOptionsWidget::OnAmbientVolChanged(float Value)
 
 void UPFOptionsWidget::OnSensChanged(float Value)
 {
-	WorkingSens = FMath::Clamp(Value, 0.2f, 3.f);
+	WorkingSens = FMath::Clamp(Value, 0.2f, 6.f);
 	ApplyLookSensitivity(WorkingSens);   // live while dragging (Tom 2026-07-17: was apply-on-Apply only)
 	RefreshLabels();
 }
@@ -1245,7 +1245,7 @@ void UPFOptionsWidget::PullFromSettings()
 	}
 	WorkingMasterVol = FMath::Clamp(WorkingMasterVol, 0.f, 1.f);
 	WorkingSfxVol = FMath::Clamp(WorkingSfxVol, 0.f, 1.f);
-	WorkingSens = FMath::Clamp(WorkingSens, 0.2f, 3.f);
+	WorkingSens = FMath::Clamp(WorkingSens, 0.2f, 6.f);
 	WorkingAmbientVol = FPFUserPrefs::GetAmbientVolume();
 	WorkingBrightness = FPFUserPrefs::GetBrightnessEV();
 	WorkingContrast = FPFUserPrefs::GetContrastScale();

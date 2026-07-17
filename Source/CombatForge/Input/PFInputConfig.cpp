@@ -32,7 +32,7 @@ void UPFInputConfig::SetLookSensitivity(float Sens)
 	{
 		return;
 	}
-	const float Scale = BaseDegreesPerMouseUnit * FMath::Clamp(Sens, 0.2f, 3.f);
+	const float Scale = BaseDegreesPerMouseUnit * FMath::Clamp(Sens, 0.2f, 6.f);
 	LookSensitivityScalar->Scalar = FVector(Scale, Scale, 1.0);
 }
 
@@ -129,7 +129,7 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 
 	// Look: Mouse2D, negate Y only, plus the PFSensitivity scalar.
 	{
-		float Sensitivity = 1.0f;
+		float Sensitivity = 3.0f;   // Tom 2026-07-17 default = the old max (range now 0.2..6)
 		if (GConfig != nullptr)
 		{
 			GConfig->GetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), Sensitivity, GGameUserSettingsIni);

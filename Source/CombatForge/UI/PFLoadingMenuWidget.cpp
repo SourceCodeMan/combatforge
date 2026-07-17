@@ -1286,7 +1286,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	QuickStartButton->SetBackgroundColor(FLinearColor(1.f, 0.85f, 0.2f, 0.95f));
 	QuickStartButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuickStartClicked);
 	QuickStartLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — auto-match setup  ")));
+	QuickStartLabel->SetText(FText::FromString(TEXT("  AUTO MATCH SETUP  ")));
 	QuickStartLabel->SetFont(PFLoadFont(16, true));
 	QuickStartLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.12f, 0.14f)));
 	QuickStartLabel->SetJustification(ETextJustify::Center);
@@ -1336,6 +1336,10 @@ void UPFLoadingMenuWidget::BuildTree()
 			JoinIpBox->SetHintText(FText::FromString(TEXT("host IP")));
 			JoinIpBox->SetText(FText::FromString(FPFUserPrefs::GetLastJoinIp()));
 			JoinIpBox->WidgetStyle.SetFont(PFLoadFont(13, false));   // default editable-text font is comically large
+			// The light default box washed out the "host IP" hint + typed IP to near-invisible (Tom). Dark text
+			// on the light box; the hint reads as a lighter shade of the same dark so it's legible but muted.
+			JoinIpBox->WidgetStyle.SetForegroundColor(FSlateColor(FLinearColor(0.06f, 0.06f, 0.08f)));
+			JoinIpBox->SetForegroundColor(FLinearColor(0.06f, 0.06f, 0.08f));
 			USizeBox* IpSizer = WidgetTree->ConstructWidget<USizeBox>();
 			IpSizer->SetWidthOverride(210.f);
 			IpSizer->SetContent(JoinIpBox);
@@ -2217,7 +2221,7 @@ void UPFLoadingMenuWidget::ApplyQuickStartPreset()
 	SetStatus(TEXT("Quick Start ready — press START GAME when warm-up finishes."));
 	if (QuickStartLabel)
 	{
-		QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — applied ✓  ")));
+		QuickStartLabel->SetText(FText::FromString(TEXT("  AUTO MATCH SETUP — applied ✓  ")));
 	}
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: Quick Start preset applied"));
 }

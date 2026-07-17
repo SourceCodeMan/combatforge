@@ -205,11 +205,11 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	}
 	else
 	{
-		// Open-field maps (The Yard): no visible walls, but bound the playable area so a player can't
-		// keep walking into the infinite desert and leave the match behind. Invisible, pawn-block ONLY —
-		// shots and the build trace pass straight through, and you can still step ~2000 uu off the pad into
-		// the sand before hitting the soft edge. (Upgrade path: swap for a CoD "return to combat area" timer.)
-		const float OpenMargin = 2000.f;
+		// Open-field maps (The Yard): no visible walls, but bound the playable area so a player can't keep
+		// walking into the infinite desert and leave the match behind. Invisible, pawn-block ONLY — shots and
+		// the build trace pass straight through. Tom 2026-07-17: the old 2000 uu (20 m) margin read as "I can
+		// still run outside the bounds", so hold the edge tight — one build cell (400 uu) off the pad.
+		const float OpenMargin = 400.f;
 		const float BoundZ = PerimeterH * 0.5f;
 		const float SpanX = FieldX / 100.f + OpenMargin * 0.02f + 0.4f;   // field width + both margins
 		const float SpanY = FieldY / 100.f + OpenMargin * 0.02f + 0.4f;

@@ -729,11 +729,11 @@ void ACombatForgePlayerController::QuitToMenu()
 	}
 	if (IsHostController())
 	{
-		// Listen host: soft-reset the match to Lobby, then re-show the landing/boot menu — the screen you load
-		// into — so "Quit to Menu" actually returns there instead of dropping onto the in-match Lobby panel.
-		ServerHostForceReturnToLobby();
-		LoadingMenu = nullptr;          // the dismissed instance was only RemoveFromParent'd, never nulled
-		CreateLoadingMenuIfNeeded();    // rebuild the boot overlay (Z=100); reuses the startup path + UI input
+		// END the hosted session and reload as a STANDALONE boot menu. A listen server stays NM_ListenServer
+		// until the level is re-opened WITHOUT ?listen, so the old soft-reset left the menu permanently stuck in
+		// "hosting" mode after a single HOST click — every later match auto-hosted (Tom 2026-07-17). Reopening the
+		// map resets the net mode to Standalone; the startup path re-shows the boot menu with the HOST button.
+		ConsoleCommand(TEXT("open L_Graybox"));
 		return;
 	}
 	// Remote client / standalone guest: leave the session (default-map reload lands on a fresh boot menu).

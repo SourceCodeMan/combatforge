@@ -167,7 +167,7 @@ private:
 	float  WorkingMasterVol = 1.f;
 	float  WorkingSfxVol = 1.f;
 	float  WorkingAmbientVol = 0.22f;
-	float  WorkingSens = 1.f;
+	float  WorkingSens = 3.f;   // default sensitivity (Tom 2026-07-17: was 1.0; new default = the old max)
 	float  WorkingFov = 105.f;
 
 	bool bOpen = false;
