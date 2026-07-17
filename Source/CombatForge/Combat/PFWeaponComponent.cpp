@@ -942,6 +942,11 @@ void UPFWeaponComponent::ServerResetLoadout()
 	FragCount   = MaxFrag;
 	SmokeCount  = MaxSmoke;
 	bReloading  = false;
+	// Respawn returns you to the PRIMARY weapon (drops any drawn pistol + its ammo stash).
+	if (ACombatForgeCharacter* Char = GetPFCharacter())
+	{
+		Char->ResetToPrimaryWeapon();
+	}
 	OnHopperChangedEvent.Broadcast(HopperCount);
 	OnGrenadeCountChangedEvent.Broadcast(FragCount, SmokeCount);
 	OnReloadStateChangedEvent.Broadcast(false);

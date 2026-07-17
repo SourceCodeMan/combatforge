@@ -269,6 +269,24 @@ private:
 	void ApplyKit();          // apply KitRep → ActiveCharConfig/ActiveWeaponConfig → visuals + weapon stats
 	bool HasValidKit() const { return KitRep.CharParts.Num() > 0; }
 
+	// ---- Weapon swap: primary (kit) ↔ pistol secondary, on the scroll wheel ----
+	// bSecondaryActive replicates so every machine re-equips the right gun mesh; ammo is stashed per slot on
+	// the server so a swap never refills. Respawn returns you to the primary (ResetToPrimaryWeapon).
+	UPROPERTY(ReplicatedUsing=OnRep_SecondaryActive) bool bSecondaryActive = false;
+	UFUNCTION() void OnRep_SecondaryActive();
+	UFUNCTION(Server, Reliable) void ServerSwapWeapon();
+	uint8 StashHopper[2]  = { 0, 0 };     // saved mag per slot (0=primary, 1=pistol)
+	int32 StashReserve[2] = { 0, 0 };     // saved reserve per slot
+	bool  bStashValid[2]  = { false, false };
+	double LastSwapTime = -100.0;
+	static constexpr float SwapCooldown = 0.25f;   // debounce a multi-notch scroll into one swap
+public:
+	/** Owning client: scroll-wheel while alive → request a weapon swap (debounced). */
+	void OnWeaponSwapInput();
+	/** Server: force the primary weapon + full ammo (respawn). */
+	void ResetToPrimaryWeapon();
+private:
+
 	/** Phase-1 spike: mount the modular Bandit body + sequence-loco anims on GetMesh(). */
 	void AssembleBanditCharacter();
 	/** Phase-2: mount base skin + each config-selected overlay part via Leader Pose. */

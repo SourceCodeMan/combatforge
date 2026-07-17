@@ -88,6 +88,10 @@ public:
 	/** Total balls currently held (mag + reserve). */
 	int32 GetTotalAmmo() const { return static_cast<int32>(HopperCount) + ReserveAmmo; }
 
+	/** Re-broadcast the mag/reserve so the HUD refreshes after a direct ammo write (e.g. a weapon swap on the
+	 *  listen host, where no OnRep fires). Owning remote clients refresh through the ammo OnReps. */
+	void NotifyAmmoChanged() { OnHopperChangedEvent.Broadcast(HopperCount); }
+
 	/**
 	 * Authority: top up mag to capacity and refill reserve to MaxReserveAmmo
 	 * (ammo barrel pickup). Returns true if anything was granted.

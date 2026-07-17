@@ -7,6 +7,7 @@
 #include "Core/CombatForgeGameMode.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
+#include "Combat/PFHealthComponent.h"   // scroll-wheel: alive→weapon swap vs dead→cycle class
 #include "Core/PFClientLogShip.h"
 #include "Player/CombatForgeCharacter.h"
 #include "Player/PFCharacterCustomization.h"   // dead-time class cycle: active save slot
@@ -560,10 +561,25 @@ void ACombatForgePlayerController::OnCycleClassWhileDead(const FInputActionValue
 	// pushes its kit at PawnClientRestart, so whatever slot is active when the timer hits zero is what you
 	// spawn wearing — no pawn or RPC needed while dead (the old pawn may already be destroyed).
 	const float Dir = Value.Get<float>();
+	// Also bail while a menu overlay is up — scrolling the Options page was silently cycling the class behind it.
+	if (FMath::IsNearlyZero(Dir) || IsOptionsMenuOpen())
+	{
+		return;
+	}
+	// ALIVE → the scroll wheel swaps primary/pistol. DEAD (respawn countdown) → it cycles the class slot.
+	if (ACombatForgeCharacter* MyChar = Cast<ACombatForgeCharacter>(GetPawn()))
+	{
+		const UPFHealthComponent* Health = MyChar->GetHealth();
+		if (Health == nullptr || !Health->bEliminated)
+		{
+			MyChar->OnWeaponSwapInput();
+			return;
+		}
+	}
+	// Dead path: whatever slot is active when the timer hits zero is what you spawn wearing — no pawn/RPC
+	// needed (the old pawn may already be destroyed).
 	const ACombatForgePlayerState* PS = GetPlayerState<ACombatForgePlayerState>();
-	// Also bail while a menu overlay is up — scrolling the Options page was silently cycling the class
-	// behind it (the countdown screen is the only surface this belongs to).
-	if (FMath::IsNearlyZero(Dir) || PS == nullptr || PS->OutKind != 1 || IsOptionsMenuOpen())
+	if (PS == nullptr || PS->OutKind != 1)
 	{
 		return;
 	}

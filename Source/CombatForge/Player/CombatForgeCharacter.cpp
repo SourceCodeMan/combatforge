@@ -1667,6 +1667,14 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	{
 		ActiveWeaponConfig = PFWeapon::LoadConfig();
 	}
+	// Pistol secondary (scroll-wheel swap): when the sidearm is drawn, override the equipped weapon with the
+	// universal pistol (PFWeaponCatalog GCats order: 0=Assault Rifle, 1=SMG, 2=Pistol). Mesh/pose/stats/mag all
+	// follow from its def below, so no other code needs to know which slot is active.
+	if (bSecondaryActive)
+	{
+		ActiveWeaponConfig.Category = 2;   // Pistol
+		ActiveWeaponConfig.Index    = 0;
+	}
 	const FPFWeaponDef& Def = PFWeapon::Weapon(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
 	UStaticMesh* WpnMesh = PFWeapon::LoadMesh(Def);
 #if !UE_BUILD_SHIPPING
@@ -1733,6 +1741,65 @@ void ACombatForgeCharacter::ReapplyWeaponLoadout()
 	ApplyWeaponLoadout();
 }
 
+void ACombatForgeCharacter::OnWeaponSwapInput()
+{
+	if (!IsLocallyControlled() || (HealthComponent != nullptr && HealthComponent->bEliminated))
+	{
+		return;
+	}
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (Now - LastSwapTime < SwapCooldown)
+	{
+		return;   // debounce a multi-notch scroll into a single swap
+	}
+	LastSwapTime = Now;
+	ServerSwapWeapon();
+}
+
+void ACombatForgeCharacter::ServerSwapWeapon_Implementation()
+{
+	if (WeaponComponent == nullptr || (HealthComponent != nullptr && HealthComponent->bEliminated))
+	{
+		return;
+	}
+	// Stash the outgoing weapon's ammo so a swap never refills.
+	const int32 Cur = bSecondaryActive ? 1 : 0;
+	StashHopper[Cur]  = WeaponComponent->HopperCount;
+	StashReserve[Cur] = WeaponComponent->ReserveAmmo;
+	bStashValid[Cur]  = true;
+
+	bSecondaryActive = !bSecondaryActive;   // replicated → OnRep re-equips the gun mesh on every other machine
+	ApplyWeaponLoadout();                    // incoming weapon's mesh/pose/stats (+ sets its mag full)
+
+	const int32 Next = bSecondaryActive ? 1 : 0;
+	if (bStashValid[Next])
+	{
+		WeaponComponent->HopperCount = static_cast<uint8>(
+			FMath::Clamp<int32>(StashHopper[Next], 0, WeaponComponent->HopperCapacity));
+		WeaponComponent->ReserveAmmo = StashReserve[Next];
+	}
+	WeaponComponent->NotifyAmmoChanged();   // host HUD refresh (owning client refreshes via ammo OnReps)
+}
+
+void ACombatForgeCharacter::OnRep_SecondaryActive()
+{
+	ApplyWeaponLoadout();   // cosmetic re-equip of the correct weapon mesh/pose on remotes + owning client
+}
+
+void ACombatForgeCharacter::ResetToPrimaryWeapon()
+{
+	bStashValid[0] = bStashValid[1] = false;
+	if (bSecondaryActive)
+	{
+		bSecondaryActive = false;   // replicated → remotes re-equip the primary
+		ApplyWeaponLoadout();
+		if (WeaponComponent != nullptr)
+		{
+			WeaponComponent->NotifyAmmoChanged();
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Replicated kit — clothing + weapon travel with the pawn, not the machine.
 // The class configs live in each player's LOCAL GameUserSettings, so the server can't read them: the owning
@@ -1744,6 +1811,7 @@ void ACombatForgeCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ACombatForgeCharacter, KitRep);
+	DOREPLIFETIME(ACombatForgeCharacter, bSecondaryActive);   // pistol-secondary: every machine re-equips the gun mesh
 }
 
 void ACombatForgeCharacter::PawnClientRestart()
