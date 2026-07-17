@@ -30,11 +30,13 @@
 #include "Serialization/JsonWriter.h"
 
 #include "GameFramework/PawnMovementComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
 #include "HAL/FileManager.h"
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
@@ -732,6 +734,128 @@ int32 ACombatForgeGameMode::GetTeamSlotIndex(const ACombatForgePlayerState* PS) 
 // ---------------------------------------------------------------------------
 // THE phase mutator
 // ---------------------------------------------------------------------------
+
+void ACombatForgeGameMode::DevAddMatchTime(float Seconds)
+{
+	ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS || !HasAuthority())
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.AddTime: authority only (run on the listen host / server)"));
+		return;
+	}
+	Seconds = FMath::Clamp(Seconds, -3600.f, 3600.f);
+	if (FMath::IsNearlyZero(Seconds))
+	{
+		return;
+	}
+
+	const float Now = GS->GetServerWorldTimeSeconds();
+	FTimerManager& TM = GetWorldTimerManager();
+
+	auto Notify = [&](const TCHAR* Label, float NewRem)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("pf.AddTime: %s now %.0fs remaining (added %+.0f)"),
+			Label, NewRem, Seconds);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green,
+				FString::Printf(TEXT("%s %+0.f s → %.0f s left"), Label, Seconds, NewRem));
+		}
+	};
+
+	// Build / Vote / Results — phase timer ends the segment.
+	if (GS->Phase == EPFMatchPhase::Build || GS->Phase == EPFMatchPhase::Vote || GS->Phase == EPFMatchPhase::Results)
+	{
+		float Remaining = GS->GetPhaseTimeRemaining();
+		if (TM.IsTimerActive(PhaseTimerHandle))
+		{
+			Remaining = FMath::Max(Remaining, TM.GetTimerRemaining(PhaseTimerHandle));
+		}
+		const float NewRem = FMath::Max(0.1f, Remaining + Seconds);
+		GS->ServerSetPhaseEndTime(Now + NewRem);
+		TM.ClearTimer(PhaseTimerHandle);
+		if (GS->Phase == EPFMatchPhase::Build)
+		{
+			BuildPhaseFullEndTime = FMath::Max(BuildPhaseFullEndTime, Now + NewRem);
+			bBuildEarlyEndActive = false;
+			TM.SetTimer(PhaseTimerHandle, this, &ACombatForgeGameMode::StartNextRoundFromBuildEnd, NewRem, false);
+			Notify(TEXT("Build"), NewRem);
+		}
+		else if (GS->Phase == EPFMatchPhase::Vote)
+		{
+			TM.SetTimer(PhaseTimerHandle, this, &ACombatForgeGameMode::FinalizeVotePhase, NewRem, false);
+			Notify(TEXT("Vote"), NewRem);
+		}
+		else // Results
+		{
+			// Results timer returns to lobby via SetPhase(Lobby) — re-arm that transition.
+			TM.SetTimer(PhaseTimerHandle,
+				FTimerDelegate::CreateUObject(this, &ACombatForgeGameMode::SetPhase, EPFMatchPhase::Lobby),
+				NewRem, false);
+			Notify(TEXT("Results"), NewRem);
+		}
+		return;
+	}
+
+	// Combat: extend freeze / live / intermission round clock + reschedule RoundTimerHandle.
+	if (GS->Phase == EPFMatchPhase::Combat)
+	{
+		float Remaining = GS->GetRoundTimeRemaining();
+		if (TM.IsTimerActive(RoundTimerHandle))
+		{
+			Remaining = FMath::Max(Remaining, TM.GetTimerRemaining(RoundTimerHandle));
+		}
+		const float NewRem = FMath::Max(0.1f, Remaining + Seconds);
+		GS->ServerSetRoundState(GS->RoundState, Now + NewRem);
+		TM.ClearTimer(RoundTimerHandle);
+
+		if (GS->RoundState == EPFRoundState::Freeze)
+		{
+			TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::BeginLiveRound, NewRem, false);
+			Notify(TEXT("Freeze"), NewRem);
+		}
+		else if (GS->RoundState == EPFRoundState::Intermission)
+		{
+			TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::OnIntermissionEnd, NewRem, false);
+			Notify(TEXT("Intermission"), NewRem);
+		}
+		else // Live (or None — treat as live resolve)
+		{
+			switch (GS->MatchType)
+			{
+			case EPFMatchType::Skirmish:
+				TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::ResolveSkirmishOnTimer, NewRem, false);
+				break;
+			case EPFMatchType::FreeForAll:
+				TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::ResolveFreeForAllOnTimer, NewRem, false);
+				break;
+			case EPFMatchType::CaptureFlag:
+				TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::ResolveCaptureFlagOnTimer, NewRem, false);
+				break;
+			case EPFMatchType::Domination:
+				TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::ResolveDominationOnTimer, NewRem, false);
+				break;
+			case EPFMatchType::Hardpoint:
+				TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::ResolveHardpointOnTimer, NewRem, false);
+				break;
+			default:
+				TM.SetTimer(RoundTimerHandle, this, &ACombatForgeGameMode::ResolveRoundOnTimer, NewRem, false);
+				break;
+			}
+			Notify(TEXT("Live"), NewRem);
+		}
+		return;
+	}
+
+	// Lobby is untimed (PhaseEndServerTime = 0). Nothing to extend.
+	UE_LOG(CombatForgeLog, Log, TEXT("pf.AddTime: phase %d has no countdown (lobby is free-form — stay as long as you like)"),
+		static_cast<int32>(GS->Phase));
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow,
+			TEXT("Lobby has no timer — stay as long as you need"));
+	}
+}
 
 void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 {
@@ -3714,3 +3838,27 @@ void ACombatForgeGameMode::ComputeEffectiveScaling()
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: match format first-to-%d, max %d rounds, %.0f s rounds"),
 		EffectiveRoundWinsToTake, EffectiveMaxRounds, EffectiveRoundDuration);
 }
+
+
+// ---------------------------------------------------------------------------
+// Dev console: add time to the current phase / combat round (pose-tune + playtest)
+// ---------------------------------------------------------------------------
+static void PFAddTimeCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	ACombatForgeGameMode* GM = World->GetAuthGameMode<ACombatForgeGameMode>();
+	if (GM == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.AddTime: no authority GameMode (run on the listen host)"));
+		return;
+	}
+	const float Sec = (Args.Num() >= 1) ? FCString::Atof(*Args[0]) : 60.f;
+	GM->DevAddMatchTime(Sec);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFAddTimeCmd(
+	TEXT("pf.AddTime"),
+	TEXT("Add seconds to the current Build/Vote/Results phase or combat round timer (default 60). Listen host only. Example: pf.AddTime 300"),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFAddTimeCmd));

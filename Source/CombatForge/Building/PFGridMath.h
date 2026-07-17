@@ -133,9 +133,10 @@ struct COMBATFORGE_API FPFGridMath
 				FVector(Wx + 200.f, Wy + 200.f, Wz + 150.f), FVector(5.f, 4.f, 0.2f));
 
 		case EPFPieceType::Roof:
-			// Cone (4.0, 4.0, 1.5) = r200 h150, base at level Z (engine cone pivot is mid-height).
-			return FTransform(FRotator(0.f, Rot * 90.f, 0.f),
-				FVector(Wx + 200.f, Wy + 200.f, Wz + 75.f), FVector(4.f, 4.f, 1.5f));
+			// Flat ceiling plate (same footprint as Floor) — replaces the old cone graybox.
+			// Cube (4.0, 4.0, 0.2) = 400×400×20, top at level Z.
+			return FTransform(FRotator::ZeroRotator,
+				FVector(Wx + 200.f, Wy + 200.f, Wz - 10.f), FVector(4.f, 4.f, 0.2f));
 
 		case EPFPieceType::PropCan:
 			// Cylinder (1.2, 1.2, 2.2) = r60 h220, resting on the support top.
@@ -195,7 +196,8 @@ struct COMBATFORGE_API FPFGridMath
 			return true;
 
 		case EPFPieceType::Roof:
-			Out = FBox(FVector(Wx, Wy, Wz), FVector(Wx + 400.f, Wy + 400.f, Wz + 150.f));
+			// Flat ceiling plate — same AABB as Floor (top at level Z).
+			Out = FBox(FVector(Wx, Wy, Wz - 20.f), FVector(Wx + 400.f, Wy + 400.f, Wz));
 			return true;
 
 		case EPFPieceType::PropCan:

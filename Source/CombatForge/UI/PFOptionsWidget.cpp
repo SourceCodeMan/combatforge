@@ -827,8 +827,8 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 	AddHowToLine(Box, TEXT("You're OUT at 3 head, 5 chest, 8 limb, or 10 total hits — whichever comes first (HUD pips + H/C/L readout). Showdown rounds: one hit."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD PHASE"), 15, true, Head);
-	AddHowToLine(Box, TEXT("F1 Wall  ·  F2 Floor  ·  F3 Ramp  ·  F4 Roof  ·  scroll/Q wheel: Window, Door, 1-Way Door, Trap Floor, cover  ·  X delete"), 13, false, Key);
-	AddHowToLine(Box, TEXT("LMB place  ·  R rotate ramp/prop  ·  Scroll cycle  ·  Hold Q wheel  ·  F open/close doors  ·  Trap drops under enemies only"), 13, false, Key);
+	AddHowToLine(Box, TEXT("F1 Wall  ·  F2 Floor  ·  F3 Ramp  ·  F4 Ceiling  ·  scroll cycles pieces (Wall→Window→Door…)  ·  tap Q for piece wheel  ·  X delete"), 13, false, Key);
+	AddHowToLine(Box, TEXT("LMB place  ·  R rotate ramp/prop  ·  Scroll cycle  ·  Tap Q piece wheel  ·  F open/close doors  ·  Trap drops under enemies only"), 13, false, Key);
 	AddHowToLine(Box, TEXT("Build on your half only. Full wall-offs are allowed — breach sealed paths with the mid-field bomb. Barrier down when combat starts."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("LOBBY / MATCH"), 15, true, Head);

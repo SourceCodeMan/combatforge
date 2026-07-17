@@ -74,6 +74,12 @@ public:
 	/** Seconds for the climb interp (vertical rise then forward tuck). */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") float MantleTime = 0.35f;
 
+	/**
+	 * CoD-style weapon weight. Set from the equipped weapon def in ApplyWeaponLoadout (runs on server +
+	 * autonomous proxy via kit rep). MUST only depend on replicated kit state — used in prediction/replay.
+	 */
+	float CachedWeaponMoveSpeedMult = 1.f;
+
 	// ---- UCharacterMovementComponent overrides ----
 	virtual float GetMaxSpeed() const override;                       // the ONLY speed source (02 R6)
 	virtual float GetMaxBrakingDeceleration() const override;

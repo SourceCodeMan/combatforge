@@ -149,6 +149,8 @@ float UPFCharacterMovementComponent::GetMaxSpeed() const
 		{
 			Speed *= ADSSpeedMult;
 		}
+		// Per-weapon weight (kit-replicated; identical on server + autonomous proxy).
+		Speed *= FMath::Clamp(CachedWeaponMoveSpeedMult, 0.5f, 1.1f);
 		return Speed;
 	}
 	default:

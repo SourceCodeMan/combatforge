@@ -84,8 +84,8 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_EquipFloor;  // F2
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_EquipRamp;   // F3
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_EquipRoof;   // F4
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_QuickEquip;  // Q, tap (0.18 s) → equip last-used piece
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_BuildWheel;  // Q, hold (0.18 s) open, release = commit
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_QuickEquip;  // retained (unmapped); was last-piece quick equip
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_BuildWheel;  // Q tap → open/commit build wheel
 
 	// ---- Contexts ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputMappingContext> IMC_Common;

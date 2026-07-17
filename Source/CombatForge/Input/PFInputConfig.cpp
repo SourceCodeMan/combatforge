@@ -173,7 +173,7 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IMC_Combat->MapKey(IA_Interact,   EKeys::F); // ammo barrels — shares F with Ready (non-consuming, phase-disjoint)
 	IMC_Combat->MapKey(IA_FireSelect, EKeys::V); // cycle fire mode
 	IMC_Combat->MapKey(IA_ThrowFrag,  EKeys::E); // frag grenade (E freed by interact->F)
-	IMC_Combat->MapKey(IA_ThrowSmoke, EKeys::Q); // smoke grenade (Q also IMC_Build QuickEquip; Combat/Build never coexist)
+	IMC_Combat->MapKey(IA_ThrowSmoke, EKeys::Q); // smoke grenade (Q = build wheel in IMC_Build; contexts never coexist)
 	IMC_Combat->MapKey(IA_Melee,      EKeys::B);                 // melee tag — keyboard
 	IMC_Combat->MapKey(IA_Melee,      EKeys::ThumbMouseButton);  // melee tag — mouse thumb (genre-standard)
 	IMC_Combat->MapKey(IA_PlantBomb,  EKeys::G);                 // demolition bomb on the aimed build piece
@@ -190,24 +190,9 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IMC_Build->MapKey(IA_EquipRamp,   EKeys::F3);
 	IMC_Build->MapKey(IA_EquipRoof,   EKeys::F4);
 
-	// Q tap (< 0.18 s) = quick-equip last-used piece; Q hold (>= 0.18 s) = wheel.
-	{
-		FEnhancedActionKeyMapping& Tap = IMC_Build->MapKey(IA_QuickEquip, EKeys::Q);
-		UInputTriggerTap* TapTrigger = NewObject<UInputTriggerTap>(IMC_Build);
-		TapTrigger->TapReleaseTimeThreshold = 0.18f;
-		Tap.Triggers.Add(TapTrigger);
-
-		FEnhancedActionKeyMapping& Hold = IMC_Build->MapKey(IA_BuildWheel, EKeys::Q);
-		UInputTriggerHold* HoldTrigger = NewObject<UInputTriggerHold>(IMC_Build);
-		HoldTrigger->HoldTimeThreshold = 0.18f;
-		// bIsOneShot MUST stay false: a one-shot Hold fires Triggered once at the 0.18s threshold
-		// and then evaluates to None the very next frame (while Q is still down), which Enhanced Input
-		// reports as Completed → OnWheelReleased → the wheel closes ~1 frame after it opens. With
-		// bIsOneShot=false the Hold keeps returning Triggered every frame while Q is held (the open is
-		// idempotent via bWheelOpenSent) and Completed fires only on real key release, committing the sector.
-		HoldTrigger->bIsOneShot = false;
-		Hold.Triggers.Add(HoldTrigger);
-	}
+	// Q tap = toggle build wheel (open on first press, commit/cancel on second). No hold threshold —
+	// hold-to-open was unreliable and hid the wheel labels until 0.18s had elapsed.
+	IMC_Build->MapKey(IA_BuildWheel, EKeys::Q);
 
 	// Rebindable-action registry, then apply any saved key overrides. Must run INSIDE Build() (which is
 	// idempotent-guarded) after the default MapKey calls, not via a re-run.

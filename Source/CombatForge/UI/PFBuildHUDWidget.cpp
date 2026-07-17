@@ -34,7 +34,7 @@ const TCHAR* UPFBuildHUDWidget::ToolDisplayName(EPFBuildTool Tool)
 	case EPFBuildTool::Wall:           return TEXT("Wall");
 	case EPFBuildTool::Floor:          return TEXT("Floor");
 	case EPFBuildTool::Ramp:           return TEXT("Ramp");
-	case EPFBuildTool::Roof:           return TEXT("Roof");
+	case EPFBuildTool::Roof:           return TEXT("Ceiling");
 	case EPFBuildTool::PropCan:        return TEXT("Barrel");
 	case EPFBuildTool::PropDorito:     return TEXT("Crate");
 	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
@@ -192,7 +192,7 @@ void UPFBuildHUDWidget::BuildTree()
 	// Controls hint — bottom left. (Improvement: delete works on team base pieces too.)
 	HintText = WidgetTree->ConstructWidget<UTextBlock>();
 	HintText->SetText(FText::FromString(
-		TEXT("F1-F4  ·  Q wheel (window/door/trap)  ·  LMB place  ·  X delete  ·  F ready")));
+		TEXT("F1-F4  ·  scroll cycle  ·  Q piece wheel  ·  LMB place  ·  X delete  ·  F ready")));
 	HintText->SetFont(PFBuildFont(12, false));
 	HintText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(HintText))

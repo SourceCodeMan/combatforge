@@ -78,6 +78,20 @@ void UPFCombatHUDWidget::BuildTree()
 	CrossLineLeft = AddCrossPiece(FVector2D(CrossLineLengthPx, CrossLineThicknessPx));
 	CrossLineRight = AddCrossPiece(FVector2D(CrossLineLengthPx, CrossLineThicknessPx));
 	CenterDot = AddCrossPiece(FVector2D(3.f, 3.f));
+	// Soft ring at projected spread when bloom is near cap ("ease off the trigger").
+	CrosshairHalo = MakeSolidImage(WidgetTree, FLinearColor(1.f, 1.f, 1.f, 0.22f));
+	if (CrosshairHalo)
+	{
+		if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(CrosshairHalo))
+		{
+			CSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+			CSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			CSlot->SetPosition(FVector2D::ZeroVector);
+			CSlot->SetSize(FVector2D(40.f, 40.f));
+			CSlot->SetZOrder(4);
+		}
+		CrosshairHalo->SetVisibility(ESlateVisibility::Hidden);
+	}
 
 	// ---- Hopper + reload — bottom right ----
 	HopperText = WidgetTree->ConstructWidget<UTextBlock>();
@@ -825,6 +839,7 @@ void UPFCombatHUDWidget::UpdateCrosshair()
 		if (CrossLineLeft)   { CrossLineLeft->SetVisibility(Hidden); }
 		if (CrossLineRight)  { CrossLineRight->SetVisibility(Hidden); }
 		if (CenterDot)       { CenterDot->SetVisibility(Hidden); }
+		if (CrosshairHalo)   { CrosshairHalo->SetVisibility(Hidden); }
 		return;
 	}
 	// Loadout crosshair: 0=cross+dot, 1=dot only, 2=cross only.
@@ -856,6 +871,10 @@ void UPFCombatHUDWidget::UpdateCrosshair()
 	}
 	if (bADS || !bShowLines)
 	{
+		if (CrosshairHalo)
+		{
+			CrosshairHalo->SetVisibility(ESlateVisibility::Hidden);
+		}
 		return;
 	}
 
@@ -895,6 +914,29 @@ void UPFCombatHUDWidget::UpdateCrosshair()
 	SetLinePos(CrossLineBottom, FVector2D(0.f, LineCenterOffset));
 	SetLinePos(CrossLineLeft, FVector2D(-LineCenterOffset, 0.f));
 	SetLinePos(CrossLineRight, FVector2D(LineCenterOffset, 0.f));
+
+	// Bloom halo: when bloom is ≥ 75% of the weapon's cap, draw a faint ring at the projected
+	// spread radius — the "ease off the trigger" tell (weapon-implementation-spec Stage 1).
+	if (CrosshairHalo)
+	{
+		const float Cap = Weapon->GetBloomCapDeg();
+		const float Bloom = Weapon->GetCurrentBloomDeg();
+		const bool bShowHalo = Cap > KINDA_SMALL_NUMBER && Bloom >= Cap * 0.75f;
+		if (bShowHalo)
+		{
+			const float Diam = FMath::Max(16.f, Gap * 2.f);
+			if (UCanvasPanelSlot* CSlot = Cast<UCanvasPanelSlot>(CrosshairHalo->Slot))
+			{
+				CSlot->SetSize(FVector2D(Diam, Diam));
+			}
+			CrosshairHalo->SetColorAndOpacity(FLinearColor(1.f, 0.85f, 0.35f, 0.18f));
+			CrosshairHalo->SetVisibility(ESlateVisibility::HitTestInvisible);
+		}
+		else
+		{
+			CrosshairHalo->SetVisibility(ESlateVisibility::Hidden);
+		}
+	}
 }
 
 void UPFCombatHUDWidget::UpdateBanner(float InDeltaTime)

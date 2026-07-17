@@ -26,6 +26,14 @@ namespace
 	const FLinearColor GSectorDimColor(0.06f, 0.07f, 0.09f, 0.85f);
 	const FLinearColor GSectorHoverColor(0.22f, 0.24f, 0.30f, 0.95f);
 
+	// Matches UPFBuildComponent GCycleOrder — wall types grouped for easy pick.
+	constexpr EPFBuildTool GSectorTools[12] =
+	{
+		EPFBuildTool::Wall, EPFBuildTool::WallWindow, EPFBuildTool::WallDoor, EPFBuildTool::WallDoorOneWay,
+		EPFBuildTool::Floor, EPFBuildTool::FloorTrap, EPFBuildTool::Ramp, EPFBuildTool::Roof,
+		EPFBuildTool::PropCan, EPFBuildTool::PropDorito, EPFBuildTool::PropSnake, EPFBuildTool::Delete
+	};
+
 	FSlateFontInfo PFWheelFont(int32 Size, bool bBold)
 	{
 		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
@@ -35,6 +43,20 @@ namespace
 const TCHAR* UPFBuildWheelWidget::ToolDisplayName(EPFBuildTool Tool)
 {
 	return PFBuildPieceVisuals::DisplayName(Tool);
+}
+
+EPFBuildTool UPFBuildWheelWidget::SectorTool(int32 SectorIndex)
+{
+	if (SectorIndex < 0 || SectorIndex >= UE_ARRAY_COUNT(GSectorTools))
+	{
+		return EPFBuildTool::Wall;
+	}
+	return GSectorTools[SectorIndex];
+}
+
+EPFBuildTool UPFBuildWheelWidget::ToolAtSector(int32 SectorIndex) const
+{
+	return SectorTool(SectorIndex);
 }
 
 TSharedRef<SWidget> UPFBuildWheelWidget::RebuildWidget()
@@ -80,7 +102,7 @@ void UPFBuildWheelWidget::BuildTree()
 		}
 
 		UTextBlock* Name = WidgetTree->ConstructWidget<UTextBlock>();
-		Name->SetText(FText::FromString(ToolDisplayName(static_cast<EPFBuildTool>(i))));
+		Name->SetText(FText::FromString(ToolDisplayName(SectorTool(i))));
 		Name->SetFont(PFWheelFont(14, true));
 		Name->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Name->SetJustification(ETextJustify::Center);
@@ -189,7 +211,7 @@ void UPFBuildWheelWidget::CloseAndCommit()
 	CloseInternal();
 	if (Committed != INDEX_NONE)
 	{
-		OnToolSelectedEvent.Broadcast(static_cast<EPFBuildTool>(Committed));
+		OnToolSelectedEvent.Broadcast(SectorTool(Committed));
 	}
 }
 
@@ -209,7 +231,7 @@ void UPFBuildWheelWidget::CommitSector(int32 SectorIndex)
 		return;
 	}
 	CloseInternal();
-	OnToolSelectedEvent.Broadcast(static_cast<EPFBuildTool>(SectorIndex));
+	OnToolSelectedEvent.Broadcast(SectorTool(SectorIndex));
 }
 
 void UPFBuildWheelWidget::CloseInternal()
@@ -230,6 +252,8 @@ void UPFBuildWheelWidget::CloseInternal()
 	{
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
+	// Let RootHUD clear BuildComponent's open flag (digit / Esc / phase paths).
+	OnWheelClosedEvent.Broadcast(false);
 }
 
 void UPFBuildWheelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -337,7 +361,7 @@ void UPFBuildWheelWidget::UpdateCenterReadout()
 	}
 	if (HoveredSector == INDEX_NONE)
 	{
-		CenterReadout->SetText(FText::FromString(TEXT("Release to cancel")));
+		CenterReadout->SetText(FText::FromString(TEXT("Q again to cancel · aim a sector")));
 		CenterReadout->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	}
 	else
@@ -349,10 +373,10 @@ void UPFBuildWheelWidget::UpdateCenterReadout()
 
 FText UPFBuildWheelWidget::SectorReadout(int32 SectorIndex) const
 {
-	const EPFBuildTool Tool = static_cast<EPFBuildTool>(SectorIndex);
+	const EPFBuildTool Tool = SectorTool(SectorIndex);
 	if (Tool == EPFBuildTool::Delete)
 	{
-		return FText::FromString(TEXT("Delete — full refund"));
+		return FText::FromString(TEXT("Delete — full refund · Q to pick"));
 	}
 
 	int32 Remaining = -1;
@@ -367,7 +391,7 @@ FText UPFBuildWheelWidget::SectorReadout(int32 SectorIndex) const
 
 	if (Remaining >= 0)
 	{
-		return FText::FromString(FString::Printf(TEXT("%s — %d left"), ToolDisplayName(Tool), Remaining));
+		return FText::FromString(FString::Printf(TEXT("%s — %d left · Q to pick"), ToolDisplayName(Tool), Remaining));
 	}
-	return FText::FromString(ToolDisplayName(Tool));
+	return FText::FromString(FString::Printf(TEXT("%s · Q to pick"), ToolDisplayName(Tool)));
 }

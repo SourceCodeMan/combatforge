@@ -42,6 +42,8 @@ struct FPFBackendProfile
 	int32   Matches = 0;
 	int32   Wins = 0;
 	int32   Eliminations = 0;
+	/** Weapon unlock slugs from the API (`wpn.ar_m4`, …). Empty offline / until backend seeds rows. */
+	TArray<FString> UnlockIds;
 };
 
 DECLARE_MULTICAST_DELEGATE(FPFOnBackendAuthChanged);
@@ -93,6 +95,14 @@ public:
 
 	/** Refresh GET /v1/profile/me into GetProfile(). No-op when logged out. */
 	void FetchProfile();
+
+	/**
+	 * True if the player may equip this weapon. Offline / logged-out / empty unlocks list = fully ungated
+	 * (LAN, bots, pre-backend). On fleet, pass WeaponId like "ar_m4" (API stores "wpn.ar_m4").
+	 */
+	bool IsWeaponUnlocked(const FString& WeaponId) const;
+	/** Fleet has loaded unlocks for the local profile (non-empty UnlockIds after profile fetch). */
+	bool HasUnlocksLoaded() const { return Profile.UnlockIds.Num() > 0; }
 
 	// ---- server directory (player hat; all require login) ----
 	void FetchServers(TFunction<void(bool bOk, const TArray<FPFBackendServerInfo>&)> Done);

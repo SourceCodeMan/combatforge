@@ -49,7 +49,12 @@ public:
 	// ---- UI subscription points ----
 	FPFOnEquippedToolChanged  OnEquippedToolChangedEvent;
 	FPFOnPlaceDenied          OnPlaceDeniedEvent;
-	FPFOnBuildWheelRequested  OnBuildWheelRequestedEvent;   // Q-hold started/released → RootHUD opens/commits wheel
+	FPFOnBuildWheelRequested  OnBuildWheelRequestedEvent;   // Q tap → RootHUD toggles wheel open/commit
+
+	/** Called by RootHUD when the wheel closes via digit / Esc / phase change (not via Q). */
+	void NotifyBuildWheelClosed();
+
+	bool IsBuildWheelOpen() const { return bWheelOpenSent; }
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -66,9 +71,7 @@ protected:
 	void OnEquipFloor();
 	void OnEquipRamp();
 	void OnEquipRoof();
-	void OnQuickEquip();
-	void OnWheelHoldTriggered();
-	void OnWheelReleased();
+	void OnWheelTogglePressed();
 
 private:
 	/** Last snapped slot sent by turbo (dedup: place on slot change OR every 0.15 s — 03 §4). */
@@ -92,6 +95,9 @@ private:
 	void EnsureGhost();
 	void SetGhostVisible(bool bVisible);
 	void SetGhostMeshForType(EPFPieceType Type);
+	void ApplyGhostTint(const FLinearColor& Color);
+	/** One-way door: small front-side wedge so facing is obvious under a translucent ghost. */
+	void UpdateOneWayFacingCue(EPFPieceType Type, int16 X, int16 Y, int16 Z, uint8 Rot, bool bShow);
 	UStaticMesh* MeshForType(EPFPieceType Type) const;
 
 	/** Quantize the anchor point per piece type (03 §4). Returns record-space grid ints. */
@@ -110,19 +116,24 @@ private:
 	UPROPERTY() TObjectPtr<UStaticMesh> CylinderMesh;
 	UPROPERTY() TObjectPtr<UStaticMesh> ConeMesh;
 	UPROPERTY() TObjectPtr<UMaterialInterface> ShapeMaterial;
+	/** Translucent unlit parent for placement ghosts (alpha actually works; BasicShape is opaque). */
+	UPROPERTY() TObjectPtr<UMaterialInterface> GhostMaterial;
 
-	// Ghost — owning-client only, opaque color-only validity (T7), NoCollision, never replicated.
+	// Ghost — owning-client only, translucent validity tint, NoCollision, never replicated.
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> GhostMesh;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> GhostMID;
+	/** Front-face arrow for one-way door ghosts (same translucent stack). */
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> GhostFacingMesh;
+	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> GhostFacingMID;
 
 	EPFBuildTool EquippedTool  = EPFBuildTool::Wall;
-	EPFBuildTool LastUsedPiece = EPFBuildTool::Wall;   // Q-tap target; session default Wall (03 §3)
+	EPFBuildTool LastUsedPiece = EPFBuildTool::Wall;   // last non-delete tool (session default Wall)
 	uint8  RampRotOffset = 0;   // resets after placement and on tool switch
 	uint8  PropRotOffset = 0;   // persists (03 §2)
 	int32  CurrentGhostMeshType = -1;
 
 	bool   bPlaceHeld = false;
-	bool   bWheelOpenSent = false;
+	bool   bWheelOpenSent = false;   // true while the build wheel UI is open
 	double LastSendTime = -100.0;
 	double DenyFlashUntil = 0.0;
 	FPFSentSlot LastSentSlot;

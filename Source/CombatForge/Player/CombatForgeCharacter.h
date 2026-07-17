@@ -138,13 +138,12 @@ protected:
 	UFUNCTION(Server, Reliable) void ServerBeginDefuse();
 	UFUNCTION(Server, Reliable) void ServerEndDefuse();
 	UFUNCTION(Server, Reliable) void ServerClaimBombPickup(class APFBombPickup* Pickup);
-	// Dev pose-tuning drag (gated by pf.WeaponDrag): hold MIDDLE MOUSE and move to slide the FP weapon in 3D.
-	// Not ADS = edits the held pose (FPLoc); ADS = edits the ADS pose. Shift = depth, Ctrl = rotate. On
-	// release, prints the pf.WeaponFP / pf.WeaponADS line to paste into PFWeaponCatalog.cpp.
+	// Dev pose-tuning drag (gated by pf.WeaponDrag): hold MIDDLE MOUSE.
+	// Plain = translate, Shift = depth, Ctrl = pitch/yaw the muzzle (barrel aim), Alt = roll.
+	// Hip vs ADS depends on aim state. Release logs paste-ready pf.WeaponFP / pf.WeaponADS lines.
 	void OnWeaponDragPressed();
 	void OnWeaponDragReleased();
 	void TickWeaponDrag();          // applies the mouse delta while dragging (called from the local Tick block)
-	void PrintWeaponPoseLine() const;
 
 	/** Sprint-out raise timer elapsed — release the buffered fire (04 §1.1). */
 	void OnSprintOutFinished();
@@ -316,7 +315,32 @@ public:
 	void OnWeaponSwapInput();
 	/** Server: force the primary weapon + full ammo (respawn). */
 	void ResetToPrimaryWeapon();
+
+	/** Log paste-ready hip + ADS pose lines (includes WeaponId for catalog paste). Console: pf.Weapon dump. */
+	void PrintWeaponPoseLine() const;
+	/**
+	 * Dev: equip a catalog gun in hand for pose tuning (pf.Weapon next/prev / cat idx / id).
+	 * Turns on pf.WeaponDrag and off pf.WeaponAutoPose so middle-mouse drag edits catalog poses.
+	 * Live drag edits are cached per WeaponId so cycling does not wipe them mid-session.
+	 */
+	void DevEquipCatalogWeapon(int32 Category, int32 Index);
+	/** Step Dir through the flat catalog (all categories). Returns true if equipped. */
+	bool DevCycleCatalogWeapon(int32 Dir);
 private:
+	/** Session-only pose overrides while tuning (key = WeaponId). Survives cycle; cleared on EndPlay. */
+	struct FPFSessionWeaponPose
+	{
+		FVector  FPLoc = FVector::ZeroVector;
+		FRotator FPRot = FRotator::ZeroRotator;
+		float    FPScale = 1.f;
+		FVector  MuzzleFP = FVector::ZeroVector;
+		FVector  AdsLoc = FVector::ZeroVector;
+		FRotator AdsRot = FRotator::ZeroRotator;
+	};
+	TMap<FName, FPFSessionWeaponPose> SessionWeaponPoses;
+	void CacheCurrentWeaponPose();
+	bool TryApplySessionWeaponPose(const FName& WeaponId, FVector& InOutFPLoc, FRotator& InOutFPRot,
+		float& InOutFPScale, FVector& InOutMuzzle, FVector& InOutAdsLoc, FRotator& InOutAdsRot) const;
 
 	/** Phase-1 spike: mount the modular Bandit body + sequence-loco anims on GetMesh(). */
 	void AssembleBanditCharacter();

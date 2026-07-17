@@ -29,8 +29,9 @@ class UWidgetSwitcher;
  * scoreboard, options menu). Panels switch on GameState OnPhaseChangedEvent.
  *
  * CROSS-PACKAGE WIRING DUTY (binding, §3.6):
- *  - BuildComponent->OnBuildWheelRequestedEvent -> Wheel->Open() / Wheel->CloseAndCommit()
+ *  - BuildComponent->OnBuildWheelRequestedEvent -> Wheel->Open() / Wheel->CloseAndCommit() (Q tap)
  *  - Wheel->OnToolSelectedEvent -> BuildComponent->EquipTool()
+ *  - Wheel->OnWheelClosedEvent -> BuildComponent->NotifyBuildWheelClosed()
  *  - re-wired on pawn change via the possession delegate — child widgets never cache pawn
  *    pointers across possession (the pawn is pushed down through BindToPawn)
  *  - scoreboard visibility from ACombatForgePlayerController::IsScoreboardHeld() /
@@ -68,6 +69,7 @@ private:
 	void HandleScoreboardHeldChanged(bool bHeld);
 	void HandleBuildWheelRequested(bool bOpen);
 	void HandleWheelToolSelected(EPFBuildTool Tool);
+	void HandleWheelClosed(bool bUnused);
 
 	/** Unwires the previous pawn's components and pushes the new pawn into the child widgets. */
 	void WirePawn(ACombatForgeCharacter* NewPawn);

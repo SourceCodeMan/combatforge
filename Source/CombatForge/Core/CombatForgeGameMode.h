@@ -64,6 +64,12 @@ public:
 	// ---- The only phase mutator in the codebase ----
 	void SetPhase(EPFMatchPhase NewPhase);            // server; updates GameState, stamps timers, side effects
 
+	/**
+	 * Dev / playtest: add seconds to the current phase or combat-round clock and reschedule the
+	 * underlying FTimerHandle so the match actually waits (HUD alone is not enough). Console: pf.AddTime.
+	 */
+	void DevAddMatchTime(float Seconds);
+
 	// ---- Cross-package server entry points ----
 	// pkg-weapons calls when a player pawn's HP hits 0 (dummies do NOT route here):
 	void NotifyPawnEliminated(ACombatForgeCharacter* Victim, const FPFPaintHitInfo& FinalHit);

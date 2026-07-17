@@ -273,10 +273,14 @@ void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 		PaintHit.ImpactPoint = ImpactPoint;
 		PaintHit.ImpactNormal = ImpactNormal;
 		// Forward the hit bone (None for capsule hits — ApplyPaintHit derives the region via
-		// nearest-bone scan; a real bone name from a mesh intercept wins outright). Region and
-		// Damage are filled by ApplyPaintHit — single source of truth, no duplicate fill here.
+		// nearest-bone scan; a real bone name from a mesh intercept wins outright). Region is
+		// resolved in ApplyPaintHit; Damage is the shooter's per-weapon HitValue (server resolve).
 		PaintHit.HitBone = Hit.BoneName;
 		PaintHit.ServerTime = static_cast<float>(GetWorld()->GetTimeSeconds());
+		if (Weapon != nullptr)
+		{
+			PaintHit.Damage = Weapon->HitValue;
+		}
 
 		VictimHealth->ApplyPaintHit(PaintHit);
 

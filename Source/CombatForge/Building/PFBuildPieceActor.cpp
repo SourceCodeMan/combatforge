@@ -70,6 +70,7 @@ void APFBuildPieceActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(APFBuildPieceActor, GridRot);
 	DOREPLIFETIME(APFBuildPieceActor, TeamId);
 	DOREPLIFETIME(APFBuildPieceActor, bOpen);
+	DOREPLIFETIME(APFBuildPieceActor, bOneWaySealed);
 }
 
 void APFBuildPieceActor::BeginPlay()
@@ -88,7 +89,9 @@ void APFBuildPieceActor::InitFromRecord(const FPFBuildPieceRec& Rec)
 	GridRot = Rec.Rot;
 	TeamId = Rec.Team;
 	bOpen = false;
+	bOneWaySealed = false;
 	DoorYawAlpha = 0.f;
+	DoorOpenRemaining = 0.f;
 	TrapOpenRemaining = 0.f;
 
 	const float Wx = GridX * Sub;
@@ -107,8 +110,27 @@ void APFBuildPieceActor::OnRep_Open()
 	ApplyOpenState();
 }
 
+void APFBuildPieceActor::OnRep_OneWaySealed()
+{
+	EnsureGeometryBuilt();
+	ApplyOpenState();
+}
+
 void APFBuildPieceActor::OnRep_PieceMeta()
 {
+	// Always rebuild: type/rot can arrive after a partial first build, and clients never inherit
+	// the server's NewObject mesh comps (those don't replicate).
+	for (UStaticMeshComponent* P : SolidParts)
+	{
+		if (IsValid(P))
+		{
+			P->DestroyComponent();
+		}
+	}
+	SolidParts.Reset();
+	DoorLeaf = nullptr;
+	OneWaySealPlate = nullptr;
+	TrapPlate = nullptr;
 	EnsureGeometryBuilt();
 }
 
@@ -197,7 +219,7 @@ void APFBuildPieceActor::RebuildGeometry()
 	}
 	SolidParts.Reset();
 	DoorLeaf = nullptr;
-	OneWayBackPlate = nullptr;
+	OneWaySealPlate = nullptr;
 	TrapPlate = nullptr;
 	if (TrapTrigger)
 	{
@@ -230,9 +252,10 @@ void APFBuildPieceActor::RebuildGeometry()
 		BuildDoorLeaf();
 		break;
 	case EPFPieceType::WallDoorOneWay:
+		// Same single-thickness door as a normal door; seal plate is flush and only after first use.
 		BuildWallFrameParts(/*door=*/true, /*window=*/false);
 		BuildDoorLeaf();
-		BuildOneWayBackPlate();
+		BuildOneWaySealPlate();
 		break;
 	case EPFPieceType::FloorTrap:
 		BuildTrapFloor();
@@ -302,14 +325,8 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 		AddCubePart(TEXT("WinHeader"), Center(MidAlong, HeaderZ), ExtentAlong(OpenAlongHalf, HeaderH),
 			FRotator::ZeroRotator, FrameMID, true);
 
-		// Visual-only glass pane (no collision) so the hole reads as a window, not empty air.
-		const float PaneZ = PieceWinSill + PieceWinH * 0.5f;
-		const float PaneThick = 4.f;
-		FVector PaneExt = ExtentAlong(OpenAlongHalf, PieceWinH * 0.5f);
-		if (bEast) { PaneExt.X = PaneThick * 0.5f; }
-		else { PaneExt.Y = PaneThick * 0.5f; }
-		AddCubePart(TEXT("WinPane"), Center(MidAlong, PaneZ), PaneExt,
-			FRotator::ZeroRotator, PaneMID, /*bBlock=*/false);
+		// No solid "glass" fill: BasicShapeMaterial is opaque, so a pane mesh read as a solid wall
+		// and hid the opening. Empty hole + frame = see/shoot-through window.
 		return;
 	}
 
@@ -383,36 +400,30 @@ FRotator APFBuildPieceActor::DoorLeafOpenRotation() const
 	return FRotator(0.f, Base + 100.f, 0.f);
 }
 
-void APFBuildPieceActor::BuildOneWayBackPlate()
+void APFBuildPieceActor::BuildOneWaySealPlate()
 {
-	// Full solid plate slightly on the BACK face (−front normal) so the reverse side reads as a wall.
-	// Disabled when the door is open so you can finish walking through; re-enabled on close.
-	const float Wx = GridX * Sub;
-	const float Wy = GridY * Sub;
-	const float Wz = GridZ * Sub;
-	const FVector N = WallFrontNormal();
-	const float BackOffset = WallThick * 0.5f + 6.f;
-	FVector Center(Wx + Cell * 0.5f, Wy + Cell * 0.5f, Wz + WallH * 0.5f);
-	if (GridRot == 1)
-	{
-		Center = FVector(Wx + Cell - N.X * BackOffset, Wy + Cell * 0.5f, Wz + WallH * 0.5f);
-	}
-	else
-	{
-		Center = FVector(Wx + Cell * 0.5f, Wy + Cell - N.Y * BackOffset, Wz + WallH * 0.5f);
-	}
-
+	// Flush fill of the door aperture in the SAME wall plane as the door leaf — not an offset second
+	// wall (that was double-thickness and gave the trick away). Starts hidden until first seal.
+	const FVector Center = DoorLeafClosedCenter();
+	const float ThickHalf = WallThick * 0.5f;
 	FVector Ext;
 	if (GridRot == 1)
 	{
-		Ext = FVector(6.f, Cell * 0.5f, WallH * 0.5f);
+		// E wall: thickness along X, door width along Y.
+		Ext = FVector(ThickHalf, PieceDoorW * 0.5f, PieceDoorH * 0.5f);
 	}
 	else
 	{
-		Ext = FVector(Cell * 0.5f, 6.f, WallH * 0.5f);
+		// N wall: thickness along Y, door width along X.
+		Ext = FVector(PieceDoorW * 0.5f, ThickHalf, PieceDoorH * 0.5f);
 	}
 
-	OneWayBackPlate = AddCubePart(TEXT("OneWayBack"), Center, Ext, FRotator::ZeroRotator, FrameMID, true);
+	OneWaySealPlate = AddCubePart(TEXT("OneWaySeal"), Center, Ext,
+		DoorLeafClosedRotation(), FrameMID, /*bBlock=*/false);
+	if (OneWaySealPlate)
+	{
+		OneWaySealPlate->SetVisibility(false);
+	}
 }
 
 void APFBuildPieceActor::BuildTrapFloor()
@@ -445,10 +456,14 @@ void APFBuildPieceActor::BuildTrapFloor()
 void APFBuildPieceActor::ApplyOpenState()
 {
 	const bool bDoorType = (PieceType == EPFPieceType::WallDoor || PieceType == EPFPieceType::WallDoorOneWay);
+	// One-way after first open→close: closed aperture shows a flush wall plate instead of the door leaf.
+	const bool bShowOneWaySeal = (PieceType == EPFPieceType::WallDoorOneWay) && bOneWaySealed && !bOpen;
+
 	if (bDoorType && DoorLeaf)
 	{
-		// Collision off while open so pawns pass; visual lerped in Tick.
-		ApplyCollisionPreset(DoorLeaf, !bOpen);
+		// Collision off while open so pawns pass; sealed-closed uses the flush plate instead of the leaf.
+		ApplyCollisionPreset(DoorLeaf, !bOpen && !bShowOneWaySeal);
+		DoorLeaf->SetVisibility(!bShowOneWaySeal);
 		if (bOpen)
 		{
 			DoorLeaf->SetWorldRotation(DoorLeafOpenRotation());
@@ -461,12 +476,12 @@ void APFBuildPieceActor::ApplyOpenState()
 		}
 	}
 
-	if (PieceType == EPFPieceType::WallDoorOneWay && OneWayBackPlate)
+	if (PieceType == EPFPieceType::WallDoorOneWay && OneWaySealPlate)
 	{
-		// When closed: solid from the back. When open: clear the plate so a front-side user can finish
-		// the walk-through (re-seals on close — classic one-way gate).
-		ApplyCollisionPreset(OneWayBackPlate, !bOpen);
-		OneWayBackPlate->SetVisibility(true); // always looks like wall from the back
+		// Seal only after first use, only while closed, flush in the door plane (single thickness).
+		// While open the hole is clear — walk through from either side.
+		ApplyCollisionPreset(OneWaySealPlate, bShowOneWaySeal);
+		OneWaySealPlate->SetVisibility(bShowOneWaySeal);
 	}
 
 	if (PieceType == EPFPieceType::FloorTrap && TrapPlate)
@@ -490,11 +505,11 @@ bool APFBuildPieceActor::CanUserToggleDoor(const APawn* User) const
 	}
 	if (PieceType == EPFPieceType::WallDoorOneWay)
 	{
-		// Must be on the FRONT side of the wall to use the door.
+		// Front side only — the trick is who can open it, not a second wall layer.
 		const FVector ToUser = (Me - DoorCenter).GetSafeNormal2D();
 		if (FVector::DotProduct(ToUser, WallFrontNormal()) < 0.15f)
 		{
-			return false; // behind / on the solid face
+			return false;
 		}
 	}
 	return true;
@@ -513,11 +528,38 @@ void APFBuildPieceActor::AuthorityTryToggleDoor(APawn* User)
 			return;
 		}
 	}
-	bOpen = !bOpen;
+	if (bOpen)
+	{
+		// Manual close (or toggle from open) — clear auto-close timer and seal one-ways.
+		AuthorityCloseDoor();
+	}
+	else
+	{
+		bOpen = true;
+		DoorOpenRemaining = DoorOpenSeconds;
+		ApplyOpenState();
+		ForceNetUpdate();
+	}
+	UE_LOG(CombatForgeLog, Log, TEXT("Door piece %u %s by %s%s"),
+		PieceId, bOpen ? TEXT("OPEN") : TEXT("CLOSE"), *GetNameSafe(User),
+		(PieceType == EPFPieceType::WallDoorOneWay && bOneWaySealed) ? TEXT(" (one-way sealed)") : TEXT(""));
+}
+
+void APFBuildPieceActor::AuthorityCloseDoor()
+{
+	if (!HasAuthority() || !bOpen)
+	{
+		return;
+	}
+	bOpen = false;
+	DoorOpenRemaining = 0.f;
+	// First close after an open arms the flush seal (trick door → wall when closed thereafter).
+	if (PieceType == EPFPieceType::WallDoorOneWay)
+	{
+		bOneWaySealed = true;
+	}
 	ApplyOpenState();
 	ForceNetUpdate();
-	UE_LOG(CombatForgeLog, Log, TEXT("Door piece %u %s by %s"),
-		PieceId, bOpen ? TEXT("OPEN") : TEXT("CLOSE"), *GetNameSafe(User));
 }
 
 void APFBuildPieceActor::Tick(float DeltaSeconds)
@@ -529,7 +571,27 @@ void APFBuildPieceActor::Tick(float DeltaSeconds)
 	}
 	if (PieceType == EPFPieceType::WallDoor || PieceType == EPFPieceType::WallDoorOneWay)
 	{
+		if (HasAuthority())
+		{
+			TickDoorAutoClose(DeltaSeconds);
+		}
 		TickDoorAnim(DeltaSeconds);
+	}
+}
+
+void APFBuildPieceActor::TickDoorAutoClose(float DeltaSeconds)
+{
+	if (!bOpen)
+	{
+		DoorOpenRemaining = 0.f;
+		return;
+	}
+	DoorOpenRemaining -= DeltaSeconds;
+	if (DoorOpenRemaining <= 0.f)
+	{
+		AuthorityCloseDoor();
+		UE_LOG(CombatForgeLog, Verbose, TEXT("Door piece %u auto-closed after %.1fs"),
+			PieceId, DoorOpenSeconds);
 	}
 }
 

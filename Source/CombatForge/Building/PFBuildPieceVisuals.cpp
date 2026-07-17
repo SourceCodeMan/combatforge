@@ -407,7 +407,7 @@ const TCHAR* DisplayName(EPFPieceType Type)
 	case EPFPieceType::Wall:           return TEXT("Wall");
 	case EPFPieceType::Floor:          return TEXT("Floor");
 	case EPFPieceType::Ramp:           return TEXT("Ramp");
-	case EPFPieceType::Roof:           return TEXT("Roof");
+	case EPFPieceType::Roof:           return TEXT("Ceiling");
 	case EPFPieceType::PropCan:        return TEXT("Barrel");
 	case EPFPieceType::PropDorito:     return TEXT("Crate");
 	case EPFPieceType::PropSnake:      return TEXT("Boxes");
@@ -426,7 +426,7 @@ const TCHAR* DisplayName(EPFBuildTool Tool)
 	case EPFBuildTool::Wall:           return TEXT("Wall");
 	case EPFBuildTool::Floor:          return TEXT("Floor");
 	case EPFBuildTool::Ramp:           return TEXT("Ramp");
-	case EPFBuildTool::Roof:           return TEXT("Roof");
+	case EPFBuildTool::Roof:           return TEXT("Ceiling");
 	case EPFBuildTool::PropCan:        return TEXT("Barrel");
 	case EPFBuildTool::PropDorito:     return TEXT("Crate");
 	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
@@ -529,13 +529,9 @@ UStaticMesh* MeshForType(EPFPieceType Type)
 	{
 		return Slot->Mesh;
 	}
-	switch (Type)
-	{
-	case EPFPieceType::Roof:
-		return GCone ? GCone : GCube;
-	default:
-		return GCube;
-	}
+	// Structural pieces (Wall/Floor/Ramp/Roof + specials' ghosts) all use the unit cube;
+	// per-type scale lives in FPFGridMath::PieceLocalTransform. Roof is a flat ceiling plate.
+	return GCube;
 }
 
 bool UsesNativeMaterials(EPFPieceType Type)

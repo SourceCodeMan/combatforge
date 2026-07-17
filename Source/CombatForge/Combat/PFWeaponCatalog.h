@@ -37,6 +37,27 @@ struct FPFWeaponDef
 	uint8       ClassBurstCount  = 3;
 	uint8       MagSize          = 30;        // per-weapon magazine
 	float       FireRateBps      = 12.f;      // per-weapon rate of fire (BBs/sec) — replaced the global marker preset
+
+	// ---- Per-weapon identity (feel / rank / Stage 2–4 consumers) — keep at END for partial-init safety ----
+	const TCHAR* WeaponId = nullptr;   // NEVER nullptr in table rows (stable slug, e.g. "ar_m4")
+	uint8  HitValue = 1;
+	uint8  Pellets = 1;
+	float  PelletSpreadDeg = 0.f;
+	float  BloomPerShotDeg = 0.15f;
+	float  BloomCapDeg = 2.0f;
+	uint8  BloomFreeShots = 5;
+	float  BloomDecayDegPerSec = 6.f;
+	float  ClimbPitchPerShotDeg = 0.30f;
+	float  ClimbYawPerShotDeg = 0.12f;
+	float  ClimbRecoverDegPerSec = 14.f;
+	float  ADSTimeSec = 0.25f;
+	float  SprintOutTime = 0.18f;
+	float  MoveSpeedMult = 0.95f;
+	float  ReloadTime = 1.0f;
+	float  SpinupSec = 0.f;
+	float  ReburstDelaySec = 0.f;
+	float  MoveSpreadMult = 1.35f;  // multiplies hip for SpreadHipMoving in ApplyWeaponLoadout
+	uint8  UnlockRank = 1;
 };
 
 /** A player's chosen weapon: category + index into that category. */
@@ -80,6 +101,13 @@ namespace PFWeapon
 	bool ComputeAutoPose(const UStaticMesh* Mesh, int32 Category, FPFWeaponAutoPose& Out);
 
 	FPFWeaponConfig DefaultConfig();
+
+	/** Find by WeaponId slug (e.g. "ar_m4"). Returns DefaultConfig() if missing. */
+	FPFWeaponConfig FindById(FStringView WeaponId);
+	/** WeaponId of category/index or empty. */
+	FString IdOf(int32 Category, int32 Index);
+	/** Unlock rank for display (1 if missing). */
+	uint8 UnlockRankOf(int32 Category, int32 Index);
 
 	// ---- Persistence (GGameUserSettings.ini [CombatForge]) ----
 	// The weapon choice is PER CLASS SLOT (the same 5 slots as the character save slots) — each class is a full

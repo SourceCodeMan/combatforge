@@ -97,7 +97,7 @@ APFBuildGrid::APFBuildGrid()
 		CubeFinder.Object,       // Wall
 		CubeFinder.Object,       // Floor
 		CubeFinder.Object,       // Ramp (plank)
-		ConeFinder.Object,       // Roof (cone proxy)
+		CubeFinder.Object,       // Roof / ceiling plate (was cone graybox)
 		CylinderFinder.Object,   // Barrel fallback
 		ConeFinder.Object,       // Crate fallback
 		CubeFinder.Object        // Boxes fallback
@@ -871,11 +871,9 @@ void APFBuildGrid::SpawnRampUnderfill(const FPFBuildPieceRec& Rec)
 	}
 	DestroyRampUnderfill(Rec.PieceId);
 
-	// Crouch capsule ≈ 116uu tall (half 58); leave a slightly taller tunnel so crouch isn't sticky.
-	// Standing ≈ 176uu — taller than the tunnel, so the solid steps block standing under the ramp.
-	// Crouch capsule ≈ 116uu; standing ≈ 176uu. Tunnel is tall enough to crouch-walk under the plank
-	// but short enough that a standing head hits the solid steps immediately.
-	constexpr float CrouchTunnelUU = 124.f;
+	// Crouch capsule = 2 * 58 = 116uu. Leave generous air under the plank so crouch-crawl isn't sticky.
+	// Standing ≈ 176uu — still taller than this tunnel, so solid steps block standing under-ramp crawls.
+	constexpr float CrouchTunnelUU = 168.f;   // 116 capsule + ~52uu slack (steps, slope, input forgiveness)
 	constexpr float CellRunUU = static_cast<float>(PFGrid::CellUU);       // 400
 	constexpr float RiseUU = static_cast<float>(PFGrid::WallHeightUU);    // 300
 	constexpr int32 Steps = 8;
@@ -937,13 +935,13 @@ void APFBuildGrid::SpawnRampUnderfill(const FPFBuildPieceRec& Rec)
 	{
 		// Distance along ascent from low edge to step midpoint.
 		const float DistMid = (static_cast<float>(i) + 0.5f) * StepRun;
-		// Underside height of the ramp plank (linear 0→300 over the cell).
-		const float PlankZ = (DistMid / CellRunUU) * RiseUU;
-		// Solid fill up to just below a crouch tunnel under the plank.
-		const float SolidTop = PlankZ - CrouchTunnelUU;
-		if (SolidTop < 18.f)
+		// Approximate top of the visual plank (linear 0→300). Visual plank is only ~20uu thick, so the
+		// underside is ~10uu below this — tunnel still fits crouch with CrouchTunnelUU slack.
+		const float PlankTopZ = (DistMid / CellRunUU) * RiseUU;
+		const float SolidTop = PlankTopZ - CrouchTunnelUU;
+		if (SolidTop < 12.f)
 		{
-			continue;   // near the low tip — nothing to fill; plank itself is the blocker
+			continue;   // near the low tip — open; the thin ISM plank is the only blocker
 		}
 
 		const float SolidHalfH = SolidTop * 0.5f;
@@ -982,38 +980,8 @@ void APFBuildGrid::SpawnRampUnderfill(const FPFBuildPieceRec& Rec)
 		}
 	}
 
-	// Also thicken the *plank* collision slightly via an extra thin plate on the underside so
-	// head hits against the slope are reliable (ISM thin cubes can tunnel).
-	{
-		const FTransform PlankT = FPFGridMath::PieceLocalTransform(
-			EPFPieceType::Ramp, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
-		UStaticMeshComponent* Plank = NewObject<UStaticMeshComponent>(Holder, TEXT("RampPlankCol"));
-		Plank->SetupAttachment(Root);
-		Plank->SetStaticMesh(Cube);
-		Plank->SetVisibility(false);
-		Plank->SetHiddenInGame(true);
-		Plank->SetCastShadow(false);
-		Plank->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		Plank->SetCollisionObjectType(ECC_WorldStatic);
-		Plank->SetCollisionResponseToAllChannels(ECR_Ignore);
-		Plank->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-		Plank->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-		Plank->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-		Plank->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
-		Plank->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
-		Plank->SetCollisionResponseToChannel(PF_ECC_BuildTrace, ECR_Block);
-		Plank->SetCanEverAffectNavigation(true);
-		Plank->RegisterComponent();
-		// Slightly thicker than the visual 20uu plank so capsule heads catch cleanly.
-		FTransform Thick = PlankT;
-		const FVector Scale = Thick.GetScale3D();
-		Thick.SetScale3D(FVector(Scale.X, Scale.Y, FMath::Max(Scale.Z, 0.55f))); // ~55uu thick
-		// Keep the TOP surface roughly where the visual is: shift down along local -Z by half extra thickness.
-		const float ExtraHalf = (Thick.GetScale3D().Z - Scale.Z) * 50.f;
-		const FVector Down = Thick.GetRotation().RotateVector(FVector(0.f, 0.f, -ExtraHalf));
-		Thick.AddToTranslation(Down);
-		Plank->SetWorldTransform(Thick);
-	}
+	// No extra thick-plank plate: it shrank the crouch tunnel below capsule height. Standing under-ramp
+	// block is handled by the solid steps; the visual ISM plank still blocks heads that hit the slope.
 
 	RampUnderfills.Add(Rec.PieceId, Holder);
 }

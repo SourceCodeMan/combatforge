@@ -424,9 +424,42 @@ void UPFBackendSubsystem::FetchProfile()
 				(*Stats)->TryGetNumberField(TEXT("wins"), Self->Profile.Wins);
 				(*Stats)->TryGetNumberField(TEXT("eliminations"), Self->Profile.Eliminations);
 			}
+			// Weapon unlocks: API returns ["wpn.ar_m4", ...] (weapon-implementation-spec §7).
+			Self->Profile.UnlockIds.Reset();
+			const TArray<TSharedPtr<FJsonValue>>* Unlocks = nullptr;
+			if (Root->TryGetArrayField(TEXT("unlocks"), Unlocks) && Unlocks)
+			{
+				for (const TSharedPtr<FJsonValue>& V : *Unlocks)
+				{
+					if (V.IsValid() && V->Type == EJson::String)
+					{
+						Self->Profile.UnlockIds.Add(V->AsString());
+					}
+				}
+			}
 			Self->SaveAuthToDisk();   // keeps the cached displayName fresh for next boot
 			Self->OnAuthChanged.Broadcast();
 		});
+}
+
+bool UPFBackendSubsystem::IsWeaponUnlocked(const FString& WeaponId) const
+{
+	// Offline / LAN / pre-backend: fully ungated (spec Stage 5).
+	if (!IsLoggedIn() || Profile.UnlockIds.Num() == 0 || WeaponId.IsEmpty())
+	{
+		return true;
+	}
+	const FString Prefixed = WeaponId.StartsWith(TEXT("wpn."))
+		? WeaponId
+		: FString::Printf(TEXT("wpn.%s"), *WeaponId);
+	for (const FString& Id : Profile.UnlockIds)
+	{
+		if (Id.Equals(Prefixed, ESearchCase::IgnoreCase) || Id.Equals(WeaponId, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void UPFBackendSubsystem::LinkInstallGuid()

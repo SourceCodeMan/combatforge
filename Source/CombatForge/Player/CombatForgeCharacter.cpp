@@ -2,8 +2,9 @@
 
 #include "Player/CombatForgeCharacter.h"
 
-#include "HAL/IConsoleManager.h"   // pf.BanditChar spike toggle
+#include "HAL/IConsoleManager.h"   // pf.BanditChar spike toggle + pose-tune cvars
 #include "DrawDebugHelpers.h"       // pf.ShowMuzzle marker
+#include "Engine/Engine.h"          // on-screen pose / weapon-cycle messages
 
 #include "CombatForge.h"
 #include "Core/CombatForgeTypes.h"
@@ -14,6 +15,7 @@
 #include "Input/PFInputConfig.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Combat/PFHealthComponent.h"
+#include "Online/PFBackendSubsystem.h"   // fleet weapon unlock gate (ServerSetKit)
 #include "Combat/PFCombatAudio.h"
 #include "Core/CombatForgePlayerState.h"   // melee: victim/attacker team + kill credit
 #include "Combat/PFCombatVFX.h"
@@ -68,16 +70,18 @@ static TAutoConsoleVariable<int32> CVarShowMuzzle(
 	TEXT("pf.ShowMuzzle"), 0,
 	TEXT("1 = draw a marker at the first-person muzzle + shot line (align pf.WeaponFP's last 3 args to the barrel)."));
 
-// Dev pose-tuning drag: hold MIDDLE MOUSE and move to slide the FP weapon in 3D (Shift = depth, Ctrl = rotate).
-// Off by default so middle-mouse does nothing in normal play; edits the held pose or the ADS pose by aim state.
+// Dev pose-tuning drag: hold MIDDLE MOUSE.
+//   plain MMB = translate  |  Shift = depth  |  Ctrl = pitch/yaw the MUZZLE  |  Alt = roll
+// Off by default; hip pose vs ADS pose depends on whether you're aiming.
 static TAutoConsoleVariable<int32> CVarWeaponDrag(
 	TEXT("pf.WeaponDrag"), 0,
-	TEXT("1 = middle-mouse-drag the FP weapon to reposition it (prints the pf.WeaponFP/ADS line on release)."));
+	TEXT("1 = MMB drag FP weapon. Plain=move, Shift=depth, Ctrl=pitch/yaw muzzle, Alt=roll. Release logs pose."));
 
-// Auto hip/ADS from mesh bounds (default on). pf.WeaponAutoPose 0 → use catalog FPLoc/AdsLoc only.
+// Catalog poses are hand-tuned (drag bake). Auto-pose overwrote those every equip and made the first
+// rifles "change every cycle" — default OFF so PFWeaponCatalog is the source of truth.
 static TAutoConsoleVariable<int32> CVarWeaponAutoPose(
-	TEXT("pf.WeaponAutoPose"), 1,
-	TEXT("1 = auto-generate FP hip + ADS from gun mesh bounds (default). 0 = catalog poses only. pf.WeaponFP/ADS still override live."));
+	TEXT("pf.WeaponAutoPose"), 0,
+	TEXT("1 = auto-generate FP hip+ADS from mesh bounds (ignores catalog). 0 = catalog poses only (default)."));
 
 // Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
 // kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
@@ -582,6 +586,7 @@ void ACombatForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Audio->StopAmbientBed();
 	}
+	SessionWeaponPoses.Empty();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -849,6 +854,11 @@ void ACombatForgeCharacter::OnWeaponDragPressed()
 	if (CVarWeaponDrag.GetValueOnGameThread() != 0 && IsLocallyControlled())
 	{
 		bWeaponDragging = true;
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(0x57445247 /*'WDRG'*/, 3.f, FColor::Cyan,
+				TEXT("Drag: MMB move · Ctrl+MMB pitch/yaw muzzle · Alt+MMB roll · Shift depth"));
+		}
 	}
 }
 
@@ -857,7 +867,8 @@ void ACombatForgeCharacter::OnWeaponDragReleased()
 	if (bWeaponDragging)
 	{
 		bWeaponDragging = false;
-		PrintWeaponPoseLine();   // dump the paste-ready line for whichever pose was being edited
+		CacheCurrentWeaponPose();  // keep live edit when cycling guns mid-session
+		PrintWeaponPoseLine();     // dump the paste-ready line for catalog bake
 	}
 }
 
@@ -880,27 +891,42 @@ void ACombatForgeCharacter::TickWeaponDrag()
 	}
 
 	const bool bDepth  = PC->IsInputKeyDown(EKeys::LeftShift);     // mouse-Y → forward/back instead of up/down
-	const bool bRotate = PC->IsInputKeyDown(EKeys::LeftControl);   // rotate instead of translate
+	const bool bRotate = PC->IsInputKeyDown(EKeys::LeftControl);   // rotate barrel (pitch/yaw), NOT translate
+	const bool bRoll   = PC->IsInputKeyDown(EKeys::LeftAlt);       // roll the gun about the barrel axis
 	const bool bAds    = IsADS();                                  // ADS pose vs held pose
 	constexpr float MoveScale = 0.12f;   // cm per mouse unit
 	constexpr float RotScale  = 0.4f;    // deg per mouse unit
 
-	if (bRotate)
+	if (bRotate || bRoll)
 	{
-		// mouse-X → yaw, mouse-Y → pitch (screen-up = muzzle up).
-		const FRotator Delta(DY * RotScale, DX * RotScale, 0.f);
-		if (bAds)
+		// Aim the MUZZLE (rotate the gun), never slide its position.
+		// Viewmodel space: Pitch tips barrel up/down, Yaw turns left/right, Roll banks about the bore.
+		// Mouse-down → muzzle dips (negative pitch). Mouse-right → yaw right.
+		FRotator Delta = FRotator::ZeroRotator;
+		if (bRoll)
 		{
-			ViewModelAdsRot += Delta;
+			// Alt: bank the weapon (barrel twist). Horizontal mouse is most natural.
+			Delta.Roll = DX * RotScale;
 		}
 		else
 		{
-			RifleFPMesh->SetRelativeRotation(RifleFPMesh->GetRelativeRotation() + Delta);
+			// Ctrl: pitch + yaw. Flip mouse-Y so dragging down points the barrel down.
+			Delta.Pitch = -DY * RotScale;
+			Delta.Yaw   =  DX * RotScale;
+		}
+		if (bAds)
+		{
+			ViewModelAdsRot = (ViewModelAdsRot + Delta).GetNormalized();
+		}
+		else
+		{
+			RifleFPMesh->SetRelativeRotation(
+				(RifleFPMesh->GetRelativeRotation() + Delta).GetNormalized());
 		}
 	}
 	else
 	{
-		// Screen plane: mouse-X → gun right (+Y), mouse-Y → gun up (+Z). Shift swaps Z for depth (+X).
+		// Screen plane translate: mouse-X → gun right (+Y), mouse-Y → gun up (+Z). Shift = depth (+X).
 		const float Right = DX * MoveScale;
 		const float Vert  = -DY * MoveScale;   // screen-up (negative DY) → gun up
 		const FVector Delta = bDepth ? FVector(Vert, Right, 0.f) : FVector(0.f, Right, Vert);
@@ -919,22 +945,174 @@ void ACombatForgeCharacter::PrintWeaponPoseLine() const
 {
 	auto V = [](const FVector& X) { return FString::Printf(TEXT("%.2f %.2f %.2f"), X.X, X.Y, X.Z); };
 	auto R = [](const FRotator& X) { return FString::Printf(TEXT("%.2f %.2f %.2f"), X.Pitch, X.Yaw, X.Roll); };
-	FString Line;
-	if (IsADS())
-	{
-		Line = FString::Printf(TEXT("pf.WeaponADS %s %s"), *V(ViewModelAdsLoc), *R(ViewModelAdsRot));
-	}
-	else if (RifleFPMesh != nullptr)
-	{
-		const float Scale = RifleFPMesh->GetRelativeScale3D().X;
-		Line = FString::Printf(TEXT("pf.WeaponFP %s %s %.3f %s"),
-			*V(RifleFPMesh->GetRelativeLocation()), *R(RifleFPMesh->GetRelativeRotation()), Scale, *V(MuzzleLocalFP));
-	}
-	UE_LOG(CombatForgeLog, Log, TEXT("%s"), *Line);
+	auto VF = [](const FVector& X) {
+		return FString::Printf(TEXT("FVector(%.2ff, %.2ff, %.2ff)"), X.X, X.Y, X.Z);
+	};
+	auto RF = [](const FRotator& X) {
+		return FString::Printf(TEXT("FRotator(%.2ff, %.2ff, %.2ff)"), X.Pitch, X.Yaw, X.Roll);
+	};
+
+	const FString Id = PFWeapon::IdOf(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+	const FString Name = PFWeapon::WeaponDisplayName(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+	const FVector FPLoc = RifleFPMesh ? RifleFPMesh->GetRelativeLocation() : FVector::ZeroVector;
+	const FRotator FPRot = RifleFPMesh ? RifleFPMesh->GetRelativeRotation() : FRotator::ZeroRotator;
+	const float Scale = RifleFPMesh ? RifleFPMesh->GetRelativeScale3D().X : 1.f;
+
+	const FString Header = FString::Printf(
+		TEXT("=== WEAPON POSE [%s] %s  cat=%d idx=%d ==="),
+		*Id, *Name, ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+	const FString HipCmd = FString::Printf(TEXT("pf.WeaponFP %s %s %.3f %s"),
+		*V(FPLoc), *R(FPRot), Scale, *V(MuzzleLocalFP));
+	const FString AdsCmd = FString::Printf(TEXT("pf.WeaponADS %s %s"),
+		*V(ViewModelAdsLoc), *R(ViewModelAdsRot));
+	const FString Catalog = FString::Printf(
+		TEXT("  // catalog paste for %s\n  // FPLoc=%s FPRot=%s FPScale=%.3ff MuzzleFP=%s\n  // AdsLoc=%s AdsRot=%s"),
+		*Id, *VF(FPLoc), *RF(FPRot), Scale, *VF(MuzzleLocalFP),
+		*VF(ViewModelAdsLoc), *RF(ViewModelAdsRot));
+
+	UE_LOG(CombatForgeLog, Log, TEXT("%s"), *Header);
+	UE_LOG(CombatForgeLog, Log, TEXT("%s"), *HipCmd);
+	UE_LOG(CombatForgeLog, Log, TEXT("%s"), *AdsCmd);
+	UE_LOG(CombatForgeLog, Log, TEXT("%s"), *Catalog);
+
 	if (GEngine != nullptr)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 12.f, FColor::Cyan, Line);
+		GEngine->AddOnScreenDebugMessage(-1, 14.f, FColor::Cyan, Header);
+		GEngine->AddOnScreenDebugMessage(-1, 14.f, FColor::Green, HipCmd);
+		GEngine->AddOnScreenDebugMessage(-1, 14.f, FColor::Yellow, AdsCmd);
 	}
+}
+
+void ACombatForgeCharacter::CacheCurrentWeaponPose()
+{
+	if (!IsLocallyControlled() || RifleFPMesh == nullptr)
+	{
+		return;
+	}
+	const FString IdStr = PFWeapon::IdOf(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+	if (IdStr.IsEmpty())
+	{
+		return;
+	}
+	FPFSessionWeaponPose& P = SessionWeaponPoses.FindOrAdd(FName(*IdStr));
+	P.FPLoc = RifleFPMesh->GetRelativeLocation();
+	P.FPRot = RifleFPMesh->GetRelativeRotation();
+	P.FPScale = RifleFPMesh->GetRelativeScale3D().X;
+	P.MuzzleFP = MuzzleLocalFP;
+	P.AdsLoc = ViewModelAdsLoc;
+	P.AdsRot = ViewModelAdsRot;
+}
+
+bool ACombatForgeCharacter::TryApplySessionWeaponPose(const FName& WeaponId, FVector& InOutFPLoc,
+	FRotator& InOutFPRot, float& InOutFPScale, FVector& InOutMuzzle, FVector& InOutAdsLoc,
+	FRotator& InOutAdsRot) const
+{
+	if (WeaponId.IsNone())
+	{
+		return false;
+	}
+	if (const FPFSessionWeaponPose* P = SessionWeaponPoses.Find(WeaponId))
+	{
+		InOutFPLoc = P->FPLoc;
+		InOutFPRot = P->FPRot;
+		InOutFPScale = P->FPScale;
+		InOutMuzzle = P->MuzzleFP;
+		InOutAdsLoc = P->AdsLoc;
+		InOutAdsRot = P->AdsRot;
+		return true;
+	}
+	return false;
+}
+
+void ACombatForgeCharacter::DevEquipCatalogWeapon(int32 Category, int32 Index)
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	// Stash the gun we're leaving so cycling back restores live drag edits (not a stale re-bake).
+	CacheCurrentWeaponPose();
+
+	Category = FMath::Clamp(Category, 0, PFWeapon::CategoryCount() - 1);
+	Index = FMath::Clamp(Index, 0, FMath::Max(0, PFWeapon::WeaponCount(Category) - 1));
+
+	// Pose tuning session: drag on, auto-pose off so you edit catalog / session values, not a regen.
+	if (IConsoleVariable* Drag = IConsoleManager::Get().FindConsoleVariable(TEXT("pf.WeaponDrag")))
+	{
+		Drag->Set(1, ECVF_SetByConsole);   // higher priority than SetByCode so it sticks
+	}
+	if (IConsoleVariable* Auto = IConsoleManager::Get().FindConsoleVariable(TEXT("pf.WeaponAutoPose")))
+	{
+		Auto->Set(0, ECVF_SetByConsole);
+	}
+
+	FPFWeaponConfig C;
+	C.Category = Category;
+	C.Index = Index;
+	PrimaryWeaponConfig = C;
+	// Keep secondary as-is; force primary in hand for a clean tune view.
+	bSecondaryActive = false;
+	PFWeapon::SaveConfig(C);
+
+	// Kit rep so listen host + any remote see the same gun stats/mesh.
+	if (HasValidKit() || GetController())
+	{
+		KitRep.WeaponCategory = static_cast<uint8>(C.Category);
+		KitRep.WeaponIndex = static_cast<uint8>(C.Index);
+		if (!HasAuthority())
+		{
+			ServerSetKit(KitRep);
+		}
+	}
+	ApplyWeaponLoadout();
+
+	const FPFWeaponDef& Def = PFWeapon::Weapon(C.Category, C.Index);
+	const bool bFromSession = SessionWeaponPoses.Contains(FName(Def.WeaponId ? Def.WeaponId : TEXT("")));
+	const FString Msg = FString::Printf(
+		TEXT("Equipped [%s] %s  (%d/%d in %s)%s  — MMB move · Ctrl+MMB pitch · release logs"),
+		Def.WeaponId ? Def.WeaponId : TEXT("?"), Def.DisplayName,
+		C.Index + 1, PFWeapon::WeaponCount(C.Category),
+		*PFWeapon::CategoryLabel(C.Category),
+		bFromSession ? TEXT(" [session edit]") : TEXT(""));
+	UE_LOG(CombatForgeLog, Log, TEXT("%s"), *Msg);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Orange, Msg);
+	}
+}
+
+bool ACombatForgeCharacter::DevCycleCatalogWeapon(int32 Dir)
+{
+	if (!IsLocallyControlled() || Dir == 0)
+	{
+		return false;
+	}
+	// Flatten catalog into a single ring: AR0, AR1, … SMG0, …
+	TArray<TPair<int32, int32>> Flat;
+	for (int32 Cat = 0; Cat < PFWeapon::CategoryCount(); ++Cat)
+	{
+		const int32 N = PFWeapon::WeaponCount(Cat);
+		for (int32 Idx = 0; Idx < N; ++Idx)
+		{
+			Flat.Emplace(Cat, Idx);
+		}
+	}
+	if (Flat.Num() == 0)
+	{
+		return false;
+	}
+	int32 Cur = 0;
+	for (int32 i = 0; i < Flat.Num(); ++i)
+	{
+		if (Flat[i].Key == ActiveWeaponConfig.Category && Flat[i].Value == ActiveWeaponConfig.Index)
+		{
+			Cur = i;
+			break;
+		}
+	}
+	const int32 Next = (Cur + Dir % Flat.Num() + Flat.Num()) % Flat.Num();
+	DevEquipCatalogWeapon(Flat[Next].Key, Flat[Next].Value);
+	return true;
 }
 
 void ACombatForgeCharacter::OnJumpPressed()
@@ -2069,10 +2247,11 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	UMaterialInterface* Mat = PFWeapon::LoadMaterial(Def);
 	RifleMaterial = Mat;
 
-	// First-person viewmodel: swap mesh/material, then pose (auto from bounds, or catalog if cvar off).
+	// First-person viewmodel: catalog pose (default), optional auto-bounds, then session drag cache wins.
 	FVector  UseFPLoc   = Def.FPLoc;
 	FRotator UseFPRot   = Def.FPRot;
 	float    UseFPScale = Def.FPScale;
+	FVector  UseMuzzle  = Def.MuzzleFP;
 	FVector  UseAdsLoc  = Def.AdsLoc;
 	FRotator UseAdsRot  = Def.AdsRot;
 	if (CVarWeaponAutoPose.GetValueOnGameThread() != 0)
@@ -2097,6 +2276,12 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 #endif
 		}
 	}
+	// Session drag edits (pose-tune cycle) override catalog/auto so guns don't "change every time".
+	if (IsLocallyControlled() && Def.WeaponId)
+	{
+		TryApplySessionWeaponPose(FName(Def.WeaponId), UseFPLoc, UseFPRot, UseFPScale, UseMuzzle,
+			UseAdsLoc, UseAdsRot);
+	}
 
 	if (RifleFPMesh != nullptr)
 	{
@@ -2110,7 +2295,7 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 		RifleFPMesh->SetRelativeRotation(UseFPRot);
 		RifleFPMesh->SetRelativeScale3D(FVector(UseFPScale));
 	}
-	MuzzleLocalFP = Def.MuzzleFP;
+	MuzzleLocalFP = UseMuzzle;
 	ViewModelAdsLoc = UseAdsLoc;
 	ViewModelAdsRot = UseAdsRot;
 
@@ -2118,13 +2303,35 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	{
 		WeaponComponent->SpreadHip     = Def.SpreadHipDeg;
 		WeaponComponent->SpreadADS     = Def.SpreadADSDeg;
+		WeaponComponent->SpreadHipMoving = Def.SpreadHipDeg * Def.MoveSpreadMult;
 		WeaponComponent->MuzzleSpeedUU = Def.MuzzleSpeedUU;
 		WeaponComponent->ProjLifetime  = Def.ProjLifetimeSec;
 		WeaponComponent->BurstCount    = Def.ClassBurstCount;
 		WeaponComponent->HopperCapacity = Def.MagSize;
 		WeaponComponent->HopperCount    = Def.MagSize;
 		WeaponComponent->FireRateBps    = Def.FireRateBps;
+		WeaponComponent->HitValue       = Def.HitValue;
+		WeaponComponent->Pellets        = Def.Pellets;
+		WeaponComponent->PelletSpreadDeg = Def.PelletSpreadDeg;
+		WeaponComponent->BloomPerShot   = Def.BloomPerShotDeg;
+		WeaponComponent->BloomCap       = Def.BloomCapDeg;
+		WeaponComponent->BloomFreeShots = Def.BloomFreeShots;
+		WeaponComponent->BloomDecayDegPerSec = Def.BloomDecayDegPerSec;
+		WeaponComponent->ClimbPitchPerShotDeg = Def.ClimbPitchPerShotDeg;
+		WeaponComponent->ClimbYawPerShotDeg   = Def.ClimbYawPerShotDeg;
+		WeaponComponent->ClimbRecoverDegPerSec = Def.ClimbRecoverDegPerSec;
+		WeaponComponent->SprintOutTime  = Def.SprintOutTime;
+		WeaponComponent->ReloadTime     = Def.ReloadTime;
+		WeaponComponent->SpinupSec      = Def.SpinupSec;
+		WeaponComponent->ReburstDelaySec = Def.ReburstDelaySec;
 		WeaponComponent->SetAllowedFireModes(Def.AllowedFireModes, Def.DefaultFireMode);
+	}
+	// Per-weapon ADS-in (out stays the character's ADSOutTime). Both sides read kit-derived Def.
+	ADSInTime = Def.ADSTimeSec;
+	// Prediction-safe move mult — only from replicated kit + which slot is drawn.
+	if (UPFCharacterMovementComponent* CMC = GetPFMovement())
+	{
+		CMC->CachedWeaponMoveSpeedMult = Def.MoveSpeedMult;
 	}
 
 	// TP hand gun + back-slung stowed gun.
@@ -2257,7 +2464,40 @@ void ACombatForgeCharacter::PushLocalKit()
 
 void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
 {
-	KitRep = NewKit;
+	FPFKitRep Kit = NewKit;
+	// Fleet rank gate (weapon-implementation-spec Stage 5): when unlocks are loaded, force locked
+	// claims down to the category's rank-1 starter. Listen/LAN / empty unlocks = skip (advisory client-side only).
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (UPFBackendSubsystem* Backend = GI->GetSubsystem<UPFBackendSubsystem>())
+			{
+				if (Backend->IsFleetActive() && Backend->HasUnlocksLoaded())
+				{
+					auto ClampSlot = [Backend](uint8& Cat, uint8& Idx)
+					{
+						const FString Id = PFWeapon::IdOf(Cat, Idx);
+						if (!Backend->IsWeaponUnlocked(Id))
+						{
+							// Category starters: ar_m4 / smg_aksu_black / pis_std / sg_01 / snp_01 / lmg_01
+							static const TCHAR* Starters[] = {
+								TEXT("ar_m4"), TEXT("smg_aksu_black"), TEXT("pis_std"),
+								TEXT("sg_01"), TEXT("snp_01"), TEXT("lmg_01")
+							};
+							const int32 C = FMath::Clamp<int32>(Cat, 0, UE_ARRAY_COUNT(Starters) - 1);
+							const FPFWeaponConfig Safe = PFWeapon::FindById(Starters[C]);
+							Cat = static_cast<uint8>(Safe.Category);
+							Idx = static_cast<uint8>(Safe.Index);
+						}
+					};
+					ClampSlot(Kit.WeaponCategory, Kit.WeaponIndex);
+					ClampSlot(Kit.SecondaryCategory, Kit.SecondaryIndex);
+				}
+			}
+		}
+	}
+	KitRep = Kit;
 	ApplyKit();   // server runs the owner's weapon stats; other clients re-dress via OnRep_Kit
 }
 
@@ -2419,6 +2659,114 @@ static FAutoConsoleCommandWithWorldAndArgs GPFWeapon2Cmd(
 	TEXT("pf.Weapon2"),
 	TEXT("Set secondary (back-sling) weapon: <category> <index>. Scroll swaps with primary."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeapon2Cmd));
+
+// Cycle / pick guns for hip+ADS drag tuning without leaving the match.
+static void PFWeaponCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	ACombatForgeCharacter* Local = nullptr;
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		if (It->IsLocallyControlled() && It->IsPlayerControlled())
+		{
+			Local = *It;
+			break;
+		}
+	}
+	if (Local == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.Weapon: no local player pawn"));
+		return;
+	}
+
+	if (Args.Num() == 0)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT(
+			"pf.Weapon usage:\n"
+			"  pf.Weapon next | prev | n | p     cycle every gun in the catalog\n"
+			"  pf.Weapon <cat> <idx>             equip by category/index (0=AR..5=LMG)\n"
+			"  pf.Weapon <weaponId>              equip by slug (e.g. ar_ak_black)\n"
+			"  pf.Weapon dump                    log hip+ADS pose for the held gun\n"
+			"  pf.Weapon list                    print the full catalog\n"
+			"Workflow: pf.Weapon next → hold MMB drag hip → hold ADS+MMB drag sights → release logs paste lines."));
+		Local->PrintWeaponPoseLine();
+		return;
+	}
+
+	const FString A0 = Args[0].ToLower();
+	if (A0 == TEXT("next") || A0 == TEXT("n") || A0 == TEXT("+"))
+	{
+		Local->DevCycleCatalogWeapon(+1);
+		return;
+	}
+	if (A0 == TEXT("prev") || A0 == TEXT("p") || A0 == TEXT("-"))
+	{
+		Local->DevCycleCatalogWeapon(-1);
+		return;
+	}
+	if (A0 == TEXT("dump") || A0 == TEXT("pose") || A0 == TEXT("print"))
+	{
+		Local->PrintWeaponPoseLine();
+		return;
+	}
+	if (A0 == TEXT("list"))
+	{
+		int32 Flat = 0;
+		for (int32 Cat = 0; Cat < PFWeapon::CategoryCount(); ++Cat)
+		{
+			for (int32 Idx = 0; Idx < PFWeapon::WeaponCount(Cat); ++Idx)
+			{
+				const FPFWeaponDef& D = PFWeapon::Weapon(Cat, Idx);
+				UE_LOG(CombatForgeLog, Log, TEXT("  [%2d] cat=%d idx=%d  %-16s  %s"),
+					Flat++, Cat, Idx, D.WeaponId ? D.WeaponId : TEXT("?"), D.DisplayName);
+			}
+		}
+		return;
+	}
+
+	// pf.Weapon <cat> <idx>
+	if (Args.Num() >= 2 && A0.IsNumeric())
+	{
+		Local->DevEquipCatalogWeapon(FCString::Atoi(*Args[0]), FCString::Atoi(*Args[1]));
+		return;
+	}
+
+	// pf.Weapon <weaponId>
+	const FPFWeaponConfig Found = PFWeapon::FindById(Args[0]);
+	if (!PFWeapon::IdOf(Found.Category, Found.Index).IsEmpty()
+		&& PFWeapon::IdOf(Found.Category, Found.Index).Equals(Args[0], ESearchCase::IgnoreCase))
+	{
+		Local->DevEquipCatalogWeapon(Found.Category, Found.Index);
+		return;
+	}
+
+	UE_LOG(CombatForgeLog, Warning, TEXT("pf.Weapon: unknown arg '%s' — try next / prev / list / dump / <id>"), *Args[0]);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponCmd(
+	TEXT("pf.Weapon"),
+	TEXT("Pose-tune helper: next|prev|list|dump|<cat> <idx>|<weaponId>. Enables drag, disables auto-pose."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponCmd));
+
+// Convenience aliases so muscle memory can hammer one word.
+static void PFWeaponNextCmd(UWorld* World)
+{
+	PFWeaponCmd(TArray<FString>{ TEXT("next") }, World);
+}
+static void PFWeaponPrevCmd(UWorld* World)
+{
+	PFWeaponCmd(TArray<FString>{ TEXT("prev") }, World);
+}
+static FAutoConsoleCommandWithWorld GPFWeaponNextCmd(
+	TEXT("pf.WeaponNext"),
+	TEXT("Equip the next catalog gun (pose-tune workflow). Same as `pf.Weapon next`."),
+	FConsoleCommandWithWorldDelegate::CreateStatic(&PFWeaponNextCmd));
+static FAutoConsoleCommandWithWorld GPFWeaponPrevCmd(
+	TEXT("pf.WeaponPrev"),
+	TEXT("Equip the previous catalog gun (pose-tune workflow). Same as `pf.Weapon prev`."),
+	FConsoleCommandWithWorldDelegate::CreateStatic(&PFWeaponPrevCmd));
 
 void ACombatForgeCharacter::ApplyTeamBody(uint8 Team)
 {

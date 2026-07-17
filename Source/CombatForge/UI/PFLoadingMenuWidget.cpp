@@ -274,7 +274,7 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	AddHowToLine(Box, TEXT("OUT at 3 head, 5 chest, 8 limb, or 10 total hits (HUD pips + H/C/L). Showdown: one hit."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD"), 14, true, Head);
-	AddHowToLine(Box, TEXT("F1–F4 structure · Q wheel: Window / Door / 1-Way Door / Trap Floor / cover · LMB place · F open doors · Trap = enemy footfall"), 12, false, Key);
+	AddHowToLine(Box, TEXT("F1–F4 structure · scroll Wall→Window→Door… · tap Q piece wheel · LMB place · F open doors · Trap = enemy footfall"), 12, false, Key);
 	AddHowToLine(Box, TEXT("Your half only. Full wall-offs OK — bomb a sealed path in combat."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("LOBBY"), 14, true, Head);
@@ -704,14 +704,27 @@ void UPFLoadingMenuWidget::RefreshWeaponLabels()
 	}
 	if (WeaponValueText != nullptr)
 	{
-		WeaponValueText->SetText(FText::FromString(FString::Printf(TEXT("%s  (%d/%d)"),
-			*PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index), WeaponConfig.Index + 1, WpnCount)));
+		FString Label = FString::Printf(TEXT("%s  (%d/%d)"),
+			*PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index),
+			WeaponConfig.Index + 1, WpnCount);
+		// Rank lock badge when logged in with unlocks (offline = ungated).
+		if (UPFBackendSubsystem* Backend = GetBackend())
+		{
+			const FString Id = PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index);
+			if (!Backend->IsWeaponUnlocked(Id))
+			{
+				Label += FString::Printf(TEXT("  🔒 Rank %u"),
+					PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index));
+			}
+		}
+		WeaponValueText->SetText(FText::FromString(Label));
 	}
 }
 
 void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 {
 	const int32 CatCount = PFWeapon::CategoryCount();
+	const FPFWeaponConfig Prev = WeaponConfig;
 	if (Kind == 0)
 	{
 		WeaponConfig.Category = (WeaponConfig.Category + Dir + CatCount) % CatCount;
@@ -722,6 +735,27 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 		const int32 WpnCount = FMath::Max(1, PFWeapon::WeaponCount(WeaponConfig.Category));
 		WeaponConfig.Index = (WeaponConfig.Index + Dir + WpnCount) % WpnCount;
 	}
+
+	// Offline / empty unlocks = fully ungated. When locked: allow browsing the name+rank, but refuse
+	// to save/equip and snap the equipped kit back (weapon-implementation-spec Stage 5).
+	if (UPFBackendSubsystem* Backend = GetBackend())
+	{
+		const FString Id = PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index);
+		if (!Backend->IsWeaponUnlocked(Id))
+		{
+			const FString LockedName = PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index);
+			const uint8 Rank = PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index);
+			WeaponConfig = Prev;
+			RefreshWeaponLabels();
+			if (WeaponValueText != nullptr)
+			{
+				WeaponValueText->SetText(FText::FromString(FString::Printf(
+					TEXT("%s  🔒 Rank %u — not equipped"), *LockedName, Rank)));
+			}
+			return;
+		}
+	}
+
 	PFWeapon::SaveConfig(WeaponConfig);
 	if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()))
 	{

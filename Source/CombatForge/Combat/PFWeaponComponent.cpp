@@ -72,18 +72,51 @@ void UPFWeaponComponent::BeginPlay()
 
 void UPFWeaponComponent::StartFire()
 {
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetTimeSeconds() : 0.0;
+
+	// Burst-DMR re-burst gate (Rifle 03): refuse to arm a new pull until the delay elapses.
+	if (ReburstDelaySec > 0.f && CurrentFireMode == EPFFireMode::Burst && Now < NextBurstAllowedTime)
+	{
+		return;
+	}
+
 	bWantsFire = true;
 	ShotsThisPull = 0;   // new trigger pull re-arms Single/Burst caps
-	// First shot fires on press instantly — no spin-up (04 §2.1).
-	if (const UWorld* World = GetWorld())
+
+	// Minigun spin-up: cold start waits SpinupSec; feathering within grace keeps barrels hot.
+	if (SpinupSec > 0.f)
 	{
-		TryFire(World->GetTimeSeconds());
+		if (Now > SpinGraceUntil)
+		{
+			SpinReadyTime = Now + static_cast<double>(SpinupSec);
+		}
+		else
+		{
+			SpinReadyTime = Now;   // still spinning — fire immediately
+		}
+	}
+	else
+	{
+		SpinReadyTime = 0.0;
+		if (World)
+		{
+			TryFire(Now);
+		}
 	}
 }
 
 void UPFWeaponComponent::StopFire()
 {
 	bWantsFire = false;
+	if (const UWorld* World = GetWorld())
+	{
+		// Short grace so feathering the trigger doesn't re-spin the minigun every time.
+		if (SpinupSec > 0.f)
+		{
+			SpinGraceUntil = World->GetTimeSeconds() + 0.4;
+		}
+	}
 }
 
 void UPFWeaponComponent::StartReload()
@@ -216,6 +249,15 @@ void UPFWeaponComponent::TryFire(double Now)
 	{
 		return;
 	}
+	if (ReburstDelaySec > 0.f && CurrentFireMode == EPFFireMode::Burst && Now < NextBurstAllowedTime)
+	{
+		return;
+	}
+	// Minigun spin-up must complete before the first BB.
+	if (SpinupSec > 0.f && Now < SpinReadyTime)
+	{
+		return;
+	}
 
 	// Sprint blocks fire: the fire input cancels sprint and starts the 0.18 s raise;
 	// the (still held) fire buffers and releases when the raise ends (04 §1.1).
@@ -223,7 +265,7 @@ void UPFWeaponComponent::TryFire(double Now)
 	if (CMC != nullptr && CMC->IsSprintingEffective())
 	{
 		CMC->SetWantsToSprint(false);
-		SprintOutReadyTime = Now + SprintOutTime;
+		SprintOutReadyTime = Now + static_cast<double>(SprintOutTime);
 		return;
 	}
 	if (Now < SprintOutReadyTime || Now < NextFireTime)
@@ -252,9 +294,14 @@ void UPFWeaponComponent::TryFire(double Now)
 	if (CurrentFireMode != EPFFireMode::Auto)
 	{
 		++ShotsThisPull;   // Auto never counts, so it can't reach the uint8 cap and stall mid-hold
+		// Rifle 03 re-burst: after a full 3-shot pull, block the next pull for ReburstDelaySec.
+		if (CurrentFireMode == EPFFireMode::Burst && ReburstDelaySec > 0.f && ShotsThisPull >= PullCap)
+		{
+			NextBurstAllowedTime = Now + static_cast<double>(ReburstDelaySec);
+		}
 	}
 
-	// 12 bps accumulator with remainder carry — no frame-quantized ROF, no catch-up
+	// ROF accumulator with remainder carry — no frame-quantized ROF, no catch-up
 	// bursts after a pause (04 §2.1).
 	const double Interval = 1.0 / static_cast<double>(FMath::Max(FireRateBps, 1.f));
 	NextFireTime = (Now - NextFireTime > Interval) ? (Now + Interval) : (NextFireTime + Interval);
@@ -327,6 +374,7 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	// Packet.ClientTime for its own cone, so both sides compute the identical half-angle for this exact shot.
 	const float StampT = static_cast<float>(Now);
 	const float HalfAngleDeg = GetSpreadHalfAngleDeg(StampT);
+	// DO-NOT-TOUCH (B3): exactly ONE VRandCone pull per shot from the main stream.
 	FRandomStream Stream = MakeShotStream(PS->GetPlayerId(), ShotIndexCounter);
 	const FVector SpreadedDir = Stream.VRandCone(BaseDir, FMath::DegreesToRadians(HalfAngleDeg));
 
@@ -356,15 +404,19 @@ void UPFWeaponComponent::FireOneShot(double Now)
 
 	if (!Char->HasAuthority())
 	{
-		// Owning-client cosmetic: instant tracer (04 §5.1). Spawn from ShotOrigin — the SAME point the server's
-		// authoritative ball spawns from — with the SAME converged dir, so the predicted tracer overlays where
-		// the hit actually lands. (Spawning from the FP barrel instead would streak the tracer to a point offset
-		// from the reticle while the splat registered on it.) A listen host skips this — its authoritative
-		// projectile spawns this same frame and IS the visual (no double tracer).
-		SpawnCosmeticProjectile(ShotOrigin, SpreadedDir, GetOwnerTeam(),
-			ShotIndexCounter);
+		// Owning-client cosmetic: instant tracer(s). Shotgun: N pellets with sub-seeds (frag-burst pattern).
+		// Listen host skips this — its authoritative projectile(s) ARE the visual.
+		if (Pellets > 1)
+		{
+			SpawnPelletVolley(ShotOrigin, SpreadedDir, GetOwnerTeam(), ShotIndexCounter,
+				PS->GetPlayerId(), /*bAuthoritative=*/false, Char);
+		}
+		else
+		{
+			SpawnCosmeticProjectile(ShotOrigin, SpreadedDir, GetOwnerTeam(), ShotIndexCounter);
+		}
 
-		// Predicted hopper; COND_OwnerOnly replication corrects any divergence.
+		// Predicted hopper; COND_OwnerOnly replication corrects any divergence. ONE ammo per packet.
 		HopperCount = (HopperCount > 0) ? static_cast<uint8>(HopperCount - 1) : 0;
 		OnHopperChangedEvent.Broadcast(HopperCount);
 	}
@@ -556,18 +608,27 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 	HopperCount = static_cast<uint8>(HopperCount - 1);
 	OnHopperChangedEvent.Broadcast(HopperCount);   // host UI (§5.9); remote owner via rep
 
-	// Authoritative, never-replicated projectile (B3).
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	SpawnParams.Owner = Char;
-	SpawnParams.Instigator = Char;
-	APFPaintballProjectile* Ball = World->SpawnActor<APFPaintballProjectile>(
-		APFPaintballProjectile::StaticClass(), FVector(Shot.Origin), SpreadedDir.Rotation(),
-		SpawnParams);
-	if (Ball != nullptr)
+	// Authoritative projectile(s). Shotgun: N pellets, each with sub-seed (not extra main-stream pulls).
+	// ONE token + ONE ammo per packet regardless of pellet count.
+	if (Pellets > 1)
 	{
-		Ball->InitProjectile(FVector(Shot.Origin), SpreadedDir, PS->TeamId, /*bAuthoritative=*/true,
-			this, Shot.ShotIndex);
+		SpawnPelletVolley(FVector(Shot.Origin), SpreadedDir, PS->TeamId, Shot.ShotIndex,
+			PS->GetPlayerId(), /*bAuthoritative=*/true, Char);
+	}
+	else
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		SpawnParams.Owner = Char;
+		SpawnParams.Instigator = Char;
+		APFPaintballProjectile* Ball = World->SpawnActor<APFPaintballProjectile>(
+			APFPaintballProjectile::StaticClass(), FVector(Shot.Origin), SpreadedDir.Rotation(),
+			SpawnParams);
+		if (Ball != nullptr)
+		{
+			Ball->InitProjectile(FVector(Shot.Origin), SpreadedDir, PS->TeamId, /*bAuthoritative=*/true,
+				this, Shot.ShotIndex);
+		}
 	}
 
 	// Gunfire noise → AI hearing: bots within range turn toward / investigate the shot (perception). Instigator
@@ -627,11 +688,19 @@ void UPFWeaponComponent::MulticastShotFX_Implementation(FVector_NetQuantize100 O
 	const FVector SpreadedDir =
 		Stream.VRandCone(FVector(Dir).GetSafeNormal(), FMath::DegreesToRadians(HalfAngleDeg));
 
-	// Listen host: authoritative ball is already the tracer — skip a second cosmetic ball.
-	// Pure clients: spawn the full cosmetic projectile.
+	// Listen host: authoritative ball(s) already ARE the tracer — skip cosmetics.
+	// Pure clients: spawn the full cosmetic volley / ball.
 	if (!Owner->HasAuthority())
 	{
-		SpawnCosmeticProjectile(FVector(Origin), SpreadedDir, GetOwnerTeam(), ShotIndex);
+		if (Pellets > 1)
+		{
+			SpawnPelletVolley(FVector(Origin), SpreadedDir, GetOwnerTeam(), ShotIndex,
+				PlayerId, /*bAuthoritative=*/false, GetPFCharacter());
+		}
+		else
+		{
+			SpawnCosmeticProjectile(FVector(Origin), SpreadedDir, GetOwnerTeam(), ShotIndex);
+		}
 	}
 
 	// Muzzle report for every non-local viewer (including listen host watching bots / remotes).
@@ -859,27 +928,127 @@ FRandomStream UPFWeaponComponent::MakeShotStream(int32 PlayerId, uint32 ShotInde
 	return FRandomStream(static_cast<int32>(HashCombine(static_cast<uint32>(PlayerId), ShotIndex)));
 }
 
+float UPFWeaponComponent::DecayBloomOverGap(float Bloom, float GapSec) const
+{
+	if (GapSec > BloomResetGap)
+	{
+		return 0.f;   // full reset after a real release
+	}
+	if (GapSec <= BloomDecayStartSec || BloomDecayDegPerSec <= 0.f)
+	{
+		return Bloom;
+	}
+	const float Decay = BloomDecayDegPerSec * (GapSec - BloomDecayStartSec);
+	if (BloomPerShot >= 0.f)
+	{
+		return FMath::Max(0.f, Bloom - Decay);
+	}
+	// Negative bloom (minigun): decay relaxes BACK toward zero (opens back up when idle).
+	return FMath::Min(0.f, Bloom + Decay);
+}
+
 float UPFWeaponComponent::GetBloomDegForStamp(float StampT) const
 {
-	// "Halo" pattern: the first BloomFreeShots of a consecutive burst are flat, then each extra shot widens the
-	// cone by BloomPerShot up to BloomCap. A pause > BloomResetGap (a real trigger release — 3x the auto cadence)
-	// starts a fresh burst. N = shots ALREADY fired in this burst before the shot at StampT.
-	const uint16 N = ((StampT - LastShotStampT) > BloomResetGap) ? 0 : ConsecShots;
-	if (N < BloomFreeShots)
+	// Bloom at StampT BEFORE this shot is counted — continuous decay over the stamp gap, full reset after
+	// BloomResetGap. Free-shot window still returns 0 until free shots are burned (positive bloom only).
+	const float Gap = StampT - LastShotStampT;
+	if (Gap > BloomResetGap)
 	{
 		return 0.f;
 	}
-	return FMath::Min(static_cast<float>(N - BloomFreeShots + 1) * BloomPerShot, BloomCap);
+	const uint16 N = ConsecShots;
+	float Bloom = DecayBloomOverGap(BloomCurrent, Gap);
+	if (BloomPerShot >= 0.f)
+	{
+		if (N < BloomFreeShots)
+		{
+			return 0.f;
+		}
+		return FMath::Clamp(Bloom, 0.f, BloomCap);
+	}
+	// Minigun: bloom is ≤ 0 and floors so hip+bloom ≥ BloomCap (BloomCap used as total-spread floor).
+	const float FloorBloom = BloomCap - SpreadHip;
+	return FMath::Clamp(Bloom, FloorBloom, 0.f);
 }
 
 void UPFWeaponComponent::AdvanceBloom(float StampT)
 {
-	if ((StampT - LastShotStampT) > BloomResetGap)
+	const float Gap = StampT - LastShotStampT;
+	if (Gap > BloomResetGap)
 	{
-		ConsecShots = 0;   // burst ended — fresh chain
+		ConsecShots = 0;
+		BloomCurrent = 0.f;
+	}
+	else
+	{
+		BloomCurrent = DecayBloomOverGap(BloomCurrent, Gap);
 	}
 	++ConsecShots;
+	if (ConsecShots > BloomFreeShots)
+	{
+		if (BloomPerShot >= 0.f)
+		{
+			BloomCurrent = FMath::Min(BloomCurrent + BloomPerShot, BloomCap);
+		}
+		else
+		{
+			// Tighten toward floor (more negative until BloomCap is the total-spread floor).
+			const float FloorBloom = BloomCap - SpreadHip;
+			BloomCurrent = FMath::Max(BloomCurrent + BloomPerShot, FloorBloom);
+		}
+	}
 	LastShotStampT = StampT;
+}
+
+float UPFWeaponComponent::GetCurrentBloomDeg() const
+{
+	const UWorld* World = GetWorld();
+	const float Now = World ? static_cast<float>(World->GetTimeSeconds()) : 0.f;
+	return GetBloomDegForStamp(Now);
+}
+
+FVector UPFWeaponComponent::PelletDir(const FVector& BaseSpreadedDir, uint32 ShotSeed, int32 PelletIdx) const
+{
+	if (Pellets <= 1 || PelletSpreadDeg <= KINDA_SMALL_NUMBER)
+	{
+		return BaseSpreadedDir;
+	}
+	// Deterministic sub-seed — never an extra pull on the main B3 stream (frag-burst pattern).
+	FRandomStream PelletStream(static_cast<int32>(HashCombine(ShotSeed, static_cast<uint32>(PelletIdx + 1))));
+	return PelletStream.VRandCone(BaseSpreadedDir, FMath::DegreesToRadians(PelletSpreadDeg));
+}
+
+void UPFWeaponComponent::SpawnPelletVolley(const FVector& Origin, const FVector& BaseSpreadedDir, uint8 Team,
+	uint32 ShotIndex, int32 PlayerId, bool bAuthoritative, ACombatForgeCharacter* Char)
+{
+	UWorld* World = GetWorld();
+	if (!World || Pellets <= 1)
+	{
+		return;
+	}
+	const uint32 ShotSeed = static_cast<uint32>(HashCombine(static_cast<uint32>(PlayerId), ShotIndex));
+	const int32 N = FMath::Clamp(static_cast<int32>(Pellets), 1, 12);
+	for (int32 i = 0; i < N; ++i)
+	{
+		const FVector Dir = PelletDir(BaseSpreadedDir, ShotSeed, i);
+		if (bAuthoritative)
+		{
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			SpawnParams.Owner = Char;
+			SpawnParams.Instigator = Char;
+			APFPaintballProjectile* Ball = World->SpawnActor<APFPaintballProjectile>(
+				APFPaintballProjectile::StaticClass(), Origin, Dir.Rotation(), SpawnParams);
+			if (Ball)
+			{
+				Ball->InitProjectile(Origin, Dir, Team, /*bAuthoritative=*/true, this, ShotIndex);
+			}
+		}
+		else
+		{
+			SpawnCosmeticProjectile(Origin, Dir, Team, ShotIndex);
+		}
+	}
 }
 
 // ---------------------------------------------------------------- OnReps & helpers

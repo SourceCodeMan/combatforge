@@ -120,14 +120,23 @@ void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate, bool 
 
 	FPFPaintHitInfo Hit = HitTemplate;
 	Hit.Region = ResolveHitRegion(Hit.HitBone, FVector(Hit.ImpactPoint));
-	Hit.Damage = 1;   // every BB = 1 hit; lethality lives in the per-region thresholds
+	// Per-weapon HitValue (sniper HV5–8, most guns 1). Server-only; never trust a client-sent field.
+	const uint8 Dmg = static_cast<uint8>(FMath::Clamp<int32>(
+		Hit.Damage > 0 ? static_cast<int32>(Hit.Damage) : 1, 1, 10));
+	Hit.Damage = Dmg;
 
-	++TotalHits;
+	TotalHits = static_cast<uint8>(FMath::Min<int32>(255, static_cast<int32>(TotalHits) + Dmg));
 	switch (Hit.Region)
 	{
-	case EPFBodyRegion::Head:  ++HeadHits;  break;
-	case EPFBodyRegion::Limbs: ++LimbHits;  break;
-	default:                   ++ChestHits; break;
+	case EPFBodyRegion::Head:
+		HeadHits = static_cast<uint8>(FMath::Min<int32>(255, static_cast<int32>(HeadHits) + Dmg));
+		break;
+	case EPFBodyRegion::Limbs:
+		LimbHits = static_cast<uint8>(FMath::Min<int32>(255, static_cast<int32>(LimbHits) + Dmg));
+		break;
+	default:
+		ChestHits = static_cast<uint8>(FMath::Min<int32>(255, static_cast<int32>(ChestHits) + Dmg));
+		break;
 	}
 	const bool bOut = bForceEliminate || bOneHitMode
 		|| HeadHits >= HeadOut || ChestHits >= ChestOut || LimbHits >= LimbOut || TotalHits >= TotalOut;

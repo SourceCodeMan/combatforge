@@ -78,6 +78,8 @@ private:
 	UPROPERTY() TObjectPtr<UImage> CrossLineLeft;
 	UPROPERTY() TObjectPtr<UImage> CrossLineRight;
 	UPROPERTY() TObjectPtr<UImage> CenterDot;
+	/** Faint bloom-cap tell: visible when bloom ≥ 75% of BloomCap (ease off the trigger). */
+	UPROPERTY() TObjectPtr<UImage> CrosshairHalo;
 
 	UPROPERTY() TObjectPtr<UTextBlock> HopperText;
 	UPROPERTY() TObjectPtr<UProgressBar> ReloadBar;

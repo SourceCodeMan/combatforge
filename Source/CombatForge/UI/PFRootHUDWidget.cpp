@@ -133,6 +133,8 @@ void UPFRootHUDWidget::NativeConstruct()
 		// re-run if the widget is removed from and re-added to the viewport.
 		WheelWidget->OnToolSelectedEvent.RemoveAll(this);
 		WheelWidget->OnToolSelectedEvent.AddUObject(this, &UPFRootHUDWidget::HandleWheelToolSelected);
+		WheelWidget->OnWheelClosedEvent.RemoveAll(this);
+		WheelWidget->OnWheelClosedEvent.AddUObject(this, &UPFRootHUDWidget::HandleWheelClosed);
 	}
 
 	WirePawn(Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()));
@@ -156,6 +158,7 @@ void UPFRootHUDWidget::NativeDestruct()
 	if (WheelWidget)
 	{
 		WheelWidget->OnToolSelectedEvent.RemoveAll(this);
+		WheelWidget->OnWheelClosedEvent.RemoveAll(this);
 	}
 	Super::NativeDestruct();
 }
@@ -285,6 +288,11 @@ void UPFRootHUDWidget::HandleBuildWheelRequested(bool bOpen)
 		const ACombatForgeGameState* GS = BoundGameState.Get();
 		if (!GS || !GS->IsBuildAllowed())
 		{
+			// BuildComponent already flipped its open flag — roll it back.
+			if (UPFBuildComponent* Build = BoundBuild.Get())
+			{
+				Build->NotifyBuildWheelClosed();
+			}
 			return;
 		}
 		WheelWidget->Open();
@@ -300,6 +308,14 @@ void UPFRootHUDWidget::HandleWheelToolSelected(EPFBuildTool Tool)
 	if (UPFBuildComponent* Build = BoundBuild.Get())
 	{
 		Build->EquipTool(Tool);
+	}
+}
+
+void UPFRootHUDWidget::HandleWheelClosed(bool /*bUnused*/)
+{
+	if (UPFBuildComponent* Build = BoundBuild.Get())
+	{
+		Build->NotifyBuildWheelClosed();
 	}
 }
 

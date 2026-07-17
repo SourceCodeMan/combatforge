@@ -31,11 +31,12 @@
 
 namespace
 {
-	// Mouse-wheel / cycle order: classic structural → specials → props → delete.
+	// Mouse-wheel cycle: wall family contiguous so scroll-from-Wall hits Window/Door next
+	// (players expect "change wall type" without hunting through floor/ramp/roof first).
 	constexpr EPFBuildTool GCycleOrder[12] =
 	{
-		EPFBuildTool::Wall, EPFBuildTool::Floor, EPFBuildTool::Ramp, EPFBuildTool::Roof,
-		EPFBuildTool::WallWindow, EPFBuildTool::WallDoor, EPFBuildTool::WallDoorOneWay, EPFBuildTool::FloorTrap,
+		EPFBuildTool::Wall, EPFBuildTool::WallWindow, EPFBuildTool::WallDoor, EPFBuildTool::WallDoorOneWay,
+		EPFBuildTool::Floor, EPFBuildTool::FloorTrap, EPFBuildTool::Ramp, EPFBuildTool::Roof,
 		EPFBuildTool::PropCan, EPFBuildTool::PropDorito, EPFBuildTool::PropSnake, EPFBuildTool::Delete
 	};
 }
@@ -48,15 +49,17 @@ UPFBuildComponent::UPFBuildComponent()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderFinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
-	// Ghost material: prefer the engine BasicShapeMaterial (ISM-safe solid "Color" tint) over M_PF_BuildPiece,
-	// which renders as the UE CHECKER on instanced meshes (the "checkered build pieces" bug). A clean tinted
-	// ghost also reads better than the concrete master for a placement preview.
+	// Placed-piece fallback (ISM-safe Color tint). Ghost uses a separate translucent parent — BasicShape
+	// is fully opaque so alpha on Color never softens the green overlay.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GhostMatFinder(
+		TEXT("/Engine/EngineDebugMaterials/M_SimpleUnlitTranslucent.M_SimpleUnlitTranslucent"));
 	CubeMesh      = CubeFinder.Object;
 	CylinderMesh  = CylinderFinder.Object;
 	ConeMesh      = ConeFinder.Object;
 	ShapeMaterial = BasicMatFinder.Succeeded() ? BasicMatFinder.Object : ArtMatFinder.Object;
+	GhostMaterial = GhostMatFinder.Succeeded() ? GhostMatFinder.Object : ShapeMaterial;
 }
 
 void UPFBuildComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -66,6 +69,13 @@ void UPFBuildComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		GhostMesh->DestroyComponent();
 		GhostMesh = nullptr;
 	}
+	if (GhostFacingMesh)
+	{
+		GhostFacingMesh->DestroyComponent();
+		GhostFacingMesh = nullptr;
+	}
+	GhostMID = nullptr;
+	GhostFacingMID = nullptr;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -94,14 +104,8 @@ void UPFBuildComponent::BindInput(UEnhancedInputComponent* EIC, const UPFInputCo
 	EIC->BindAction(Cfg->IA_EquipRamp, ETriggerEvent::Started, this, &UPFBuildComponent::OnEquipRamp);
 	EIC->BindAction(Cfg->IA_EquipRoof, ETriggerEvent::Started, this, &UPFBuildComponent::OnEquipRoof);
 
-	// Q-tap fires Triggered once on release under the tap threshold.
-	EIC->BindAction(Cfg->IA_QuickEquip, ETriggerEvent::Triggered, this, &UPFBuildComponent::OnQuickEquip);
-
-	// Q-hold: the hold trigger enters Triggered when the 0.18 s threshold lands ("open" per T4);
-	// Completed on release commits the wheel. Guarded so the wheel opens exactly once per hold.
-	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Triggered, this, &UPFBuildComponent::OnWheelHoldTriggered);
-	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Completed, this, &UPFBuildComponent::OnWheelReleased);
-	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Canceled, this, &UPFBuildComponent::OnWheelReleased);
+	// Q tap toggles the build wheel (open / commit). No hold threshold — hold was unreliable.
+	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Started, this, &UPFBuildComponent::OnWheelTogglePressed);
 }
 
 void UPFBuildComponent::OnPlaceStarted()
@@ -136,6 +140,11 @@ void UPFBuildComponent::OnRotatePressed()
 
 void UPFBuildComponent::OnCyclePiece(const FInputActionValue& Value)
 {
+	// Don't steal mouse-wheel while the build wheel is open (cursor aims sectors instead).
+	if (bWheelOpenSent)
+	{
+		return;
+	}
 	const float Axis = Value.Get<float>();
 	if (FMath::IsNearlyZero(Axis))
 	{
@@ -172,27 +181,25 @@ void UPFBuildComponent::OnEquipFloor() { EquipTool(EPFBuildTool::Floor); }
 void UPFBuildComponent::OnEquipRamp()  { EquipTool(EPFBuildTool::Ramp); }
 void UPFBuildComponent::OnEquipRoof()  { EquipTool(EPFBuildTool::Roof); }
 
-void UPFBuildComponent::OnQuickEquip()
+void UPFBuildComponent::OnWheelTogglePressed()
 {
-	EquipTool(LastUsedPiece);
-}
-
-void UPFBuildComponent::OnWheelHoldTriggered()
-{
-	if (!bWheelOpenSent)
+	// Tap Q: open if closed, commit (or cancel in dead zone) if open.
+	if (bWheelOpenSent)
+	{
+		bWheelOpenSent = false;
+		OnBuildWheelRequestedEvent.Broadcast(false);
+	}
+	else
 	{
 		bWheelOpenSent = true;
 		OnBuildWheelRequestedEvent.Broadcast(true);
 	}
 }
 
-void UPFBuildComponent::OnWheelReleased()
+void UPFBuildComponent::NotifyBuildWheelClosed()
 {
-	if (bWheelOpenSent)
-	{
-		bWheelOpenSent = false;
-		OnBuildWheelRequestedEvent.Broadcast(false);
-	}
+	// Wheel closed via digit / Esc / phase change — keep our open flag in sync so the next Q opens.
+	bWheelOpenSent = false;
 }
 
 void UPFBuildComponent::EquipTool(EPFBuildTool Tool)
@@ -234,6 +241,13 @@ void UPFBuildComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	{
 		SetGhostVisible(false);
 		LastSentSlot.bValid = false;
+		return;
+	}
+
+	// While the piece wheel is open, freeze placement so LMB / turbo don't fire under the UI.
+	if (bWheelOpenSent)
+	{
+		SetGhostVisible(false);
 		return;
 	}
 
@@ -384,11 +398,11 @@ void UPFBuildComponent::UpdatePlacementGhostAndTurbo(const FVector& CamLoc, cons
 	}
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	const bool bDenyFlash = Now < DenyFlashUntil;
-	if (GhostMID)
-	{
-		GhostMID->SetVectorParameterValue(TEXT("Color"),
-			(bDenyFlash || Reason != EPFDenyReason::None) ? PFColors::GhostInvalid : PFColors::GhostValid);
-	}
+	const FLinearColor Tint = (bDenyFlash || Reason != EPFDenyReason::None)
+		? PFColors::GhostInvalid : PFColors::GhostValid;
+	ApplyGhostTint(Tint);
+	// One-way: front-side wedge so facing is readable through the translucent overlay.
+	UpdateOneWayFacingCue(Type, X, Y, Z, Rot, true);
 	SetGhostVisible(true);
 
 	// Turbo (03 §4): place on snapped-slot change OR every 0.15 s; client self-cap 8 RPC/s.
@@ -450,11 +464,8 @@ void UPFBuildComponent::UpdateDeleteToolAndTurbo(bool bTraceHit, const FHitResul
 		GhostMesh->SetWorldTransform(T);
 	}
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-	if (GhostMID)
-	{
-		GhostMID->SetVectorParameterValue(TEXT("Color"),
-			(Now < DenyFlashUntil) ? PFColors::GhostInvalid : PFColors::DeleteHighlight);
-	}
+	ApplyGhostTint((Now < DenyFlashUntil) ? PFColors::GhostInvalid : PFColors::DeleteHighlight);
+	UpdateOneWayFacingCue(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot, false);
 	SetGhostVisible(true);
 
 	// Turbo-delete, same cadence as turbo-build (03 §4).
@@ -583,19 +594,111 @@ void UPFBuildComponent::EnsureGhost()
 	{
 		return;
 	}
-	GhostMesh = NewObject<UStaticMeshComponent>(GetOwner());
-	GhostMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	GhostMesh->SetCastShadow(false);
-	GhostMesh->SetCanEverAffectNavigation(false);
-	GhostMesh->SetVisibility(false);
-	GhostMesh->RegisterComponent();
 
-	if (ShapeMaterial)
+	auto MakeGhostComp = [this](const FName& Name) -> UStaticMeshComponent*
 	{
-		GhostMID = UMaterialInstanceDynamic::Create(ShapeMaterial, this);
-		GhostMID->SetVectorParameterValue(TEXT("Color"), PFColors::GhostValid);
-		GhostMesh->SetMaterial(0, GhostMID);
+		UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(GetOwner(), Name);
+		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Comp->SetCastShadow(false);
+		Comp->SetCanEverAffectNavigation(false);
+		Comp->SetVisibility(false);
+		// Translucent sort: draw after world so the soft green reads as an overlay.
+		Comp->SetTranslucentSortPriority(100);
+		Comp->SetRenderCustomDepth(false);
+		Comp->RegisterComponent();
+		return Comp;
+	};
+
+	GhostMesh = MakeGhostComp(TEXT("BuildGhost"));
+	GhostFacingMesh = MakeGhostComp(TEXT("BuildGhostFacing"));
+	if (ConeMesh)
+	{
+		GhostFacingMesh->SetStaticMesh(ConeMesh);
 	}
+	else if (CubeMesh)
+	{
+		GhostFacingMesh->SetStaticMesh(CubeMesh);
+	}
+
+	UMaterialInterface* Parent = GhostMaterial ? GhostMaterial.Get() : ShapeMaterial.Get();
+	if (Parent)
+	{
+		GhostMID = UMaterialInstanceDynamic::Create(Parent, this);
+		GhostFacingMID = UMaterialInstanceDynamic::Create(Parent, this);
+		ApplyGhostTint(PFColors::GhostValid);
+		if (GhostMesh)
+		{
+			GhostMesh->SetMaterial(0, GhostMID);
+		}
+		if (GhostFacingMesh)
+		{
+			GhostFacingMesh->SetMaterial(0, GhostFacingMID);
+		}
+	}
+}
+
+void UPFBuildComponent::ApplyGhostTint(const FLinearColor& Color)
+{
+	auto ApplyTo = [&](UMaterialInstanceDynamic* MID)
+	{
+		if (!MID)
+		{
+			return;
+		}
+		// M_SimpleUnlitTranslucent uses Color (RGB + A). Also set common opacity aliases.
+		MID->SetVectorParameterValue(TEXT("Color"), Color);
+		MID->SetVectorParameterValue(TEXT("BaseColor"), Color);
+		MID->SetScalarParameterValue(TEXT("Opacity"), Color.A);
+		MID->SetScalarParameterValue(TEXT("OpacityMultiplier"), Color.A);
+	};
+	ApplyTo(GhostMID);
+	ApplyTo(GhostFacingMID);
+}
+
+void UPFBuildComponent::UpdateOneWayFacingCue(EPFPieceType Type, int16 X, int16 Y, int16 Z, uint8 Rot, bool bShow)
+{
+	if (!GhostFacingMesh)
+	{
+		return;
+	}
+	const bool bOneWay = bShow && Type == EPFPieceType::WallDoorOneWay;
+	if (!bOneWay)
+	{
+		GhostFacingMesh->SetVisibility(false);
+		return;
+	}
+
+	// Door leaf center on the wall plane, then push a small cone outward on the FRONT (+normal).
+	// Front = +Y for N-edge (Rot 0), +X for E-edge (Rot 1) — matches APFBuildPieceActor::WallFrontNormal.
+	const float S = 100.f;
+	const float Wx = X * S;
+	const float Wy = Y * S;
+	const float Wz = Z * S;
+	const float Cell = 400.f;
+	const float DoorH = 230.f;
+	FVector Center;
+	FVector Front;
+	FRotator ConeRot;
+	if (Rot == 1)
+	{
+		Center = FVector(Wx + Cell, Wy + Cell * 0.5f, Wz + DoorH * 0.5f);
+		Front = FVector(1.f, 0.f, 0.f);
+		// Engine cone points +Z; pitch -90 aims +X (front).
+		ConeRot = FRotator(-90.f, 0.f, 0.f);
+	}
+	else
+	{
+		Center = FVector(Wx + Cell * 0.5f, Wy + Cell, Wz + DoorH * 0.5f);
+		Front = FVector(0.f, 1.f, 0.f);
+		// Pitch -90 then yaw 90 → aim +Y.
+		ConeRot = FRotator(-90.f, 90.f, 0.f);
+	}
+	// Sit just in front of the door face so it reads as "open this side".
+	const FVector Tip = Center + Front * 55.f;
+	GhostFacingMesh->SetWorldLocation(Tip);
+	GhostFacingMesh->SetWorldRotation(ConeRot);
+	GhostFacingMesh->SetWorldScale3D(FVector(0.35f, 0.35f, 0.55f));
+	GhostFacingMesh->SetVisibility(true);
 }
 
 void UPFBuildComponent::SetGhostVisible(bool bVisible)
@@ -603,6 +706,10 @@ void UPFBuildComponent::SetGhostVisible(bool bVisible)
 	if (GhostMesh && GhostMesh->IsVisible() != bVisible)
 	{
 		GhostMesh->SetVisibility(bVisible);
+	}
+	if (!bVisible && GhostFacingMesh)
+	{
+		GhostFacingMesh->SetVisibility(false);
 	}
 }
 
@@ -615,12 +722,8 @@ void UPFBuildComponent::SetGhostMeshForType(EPFPieceType Type)
 	GhostMesh->SetStaticMesh(MeshForType(Type));
 	if (GhostMID)
 	{
-		// Structural ghost: same warehouse surface as placed pieces (validity Color still wins).
-		if (!PFIsProp(Type))
-		{
-			PFBuildPieceVisuals::ApplyStructuralSurface(GhostMID, Type);
-		}
-		// Warehouse props can have many material slots — tint every one for validity color.
+		// Soft translucent color only — do NOT rebind warehouse surfaces (those are opaque and
+		// bury the validity tint / hide one-way facing under solid concrete).
 		const int32 NumMats = FMath::Max(1, GhostMesh->GetNumMaterials());
 		for (int32 i = 0; i < NumMats; ++i)
 		{
@@ -632,15 +735,13 @@ void UPFBuildComponent::SetGhostMeshForType(EPFPieceType Type)
 
 UStaticMesh* UPFBuildComponent::MeshForType(EPFPieceType Type) const
 {
-	// Shared catalog: warehouse barrel/crate/boxes for props; basic shapes for structural.
+	// Shared catalog: warehouse barrel/crate/boxes for props; cube for structural (incl. flat roof).
 	if (UStaticMesh* Shared = PFBuildPieceVisuals::MeshForType(Type))
 	{
 		return Shared;
 	}
 	switch (Type)
 	{
-	case EPFPieceType::Roof:
-		return ConeMesh;
 	case EPFPieceType::PropCan:
 		return CylinderMesh;
 	default:

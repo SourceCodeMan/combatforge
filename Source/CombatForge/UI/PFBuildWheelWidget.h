@@ -14,16 +14,14 @@ class USizeBox;
 class UTextBlock;
 
 /**
- * THE build wheel (03 §3): 8 x 45-degree sectors clockwise from top —
- * Wall, Floor, Ramp, Roof, Barrel, Crate, Boxes, Delete.
- * Opened on Q-hold (>= 0.18 s) via UPFRootHUDWidget from
- * UPFBuildComponent::OnBuildWheelRequestedEvent; release commits the hovered
- * sector through OnToolSelectedEvent. Client-only, zero replication.
+ * Build wheel: 12 sectors clockwise from top (wall family first, then floors,
+ * ramps, props, delete). Opened on Q tap via UPFRootHUDWidget from
+ * UPFBuildComponent::OnBuildWheelRequestedEvent; second Q / digit / click commits
+ * the hovered sector (dead zone = cancel). Client-only, zero replication.
  *
- * Dead zone r = 90 px (release inside = cancel); select band 90-280 px;
- * hovered sector 1.08x + brighten; center readout "Wall — 23 left";
- * digits 1-8 = instant select (NativeOnKeyDown, T4); selection math =
- * atan2 of accumulated mouse delta in NativeTick.
+ * Dead zone r = 90 px; select band 90-300 px; hovered sector 1.08x + brighten;
+ * digits 1-9,0 = instant select; selection math = atan2 of accumulated mouse
+ * delta in NativeTick.
  */
 UCLASS()
 class COMBATFORGE_API UPFBuildWheelWidget : public UUserWidget
@@ -34,13 +32,16 @@ public:
 	/** Captures mouse to the wheel cursor; camera frozen while open (03 §3). */
 	void Open();
 
-	/** Release: hovered sector -> OnToolSelectedEvent; inside dead zone = cancel. */
+	/** Second Q / confirm: hovered sector -> OnToolSelectedEvent; inside dead zone = cancel. */
 	void CloseAndCommit();
 
-	/** Close without committing (phase change / forced teardown). Intra-package. */
+	/** Close without committing (phase change / forced teardown / Esc). */
 	void CloseCancel();
 
 	bool IsWheelOpen() const { return bWheelOpen; }
+
+	/** Fires whenever the wheel fully closes (commit, cancel, digit). RootHUD resets BuildComponent flag. */
+	FPFOnBuildWheelRequested OnWheelClosedEvent;
 
 	/** Contract §3.6 — UPFRootHUDWidget wires this to UPFBuildComponent::EquipTool. */
 	FPFOnToolSelected OnToolSelectedEvent;
@@ -60,8 +61,11 @@ private:
 	void ApplySectorVisual(int32 SectorIndex, bool bHovered);
 	void UpdateCenterReadout();
 	FText SectorReadout(int32 SectorIndex) const;
+	EPFBuildTool ToolAtSector(int32 SectorIndex) const;
 
 	static const TCHAR* ToolDisplayName(EPFBuildTool Tool);
+	/** Sector layout matches mouse-wheel cycle (wall family contiguous). */
+	static EPFBuildTool SectorTool(int32 SectorIndex);
 
 	UPROPERTY() TObjectPtr<UCanvasPanel> RootCanvas;
 	UPROPERTY() TObjectPtr<UTextBlock> CenterReadout;

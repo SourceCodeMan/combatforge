@@ -133,12 +133,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadAirAdd = 1.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadSlideAdd = 1.0f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpreadCrouchMult = 0.8f;
-	// Recoil bloom ("halo" pattern): the first BloomFreeShots of a consecutive burst are flat, then every extra
-	// shot adds BloomPerShot to the cone up to BloomCap; a BloomResetGap pause (trigger release) resets it.
+	// Recoil bloom ("halo" pattern): continuous decay between shots; full reset after BloomResetGap.
+	// Negative BloomPerShot (minigun) tightens the cone; BloomCap is then a FLOOR on total spread contribution.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomPerShot = 0.15f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomCap = 2.0f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 BloomFreeShots = 5;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomResetGap = 0.25f;   // ~3 intervals at 12 bps: a real release, not auto cadence
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomResetGap = 0.25f;   // full chain reset after a real release
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomDecayDegPerSec = 6.f;
+	/** Delay before continuous decay starts after the last shot (stamp-relative). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomDecayStartSec = 0.15f;
 	/** Bloom retained while ADS. High enough that sustained ADS auto fire visibly sprays (burst discipline pays). */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float BloomADSMult = 0.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SprintOutTime = 0.18f;
@@ -149,6 +152,20 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ClimbYawPerShotDeg    = 0.12f;   // drifts right
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ClimbFreeShotsMult    = 0.4f;    // gentler during the first BloomFreeShots
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ClimbRecoverDegPerSec = 14.f;
+
+	/** Region-counter credit per BB (server ApplyPaintHit). Snipers 5–8, most guns 1. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 HitValue = 1;
+	/** >1 = shotgun volley (one ammo/packet, N projectiles with sub-seeds — B3). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 Pellets = 1;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float PelletSpreadDeg = 0.f;
+	/** Minigun spin-up before first BB; 0 = no spin. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float SpinupSec = 0.f;
+	/** After a full burst, block the next burst for this long (Rifle 03 DMR cadence). 0 = none. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ReburstDelaySec = 0.f;
+
+	/** Crosshair halo: current bloom deg at wall-clock now (client display only). */
+	float GetCurrentBloomDeg() const;
+	float GetBloomCapDeg() const { return BloomCap; }
 
 	// Recoil-kick feel (camera view-punch + viewmodel kick only; not the spread cone).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ADSRecoilMult    = 0.4f;   // kick x this when fully aimed
@@ -184,10 +201,11 @@ private:
 	void CancelReload();                // sprint/slide: restores nothing — hopper only fills on finish
 	void UpdateReload(double Now);
 
-	// ---- Bloom (consecutive-shot counter, clocked by the SHOOTER's stamp — FPFShotPacket.ClientTime — so the
-	//      owning client and the server evaluate bit-identical operands and agree on every shot's cone) ----
-	float GetBloomDegForStamp(float StampT) const;   // cone contribution for a shot fired at StampT
-	void  AdvanceBloom(float StampT);                // count the shot at StampT (resets after BloomResetGap)
+	// ---- Bloom (continuous value + free-shot ramp, clocked by the SHOOTER's stamp — FPFShotPacket.ClientTime) ----
+	float GetBloomDegForStamp(float StampT) const;   // cone contribution for a shot fired at StampT (pre-advance)
+	void  AdvanceBloom(float StampT);                // apply this shot to the bloom chain
+	/** Decay bloom over a stamp gap (full reset if gap > BloomResetGap). Deterministic. */
+	float DecayBloomOverGap(float Bloom, float GapSec) const;
 
 	// ---- Helpers ----
 	ACombatForgeCharacter*  GetPFCharacter() const;
@@ -195,6 +213,10 @@ private:
 	uint8 GetOwnerTeam() const;         // 255 if unknown
 	void  SpawnCosmeticProjectile(const FVector& Origin, const FVector& SpreadedDir,
 	                              uint8 Team, uint32 ShotIndex);
+	/** Pellet fan around BaseSpreadedDir using HashCombine(ShotSeed, PelletIdx) — never extra VRandCone on main stream. */
+	FVector PelletDir(const FVector& BaseSpreadedDir, uint32 ShotSeed, int32 PelletIdx) const;
+	void SpawnPelletVolley(const FVector& Origin, const FVector& BaseSpreadedDir, uint8 Team,
+	                       uint32 ShotIndex, int32 PlayerId, bool bAuthoritative, ACombatForgeCharacter* Char);
 
 	// Fire state
 	bool   bWantsFire = false;
@@ -210,11 +232,19 @@ private:
 	// shooter's clock so client + server chains match; remote viewers estimate with their own clock (cosmetic).
 	uint16 ConsecShots = 0;
 	float  LastShotStampT = -1000.f;
+	float  BloomCurrent = 0.f;   // bloom AFTER last AdvanceBloom (pre-decay for the next gap)
 
 	// Recoil-climb state (owning human player only): how much accumulated climb is still owed back.
 	float  RecoilClimbPitch = 0.f;
 	float  RecoilClimbYaw = 0.f;
 	double LastClimbShotTime = -1000.0;
+
+	// Spin-up (minigun) — client gate; server enforces the same def-driven delay via packet spacing + this gate on host.
+	double SpinReadyTime = 0.0;
+	double SpinGraceUntil = 0.0;
+
+	// Burst DMR re-burst delay (Rifle 03).
+	double NextBurstAllowedTime = 0.0;
 
 	// Reload state
 	double ReloadEndTime = 0.0;
