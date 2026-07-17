@@ -203,6 +203,35 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 			EscapeLid = Lid;
 		}
 	}
+	else
+	{
+		// Open-field maps (The Yard): no visible walls, but bound the playable area so a player can't
+		// keep walking into the infinite desert and leave the match behind. Invisible, pawn-block ONLY —
+		// shots and the build trace pass straight through, and you can still step ~2000 uu off the pad into
+		// the sand before hitting the soft edge. (Upgrade path: swap for a CoD "return to combat area" timer.)
+		const float OpenMargin = 2000.f;
+		const float BoundZ = PerimeterH * 0.5f;
+		const float SpanX = FieldX / 100.f + OpenMargin * 0.02f + 0.4f;   // field width + both margins
+		const float SpanY = FieldY / 100.f + OpenMargin * 0.02f + 0.4f;
+		auto MakeBound = [&](const TCHAR* Name, const FVector& Loc, const FVector& Scale)
+		{
+			UStaticMeshComponent* W = MakeShapePart(Name, Loc, Scale, EPFShellCollision::Solid, WallMaterial);
+			if (W)
+			{
+				W->SetVisibility(false);
+				W->SetHiddenInGame(true);
+				W->SetCastShadow(false);
+				W->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Ignore);
+				W->SetCollisionResponseToChannel(PF_ECC_BuildTrace, ECR_Ignore);
+				W->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+				PerimeterWalls.Add(W);
+			}
+		};
+		MakeBound(TEXT("OpenBoundN"), FVector(FieldX * 0.5f, FieldY + OpenMargin, BoundZ), FVector(SpanX, 0.2f, WallScaleZ));
+		MakeBound(TEXT("OpenBoundS"), FVector(FieldX * 0.5f, -OpenMargin, BoundZ), FVector(SpanX, 0.2f, WallScaleZ));
+		MakeBound(TEXT("OpenBoundW"), FVector(-OpenMargin, FieldY * 0.5f, BoundZ), FVector(0.2f, SpanY, WallScaleZ));
+		MakeBound(TEXT("OpenBoundE"), FVector(FieldX + OpenMargin, FieldY * 0.5f, BoundZ), FVector(0.2f, SpanY, WallScaleZ));
+	}
 
 	// --- Team-tinted spawn-strip floor tiles over the spawn columns (x = 0 and x = 15) ---
 	// Full field width on every map (the Yard's wider strip still reads "my side" at a glance).
@@ -262,6 +291,18 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	PenWalls.Add(MakeShapePart(TEXT("PenWallE"),
 		FVector(PenCenterX + PenHalf - 10.f, PenCenterY, PenWallH * 0.5f), FVector(0.2f, 20.f, 3.f),
 		EPFShellCollision::Solid, WallMaterial));
+
+	// On open-field maps the pen sits 3000 uu south of the field with no perimeter to hide it, so it reads
+	// as a stray walled box out in the desert. Keep it functional for warm-up spawns but hide the geometry.
+	if (!MapDef.bPerimeter)
+	{
+		auto HidePart = [](UStaticMeshComponent* P)
+		{
+			if (P) { P->SetVisibility(false); P->SetHiddenInGame(true); P->SetCastShadow(false); }
+		};
+		HidePart(PenFloor);
+		for (UStaticMeshComponent* W : PenWalls) { HidePart(W); }
+	}
 
 	// --- Cosmetic CQB warehouse shell (cube frame; real Megascans drape in BeginPlay) ---
 	BuildWarehouseDressing();

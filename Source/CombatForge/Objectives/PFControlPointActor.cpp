@@ -5,6 +5,7 @@
 #include "CombatForge.h"
 #include "Core/CombatForgePlayerState.h"
 #include "Core/CombatForgeTypes.h"
+#include "Combat/PFHealthComponent.h"
 #include "Player/CombatForgeCharacter.h"
 
 #include "Components/SphereComponent.h"
@@ -352,7 +353,10 @@ uint8 APFControlPointActor::ServerQueryOccupancy(int32& OutA, int32& OutB,
 			continue;
 		}
 		ACombatForgePlayerState* PS = Char->GetPlayerState<ACombatForgePlayerState>();
-		if (!PS || !PS->bAliveInRound)
+		// bAliveInRound isn't cleared on elimination in Skirmish; also reject eliminated-but-respawning
+		// pawns so a corpse can't hold/contest a Domination point during its respawn window.
+		const UPFHealthComponent* Health = Char->GetHealth();
+		if (!PS || !PS->bAliveInRound || (Health && Health->bEliminated))
 		{
 			continue;
 		}

@@ -1245,6 +1245,19 @@ void ACombatForgeGameMode::TeleportPawnTo(ACombatForgeCharacter* Pawn, const FTr
 	{
 		return;
 	}
+
+	// Reused pawns snap (TeleportTo flags a non-interpolated correction), which reads as the SAME actor
+	// warping across the map. Humans never see it (death cam), but bots have no masking, so remote clients
+	// watch bot bodies pop from death spot to spawn. Hide the bot actor across the snap and restore a beat
+	// later — bHidden replicates, so it reads as a clean respawn. SetActorHiddenInGame is an actor-level gate
+	// that does NOT stomp per-component visibility flags (the viewmodel/hold-pose logic still owns those).
+	const ACombatForgePlayerState* PS = Pawn->GetPlayerState<ACombatForgePlayerState>();
+	const bool bMaskWarp = PS && PS->IsABot() && !Pawn->IsHidden();
+	if (bMaskWarp)
+	{
+		Pawn->SetActorHiddenInGame(true);
+	}
+
 	Pawn->TeleportTo(Transform.GetLocation(), Transform.GetRotation().Rotator(),
 		/*bIsATest=*/false, /*bNoCheck=*/true);
 	if (UPawnMovementComponent* Move = Pawn->GetMovementComponent())
@@ -1254,6 +1267,26 @@ void ACombatForgeGameMode::TeleportPawnTo(ACombatForgeCharacter* Pawn, const FTr
 	if (AController* Controller = Pawn->GetController())
 	{
 		Controller->SetControlRotation(Transform.GetRotation().Rotator());
+	}
+
+	if (bMaskWarp)
+	{
+		FTimerHandle RestoreHandle;
+		TWeakObjectPtr<ACombatForgeCharacter> WeakPawn(Pawn);
+		GetWorldTimerManager().SetTimer(RestoreHandle, [WeakPawn]()
+		{
+			ACombatForgeCharacter* P = WeakPawn.Get();
+			if (!P)
+			{
+				return;
+			}
+			// Don't un-hide a pawn that got eliminated again inside the mask window.
+			const UPFHealthComponent* H = P->GetHealth();
+			if (!H || !H->bEliminated)
+			{
+				P->SetActorHiddenInGame(false);
+			}
+		}, 0.1f, false);
 	}
 }
 

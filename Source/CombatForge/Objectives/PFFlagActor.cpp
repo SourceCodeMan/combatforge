@@ -6,6 +6,7 @@
 #include "Core/CombatForgeGameMode.h"
 #include "Core/CombatForgePlayerState.h"
 #include "Core/CombatForgeTypes.h"
+#include "Combat/PFHealthComponent.h"
 #include "Objectives/PFObjectiveLayout.h"
 #include "Player/CombatForgeCharacter.h"
 
@@ -265,7 +266,11 @@ void APFFlagActor::OnPickupOverlap(UPrimitiveComponent* /*OverlappedComponent*/,
 		return;
 	}
 	ACombatForgePlayerState* PS = Char->GetPlayerState<ACombatForgePlayerState>();
-	if (!PS || PS->TeamId > 1 || !PS->bAliveInRound)
+	// bAliveInRound is NOT the elimination truth in Skirmish (it's never cleared on elim — see PFBotController),
+	// so an eliminated-but-respawning player would otherwise still return/capture when the flag re-overlaps
+	// their corpse (e.g. an enemy drops it on them). Gate on the real elimination flag too.
+	const UPFHealthComponent* Health = Char->GetHealth();
+	if (!PS || PS->TeamId > 1 || !PS->bAliveInRound || (Health && Health->bEliminated))
 	{
 		return;
 	}
