@@ -2493,18 +2493,25 @@ void UPFLoadingMenuWidget::RefreshOnlinePanel()
 {
 	UPFBackendSubsystem* Backend = GetBackend();
 	const bool bLoggedIn = Backend && Backend->IsLoggedIn();
+	const bool bLinking = Backend && Backend->IsDeviceLoginActive();
 	if (AccountStatusText)
 	{
 		FString Line;
-		if (Backend && Backend->IsDeviceLoginActive())
+		if (bLinking)
 		{
-			Line = FString::Printf(TEXT("Code %s — approve at playcombatforge.com/link"),
-				*Backend->GetPendingUserCode());
+			Line = Backend->GetPendingUserCode().IsEmpty()
+				? TEXT("Contacting the account server…")
+				: FString::Printf(TEXT("Code %s — see the status line for where to approve"),
+					*Backend->GetPendingUserCode());
 		}
 		else if (bLoggedIn)
 		{
 			const FPFBackendProfile& P = Backend->GetProfile();
-			Line = FString::Printf(TEXT("Signed in as %s · Level %d"), *P.DisplayName, P.Level);
+			// Between token grant and the profile fetch landing there is no name yet — say so
+			// instead of flashing "Signed in as  · Level 1".
+			Line = P.DisplayName.IsEmpty()
+				? TEXT("Signed in — loading profile…")
+				: FString::Printf(TEXT("Signed in as %s · Level %d"), *P.DisplayName, P.Level);
 		}
 		else
 		{
@@ -2516,7 +2523,10 @@ void UPFLoadingMenuWidget::RefreshOnlinePanel()
 	}
 	if (LoginLabel)
 	{
-		LoginLabel->SetText(FText::FromString(bLoggedIn ? TEXT("  LOG OUT  ") : TEXT("  LOG IN  ")));
+		// While the device flow runs the button is the CANCEL path — a second click must never
+		// read as "log in again".
+		LoginLabel->SetText(FText::FromString(
+			bLinking ? TEXT("  CANCEL  ") : bLoggedIn ? TEXT("  LOG OUT  ") : TEXT("  LOG IN  ")));
 	}
 	if (QuickPlayButton)
 	{
@@ -2529,6 +2539,13 @@ void UPFLoadingMenuWidget::RefreshOnlinePanel()
 	if (JoinCodeButton)
 	{
 		JoinCodeButton->SetIsEnabled(bLoggedIn);
+	}
+	// Logout / session expiry with the browser open: stale rows must not stay joinable.
+	if (!bLoggedIn && bServerListOpen)
+	{
+		bServerListOpen = false;
+		BrowserRows.Reset();
+		RebuildServerRows();
 	}
 }
 

@@ -427,6 +427,10 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 		Exiting ? Exiting->GetPlayerState<ACombatForgePlayerState>() : nullptr;
 	if (ExitingPS)
 	{
+		// Progression: capture the leaver's stats BEFORE any teardown below (team/roster wipe,
+		// Destroy) — Results-time reporting can't see a destroyed PlayerState.
+		SnapshotLeaverForReport(ExitingPS);
+
 		// The leaver's PlayerState may linger in PlayerArray briefly; take them out of the
 		// alive count NOW so the post-logout victory check below is correct.
 		ExitingPS->bAliveInRound = false;
@@ -486,9 +490,50 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 		if (ACombatForgeGameState* GS = GetPFGameState(); GS && GS->Phase != EPFMatchPhase::Lobby)
 		{
 			UE_LOG(CombatForgeLog, Log, TEXT("GameMode: last human left mid-match — returning to Lobby"));
+			// Abandoned match: report what happened before the state is wiped (winner = draw/none).
+			// Every human row rides the leaver snapshots; the API's duration clamp drops trivially
+			// short abandons, which is fine.
+			if (GS->Phase == EPFMatchPhase::Combat || GS->Phase == EPFMatchPhase::Vote)
+			{
+				PendingMatchResult = MakeMatchResult(255);
+				EmitMatchReport();
+			}
 			HostForceReturnToLobby();
 		}
 	}
+}
+
+void ACombatForgeGameMode::SnapshotLeaverForReport(const ACombatForgePlayerState* PS)
+{
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->MatchId.IsEmpty() || GS->Phase == EPFMatchPhase::Lobby
+		|| !PS || PS->IsABot() || PS->IsHeadlessServerPhantom() || PS->PlayerGuidHash.IsEmpty())
+	{
+		return;
+	}
+	// Rejoin overwrite: same install leaving twice keeps only the latest snapshot.
+	PendingLeaverRows.RemoveAll([PS](const FPFLeaverRow& Row)
+	{
+		return Row.GuidHash == PS->PlayerGuidHash;
+	});
+	FPFLeaverRow Row;
+	Row.GuidHash  = PS->PlayerGuidHash;
+	Row.Team      = PS->TeamId;
+	Row.Elims     = PS->Eliminations;
+	Row.TimesElim = PS->TimesEliminated;
+	Row.Score     = PS->MatchScore;
+	Row.Tags      = PS->TagCount;
+	if (BuildGrid)
+	{
+		for (const FPFBuildPieceRec& Rec : BuildGrid->Pieces.Items)
+		{
+			if (Rec.OwnerIdx == PS->RosterIndex)
+			{
+				++Row.Builder;
+			}
+		}
+	}
+	PendingLeaverRows.Add(MoveTemp(Row));
 }
 
 void ACombatForgeGameMode::RefreshMatchLeader(const ACombatForgePlayerState* ExcludePS)
@@ -761,6 +806,7 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		GS->ServerSetMatchId(FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower());
 		ComputeEffectiveScaling();
 		ResetPlayerMatchStats();
+		PendingLeaverRows.Reset();   // fresh match — last match's leaver snapshots are spent
 
 		bSuddenDeathPlayed = false;
 		bPendingSuddenDeath = false;
@@ -2921,6 +2967,7 @@ void ACombatForgeGameMode::EmitMatchReport() const
 	Root->SetNumberField(TEXT("netProtocol"), PFBuild::NetProtocol);
 
 	TArray<TSharedPtr<FJsonValue>> Players;
+	TSet<FString> LiveGuidHashes;
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
@@ -2928,6 +2975,7 @@ void ACombatForgeGameMode::EmitMatchReport() const
 		{
 			continue;   // bots have no guid hash; humans without one never completed the join;
 		}	            // a pilot box's phantom carries the BOX's install guid — never report it
+		LiveGuidHashes.Add(PS->PlayerGuidHash);
 		const TSharedRef<FJsonObject> P = MakeShared<FJsonObject>();
 		P->SetStringField(TEXT("guidHash"), PS->PlayerGuidHash);
 		P->SetNumberField(TEXT("team"), PS->TeamId);
@@ -2937,8 +2985,29 @@ void ACombatForgeGameMode::EmitMatchReport() const
 		P->SetNumberField(TEXT("tags"), PS->TagCount);
 		P->SetNumberField(TEXT("objective"), 0);   // dedicated objective counter: fast-follow
 		P->SetNumberField(TEXT("builder"), PiecesByRoster.FindRef(PS->RosterIndex));
-		P->SetBoolField(TEXT("completed"), IsActiveRosterMember(PS));   // still connected at commit
+		P->SetBoolField(TEXT("completed"), true);   // still connected at commit = finished the match
 		P->SetBoolField(TEXT("isBot"), PS->IsABot());
+		Players.Add(MakeShared<FJsonValueObject>(P));
+	}
+	// Mid-match leavers (snapshotted at Logout, before their PlayerState died): completed:false —
+	// they keep their earned stats but not the completion/daily bonuses. A rejoiner's live row wins.
+	for (const FPFLeaverRow& Row : PendingLeaverRows)
+	{
+		if (LiveGuidHashes.Contains(Row.GuidHash))
+		{
+			continue;
+		}
+		const TSharedRef<FJsonObject> P = MakeShared<FJsonObject>();
+		P->SetStringField(TEXT("guidHash"), Row.GuidHash);
+		P->SetNumberField(TEXT("team"), Row.Team);
+		P->SetNumberField(TEXT("elims"), Row.Elims);
+		P->SetNumberField(TEXT("timesElim"), Row.TimesElim);
+		P->SetNumberField(TEXT("score"), Row.Score);
+		P->SetNumberField(TEXT("tags"), Row.Tags);
+		P->SetNumberField(TEXT("objective"), 0);
+		P->SetNumberField(TEXT("builder"), Row.Builder);
+		P->SetBoolField(TEXT("completed"), false);
+		P->SetBoolField(TEXT("isBot"), false);
 		Players.Add(MakeShared<FJsonValueObject>(P));
 	}
 	if (Players.Num() == 0)

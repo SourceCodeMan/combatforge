@@ -554,8 +554,9 @@ void UPFLobbyWidget::NativeConstruct()
 
 	if (FooterText)
 	{
+		bFooterShowsHostHints = IsLocalHost();
 		FString Hints = TEXT("F — Ready    ·    Esc — Options / How to Play    ·    Hold Tab — Cursor");
-		if (IsLocalHost())
+		if (bFooterShowsHostHints)
 		{
 			Hints += TEXT("    ·    Enter — Start Match    ·    Click a player to swap team");
 		}
@@ -578,6 +579,19 @@ void UPFLobbyWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		PollAccum = 0.f;
 		RefreshRoster();
 		RefreshConfig();
+
+		// Footer hints follow a migrating match leader (dedicated: crown can arrive/move mid-lobby).
+		const bool bHostNow = IsLocalHost();
+		if (FooterText && bHostNow != bFooterShowsHostHints)
+		{
+			bFooterShowsHostHints = bHostNow;
+			FString Hints = TEXT("F — Ready    ·    Esc — Options / How to Play    ·    Hold Tab — Cursor");
+			if (bHostNow)
+			{
+				Hints += TEXT("    ·    Enter — Start Match    ·    Click a player to swap team");
+			}
+			FooterText->SetText(FText::FromString(Hints));
+		}
 	}
 
 	// The loadout overlay only makes sense while the Tab-hold cursor exists. Collapse it the moment the

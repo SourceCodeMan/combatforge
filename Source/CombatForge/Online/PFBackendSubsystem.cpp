@@ -129,11 +129,7 @@ void UPFBackendSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UPFBackendSubsystem::Deinitialize()
 {
 	StopDevicePolling();
-	if (HeartbeatTicker.IsValid())
-	{
-		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTicker);
-		HeartbeatTicker.Reset();
-	}
+	FleetUnregister();   // best-effort: drop off the directory instead of ghosting for 30 s
 	Super::Deinitialize();
 }
 
@@ -220,19 +216,22 @@ void UPFBackendSubsystem::BeginDeviceLogin()
 {
 	if (IsDeviceLoginActive())
 	{
-		return;
+		return;   // covers the in-flight window too — a double-click can't start two flows
 	}
-	OnStatus.Broadcast(TEXT("Contacting playcombatforge.com…"));
+	bDeviceCodeRequestInFlight = true;
+	const int32 Gen = ++DeviceFlowGeneration;
+	OnStatus.Broadcast(TEXT("Contacting the account server…"));
 	const FString Body = FString::Printf(TEXT("{\"client_id\":\"%s\"}"), GameClientId);
 	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
 	Request(TEXT("POST"), TEXT("/api/auth/device/code"), Body, /*AuthMode=*/0,
-		[WeakThis](int32 Code, const FString& Resp)
+		[WeakThis, Gen](int32 Code, const FString& Resp)
 		{
 			UPFBackendSubsystem* Self = WeakThis.Get();
-			if (!Self)
+			if (!Self || Self->DeviceFlowGeneration != Gen)
 			{
-				return;
+				return;   // canceled while in flight — a stale response must not resurrect the flow
 			}
+			Self->bDeviceCodeRequestInFlight = false;
 			TSharedPtr<FJsonObject> Root;
 			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resp);
 			if (Code != 200 || !FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
@@ -242,25 +241,39 @@ void UPFBackendSubsystem::BeginDeviceLogin()
 			}
 			Root->TryGetStringField(TEXT("device_code"), Self->PendingDeviceCode);
 			Root->TryGetStringField(TEXT("user_code"), Self->PendingUserCode);
+			// The approval URL comes from the API — never hardcode it (the /link page lives on the
+			// API host; the main site only gains a redirect when Tom adds one).
+			Self->VerificationUri = TEXT("the CombatForge website");
+			Root->TryGetStringField(TEXT("verification_uri"), Self->VerificationUri);
 			double Interval = 5.0, ExpiresIn = 900.0;
 			Root->TryGetNumberField(TEXT("interval"), Interval);
 			Root->TryGetNumberField(TEXT("expires_in"), ExpiresIn);
 			Self->DevicePollIntervalSec = FMath::Clamp((float)Interval, 2.f, 30.f);
 			Self->DeviceExpiresAtSec = FPlatformTime::Seconds() + ExpiresIn;
 			Self->OnStatus.Broadcast(FString::Printf(
-				TEXT("Code %s — approve at playcombatforge.com/link"), *Self->PendingUserCode));
-
-			Self->DevicePollTicker = FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateLambda([WeakThis](float) -> bool
-				{
-					if (UPFBackendSubsystem* Inner = WeakThis.Get())
-					{
-						Inner->PollDeviceToken();
-						return true;   // keep ticking; StopDevicePolling removes us
-					}
-					return false;
-				}), Self->DevicePollIntervalSec);
+				TEXT("Code %s — approve at %s"), *Self->PendingUserCode, *Self->VerificationUri));
+			Self->ArmDevicePollTicker();
 		});
+}
+
+void UPFBackendSubsystem::ArmDevicePollTicker()
+{
+	if (DevicePollTicker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(DevicePollTicker);
+		DevicePollTicker.Reset();
+	}
+	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
+	DevicePollTicker = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([WeakThis](float) -> bool
+		{
+			if (UPFBackendSubsystem* Inner = WeakThis.Get())
+			{
+				Inner->PollDeviceToken();
+				return true;   // keep ticking; StopDevicePolling removes us
+			}
+			return false;
+		}), DevicePollIntervalSec);
 }
 
 void UPFBackendSubsystem::CancelDeviceLogin()
@@ -284,14 +297,15 @@ void UPFBackendSubsystem::PollDeviceToken()
 	const FString Body = FString::Printf(
 		TEXT("{\"grant_type\":\"urn:ietf:params:oauth:grant-type:device_code\",")
 		TEXT("\"device_code\":\"%s\",\"client_id\":\"%s\"}"), *PendingDeviceCode, GameClientId);
+	const int32 Gen = DeviceFlowGeneration;
 	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
 	Request(TEXT("POST"), TEXT("/api/auth/device/token"), Body, /*AuthMode=*/0,
-		[WeakThis](int32 Code, const FString& Resp)
+		[WeakThis, Gen](int32 Code, const FString& Resp)
 		{
 			UPFBackendSubsystem* Self = WeakThis.Get();
-			if (!Self || Self->PendingDeviceCode.IsEmpty())
+			if (!Self || Self->DeviceFlowGeneration != Gen || Self->PendingDeviceCode.IsEmpty())
 			{
-				return;
+				return;   // canceled/superseded while this poll was in flight
 			}
 			TSharedPtr<FJsonObject> Root;
 			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resp);
@@ -314,8 +328,9 @@ void UPFBackendSubsystem::PollDeviceToken()
 			}
 			if (Err == TEXT("slow_down"))
 			{
-				Self->DevicePollIntervalSec += 5.f;   // RFC 8628 §3.5 (ticker keeps old cadence
-				return;                                // until re-armed; server tolerates it)
+				Self->DevicePollIntervalSec += 5.f;   // RFC 8628 §3.5
+				Self->ArmDevicePollTicker();          // re-arm — FTSTicker's delay is fixed at add time
+				return;
 			}
 			Self->StopDevicePolling();
 			Self->OnStatus.Broadcast(Err == TEXT("access_denied")
@@ -326,6 +341,8 @@ void UPFBackendSubsystem::PollDeviceToken()
 
 void UPFBackendSubsystem::StopDevicePolling()
 {
+	++DeviceFlowGeneration;   // invalidate every in-flight code/token callback
+	bDeviceCodeRequestInFlight = false;
 	if (DevicePollTicker.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(DevicePollTicker);
@@ -527,18 +544,34 @@ void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 	// player installs never have a key, so a random listen host can never register or grant XP.
 	const ENetMode Net = World ? World->GetNetMode() : NM_Standalone;
 	if (!World || (Net != NM_DedicatedServer && Net != NM_ListenServer)
-		|| ServerKey.IsEmpty() || bFleetRegistered)
+		|| ServerKey.IsEmpty() || bFleetRegistered || bFleetRegisterInFlight)
 	{
 		return;
 	}
+	bFleetRegisterInFlight = true;
 	FleetGS = World->GetGameState<ACombatForgeGameState>();
 	FleetPort = World->URL.Port;
 
+	// LAN address rides along so same-LAN joiners skip NAT hairpin (flaky on consumer routers —
+	// exactly the Phase-0 pilot-in-Tom's-house case). The Worker still records the OBSERVED
+	// public IP as the primary address.
+	FString LanAddr;
+	if (ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM))
+	{
+		bool bCanBind = false;
+		const TSharedRef<FInternetAddr> Local = Sockets->GetLocalHostAddr(*GLog, bCanBind);
+		LanAddr = Local->ToString(/*bAppendPort=*/false);
+	}
+	// -PFPrivate: unlisted match — the directory mints a 6-char join code instead of listing us.
+	const bool bPrivate = FParse::Param(FCommandLine::Get(), TEXT("PFPrivate"));
+
 	const FString Body = FString::Printf(
-		TEXT("{\"port\":%d,\"netProtocol\":%d,\"maxPlayers\":%d,\"map\":\"%s\",\"mode\":\"%s\"}"),
+		TEXT("{\"port\":%d,\"netProtocol\":%d,\"maxPlayers\":%d,\"map\":\"%s\",\"mode\":\"%s\",")
+		TEXT("\"lanAddr\":\"%s\",\"private\":%s}"),
 		FleetPort, PFBuild::NetProtocol, (int32)PFGrid::MaxRosterSlots,
 		FleetGS.IsValid() ? *EnumShortName(TEXT("/Script/CombatForge.EPFArenaMap"), (int64)FleetGS->ArenaMap) : TEXT(""),
-		FleetGS.IsValid() ? *EnumShortName(TEXT("/Script/CombatForge.EPFMatchType"), (int64)FleetGS->MatchType) : TEXT(""));
+		FleetGS.IsValid() ? *EnumShortName(TEXT("/Script/CombatForge.EPFMatchType"), (int64)FleetGS->MatchType) : TEXT(""),
+		*LanAddr, bPrivate ? TEXT("true") : TEXT("false"));
 
 	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
 	Request(TEXT("POST"), TEXT("/v1/servers/register"), Body, /*AuthMode=*/2,
@@ -549,10 +582,26 @@ void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 			{
 				return;
 			}
+			Self->bFleetRegisterInFlight = false;
+			if (Self->bFleetRegistered)
+			{
+				return;   // a parallel register already won — don't arm a second heartbeat
+			}
 			if (Code != 200)
 			{
 				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: fleet register failed (%d) %s"), Code, *Resp);
 				return;
+			}
+			// Private match: surface the join code where the box operator can read + share it.
+			TSharedPtr<FJsonObject> RegRoot;
+			const TSharedRef<TJsonReader<>> RegReader = TJsonReaderFactory<>::Create(Resp);
+			FString JoinCode;
+			if (FJsonSerializer::Deserialize(RegReader, RegRoot) && RegRoot.IsValid()
+				&& RegRoot->TryGetStringField(TEXT("joinCode"), JoinCode) && !JoinCode.IsEmpty())
+			{
+				UE_LOG(CombatForgeLog, Display, TEXT("Backend: PRIVATE MATCH CODE: %s"), *JoinCode);
+				FFileHelper::SaveStringToFile(JoinCode, *FPaths::Combine(
+					FPaths::ProjectSavedDir(), TEXT("CombatForge"), TEXT("JoinCode.txt")));
 			}
 			Self->bFleetRegistered = true;
 			UE_LOG(CombatForgeLog, Log, TEXT("Backend: fleet registered (port %d)"), Self->FleetPort);
@@ -592,6 +641,20 @@ void UPFBackendSubsystem::SendHeartbeat()
 	{
 		return;
 	}
+	// Ghost-server guard: if this process is no longer actually SERVING (the box operator hit
+	// STOP HOSTING, or the world dropped to standalone), fall out of the directory instead of
+	// heartbeating quick-play traffic at a dead port.
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		const UWorld* World = GI->GetWorld();
+		const ENetMode Net = World ? World->GetNetMode() : NM_Standalone;
+		if (Net != NM_DedicatedServer && Net != NM_ListenServer)
+		{
+			UE_LOG(CombatForgeLog, Log, TEXT("Backend: no longer hosting — unregistering from the directory"));
+			FleetUnregister();
+			return;
+		}
+	}
 	// Re-resolve after map reload (`open L_Graybox` recreates the GameState).
 	if (!GS)
 	{
@@ -605,7 +668,7 @@ void UPFBackendSubsystem::SendHeartbeat()
 		}
 	}
 	int32 Humans = 0;
-	FString PhaseStr, MapStr, ModeStr;
+	FString PhaseStr, MapStr, ModeStr, FormatStr;
 	if (GS)
 	{
 		for (const APlayerState* PSBase : GS->PlayerArray)
@@ -621,10 +684,19 @@ void UPFBackendSubsystem::SendHeartbeat()
 			? EnumShortName(TEXT("/Script/CombatForge.EPFArenaMap"), (int64)GS->ArenaMap)
 			: GS->SelectedCommunityMapLabel;
 		ModeStr  = EnumShortName(TEXT("/Script/CombatForge.EPFMatchType"), (int64)GS->MatchType);
+		FormatStr = FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize);
 	}
-	const FString Body = FString::Printf(
-		TEXT("{\"players\":%d,\"phase\":\"%s\",\"map\":\"%s\",\"mode\":\"%s\"}"),
-		Humans, *PhaseStr, *MapStr.ReplaceQuotesWithEscapedQuotes(), *ModeStr);
+	// Proper JSON serialization: community-map labels are free text (quotes/backslashes would
+	// silently 400 a Printf-built body and drop us off the directory).
+	const TSharedRef<FJsonObject> BodyObj = MakeShared<FJsonObject>();
+	BodyObj->SetNumberField(TEXT("players"), Humans);
+	BodyObj->SetStringField(TEXT("phase"), PhaseStr);
+	BodyObj->SetStringField(TEXT("map"), MapStr);
+	BodyObj->SetStringField(TEXT("mode"), ModeStr);
+	BodyObj->SetStringField(TEXT("format"), FormatStr);
+	FString Body;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(BodyObj, Writer);
 	Request(TEXT("POST"), TEXT("/v1/servers/heartbeat"), Body, /*AuthMode=*/2,
 		[](int32 Code, const FString&)
 		{
@@ -633,6 +705,22 @@ void UPFBackendSubsystem::SendHeartbeat()
 				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: heartbeat says not-registered (409)"));
 			}
 		});
+}
+
+void UPFBackendSubsystem::FleetUnregister()
+{
+	if (HeartbeatTicker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTicker);
+		HeartbeatTicker.Reset();
+	}
+	if (!bFleetRegistered)
+	{
+		return;
+	}
+	bFleetRegistered = false;
+	FleetGS.Reset();
+	Request(TEXT("POST"), TEXT("/v1/servers/unregister"), TEXT("{}"), /*AuthMode=*/2, nullptr);
 }
 
 void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FString& PendingFilePath)
@@ -658,9 +746,20 @@ void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FStri
 					IFileManager::Get().Delete(*PendingFilePath);
 				}
 			}
+			else if (Code >= 400 && Code < 500 && Code != 408 && Code != 429 && !PendingFilePath.IsEmpty())
+			{
+				// Deterministic rejection (validation/clamp): quarantine instead of re-signing and
+				// re-POSTing the same doomed report on every boot forever.
+				const FString Rejected = FPaths::Combine(FPaths::GetPath(PendingFilePath),
+					TEXT("rejected"), FPaths::GetCleanFilename(PendingFilePath));
+				IFileManager::Get().MakeDirectory(*FPaths::GetPath(Rejected), /*Tree=*/true);
+				IFileManager::Get().Move(*Rejected, *PendingFilePath);
+				UE_LOG(CombatForgeLog, Warning,
+					TEXT("Backend: match report rejected (%d) %s — quarantined to %s"), Code, *Resp, *Rejected);
+			}
 			else
 			{
-				// Leave the pending file in place — re-sent at next fleet registration.
+				// Transient (5xx / network / rate limit): leave in place — re-sent at next registration.
 				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: match report failed (%d) %s"), Code, *Resp);
 			}
 		}, Headers);

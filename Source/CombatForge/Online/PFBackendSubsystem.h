@@ -77,7 +77,9 @@ public:
 	// ---- auth state (player hat) ----
 	bool IsLoggedIn() const { return !AuthToken.IsEmpty(); }
 	const FPFBackendProfile& GetProfile() const { return Profile; }
-	bool IsDeviceLoginActive() const { return !PendingDeviceCode.IsEmpty(); }
+	/** Active from the LOG IN click (request in flight) until token/cancel/expiry — the UI shows
+	 *  CANCEL for this whole window, so a double-click can never start two flows (review 2cf97f2). */
+	bool IsDeviceLoginActive() const { return bDeviceCodeRequestInFlight || !PendingDeviceCode.IsEmpty(); }
 	const FString& GetPendingUserCode() const { return PendingUserCode; }
 
 	/** Start the device-link flow. Progress lands on OnStatus; success flips OnAuthChanged. */
@@ -120,19 +122,28 @@ private:
 	// ---- device flow ----
 	FString PendingDeviceCode;
 	FString PendingUserCode;
+	FString VerificationUri;                 // where to approve — FROM the API, never hardcoded
 	float   DevicePollIntervalSec = 5.f;
 	double  DeviceExpiresAtSec = 0.0;        // FPlatformTime::Seconds deadline
 	FTSTicker::FDelegateHandle DevicePollTicker;
+	bool    bDeviceCodeRequestInFlight = false;
+	/** Bumped by Begin/Cancel/Stop: any async callback carrying a stale generation bails, so a
+	 *  canceled flow can never resurrect itself when its in-flight response lands (review 2cf97f2). */
+	int32   DeviceFlowGeneration = 0;
 	void PollDeviceToken();
 	void StopDevicePolling();
+	void ArmDevicePollTicker();              // (re)arm at the CURRENT interval (slow_down re-arms)
 	void HandleLoginSucceeded(const FString& Token);
 
 	// ---- fleet ----
 	bool bFleetRegistered = false;
+	bool bFleetRegisterInFlight = false;
 	FTSTicker::FDelegateHandle HeartbeatTicker;
 	TWeakObjectPtr<ACombatForgeGameState> FleetGS;
 	int32 FleetPort = 7777;
 	void SendHeartbeat();
+	/** Drop out of the directory (POST /unregister + stop the heartbeat). Safe to call anytime. */
+	void FleetUnregister();
 
 	// ---- plumbing ----
 	/** Fire an HTTP request. AuthMode: 0 none, 1 Bearer(player token), 2 Bearer(server key). */

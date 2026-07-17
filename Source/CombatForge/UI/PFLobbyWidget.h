@@ -95,6 +95,7 @@ private:
 	int32 WorkingCrosshairStyle = 0;
 
 	float PollAccum = 0.f;
+	bool bFooterShowsHostHints = false;   // re-styled when the match leader migrates (dedicated)
 	FString LastRosterSignature;
 
 	static constexpr float PollInterval = 0.5f;

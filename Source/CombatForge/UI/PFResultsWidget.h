@@ -38,6 +38,7 @@ private:
 	void BuildTree();
 	void TryBindGameState();
 	void HandleVoteTallyChanged();
+	void HandleMatchLeaderChanged();   // RETURN button follows a migrating leader (dedicated)
 
 	void RefreshAll();
 	void RefreshResult(const ACombatForgeGameState& GS);

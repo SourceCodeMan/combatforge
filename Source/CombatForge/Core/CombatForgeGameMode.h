@@ -220,6 +220,18 @@ protected:
 	 *  Always archived to Saved/MatchReports/; on a fleet box it is also queued + POSTed
 	 *  (idempotent on matchId server-side, so crash-resends are harmless). */
 	void EmitMatchReport() const;
+
+	/** Stat snapshot of a mid-match leaver, taken in Logout BEFORE the PlayerState is torn down —
+	 *  otherwise a kid who force-quits (the common case) silently loses the whole match's
+	 *  progression. Merged into EmitMatchReport with completed:false; live rows win on rejoin. */
+	struct FPFLeaverRow
+	{
+		FString GuidHash;
+		uint8   Team = 255;
+		int32   Elims = 0, TimesElim = 0, Score = 0, Tags = 0, Builder = 0;
+	};
+	TArray<FPFLeaverRow> PendingLeaverRows;   // cleared at Lobby→Build (new match)
+	void SnapshotLeaverForReport(const ACombatForgePlayerState* PS);
 	static void SanitizeVoteIds(TArray<uint8>& InOutLiked, TArray<uint8>& InOutDisliked);
 
 	// ---- (intra) runtime state ----

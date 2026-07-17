@@ -150,7 +150,7 @@ void UPFResultsWidget::NativeConstruct()
 	TryBindGameState();
 	if (ReturnBox)
 	{
-		// Host-ness is fixed for the session (listen host, 02 D12).
+		// Initial paint; HandleMatchLeaderChanged re-styles if leadership migrates (dedicated).
 		ReturnBox->SetVisibility(IsLocalHost() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	PollAccum = PollInterval; // refresh on first visible tick
@@ -162,6 +162,7 @@ void UPFResultsWidget::NativeDestruct()
 	if (BoundGameState.IsValid())
 	{
 		BoundGameState->OnVoteTallyChangedEvent.RemoveAll(this);
+		BoundGameState->OnMatchLeaderChangedEvent.RemoveAll(this);
 		BoundGameState.Reset();
 	}
 	Super::NativeDestruct();
@@ -179,6 +180,17 @@ void UPFResultsWidget::TryBindGameState()
 	{
 		BoundGameState = GS;
 		GS->OnVoteTallyChangedEvent.AddUObject(this, &UPFResultsWidget::HandleVoteTallyChanged);
+		// Leadership can migrate mid-Results on a dedicated server (the leader quit) — the RETURN
+		// button must land on the new leader, not vanish with the old one.
+		GS->OnMatchLeaderChangedEvent.AddUObject(this, &UPFResultsWidget::HandleMatchLeaderChanged);
+	}
+}
+
+void UPFResultsWidget::HandleMatchLeaderChanged()
+{
+	if (ReturnBox)
+	{
+		ReturnBox->SetVisibility(IsLocalHost() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 }
 
