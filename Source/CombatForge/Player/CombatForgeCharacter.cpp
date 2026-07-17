@@ -918,12 +918,23 @@ void ACombatForgeCharacter::OnJumpPressed()
 {
 	bJumpKeyHeld = true;
 	LastJumpPressedTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	// 2nd SPACE press while airborne = mantle intent (double-space ledge climb, Tom 2026-07-17). The intent
+	// rides FLAG_Custom_2 in the move stream; the CMC enters the climb deterministically the moment a valid
+	// ≤1-level ledge is ahead (and keeps retrying while the key is held — forgiving timing).
+	if (PFMovement != nullptr && PFMovement->IsFalling() && !PFMovement->IsMantling())
+	{
+		PFMovement->SetWantsToMantle(true);
+	}
 	Jump(); // no coyote time; pre-landing presses are re-armed in Landed()
 }
 
 void ACombatForgeCharacter::OnJumpReleased()
 {
 	bJumpKeyHeld = false;
+	if (PFMovement != nullptr)
+	{
+		PFMovement->SetWantsToMantle(false);   // a whiffed 2nd press must not latch forever
+	}
 	StopJumping();
 }
 

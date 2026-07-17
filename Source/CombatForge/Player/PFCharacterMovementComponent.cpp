@@ -3,6 +3,8 @@
 #include "Player/PFCharacterMovementComponent.h"
 
 #include "CombatForge.h"
+#include "Components/CapsuleComponent.h"   // mantle: ledge detection uses the live capsule dims
+#include "Engine/World.h"
 #include "GameFramework/Character.h"
 
 namespace
@@ -34,6 +36,7 @@ UPFCharacterMovementComponent::UPFCharacterMovementComponent()
 
 	bWantsToSprintPF = false;
 	bWantsToADSPF = false;
+	bWantsToMantlePF = false;
 	bSlideGlideActive = false;
 }
 
@@ -49,6 +52,11 @@ void UPFCharacterMovementComponent::SetWantsToSprint(bool bWants)
 void UPFCharacterMovementComponent::SetWantsToADS(bool bWants)
 {
 	bWantsToADSPF = bWants;
+}
+
+void UPFCharacterMovementComponent::SetWantsToMantle(bool bWants)
+{
+	bWantsToMantlePF = bWants;
 }
 
 void UPFCharacterMovementComponent::OnCrouchSlidePressed()
@@ -68,6 +76,11 @@ void UPFCharacterMovementComponent::OnCrouchSlideReleased()
 bool UPFCharacterMovementComponent::IsSliding() const
 {
 	return MovementMode == MOVE_Custom && CustomMovementMode == CMOVE_Slide;
+}
+
+bool UPFCharacterMovementComponent::IsMantling() const
+{
+	return MovementMode == MOVE_Custom && CustomMovementMode == CMOVE_Mantle;
 }
 
 bool UPFCharacterMovementComponent::IsSprintingEffective() const
@@ -101,6 +114,10 @@ bool UPFCharacterMovementComponent::WantsToADS() const
 
 float UPFCharacterMovementComponent::GetMaxSpeed() const
 {
+	if (IsMantling())
+	{
+		return 0.f;   // the climb interp drives motion, not acceleration
+	}
 	if (IsSliding())
 	{
 		return SlideBoostSpeed;
@@ -141,9 +158,9 @@ float UPFCharacterMovementComponent::GetMaxSpeed() const
 
 float UPFCharacterMovementComponent::GetMaxBrakingDeceleration() const
 {
-	if (IsSliding())
+	if (IsSliding() || IsMantling())
 	{
-		return 0.f; // PhysSlide applies its own friction curve
+		return 0.f; // PhysSlide applies its own friction curve; PhysMantle is a pure interp
 	}
 	return Super::GetMaxBrakingDeceleration();
 }
@@ -165,6 +182,11 @@ bool UPFCharacterMovementComponent::CanCrouchInCurrentState() const
 
 bool UPFCharacterMovementComponent::CanAttemptJump() const
 {
+	// No jump-cancel out of a climb.
+	if (IsMantling())
+	{
+		return false;
+	}
 	// Allow jumping out of the slide (slide-jump keeps horizontal velocity:
 	// stock DoJump only sets Velocity.Z, then falls — exactly what 04 §1.2 asks).
 	if (IsSliding())
@@ -172,6 +194,17 @@ bool UPFCharacterMovementComponent::CanAttemptJump() const
 		return IsJumpAllowed();
 	}
 	return Super::CanAttemptJump();
+}
+
+void UPFCharacterMovementComponent::OnTeleported()
+{
+	Super::OnTeleported();
+	// A respawn/eject teleport mid-climb must not keep interpolating toward the STALE target
+	// (the pawn would glide back across the map). Fall; FindFloor sorts out the rest.
+	if (IsMantling())
+	{
+		SetMovementMode(MOVE_Falling);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +237,21 @@ void UPFCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const 
 	{
 		EnterSlide();
 	}
+
+	// Deterministic mantle entry (04-adjacent, Tom 2026-07-17): the 2nd SPACE press while airborne rides
+	// FLAG_Custom_2; while it's held and we're falling, retry the ledge test each sim step — geometry is
+	// STATIC world collision, so client prediction and server replay agree. The flag is a pure input intent
+	// (cleared by the character on key release, never mutated inside the sim).
+	if (!IsMantling()
+		&& bWantsToMantlePF
+		&& IsFalling())
+	{
+		FVector StandTarget;
+		if (DetectMantleLedge(StandTarget))
+		{
+			EnterMantle(StandTarget);
+		}
+	}
 }
 
 void UPFCharacterMovementComponent::EnterSlide()
@@ -224,6 +272,15 @@ void UPFCharacterMovementComponent::EnterSlide()
 	SetMovementMode(MOVE_Custom, CMOVE_Slide);
 }
 
+void UPFCharacterMovementComponent::EnterMantle(const FVector& StandTarget)
+{
+	MantleStart   = UpdatedComponent->GetComponentLocation();
+	MantleTarget  = StandTarget;
+	MantleElapsed = 0.f;
+	Velocity      = FVector::ZeroVector;   // the interp owns the motion for MantleTime
+	SetMovementMode(MOVE_Custom, CMOVE_Mantle);
+}
+
 void UPFCharacterMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
 {
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
@@ -241,6 +298,12 @@ void UPFCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 		bSlideGlideActive = false;
 		OnSlideStateChanged.Broadcast(false);
 	}
+
+	const bool bWasMantling = (PreviousMovementMode == MOVE_Custom && PreviousCustomMode == CMOVE_Mantle);
+	if (bWasMantling && !IsMantling())
+	{
+		MantleElapsed = 0.f;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +317,10 @@ void UPFCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations
 	if (CustomMovementMode == CMOVE_Slide)
 	{
 		PhysSlide(deltaTime, Iterations);
+	}
+	else if (CustomMovementMode == CMOVE_Mantle)
+	{
+		PhysMantle(deltaTime, Iterations);
 	}
 	else
 	{
@@ -357,6 +424,127 @@ void UPFCharacterMovementComponent::PhysSlide(float deltaTime, int32 Iterations)
 }
 
 // ---------------------------------------------------------------------------
+// Mantle physics + ledge detection
+// ---------------------------------------------------------------------------
+
+void UPFCharacterMovementComponent::PhysMantle(float deltaTime, int32 Iterations)
+{
+	if (deltaTime < PFMinTickTime || !HasValidData())
+	{
+		return;
+	}
+
+	Iterations++;
+	bJustTeleported = true;   // interp-driven: never derive velocity from the positional delta
+
+	MantleElapsed += deltaTime;
+	const float Duration = FMath::Max(0.05f, MantleTime);
+	const float Alpha = FMath::Clamp(MantleElapsed / Duration, 0.f, 1.f);
+
+	// Rise-then-tuck: vertical dominates the first 60% (clear the lip), then translate forward onto/over the
+	// ledge. Both eased so the climb reads as a grab-and-pull, not a linear glide. Fully deterministic from
+	// (MantleStart, MantleTarget, MantleElapsed) — a mid-climb correction replays the same curve.
+	const float ZAlpha  = FMath::InterpEaseOut(0.f, 1.f, FMath::Clamp(Alpha / 0.6f, 0.f, 1.f), 2.f);
+	const float XYAlpha = FMath::InterpEaseInOut(0.f, 1.f, FMath::Clamp((Alpha - 0.6f) / 0.4f, 0.f, 1.f), 2.f);
+	FVector NewLoc;
+	NewLoc.X = FMath::Lerp(MantleStart.X, MantleTarget.X, XYAlpha);
+	NewLoc.Y = FMath::Lerp(MantleStart.Y, MantleTarget.Y, XYAlpha);
+	NewLoc.Z = FMath::Lerp(MantleStart.Z, MantleTarget.Z, ZAlpha);
+
+	// Collision OFF for the climb (bSweep=false): the end position was pre-validated clear, and sweeping
+	// would snag the capsule on the very lip we're climbing.
+	MoveUpdatedComponent(NewLoc - UpdatedComponent->GetComponentLocation(),
+		UpdatedComponent->GetComponentQuat(), /*bSweep=*/false);
+	Velocity = FVector::ZeroVector;
+
+	if (Alpha >= 1.f)
+	{
+		// Hand off with a small forward carry: over a THIN wall the capsule (fully above the top) drops down
+		// the far side — the "climb over"; onto a thick slab/floor top, FindFloor lands it next step.
+		const FVector Fwd = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
+		Velocity = Fwd * 150.f;
+		SetMovementMode(MOVE_Falling);
+	}
+}
+
+bool UPFCharacterMovementComponent::DetectMantleLedge(FVector& OutStandTarget) const
+{
+	if (!HasValidData() || CharacterOwner == nullptr)
+	{
+		return false;
+	}
+	const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+	UWorld* World = GetWorld();
+	if (Capsule == nullptr || World == nullptr)
+	{
+		return false;
+	}
+	const float Radius     = Capsule->GetScaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const FVector Loc  = UpdatedComponent->GetComponentLocation();
+	const FVector Fwd  = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
+	if (Fwd.IsNearlyZero())
+	{
+		return false;
+	}
+	const float FeetZ = Loc.Z - HalfHeight;
+
+	// STATIC world geometry only (build pieces + shell are ECC_WorldStatic objects): pawns can't be mantled,
+	// and — critically — static-only keeps the test deterministic between client prediction + server replay.
+	FCollisionObjectQueryParams StaticOnly(ECC_WorldStatic);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PFMantle), /*bTraceComplex=*/false, CharacterOwner);
+
+	// 1) A near-vertical face directly ahead at chest height.
+	const FVector ChestStart(Loc.X, Loc.Y, FeetZ + 55.f);
+	FHitResult WallHit;
+	if (!World->LineTraceSingleByObjectType(WallHit, ChestStart,
+		ChestStart + Fwd * (Radius + MantleReachUU), StaticOnly, Params))
+	{
+		return false;
+	}
+	if (WallHit.ImpactNormal.Z > 0.35f || FVector::DotProduct(FVector(WallHit.ImpactNormal), Fwd) > -0.3f)
+	{
+		return false;   // a floor/ramp surface or a glancing wall — not a mantle face
+	}
+
+	// 2) The ledge top: trace DOWN just inside the face from above the height band. A wall taller than the
+	//    band puts the trace start inside its body → degenerate/too-high hit → rejected by the band below.
+	const FVector TopProbeXY = FVector(WallHit.ImpactPoint.X, WallHit.ImpactPoint.Y, 0.f) + Fwd * 8.f;
+	const float ProbeTopZ = FeetZ + MantleMaxHeightUU + 40.f;
+	FHitResult TopHit;
+	if (!World->LineTraceSingleByObjectType(TopHit,
+		FVector(TopProbeXY.X, TopProbeXY.Y, ProbeTopZ),
+		FVector(TopProbeXY.X, TopProbeXY.Y, FeetZ), StaticOnly, Params))
+	{
+		return false;
+	}
+	const float LedgeTopZ = TopHit.ImpactPoint.Z;
+	const float RelHeight = LedgeTopZ - FeetZ;
+	if (RelHeight < MantleMinHeightUU || RelHeight > MantleMaxHeightUU)
+	{
+		return false;   // a normal step (walkable anyway) or too tall to grab — ONE build level max
+	}
+
+	// 3) End position: capsule centered just past the face, fully ABOVE the ledge top (so a thin 20uu wall is
+	//    vaulted and a thick slab is stood on). Verify capsule clearance there AND at the top-of-rise corner
+	//    (start XY at target Z) so the climb path can't tunnel into a roof or another pawn.
+	const FVector StandTarget(
+		WallHit.ImpactPoint.X + Fwd.X * (Radius + 20.f),
+		WallHit.ImpactPoint.Y + Fwd.Y * (Radius + 20.f),
+		LedgeTopZ + HalfHeight + 4.f);
+	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+	const FVector RiseCorner(Loc.X, Loc.Y, StandTarget.Z);
+	if (World->OverlapBlockingTestByChannel(RiseCorner, FQuat::Identity, ECC_Pawn, CapsuleShape, Params)
+		|| World->OverlapBlockingTestByChannel(StandTarget, FQuat::Identity, ECC_Pawn, CapsuleShape, Params))
+	{
+		return false;   // no headroom (roof) or the landing spot is occupied
+	}
+
+	OutStandTarget = StandTarget;
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Compressed flags / saved moves (02 D5, R6)
 // ---------------------------------------------------------------------------
 
@@ -366,6 +554,7 @@ void UPFCharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
 
 	bWantsToSprintPF = (Flags & FSavedMove_Character::FLAG_Custom_0) != 0;
 	bWantsToADSPF    = (Flags & FSavedMove_Character::FLAG_Custom_1) != 0;
+	bWantsToMantlePF = (Flags & FSavedMove_Character::FLAG_Custom_2) != 0;
 }
 
 FNetworkPredictionData_Client* UPFCharacterMovementComponent::GetPredictionData_Client() const
@@ -392,6 +581,7 @@ FNetworkPredictionData_Client* UPFCharacterMovementComponent::GetPredictionData_
 FSavedMove_PF::FSavedMove_PF()
 	: bSavedWantsToSprint(false)
 	, bSavedWantsToADS(false)
+	, bSavedWantsToMantle(false)
 {
 }
 
@@ -400,6 +590,7 @@ void FSavedMove_PF::Clear()
 	Super::Clear();
 	bSavedWantsToSprint = false;
 	bSavedWantsToADS = false;
+	bSavedWantsToMantle = false;
 }
 
 uint8 FSavedMove_PF::GetCompressedFlags() const
@@ -413,6 +604,10 @@ uint8 FSavedMove_PF::GetCompressedFlags() const
 	{
 		Result |= FLAG_Custom_1;
 	}
+	if (bSavedWantsToMantle)
+	{
+		Result |= FLAG_Custom_2;
+	}
 	return Result;
 }
 
@@ -420,7 +615,8 @@ bool FSavedMove_PF::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InC
 {
 	const FSavedMove_PF* NewMovePF = static_cast<const FSavedMove_PF*>(NewMove.Get());
 	if (bSavedWantsToSprint != NewMovePF->bSavedWantsToSprint
-		|| bSavedWantsToADS != NewMovePF->bSavedWantsToADS)
+		|| bSavedWantsToADS != NewMovePF->bSavedWantsToADS
+		|| bSavedWantsToMantle != NewMovePF->bSavedWantsToMantle)
 	{
 		return false;
 	}
@@ -435,6 +631,7 @@ void FSavedMove_PF::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& 
 	{
 		bSavedWantsToSprint = CMC->bWantsToSprintPF;
 		bSavedWantsToADS = CMC->bWantsToADSPF;
+		bSavedWantsToMantle = CMC->bWantsToMantlePF;
 	}
 }
 
@@ -446,6 +643,7 @@ void FSavedMove_PF::PrepMoveFor(ACharacter* C)
 	{
 		CMC->bWantsToSprintPF = bSavedWantsToSprint;
 		CMC->bWantsToADSPF = bSavedWantsToADS;
+		CMC->bWantsToMantlePF = bSavedWantsToMantle;
 	}
 }
 

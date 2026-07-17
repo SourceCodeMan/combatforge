@@ -24,17 +24,20 @@ class COMBATFORGE_API UPFCharacterMovementComponent : public UCharacterMovementC
 public:
 	UPFCharacterMovementComponent();
 
-	/** Custom movement mode value under MOVE_Custom. */
-	static constexpr uint8 CMOVE_Slide = 0;
+	/** Custom movement mode values under MOVE_Custom. */
+	static constexpr uint8 CMOVE_Slide  = 0;
+	static constexpr uint8 CMOVE_Mantle = 1;
 
 	// ---- Input intents (prediction-safe; ride compressed flags, NEVER RPCs — 02 D5) ----
 	void SetWantsToSprint(bool bWants);    // FLAG_Custom_0
 	void SetWantsToADS(bool bWants);       // FLAG_Custom_1 (speed effect must be in the move stream)
+	void SetWantsToMantle(bool bWants);    // FLAG_Custom_2 — 2nd SPACE press while airborne (ledge climb)
 	void OnCrouchSlidePressed();           // sets bWantsToCrouch; CMC decides slide vs crouch deterministically
 	void OnCrouchSlideReleased();
 
 	// ---- Cross-package queries ----
 	bool IsSliding() const;                // MovementMode == MOVE_Custom && CustomMovementMode == CMOVE_Slide
+	bool IsMantling() const;               // MovementMode == MOVE_Custom && CustomMovementMode == CMOVE_Mantle
 	bool IsSprintingEffective() const;     // sprint flag AND grounded AND input dot forward > 0.5
 	bool IsSlideGlidePhase() const;        // glide window (first 0.35 s, extended while descending)
 	bool WantsToADS() const;               // FLAG_Custom_1 state: the server-visible ADS intent from the
@@ -59,6 +62,17 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Movement") float SlideMaxDuration = 1.1f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Movement") float SlideCooldown = 0.5f;
 
+	// ---- Mantle (double-SPACE ledge climb) ----
+	/** Forward reach past the capsule edge that still counts as "at the wall". */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") float MantleReachUU = 55.f;
+	/** Ledge-top height band relative to the CURRENT feet position. Min skips normal step-ups; Max ≈ one
+	 *  wall level (300) + slack, so a single mantle can clear one build level but never a stacked (600) wall
+	 *  or the 1800 perimeter — the arena-containment + fort-integrity invariants stay intact. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") float MantleMinHeightUU = 60.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") float MantleMaxHeightUU = 340.f;
+	/** Seconds for the climb interp (vertical rise then forward tuck). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") float MantleTime = 0.35f;
+
 	// ---- UCharacterMovementComponent overrides ----
 	virtual float GetMaxSpeed() const override;                       // the ONLY speed source (02 R6)
 	virtual float GetMaxBrakingDeceleration() const override;
@@ -66,6 +80,7 @@ public:
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual bool CanCrouchInCurrentState() const override;            // stay crouched during CMOVE_Slide
 	virtual bool CanAttemptJump() const override;                     // slide-jump keeps horizontal velocity
+	virtual void OnTeleported() override;                             // respawn teleport aborts a mantle
 
 protected:
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
@@ -78,12 +93,30 @@ protected:
 	/** Boost to SlideBoostSpeed along current velocity direction and enter CMOVE_Slide. */
 	void EnterSlide();
 
+	/** CMOVE_Mantle physics: deterministic rise-then-tuck interp from MantleStart to MantleTarget. */
+	void PhysMantle(float deltaTime, int32 Iterations);
+
+	/** Capture start/target and enter CMOVE_Mantle. */
+	void EnterMantle(const FVector& StandTarget);
+
+	/** Ledge test against STATIC world geometry (deterministic on client + replaying server): a near-vertical
+	 *  face ahead, a top within the mantle height band, and capsule clearance above it. OutStandTarget = the
+	 *  capsule-center end position (just past the face, fully ABOVE the ledge top). */
+	bool DetectMantleLedge(FVector& OutStandTarget) const;
+
 private:
 	friend class FSavedMove_PF;
 
 	// Input intents carried by compressed flags (never replicated directly).
 	uint8 bWantsToSprintPF : 1;
 	uint8 bWantsToADSPF : 1;
+	uint8 bWantsToMantlePF : 1;
+
+	// Mantle simulation state. Like the slide timers, NOT part of saved moves — the interp is fully
+	// deterministic from (start, target, elapsed), so a rare mid-climb correction replays within tolerance.
+	FVector MantleStart = FVector::ZeroVector;
+	FVector MantleTarget = FVector::ZeroVector;
+	float MantleElapsed = 0.f;
 
 	// Slide simulation state. Advanced only inside the movement simulation
 	// (PhysSlide / OnMovementUpdated) so client and server stay in step; not
@@ -104,6 +137,7 @@ public:
 
 	uint8 bSavedWantsToSprint : 1;
 	uint8 bSavedWantsToADS : 1;
+	uint8 bSavedWantsToMantle : 1;   // FLAG_Custom_2
 
 	FSavedMove_PF();
 
