@@ -2499,10 +2499,13 @@ void UPFLoadingMenuWidget::RefreshOnlinePanel()
 		FString Line;
 		if (bLinking)
 		{
+			const FString& Uri = Backend->GetVerificationUri();
 			Line = Backend->GetPendingUserCode().IsEmpty()
 				? TEXT("Contacting the account server…")
-				: FString::Printf(TEXT("Code %s — see the status line for where to approve"),
-					*Backend->GetPendingUserCode());
+				// New players: the destination page's "New here?" button makes an account in
+				// seconds — say so up front so a first-timer doesn't wonder how to sign up.
+				: FString::Printf(TEXT("Code %s — go to %s · new? sign up free when you get there"),
+					*Backend->GetPendingUserCode(), Uri.IsEmpty() ? TEXT("the CombatForge website") : *Uri);
 		}
 		else if (bLoggedIn)
 		{

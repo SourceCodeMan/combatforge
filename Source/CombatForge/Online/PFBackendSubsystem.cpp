@@ -250,8 +250,12 @@ void UPFBackendSubsystem::BeginDeviceLogin()
 			Root->TryGetNumberField(TEXT("expires_in"), ExpiresIn);
 			Self->DevicePollIntervalSec = FMath::Clamp((float)Interval, 2.f, 30.f);
 			Self->DeviceExpiresAtSec = FPlatformTime::Seconds() + ExpiresIn;
+			// Explicit about the sign-up step — the approval page's own "New here?" link is easy to
+			// miss on a first visit if nothing set the expectation (Tom 2026-07-17: had a code, no
+			// idea an account was needed or how to make one).
 			Self->OnStatus.Broadcast(FString::Printf(
-				TEXT("Code %s — approve at %s"), *Self->PendingUserCode, *Self->VerificationUri));
+				TEXT("Code %s — go to %s (no account yet? you can sign up free there)"),
+				*Self->PendingUserCode, *Self->VerificationUri));
 			Self->ArmDevicePollTicker();
 		});
 }

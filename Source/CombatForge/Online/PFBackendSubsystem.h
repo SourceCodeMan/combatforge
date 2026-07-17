@@ -81,6 +81,9 @@ public:
 	 *  CANCEL for this whole window, so a double-click can never start two flows (review 2cf97f2). */
 	bool IsDeviceLoginActive() const { return bDeviceCodeRequestInFlight || !PendingDeviceCode.IsEmpty(); }
 	const FString& GetPendingUserCode() const { return PendingUserCode; }
+	/** Where to approve the code — comes FROM the API response, never hardcoded (2026-07-17: an
+	 *  earlier build pointed at a URL that doesn't exist). Empty until BeginDeviceLogin succeeds. */
+	const FString& GetVerificationUri() const { return VerificationUri; }
 
 	/** Start the device-link flow. Progress lands on OnStatus; success flips OnAuthChanged. */
 	void BeginDeviceLogin();
