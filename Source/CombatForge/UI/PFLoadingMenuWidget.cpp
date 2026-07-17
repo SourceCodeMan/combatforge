@@ -1286,7 +1286,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	QuickStartButton->SetBackgroundColor(FLinearColor(1.f, 0.85f, 0.2f, 0.95f));
 	QuickStartButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuickStartClicked);
 	QuickStartLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — first game  ")));
+	QuickStartLabel->SetText(FText::FromString(TEXT("  QUICK START — auto-match setup  ")));
 	QuickStartLabel->SetFont(PFLoadFont(16, true));
 	QuickStartLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.12f, 0.14f)));
 	QuickStartLabel->SetJustification(ETextJustify::Center);

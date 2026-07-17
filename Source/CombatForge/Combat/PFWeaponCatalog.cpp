@@ -46,12 +46,12 @@ namespace PFWeapon
 		// ROF and a smaller mag (rifle 30/12bps, SMG 25/14bps, pistol 18/10bps - per-weapon identity).
 		const FPFWeaponDef GSMGs[] = {
 			{ TEXT("AKSU (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black"),
-			  nullptr, FVector(-17.92f, -5.30f, 5.37f), FRotator(-5.f, -90.f, 5.f), 0.30f, FVector(10.8f, 6.4f, 0.6f),
-			  FVector(24.81f, 6.37f, -7.95f), FRotator(5.f, 0.f, -5.f),
+			  nullptr, FVector(-17.92f, -5.30f, 5.37f), FRotator(-5.f, -90.f, 0.f), 0.30f, FVector(10.8f, 6.4f, 0.6f),
+			  FVector(24.81f, 6.37f, -7.95f), FRotator(5.f, 0.f, 0.f),   // Tom 2026-07-17: zeroed roll (was tilted "barrel roll left")
 			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3, /*MagSize*/ 25, /*Bps*/ 14.f },   // Tom drag-tuned 2026-07-15
 			{ TEXT("AKSU (Wood)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood"),
-			  nullptr, FVector(-17.92f, -5.30f, 5.37f), FRotator(-5.f, -90.f, 5.f), 0.30f, FVector(10.8f, 6.4f, 0.6f),
-			  FVector(24.81f, 6.37f, -7.95f), FRotator(5.f, 0.f, -5.f),
+			  nullptr, FVector(-17.92f, -5.30f, 5.37f), FRotator(-5.f, -90.f, 0.f), 0.30f, FVector(10.8f, 6.4f, 0.6f),
+			  FVector(24.81f, 6.37f, -7.95f), FRotator(5.f, 0.f, 0.f),   // Tom 2026-07-17: zeroed roll (was tilted "barrel roll left")
 			  (1 << 1) | (1 << 2), EPFFireMode::Auto, 2.2f, 0.20f, 8500.f, 1.4f, 3, /*MagSize*/ 25, /*Bps*/ 14.f },   // Tom drag-tuned 2026-07-15 (identical to Black)
 		};
 		// Pistol = burst or single (NO auto). Sidearm hold; shortest range.

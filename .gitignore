@@ -64,3 +64,5 @@ Content/NiagaraExamples/
 
 # parked non-cookable content packs (moved out of Content/ so the cooker skips them)
 _parked_content/
+# Shooter Rifle Animations Fab pack (local paid content, like Bandits)
+Content/RifleAnims/

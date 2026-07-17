@@ -991,6 +991,7 @@ void UPFOptionsWidget::OnAmbientVolChanged(float Value)
 void UPFOptionsWidget::OnSensChanged(float Value)
 {
 	WorkingSens = FMath::Clamp(Value, 0.2f, 3.f);
+	ApplyLookSensitivity(WorkingSens);   // live while dragging (Tom 2026-07-17: was apply-on-Apply only)
 	RefreshLabels();
 }
 

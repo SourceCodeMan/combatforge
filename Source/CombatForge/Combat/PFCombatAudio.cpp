@@ -692,7 +692,9 @@ void UPFCombatAudio::PlayFootstep(bool bSprint)
 		return;
 	}
 	const float Pitch = bSprint ? FMath::FRandRange(1.05f, 1.18f) : FMath::FRandRange(0.9f, 1.05f);
-	const float Vol = (bSprint ? 0.42f : 0.32f) * ReadSfxVolumeScale();
+	// Tom 2026-07-17 "I hate the footstep sound": cut to ~1/3 so it's a subtle scuff, not intrusive.
+	// (Morning Q: keep quiet, remove entirely, or swap the cue?)
+	const float Vol = (bSprint ? 0.16f : 0.11f) * ReadSfxVolumeScale();
 
 	FVector Loc = FVector::ZeroVector;
 	if (const AActor* Owner = GetOwner())
