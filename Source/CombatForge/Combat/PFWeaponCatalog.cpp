@@ -27,8 +27,8 @@ namespace PFWeapon
 			  FVector(15.49f, 3.42f, -10.59f), FRotator(1.5f, 0.f, -0.5f) },   // Tom drag-tuned 2026-07-15 (pass 2: FP pulled in + raised, ADS lowered)
 			{ TEXT("Rifle (Olive)"), TEXT("/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive"),
 			  TEXT("/Game/QuantumCharacter/Materials/M_Rifle_Olive.M_Rifle_Olive"),
-			  FVector(-2.56f, -3.19f, 5.81f), FRotator(-1.5f, -90.f, 1.5f), 0.5f, FVector(42.f, 3.5f, -3.5f),
-			  FVector(15.49f, 3.42f, -10.59f), FRotator(1.5f, 0.f, -0.5f) },   // Tom: match default rifle 2026-07-15
+			  FVector(-12.64f, 0.12f, -1.01f), FRotator(-1.5f, -90.f, 1.5f), 0.5f, FVector(42.f, 3.5f, -3.5f),
+			  FVector(24.44f, 0.20f, -8.75f), FRotator(1.5f, 0.f, -0.5f) },   // Tom drag-tuned 2026-07-17 (Olive is a distinct mesh — its own FP + ADS now)
 			// Muzzle + ADS are COMPUTED from mesh geometry (Saved/weapon_geometry.json) via the sight-line formula:
 			// AdsLoc = (D,0,0) - FPLoc - R(s*p_sight), R(v)=(v.y,-v.x,v.z), D=20cm, p_sight=(x_center, 0.58*len,
 			// boxMax.z - margin). The formula reproduces the verified SM_Rifle ADS. AK hip = Tom's live-tuned pose.

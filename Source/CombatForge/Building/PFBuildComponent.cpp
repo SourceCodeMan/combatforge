@@ -630,8 +630,30 @@ void UPFBuildComponent::EjectOverlappedPawns(const FBox& PieceBox) const
 		                        && (Loc.Z + HalfHeight) > PieceBox.Min.Z + 4.f;
 		if (bXYPenetrating && bZPenetrating)
 		{
-			Pawn->SetActorLocation(
-				FVector(Loc.X, Loc.Y, PieceBox.Max.Z + HalfHeight + 2.f),
+			// Eject along the SHORTEST escape, not always straight up. The old "teleport to the
+			// piece top" flung a pawn overlapping a WALL/ROOF up several metres (Tom: "a bot launches
+			// into the air for no reason"). Pick the min-magnitude of {up, ±X, ±Y}: a pawn standing in
+			// a floor pops up onto it (up is nearest); a pawn clipping a wall slides out sideways.
+			const float PadV = HalfHeight + 2.f;
+			const float PadH = Radius + 2.f;
+			const float UpEsc = (PieceBox.Max.Z + PadV) - Loc.Z;   // up onto the piece
+			const float PushPX = (PieceBox.Max.X + PadH) - Loc.X;
+			const float PushNX = Loc.X - (PieceBox.Min.X - PadH);
+			const float PushPY = (PieceBox.Max.Y + PadH) - Loc.Y;
+			const float PushNY = Loc.Y - (PieceBox.Min.Y - PadH);
+
+			FVector Delta(0.f, 0.f, UpEsc);
+			float Best = FMath::Abs(UpEsc);
+			auto Consider = [&](const FVector& D)
+			{
+				if (D.Size() < Best) { Best = D.Size(); Delta = D; }
+			};
+			Consider(FVector(PushPX, 0.f, 0.f));
+			Consider(FVector(-PushNX, 0.f, 0.f));
+			Consider(FVector(0.f, PushPY, 0.f));
+			Consider(FVector(0.f, -PushNY, 0.f));
+
+			Pawn->SetActorLocation(Loc + Delta,
 				/*bSweep=*/false, /*OutSweepHitResult=*/nullptr, ETeleportType::TeleportPhysics);
 		}
 	}

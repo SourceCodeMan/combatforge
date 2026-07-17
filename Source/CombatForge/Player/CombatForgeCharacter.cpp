@@ -2192,10 +2192,13 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 		}
 	}
 
-	// FP viewmodel (owner): fully off during build so it doesn't block placement.
+	// FP viewmodel (owner): fully off during build so it doesn't block placement, AND off while
+	// eliminated — without the elim gate this per-tick re-show defeated the death hide and left the
+	// owner's own rifle floating at the death spot until respawn (Tom's "floating gun").
 	if (ViewModelRoot != nullptr)
 	{
-		ViewModelRoot->SetVisibility(!bHideForBuild, /*bPropagateToChildren=*/true);
+		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
+		ViewModelRoot->SetVisibility(!bHideForBuild && !bElim, /*bPropagateToChildren=*/true);
 	}
 	// TP rifle (remotes): also hide so builders don't look armed.
 	if (WeaponMeshComp != nullptr)
@@ -2283,18 +2286,18 @@ void ACombatForgeCharacter::ApplyRaisedWeaponPose()
 
 void ACombatForgeCharacter::UpdateWeaponHoldPose()
 {
-	// Force the TP gun hidden every frame while eliminated. SetEliminatedAppearance hides it once, but
-	// some path re-shows it during the 5 s corpse window (Tom: "floating gun until the timer resets").
-	// This runs every tick so the weapon can never stay visible on a dead body regardless of that path.
-	if (WeaponMeshComp != nullptr)
+	// Force ALL weapon visuals hidden every frame while eliminated. SetEliminatedAppearance hides them
+	// once, but UpdateBuildPhaseWeaponVisibility re-shows the FP viewmodel every tick (no elim gate) —
+	// so the OWNER saw their own first-person rifle floating at the death spot for the 5 s corpse window
+	// (Tom: "gun stays in the air"). Backstop the TP gun AND the FP viewmodel/arms every tick.
+	if (const UPFHealthComponent* H = GetHealth())
 	{
-		if (const UPFHealthComponent* H = GetHealth())
+		if (H->bEliminated)
 		{
-			if (H->bEliminated)
-			{
-				WeaponMeshComp->SetHiddenInGame(true);
-				return;
-			}
+			if (WeaponMeshComp != nullptr) { WeaponMeshComp->SetHiddenInGame(true); }
+			if (ViewModelRoot != nullptr)  { ViewModelRoot->SetVisibility(false, /*bPropagateToChildren=*/true); }
+			if (FirstPersonArms != nullptr) { FirstPersonArms->SetVisibility(false); }
+			return;
 		}
 	}
 
