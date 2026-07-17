@@ -266,10 +266,11 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Pick map, mode, type, format, and bots here, then START GAME."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("MOVE & LOOK"), 14, true, Head);
-	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump · Shift sprint · Ctrl/C crouch (slide while sprinting)"), 12, false, Key);
+	AddHowToLine(Box, TEXT("WASD move · Mouse look · Space jump (again mid-air at a wall = climb over) · Shift sprint · Ctrl/C crouch"), 12, false, Key);
 
 	AddHowToLine(Box, TEXT("COMBAT"), 14, true, Head);
-	AddHowToLine(Box, TEXT("LMB fire · RMB aim · V fire mode · R reload · F refill at barrels · E frag · Q smoke"), 12, false, Key);
+	AddHowToLine(Box, TEXT("LMB fire · RMB aim · V fire mode · R reload · F refill at barrels · E frag · Q smoke · B melee · Scroll pistol"), 12, false, Key);
+	AddHowToLine(Box, TEXT("G plant a breach bomb on a build piece (15s fuse) · enemies HOLD F 8s to defuse · boom removes that piece for the match"), 12, false, Key);
 	AddHowToLine(Box, TEXT("OUT at 3 head, 5 chest, 8 limb, or 10 total hits (HUD pips + H/C/L). Showdown: one hit."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD"), 14, true, Head);

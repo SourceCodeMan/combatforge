@@ -801,12 +801,13 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 	AddHowToLine(Box, TEXT("Lobby → Build forts → Fight. Host sets map, mode, type, format, and bots on the pre-game screen, then START GAME."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("MOVE & LOOK"), 15, true, Head);
-	AddHowToLine(Box, TEXT("WASD  move     ·     Mouse  look     ·     Space  jump"), 13, false, Key);
+	AddHowToLine(Box, TEXT("WASD  move     ·     Mouse  look     ·     Space  jump (press Space again mid-air at a wall to climb over)"), 13, false, Key);
 	AddHowToLine(Box, TEXT("Shift  sprint     ·     Ctrl / C  crouch (slide while sprinting)"), 13, false, Key);
 
 	AddHowToLine(Box, TEXT("COMBAT"), 15, true, Head);
 	AddHowToLine(Box, TEXT("LMB  fire  ·  RMB  aim  ·  V  fire mode  ·  R  reload  ·  F  refill at ammo barrels"), 13, false, Key);
-	AddHowToLine(Box, TEXT("E  frag grenade  ·  Q  smoke grenade  ·  Rifle 30rd / SMG 25rd / Pistol 18rd, each with its own fire modes"), 13, false, Key);
+	AddHowToLine(Box, TEXT("E  frag  ·  Q  smoke  ·  B  melee tag  ·  Scroll  swap pistol  ·  Rifle 30rd / SMG 25rd / Pistol 18rd"), 13, false, Key);
+	AddHowToLine(Box, TEXT("G  plant a breach bomb on an aimed build piece (15s) — enemies HOLD F for 8s to defuse. The boom removes that piece for the match."), 13, false, Key);
 	AddHowToLine(Box, TEXT("You're OUT at 3 head, 5 chest, 8 limb, or 10 total hits — whichever comes first (HUD pips + H/C/L readout). Showdown rounds: one hit."), 13, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD PHASE"), 15, true, Head);
