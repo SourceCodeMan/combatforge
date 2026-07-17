@@ -116,6 +116,14 @@ protected:
 	// Server-authoritative melee: short forward trace from the camera; first live enemy pawn in range is
 	// eliminated outright (the tag). Client requests; server re-validates the cooldown + range + team.
 	UFUNCTION(Server, Reliable) void ServerMelee();
+
+	// ---- Demolition bomb (breach a blocked path) ----
+	void OnPlantPressed();         // G — plant a bomb on the aimed structural build piece (Combat only)
+	void OnInteractReleased();     // F released — stop defusing (barrel refill is tap-only, unaffected)
+	// Pawn-routed Server RPCs (the bomb + GameMode have no owning client connection — barrel pattern).
+	UFUNCTION(Server, Reliable) void ServerPlantBomb(uint16 PieceId);
+	UFUNCTION(Server, Reliable) void ServerBeginDefuse();
+	UFUNCTION(Server, Reliable) void ServerEndDefuse();
 	// Dev pose-tuning drag (gated by pf.WeaponDrag): hold MIDDLE MOUSE and move to slide the FP weapon in 3D.
 	// Not ADS = edits the held pose (FPLoc); ADS = edits the ADS pose. Shift = depth, Ctrl = rotate. On
 	// release, prints the pf.WeaponFP / pf.WeaponADS line to paste into PFWeaponCatalog.cpp.
@@ -438,6 +446,10 @@ private:
 	uint8 bFireHeld : 1;
 	uint8 bJumpKeyHeld : 1;
 	uint8 bADSToggleMode : 1;    // cached FPFUserPrefs::GetADSToggle(): false = hold, true = toggle
+
+	// Demolition bomb: the bomb this pawn is currently holding F on (server-side), + plant debounce.
+	TWeakObjectPtr<class APFBombActor> DefusingBomb;
+	double LastPlantTime = -100.0;
 
 	// Melee tag: last swing time (server + owning client) for the cooldown gate, and its tuning.
 	double LastMeleeTime = -100.0;

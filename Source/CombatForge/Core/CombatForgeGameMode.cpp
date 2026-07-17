@@ -13,7 +13,9 @@
 #include "Combat/PFWeaponComponent.h"
 #include "Combat/PFTargetDummy.h"
 #include "Combat/PFAmmoBarrel.h"
+#include "Combat/PFBombActor.h"
 #include "Building/PFArenaShell.h"
+#include "Building/PFGridMath.h"   // bomb spawn point = the target piece's AABB center
 #include "Building/PFYardShell.h"
 #include "Building/PFBuildGrid.h"
 #include "Objectives/PFControlPointActor.h"
@@ -827,9 +829,10 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 
 	case EPFMatchPhase::Vote:
 	{
-		// Objective actors + ammo barrels live only during combat Live — tear them down.
+		// Objective actors + ammo barrels + bombs live only during combat Live — tear them down.
 		DestroyObjectiveActors();
 		DestroyAmmoBarrels();
+		DestroyBombs();
 		GS->ServerSetRoundState(EPFRoundState::None, 0.f);
 		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this,
 			&ACombatForgeGameMode::FinalizeVotePhase, VotePhaseDuration, false);
@@ -1025,6 +1028,7 @@ void ACombatForgeGameMode::HostForceReturnToLobby()
 	GetWorldTimerManager().ClearTimer(HardpointRotateTimerHandle);
 	DestroyObjectiveActors();
 	DestroyAmmoBarrels();
+	DestroyBombs();
 	RemoveAllBots();
 	SetPhase(EPFMatchPhase::Lobby);
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: host force-returned to Lobby (quit to menu)"));
@@ -2141,6 +2145,84 @@ void ACombatForgeGameMode::DestroyAmmoBarrels()
 		}
 	}
 	AmmoBarrels.Reset();
+}
+
+void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, uint16 PieceId)
+{
+	ACombatForgeGameState* GS = GetGameState<ACombatForgeGameState>();
+	ACombatForgePlayerState* PlanterPS = Planter ? Planter->GetPlayerState<ACombatForgePlayerState>() : nullptr;
+	if (!GS || !PlanterPS || !BuildGrid || !GS->IsFireAllowed())
+	{
+		return;   // combat-live only, same gate as weapons
+	}
+	FPFBuildPieceRec Rec;
+	if (!BuildGrid->FindPieceById(PieceId, Rec))
+	{
+		return;   // already deleted / stale id
+	}
+	// Structural pieces only (Wall/Floor/Ramp/Roof) — the point is breaching a blocked path, not
+	// wasting a bomb on a cosmetic barrel/crate.
+	if (PFIsProp(Rec.Type))
+	{
+		return;
+	}
+	// One active bomb per planter (keeps the tool a breach, not an artillery barrage).
+	for (const APFBombActor* B : ActiveBombs)
+	{
+		if (IsValid(B) && B->IsArmed() && B->GetPlanterPS() == PlanterPS)
+		{
+			return;
+		}
+	}
+	// One bomb per piece — atomic on the grid (rejects a same-frame double plant).
+	if (!BuildGrid->TrySetPieceBomb(PieceId))
+	{
+		return;
+	}
+
+	FBox Bounds(ForceInit);
+	FPFGridMath::PieceAABB(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot, Bounds);
+	const FVector Center = Bounds.GetCenter();
+
+	// Server-side range sanity: the client traced within BuildReachUU; allow slack for latency/piece extent.
+	if (FVector::DistSquared(Planter->GetActorLocation(), Center) > FMath::Square(PFGrid::BuildReachUU * 1.5f))
+	{
+		BuildGrid->ClearPieceBomb(PieceId);
+		return;
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = this;
+	APFBombActor* Bomb = GetWorld()->SpawnActor<APFBombActor>(
+		APFBombActor::StaticClass(), Center, FRotator::ZeroRotator, Params);
+	if (!Bomb)
+	{
+		BuildGrid->ClearPieceBomb(PieceId);
+		return;
+	}
+	Bomb->ServerArm(BuildGrid, PieceId, Center, PlanterPS->TeamId, PlanterPS);
+	ActiveBombs.Add(Bomb);
+}
+
+void ACombatForgeGameMode::DestroyBombs()
+{
+	for (APFBombActor* B : ActiveBombs)
+	{
+		if (IsValid(B))
+		{
+			B->Destroy();
+		}
+	}
+	ActiveBombs.Reset();
+	if (BuildGrid)
+	{
+		// Registry entries for destroyed-without-detonating bombs would otherwise block re-planting next round.
+		for (const FPFBuildPieceRec& Rec : BuildGrid->GetPieces())
+		{
+			BuildGrid->ClearPieceBomb(Rec.PieceId);
+		}
+	}
 }
 
 void ACombatForgeGameMode::ClearAllFlagCarriers()

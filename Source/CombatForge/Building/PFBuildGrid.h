@@ -113,6 +113,18 @@ public:
 	/** ISM hit → piece record, for the client delete-tool highlight. */
 	bool FindPieceByHit(const FHitResult& Hit, uint16& OutPieceId, FPFBuildPieceRec& OutRec) const;
 
+	// ---- Demolition bomb support (breach a walled-off path; live-grid only, never touches the saved arena) ----
+	/** Server/const lookup of a live piece by id (no HitResult). */
+	bool FindPieceById(uint16 PieceId, FPFBuildPieceRec& OutRec) const;
+	/** Authority-only: remove a piece from the LIVE grid for the rest of the match. Unlike TryDeletePiece this
+	 *  has NO phase/team/refund gate (it runs during frozen combat and mints no budget) and writes no file —
+	 *  the arena JSON was fingerprinted at Build→Combat, so the piece returns next match / on rebuild. */
+	void ServerRemovePieceForMatch(uint16 PieceId);
+	/** One bomb per piece: returns false if already armed. */
+	bool TrySetPieceBomb(uint16 PieceId);
+	void ClearPieceBomb(uint16 PieceId);
+	bool IsPieceBombed(uint16 PieceId) const { return BombedPieceIds.Contains(PieceId); }
+
 private:
 	friend struct FPFBuildPieceArray;
 
@@ -175,4 +187,7 @@ private:
 	// roster index the GameMode may recycle to a later joiner; a refund must never leak to that
 	// newcomer, so the refund is gated on the ORIGINAL builder's PlayerState still matching.
 	TMap<uint16, TWeakObjectPtr<ACombatForgePlayerState>> BuilderByPieceId;
+
+	// Pieces with a live demolition bomb attached (server-only; enforces one bomb per piece atomically).
+	TSet<uint16> BombedPieceIds;
 };

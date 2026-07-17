@@ -18,7 +18,10 @@
 #include "Core/CombatForgePlayerState.h"   // melee: victim/attacker team + kill credit
 #include "Combat/PFCombatVFX.h"
 #include "Combat/PFAmmoBarrel.h"
+#include "Combat/PFBombActor.h"
 #include "Building/PFBuildComponent.h"
+#include "Building/PFBuildGrid.h"          // plant: aimed-piece lookup (FindPieceByHit)
+#include "Core/CombatForgeGameMode.h"      // plant: server route to ServerTryPlantBomb
 #include "Core/PFUserPrefs.h"
 
 #include "Camera/CameraComponent.h"
@@ -751,6 +754,11 @@ void ACombatForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	if (Cfg->IA_Interact)
 	{
 		EIC->BindAction(Cfg->IA_Interact, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnInteractPressed);
+		EIC->BindAction(Cfg->IA_Interact, ETriggerEvent::Completed, this, &ACombatForgeCharacter::OnInteractReleased);
+	}
+	if (Cfg->IA_PlantBomb)
+	{
+		EIC->BindAction(Cfg->IA_PlantBomb, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnPlantPressed);
 	}
 	if (Cfg->IA_FireSelect)
 	{
@@ -1023,12 +1031,29 @@ void ACombatForgeCharacter::OnInteractPressed()
 	{
 		return;
 	}
-	// Nearest available ammo barrel in interact range.
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
+	// Defuse first: if an armed ENEMY bomb is in reach, F becomes hold-to-defuse (8 s, server-validated).
+	// The client scan is UX only — ServerBeginDefuse re-finds and re-validates the bomb authoritatively.
+	{
+		const ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
+		const uint8 MyTeam = MyPS ? MyPS->TeamId : 255;
+		for (TActorIterator<APFBombActor> It(World); It; ++It)
+		{
+			const APFBombActor* Bomb = *It;
+			if (Bomb && Bomb->IsArmed() && MyTeam <= 1 && Bomb->GetPlanterTeam() != MyTeam
+				&& FVector::DistSquared(GetActorLocation(), Bomb->GetActorLocation())
+					<= FMath::Square(APFBombActor::DefuseRangeUU))
+			{
+				ServerBeginDefuse();
+				return;
+			}
+		}
+	}
+	// Otherwise: nearest available ammo barrel in interact range.
 	APFAmmoBarrel* Best = nullptr;
 	float BestDistSq = FMath::Square(220.f);
 	const FVector Me = GetActorLocation();
@@ -1060,6 +1085,109 @@ void ACombatForgeCharacter::ServerRefillAtBarrel_Implementation(APFAmmoBarrel* B
 	{
 		Barrel->AuthorityInteract(this);   // barrel re-validates phase/availability/range on the server
 	}
+}
+
+void ACombatForgeCharacter::OnInteractReleased()
+{
+	if (IsLocallyControlled())
+	{
+		ServerEndDefuse();   // harmless no-op when not defusing
+	}
+}
+
+void ACombatForgeCharacter::OnPlantPressed()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	const double Now = World->GetTimeSeconds();
+	if (Now - LastPlantTime < 0.5)
+	{
+		return;   // debounce; the server re-validates everything anyway
+	}
+	LastPlantTime = Now;
+
+	// Aim at a build piece: same channel + reach as the build ghost trace.
+	FVector EyeLoc; FRotator EyeRot;
+	GetActorEyesViewPoint(EyeLoc, EyeRot);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PFPlantBomb), /*bTraceComplex=*/false, this);
+	FHitResult Hit;
+	if (!World->LineTraceSingleByChannel(Hit, EyeLoc,
+		EyeLoc + EyeRot.Vector() * PFGrid::BuildReachUU, PF_ECC_BuildTrace, Params))
+	{
+		return;
+	}
+	for (TActorIterator<APFBuildGrid> It(World); It; ++It)
+	{
+		uint16 PieceId = 0;
+		FPFBuildPieceRec Rec;
+		if (*It && (*It)->FindPieceByHit(Hit, PieceId, Rec))
+		{
+			ServerPlantBomb(PieceId);
+			return;
+		}
+	}
+}
+
+void ACombatForgeCharacter::ServerPlantBomb_Implementation(uint16 PieceId)
+{
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
+	{
+		return;
+	}
+	if (ACombatForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ACombatForgeGameMode>() : nullptr)
+	{
+		GM->ServerTryPlantBomb(this, PieceId);   // phase / piece / one-per-piece / one-per-planter / range
+	}
+}
+
+void ACombatForgeCharacter::ServerBeginDefuse_Implementation()
+{
+	UWorld* World = GetWorld();
+	const ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
+	const uint8 MyTeam = MyPS ? MyPS->TeamId : 255;
+	if (!World || MyTeam > 1 || (HealthComponent != nullptr && HealthComponent->bEliminated))
+	{
+		return;
+	}
+	// Authoritative re-find: nearest armed enemy bomb in defuse range. The bomb's own Tick keeps
+	// re-validating range/alive/team while the hold accumulates.
+	APFBombActor* Best = nullptr;
+	float BestDistSq = FMath::Square(APFBombActor::DefuseRangeUU);
+	for (TActorIterator<APFBombActor> It(World); It; ++It)
+	{
+		APFBombActor* Bomb = *It;
+		if (!Bomb || !Bomb->IsArmed() || Bomb->GetPlanterTeam() == MyTeam)
+		{
+			continue;
+		}
+		const float D = FVector::DistSquared(GetActorLocation(), Bomb->GetActorLocation());
+		if (D <= BestDistSq)
+		{
+			BestDistSq = D;
+			Best = Bomb;
+		}
+	}
+	if (Best)
+	{
+		DefusingBomb = Best;
+		Best->ServerSetDefuser(this, true);
+	}
+}
+
+void ACombatForgeCharacter::ServerEndDefuse_Implementation()
+{
+	if (APFBombActor* Bomb = DefusingBomb.Get())
+	{
+		Bomb->ServerSetDefuser(this, false);
+	}
+	DefusingBomb.Reset();
 }
 
 void ACombatForgeCharacter::OnFireSelectPressed()

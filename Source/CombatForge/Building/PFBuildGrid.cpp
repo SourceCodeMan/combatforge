@@ -700,6 +700,67 @@ void APFBuildGrid::FreezeBuild()
 	UE_LOG(CombatForgeLog, Log, TEXT("BuildGrid: frozen with %d pieces"), Pieces.Items.Num());
 }
 
+bool APFBuildGrid::FindPieceById(uint16 PieceId, FPFBuildPieceRec& OutRec) const
+{
+	for (const FPFBuildPieceRec& Rec : Pieces.Items)
+	{
+		if (Rec.PieceId == PieceId)
+		{
+			OutRec = Rec;
+			return true;
+		}
+	}
+	return false;
+}
+
+void APFBuildGrid::ServerRemovePieceForMatch(uint16 PieceId)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	int32 FoundIdx = INDEX_NONE;
+	for (int32 Idx = 0; Idx < Pieces.Items.Num(); ++Idx)
+	{
+		if (Pieces.Items[Idx].PieceId == PieceId)
+		{
+			FoundIdx = Idx;
+			break;
+		}
+	}
+	if (FoundIdx == INDEX_NONE)
+	{
+		return;   // already gone (deleted/cleared before the fuse ran out)
+	}
+	// Deliberately NO bBuildFrozen / phase / team / refund gate (unlike TryDeletePiece): a detonation runs
+	// during frozen combat and mints no budget. Mutates only the LIVE FastArray — clients mirror the removal
+	// via PreReplicatedRemove→RemovePieceLocal, and the saved arena (fingerprinted at Build→Combat) is
+	// untouched, so the piece returns next match / on rebuild.
+	const FPFBuildPieceRec Rec = Pieces.Items[FoundIdx];   // copy before removal
+	BuilderByPieceId.Remove(Rec.PieceId);
+	RemovePieceLocal(Rec);
+	Pieces.Items.RemoveAt(FoundIdx);
+	Pieces.MarkArrayDirty();
+	BombedPieceIds.Remove(PieceId);
+	UE_LOG(CombatForgeLog, Log, TEXT("BuildGrid: piece #%u (%s) demolished for the match"),
+		PieceId, PFBuildPieceVisuals::DisplayName(Rec.Type));
+}
+
+bool APFBuildGrid::TrySetPieceBomb(uint16 PieceId)
+{
+	if (BombedPieceIds.Contains(PieceId))
+	{
+		return false;
+	}
+	BombedPieceIds.Add(PieceId);
+	return true;
+}
+
+void APFBuildGrid::ClearPieceBomb(uint16 PieceId)
+{
+	BombedPieceIds.Remove(PieceId);
+}
+
 void APFBuildGrid::ClearAll()
 {
 	Pieces.Items.Empty();
@@ -720,6 +781,7 @@ void APFBuildGrid::ClearAll()
 	StructuralBounds.Empty();
 	PropBounds.Empty();
 	BuilderByPieceId.Empty();
+	BombedPieceIds.Empty();
 	RateWindows.Empty();
 	NextPieceId = 0;
 	bBuildFrozen = false;

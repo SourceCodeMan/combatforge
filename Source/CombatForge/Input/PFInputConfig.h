@@ -73,6 +73,7 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_ThrowFrag;   // E, tap — throw frag
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_ThrowSmoke;  // Q, tap — throw smoke (safe: Q also IMC_Build, contexts never coexist)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Melee;       // B / mouse-thumb — close-range melee tag (instant "out")
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_PlantBomb;   // G — plant a demolition bomb on the aimed build piece
 
 	// ---- Build (IMC_Build, priority 1) ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Place;       // LMB, hold (turbo in component)

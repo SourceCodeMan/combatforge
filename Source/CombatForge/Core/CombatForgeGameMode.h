@@ -137,6 +137,14 @@ protected:
 	/** 4 ammo barrels at random field spots each combat start (refill mag+reserve). */
 	void SpawnAmmoBarrels();
 	void DestroyAmmoBarrels();
+
+public:
+	/** Server: plant a demolition bomb on a structural build piece (validated: combat-live, piece exists,
+	 *  structural, one bomb per piece, one active bomb per planter). Called from the pawn's ServerPlantBomb. */
+	void ServerTryPlantBomb(class ACombatForgeCharacter* Planter, uint16 PieceId);
+
+protected:
+	void DestroyBombs();
 	void ClearAllFlagCarriers();
 	APFFlagActor* GetFlagForTeam(uint8 Team) const;
 	bool IsTeamScoreObjectiveMode(EPFMatchType Type) const;
@@ -219,6 +227,7 @@ protected:
 	FTimerHandle CrashBreadcrumbTimer;       // 30 s host roster dump for crash triage
 
 	UPROPERTY() TArray<TObjectPtr<class APFAmmoBarrel>> AmmoBarrels;
+	UPROPERTY() TArray<TObjectPtr<class APFBombActor>> ActiveBombs;   // live demolition bombs (combat only)
 
 	// Effective match scaling (T15), computed at Lobby→Build from connected team sizes:
 	uint8 EffectiveRoundWinsToTake = 4;
