@@ -52,6 +52,7 @@ protected:
 	UFUNCTION() void OnTabVideo();
 	UFUNCTION() void OnTabAudio();
 	UFUNCTION() void OnTabControls();
+	UFUNCTION() void OnTabClass();
 	UFUNCTION() void OnTabHowTo();
 	UFUNCTION() void OnApplyClicked();
 	UFUNCTION() void OnBackClicked();
@@ -81,6 +82,7 @@ private:
 	void BuildVideoPage(UWidget* ParentBox);
 	void BuildAudioPage(UWidget* ParentBox);
 	void BuildControlsPage(UWidget* ParentBox);
+	void BuildClassPage(UWidget* ParentBox);
 	void BuildHowToPlayPage(UWidget* ParentBox);
 	void AddHowToLine(UVerticalBox* Box, const FString& Text, int32 Size, bool bBold, const FLinearColor& Color);
 	UButton* MakeTabButton(const FString& Label, FName Name);
@@ -111,6 +113,7 @@ private:
 	UPROPERTY() TObjectPtr<UButton> TabVideo;
 	UPROPERTY() TObjectPtr<UButton> TabAudio;
 	UPROPERTY() TObjectPtr<UButton> TabControls;
+	UPROPERTY() TObjectPtr<UButton> TabClass;   // in-game class switch tab (hidden in boot-menu embedded mode)
 	UPROPERTY() TObjectPtr<UButton> TabHowTo;
 	UPROPERTY() TObjectPtr<UButton> ApplyButton;
 	UPROPERTY() TObjectPtr<UButton> BackButton;
@@ -120,8 +123,7 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> QualityValueText;
 	UPROPERTY() TObjectPtr<UButton> WindowModeButton;
 	UPROPERTY() TObjectPtr<UTextBlock> WindowModeValueText;
-	// In-game class quick-switch (Controls page). Hidden in the boot-menu embedded options (ApplyEmbeddedChrome).
-	UPROPERTY() TObjectPtr<class UHorizontalBox> ClassRow;
+	// In-game CLASS tab (dedicated page; the whole tab is hidden in the boot-menu embedded options).
 	UPROPERTY() TObjectPtr<UButton> ClassButton;
 	UPROPERTY() TObjectPtr<UTextBlock> ClassValueText;
 	UPROPERTY() TObjectPtr<UButton> ResolutionButton;

@@ -99,10 +99,12 @@ void UPFOptionsWidget::BuildTree()
 	TabVideo = MakeTabButton(TEXT("  VIDEO  "), TEXT("TabVideo"));
 	TabAudio = MakeTabButton(TEXT("  AUDIO  "), TEXT("TabAudio"));
 	TabControls = MakeTabButton(TEXT("  CONTROLS  "), TEXT("TabControls"));
+	TabClass = MakeTabButton(TEXT("  CLASS  "), TEXT("TabClass"));
 	TabHowTo = MakeTabButton(TEXT("  HOW TO PLAY  "), TEXT("TabHowTo"));
 	TabVideo->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnTabVideo);
 	TabAudio->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnTabAudio);
 	TabControls->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnTabControls);
+	TabClass->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnTabClass);
 	TabHowTo->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnTabHowTo);
 	auto AddTab = [Tabs](UButton* B)
 	{
@@ -114,6 +116,7 @@ void UPFOptionsWidget::BuildTree()
 	AddTab(TabVideo);
 	AddTab(TabAudio);
 	AddTab(TabControls);
+	AddTab(TabClass);
 	AddTab(TabHowTo);
 	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(Tabs))
 	{
@@ -125,15 +128,18 @@ void UPFOptionsWidget::BuildTree()
 	UVerticalBox* VideoPage = WidgetTree->ConstructWidget<UVerticalBox>();
 	UVerticalBox* AudioPage = WidgetTree->ConstructWidget<UVerticalBox>();
 	UVerticalBox* ControlsPage = WidgetTree->ConstructWidget<UVerticalBox>();
+	UVerticalBox* ClassPage = WidgetTree->ConstructWidget<UVerticalBox>();
 	UVerticalBox* HowToPage = WidgetTree->ConstructWidget<UVerticalBox>();
 	BuildVideoPage(VideoPage);
 	BuildAudioPage(AudioPage);
 	BuildControlsPage(ControlsPage);
+	BuildClassPage(ClassPage);
 	BuildHowToPlayPage(HowToPage);
-	PageSwitcher->AddChild(VideoPage);
-	PageSwitcher->AddChild(AudioPage);
-	PageSwitcher->AddChild(ControlsPage);
-	PageSwitcher->AddChild(HowToPage);
+	PageSwitcher->AddChild(VideoPage);       // 0
+	PageSwitcher->AddChild(AudioPage);       // 1
+	PageSwitcher->AddChild(ControlsPage);    // 2
+	PageSwitcher->AddChild(ClassPage);       // 3
+	PageSwitcher->AddChild(HowToPage);       // 4
 	// Fixed page viewport: pin BOTH width and height so switching tabs can't grow/re-center the whole card.
 	// Overflow (the tall How to Play page) scrolls inside a UScrollBox instead of resizing the menu frame.
 	USizeBox* PageSizer = WidgetTree->ConstructWidget<USizeBox>();
@@ -445,25 +451,6 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 {
 	UVerticalBox* Box = CastChecked<UVerticalBox>(ParentBox);
 
-	// CLASS quick-switch — click to cycle your active class (applies to your pawn live). Hidden in the
-	// boot-menu embedded options (the boot menu has its own full CHARACTER tab); this is for the in-game
-	// pause menu, so you can change class without leaving the match.
-	UHorizontalBox* ClassRowBox = WidgetTree->ConstructWidget<UHorizontalBox>();
-	ClassRowBox->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Class"), 15, false));
-	ClassButton = WidgetTree->ConstructWidget<UButton>();
-	ClassButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnClassClicked);
-	ClassValueText = MakeLabel(WidgetTree, TEXT("  Class 1  "), 14, true);
-	ClassButton->AddChild(ClassValueText);
-	if (UHorizontalBoxSlot* H = ClassRowBox->AddChildToHorizontalBox(ClassButton))
-	{
-		H->SetPadding(FMargin(16.f, 0.f, 0.f, 0.f));
-	}
-	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(ClassRowBox))
-	{
-		V->SetPadding(FMargin(0.f, 10.f));
-	}
-	ClassRow = ClassRowBox;
-
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 	Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Mouse sensitivity"), 15, false));
 	SensSlider = WidgetTree->ConstructWidget<USlider>();
@@ -760,6 +747,47 @@ void UPFOptionsWidget::AddHowToLine(UVerticalBox* Box, const FString& Text, int3
 	}
 }
 
+void UPFOptionsWidget::BuildClassPage(UWidget* ParentBox)
+{
+	// In-game class switch (pause menu). The boot menu has its own full CHARACTER tab, so this whole tab is
+	// hidden there (ApplyEmbeddedChrome collapses TabClass). Click the button to cycle your 5 saved classes;
+	// it applies to your pawn's loadout immediately.
+	UVerticalBox* Box = CastChecked<UVerticalBox>(ParentBox);
+
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(
+		MakeLabel(WidgetTree, TEXT("Switch your class without leaving the match."), 14, false)))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 18.f));
+	}
+
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+	Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Active class"), 16, true));
+	ClassButton = WidgetTree->ConstructWidget<UButton>();
+	ClassButton->SetBackgroundColor(FLinearColor(0.12f, 0.35f, 0.75f));
+	ClassButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnClassClicked);
+	ClassValueText = MakeLabel(WidgetTree, TEXT("  Class 1  "), 18, true);
+	ClassButton->AddChild(ClassValueText);
+	if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(ClassButton))
+	{
+		H->SetPadding(FMargin(20.f, 0.f, 0.f, 0.f));
+		H->SetVerticalAlignment(VAlign_Center);
+	}
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Row))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 6.f));
+	}
+
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(MakeLabel(WidgetTree,
+		TEXT("Click to cycle your 5 saved classes. Edit each class's weapon + outfit from the boot menu's CHARACTER tab."),
+		12, false)))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 18.f, 0.f, 0.f));
+	}
+}
+
 void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 {
 	UVerticalBox* Box = CastChecked<UVerticalBox>(ParentBox);
@@ -840,7 +868,7 @@ void UPFOptionsWidget::Open()
 
 void UPFOptionsWidget::OpenHowToPlay()
 {
-	ActiveTab = 3;
+	ActiveTab = 4;   // How to Play moved to index 4 when the CLASS tab was inserted at 3
 	Open();
 }
 
@@ -855,8 +883,8 @@ void UPFOptionsWidget::ApplyEmbeddedChrome()
 	// a second one read as a duplicate (Tom 2026-07-15). The in-game pause overlay never routes
 	// through here (bEmbedded=false), so it keeps its How to Play tab.
 	if (TabHowTo)          { TabHowTo->SetVisibility(ESlateVisibility::Collapsed); }
-	// The boot menu has its own CHARACTER tab for class selection, so hide the in-game class quick-switch here.
-	if (ClassRow)          { ClassRow->SetVisibility(ESlateVisibility::Collapsed); }
+	// The boot menu has its own CHARACTER tab for class selection, so hide the in-game CLASS tab here.
+	if (TabClass)          { TabClass->SetVisibility(ESlateVisibility::Collapsed); }
 }
 
 void UPFOptionsWidget::EnterEmbeddedMode()
@@ -900,7 +928,7 @@ void UPFOptionsWidget::NativeDestruct()
 
 void UPFOptionsWidget::SelectTab(int32 Index)
 {
-	ActiveTab = FMath::Clamp(Index, 0, 3);
+	ActiveTab = FMath::Clamp(Index, 0, 4);
 	if (PageSwitcher)
 	{
 		PageSwitcher->SetActiveWidgetIndex(ActiveTab);
@@ -910,7 +938,8 @@ void UPFOptionsWidget::SelectTab(int32 Index)
 void UPFOptionsWidget::OnTabVideo() { SelectTab(0); }
 void UPFOptionsWidget::OnTabAudio() { SelectTab(1); }
 void UPFOptionsWidget::OnTabControls() { SelectTab(2); }
-void UPFOptionsWidget::OnTabHowTo() { SelectTab(3); }
+void UPFOptionsWidget::OnTabClass() { SelectTab(3); }
+void UPFOptionsWidget::OnTabHowTo() { SelectTab(4); }
 
 void UPFOptionsWidget::OnBackClicked()
 {
