@@ -78,7 +78,7 @@ namespace
 
 		const FDateTime Utc = FDateTime::UtcNow();
 		const TSharedRef<FJsonObject> Root = FPFArenaSerialization::BuildLayoutJson(
-			Pieces, MatchIdTag, /*TeamSize=*/4, Utc);
+			Pieces, MatchIdTag, /*TeamSize=*/4, Utc, /*GridCellsY=*/PFGrid::CellsY);   // starter seeds are Warehouse-grid
 
 		// Seed votes so ranking prefers these over empty dumps.
 		TArray<TSharedPtr<FJsonValue>> Votes;

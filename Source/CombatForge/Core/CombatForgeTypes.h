@@ -207,7 +207,8 @@ namespace PFGrid
 {
 	constexpr int32 CellUU = 400;      constexpr int32 SubUU  = 100;
 	constexpr int32 WallHeightUU = 300;constexpr int32 SubPerCell = 4;   // CellUU / SubUU
-	constexpr int32 CellsX = 16;       constexpr int32 CellsY = 10;
+	constexpr int32 CellsX = 16;       constexpr int32 CellsY = 10;   // CellsY = the DEFAULT (Warehouse) rows
+	constexpr int32 MaxCellsY = 20;    // largest per-map row count (The Yard) — sizes fixed seal-check arrays
 	constexpr int32 Levels = 4;        constexpr int32 HeightCapUU = 1200;
 	// Field-local cell columns (x): [0]=A spawn, [1..6]=A plot, [7..8]=neutral, [9..14]=B plot, [15]=B spawn
 	constexpr int32 SpawnColA = 0;     constexpr int32 PlotAMinX = 1;  constexpr int32 PlotAMaxX = 6;
@@ -219,14 +220,14 @@ namespace PFGrid
 	constexpr float BuildReachUU = 1200.f;                    // ghost trace length
 }
 
-// ---- Per-map field parameters (task #40) ----
-// The build GRID stays PFGrid's 16×10 on EVERY map: the grid header is hashed into every arenaId
-// (PFArenaSerialization), sized into the connectivity guard's stack arrays (PFBuildGrid), and
-// baked into objectives/seeds — forking it per map would invalidate the whole community-map
-// space. A bigger map only widens the PLAYABLE field; the extra width is an open flanking lane.
+// ---- Per-map field parameters (task #40; per-map GRID rows since 2026-07-17) ----
+// The build grid is 16 × CellsY per map (Warehouse 16×10, The Yard 16×20). CellsY is threaded through the
+// grid math, objectives, seal-check, and the arenaId grid-header, so a map built on one grid REJECTS on the
+// other (Tom's rule: Yard maps ≠ Warehouse maps). CellsX + all X-column math stay frozen 16-wide on every map.
 struct COMBATFORGE_API FPFArenaMapDef
 {
 	EPFArenaMap MapId = EPFArenaMap::Warehouse;
+	int32   CellsY = PFGrid::CellsY;    // build-grid rows for THIS map (Warehouse 10, Yard 20). FieldY = CellsY*CellUU.
 	float   FieldX = static_cast<float>(PFGrid::CellsX * PFGrid::CellUU);   // 6400
 	float   FieldY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);   // 4000
 	bool    bRoof = true;               // roof deck + trusses + skylights (Warehouse); false = open air

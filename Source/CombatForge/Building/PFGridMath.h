@@ -223,9 +223,9 @@ struct COMBATFORGE_API FPFGridMath
 	}
 
 	/** True iff cell (Cx, Cy) lies inside the given team's build plot. */
-	static bool IsCellInTeamPlot(int32 Cx, int32 Cy, uint8 Team)
+	static bool IsCellInTeamPlot(int32 Cx, int32 Cy, uint8 Team, int32 CellsY)
 	{
-		if (Cy < 0 || Cy >= PFGrid::CellsY)
+		if (Cy < 0 || Cy >= CellsY)
 		{
 			return false;
 		}
@@ -244,11 +244,11 @@ struct COMBATFORGE_API FPFGridMath
 	 * check and the wall edge-adjacency ruling live in APFBuildGrid::QueryPlacement (the one
 	 * predicate both ghost and server run); this function is the coarse per-record test.
 	 */
-	static bool IsInsideTeamPlot(EPFPieceType Type, int16 X, int16 Y, uint8 Team)
+	static bool IsInsideTeamPlot(EPFPieceType Type, int16 X, int16 Y, uint8 Team, int32 CellsY)
 	{
 		if (!PFIsProp(Type))
 		{
-			return IsCellInTeamPlot(X / PFGrid::SubPerCell, Y / PFGrid::SubPerCell, Team);
+			return IsCellInTeamPlot(X / PFGrid::SubPerCell, Y / PFGrid::SubPerCell, Team, CellsY);
 		}
 		int32 MinC = 0, MaxC = 0;
 		if (!TeamPlotColumns(Team, MinC, MaxC))
@@ -258,7 +258,7 @@ struct COMBATFORGE_API FPFGridMath
 		const float Px = X * static_cast<float>(PFGrid::SubUU);
 		const float Py = Y * static_cast<float>(PFGrid::SubUU);
 		return Px >= MinC * PFGrid::CellUU && Px <= (MaxC + 1) * PFGrid::CellUU
-			&& Py >= 0.f && Py <= static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);
+			&& Py >= 0.f && Py <= static_cast<float>(CellsY * PFGrid::CellUU);
 	}
 
 	// ---------------------------------------------------------------

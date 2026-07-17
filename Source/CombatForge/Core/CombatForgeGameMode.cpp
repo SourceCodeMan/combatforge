@@ -1997,11 +1997,12 @@ void ACombatForgeGameMode::SpawnObjectiveActors()
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Params.Owner = this;
 
+	const int32 MapCellsY = PFGetArenaMapDef(GS->ArenaMap).CellsY;   // objectives centre on the active grid
 	if (GS->MatchType == EPFMatchType::CaptureFlag)
 	{
 		for (uint8 Team = 0; Team <= 1; ++Team)
 		{
-			const FVector Home = PFObjectiveLayout::FlagHome(Team);
+			const FVector Home = PFObjectiveLayout::FlagHome(Team, MapCellsY);
 			APFFlagActor* Flag = World->SpawnActor<APFFlagActor>(
 				APFFlagActor::StaticClass(), Home, FRotator::ZeroRotator, Params);
 			if (Flag)
@@ -2020,7 +2021,7 @@ void ACombatForgeGameMode::SpawnObjectiveActors()
 		ControlPoints.Reset(PFObjectiveLayout::ControlPointCount);
 		for (int32 i = 0; i < PFObjectiveLayout::ControlPointCount; ++i)
 		{
-			const FVector Loc = PFObjectiveLayout::ControlPointLocation(i);
+			const FVector Loc = PFObjectiveLayout::ControlPointLocation(i, MapCellsY);
 			// Hardpoint: one active hill that rotates. Domination (CoD model): ALL zones live at once.
 			const bool bActive = bHardpoint ? (i == HardpointActiveSlot) : true;
 			APFControlPointActor* CP = World->SpawnActor<APFControlPointActor>(

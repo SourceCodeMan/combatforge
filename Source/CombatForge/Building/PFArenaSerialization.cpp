@@ -120,6 +120,7 @@ FString FPFArenaSerialization::ComputeHalfHash(const TArray<FPFBuildPieceRec>& P
 TSharedRef<FJsonObject> FPFArenaSerialization::BuildLayoutJson(const TArray<FPFBuildPieceRec>& Pieces,
                                                                const FString& MatchId, int32 TeamSize,
                                                                const FDateTime& CreatedUtc,
+                                                               int32 GridCellsY,
                                                                const FString& ParentArenaId)
 {
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -138,7 +139,7 @@ TSharedRef<FJsonObject> FPFArenaSerialization::BuildLayoutJson(const TArray<FPFB
 	Grid->SetNumberField(TEXT("subUU"), PFGrid::SubUU);
 	Grid->SetNumberField(TEXT("wallH"), PFGrid::WallHeightUU);
 	Grid->SetNumberField(TEXT("cellsX"), PFGrid::CellsX);
-	Grid->SetNumberField(TEXT("cellsY"), PFGrid::CellsY);
+	Grid->SetNumberField(TEXT("cellsY"), GridCellsY);   // per-map rows (Warehouse 10, Yard 20) — gates cross-map loads
 	Grid->SetNumberField(TEXT("levels"), PFGrid::Levels);
 	Root->SetObjectField(TEXT("grid"), Grid);
 
@@ -181,11 +182,11 @@ bool FPFArenaSerialization::ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
 	OutTeamSize = 0;
 	Root->TryGetNumberField(TEXT("teamSize"), OutTeamSize);
 
-	// Grid-header guard: the header is hashed into every arenaId (AppendGridHeader) but was never
-	// VALIDATED on load — a file saved against different grid dims would silently land its pieces
-	// on the wrong grid. All maps share PFGrid's one build grid by design (a wider map only widens
-	// the playable field), so any mismatch means a foreign/corrupt file → reject. A file with no
-	// grid block predates the header and is accepted as-is (per-piece clamps below still apply).
+	// Grid-header guard: a file saved against different grid dims would silently land its pieces on the
+	// wrong grid. CellUU/CellsX are frozen on every map; CellsY is per-map — the two valid grids are the
+	// Warehouse (10) and the Yard (20). Accept either here (so a Yard map parses for the catalog); the
+	// cross-map "can't play a Yard map on the Warehouse" gate is enforced at load (LoadCommunityArenaByFileName,
+	// against the ACTIVE map). Anything else is a foreign/corrupt file → reject. No grid block = legacy, accepted.
 	const TSharedPtr<FJsonObject>* GridObj = nullptr;
 	if (Root->TryGetObjectField(TEXT("grid"), GridObj) && GridObj != nullptr && (*GridObj).IsValid())
 	{
@@ -193,7 +194,8 @@ bool FPFArenaSerialization::ParseLayoutJson(const TSharedRef<FJsonObject>& Root,
 		(*GridObj)->TryGetNumberField(TEXT("cellUU"), CellUU);
 		(*GridObj)->TryGetNumberField(TEXT("cellsX"), CellsX);
 		(*GridObj)->TryGetNumberField(TEXT("cellsY"), CellsY);
-		if (CellUU != PFGrid::CellUU || CellsX != PFGrid::CellsX || CellsY != PFGrid::CellsY)
+		const bool bKnownRows = (CellsY == PFGrid::CellsY || CellsY == PFGrid::MaxCellsY);
+		if (CellUU != PFGrid::CellUU || CellsX != PFGrid::CellsX || !bKnownRows)
 		{
 			return false;
 		}

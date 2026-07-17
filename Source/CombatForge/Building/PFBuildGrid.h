@@ -147,6 +147,8 @@ private:
 
 	static int32 ISMCIndexFor(EPFPieceType Type, uint8 Team);
 	static FIntVector WallEdgeKey(int32 Cx, int32 Cy, int32 Level, uint8 EdgeNE);
+	/** Grid rows for the map currently in play (GameState->ArenaMap → map def; Warehouse 10, Yard 20). */
+	int32 ActiveCellsY() const;
 
 	UPROPERTY() TObjectPtr<USceneComponent> GridRoot;
 	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> PieceISMCs[14];

@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "Core/PFPaths.h"
+#include "Core/CombatForgeGameState.h"   // active ArenaMap → per-map grid rows (map-identity gate)
 #include "Building/PFArenaSeed.h"
 #include "Building/PFArenaSerialization.h"
 
@@ -19,6 +20,14 @@
 
 namespace
 {
+	/** Build-grid rows of the map currently in play (Warehouse 10, Yard 20); default when no GameState yet. */
+	int32 ResolveActiveGridCellsY(const UGameInstance* GI)
+	{
+		const UWorld* World = GI ? GI->GetWorld() : nullptr;
+		const ACombatForgeGameState* GS = World ? World->GetGameState<ACombatForgeGameState>() : nullptr;
+		return GS ? PFGetArenaMapDef(GS->ArenaMap).CellsY : PFGrid::CellsY;
+	}
+
 	/** First 8 hex digits of the match GUID string, lowercased (dashes/braces skipped). */
 	// CONTRACT-GAP: §3.7 says the filename uses the "matchId first 8 hex" without defining the
 	// GUID string format; skipping non-hex separators and lowercasing is the smallest reading
@@ -98,7 +107,9 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 	CurrentArenaId   = FPFArenaSerialization::ComputeArenaId(FrozenPieces);
 	CurrentParentArenaId = ParentArenaId;   // BuildLayoutJson drops it when it equals CurrentArenaId (no real remix)
 	CurrentRecordJson = FPFArenaSerialization::BuildLayoutJson(FrozenPieces, MatchId, TeamSize,
-	                                                           RecordCreatedUtc, ParentArenaId);
+	                                                           RecordCreatedUtc,
+	                                                           ResolveActiveGridCellsY(GetGameInstance()),
+	                                                           ParentArenaId);
 
 	const FString ArenaDir = FPFPaths::ArenaDir();   // stable per-user dir (survives repackaging)
 	CurrentFilePath = ArenaDir / FString::Printf(TEXT("arena_%s_%s.json"),
@@ -259,6 +270,13 @@ bool UPFRatingSubsystem::ParseArenaFile(const FString& AbsolutePath, const FStri
 	OutInfo.FileName = FileName;
 	OutInfo.PieceCount = OutPieces.Num();
 	OutInfo.TeamSize = TeamSize;
+	// Build-grid rows this map was made on (default = Warehouse for legacy files with no grid block).
+	OutInfo.CellsY = PFGrid::CellsY;
+	const TSharedPtr<FJsonObject>* GridObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("grid"), GridObj) && GridObj != nullptr && (*GridObj).IsValid())
+	{
+		(*GridObj)->TryGetNumberField(TEXT("cellsY"), OutInfo.CellsY);
+	}
 	Root->TryGetStringField(TEXT("arenaId"), OutInfo.ArenaId);
 	Root->TryGetStringField(TEXT("parentArenaId"), OutInfo.ParentArenaId);   // Remix lineage; absent on originals
 	Root->TryGetStringField(TEXT("createdUtc"), OutInfo.CreatedUtc);
@@ -386,7 +404,22 @@ bool UPFRatingSubsystem::LoadCommunityArenaByFileName(const FString& FileName,
 	}
 	const FString Path = FPFPaths::ArenaDir() / FileName;
 	FPFCommunityMapInfo Info;
-	return ParseArenaFile(Path, FileName, Info, OutPieces);
+	if (!ParseArenaFile(Path, FileName, Info, OutPieces))
+	{
+		return false;
+	}
+	// Maps don't carry between grids (Tom 2026-07-17): a map built on a different grid — the Yard (20 rows)
+	// vs the Warehouse (10) — can't be played on this shell. Reject so its pieces never land out-of-bounds.
+	const int32 ActiveCY = ResolveActiveGridCellsY(GetGameInstance());
+	if (Info.CellsY != ActiveCY)
+	{
+		UE_LOG(CombatForgeLog, Log,
+			TEXT("Community map %s is a %d-row grid but the active map is %d rows — not loadable here."),
+			*FileName, Info.CellsY, ActiveCY);
+		OutPieces.Reset();
+		return false;
+	}
+	return true;
 }
 
 bool UPFRatingSubsystem::LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces) const

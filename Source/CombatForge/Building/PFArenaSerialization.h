@@ -39,6 +39,7 @@ struct COMBATFORGE_API FPFArenaSerialization
 	static TSharedRef<FJsonObject> BuildLayoutJson(const TArray<FPFBuildPieceRec>& Pieces,
 	                                               const FString& MatchId, int32 TeamSize,
 	                                               const FDateTime& CreatedUtc,
+	                                               int32 GridCellsY,
 	                                               const FString& ParentArenaId = FString());
 
 	/**

@@ -1074,7 +1074,8 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 			if (Flag->GetOwnerTeam() == MyTeam) { HomeFlag = Flag; }
 			else if (Flag->GetCarrier() == MyPS) { bCarryingEnemyFlag = true; }
 		}
-		const FVector MyHome = HomeFlag ? HomeFlag->GetHomeLocation() : PFObjectiveLayout::FlagHome(MyTeam);
+		const FVector MyHome = HomeFlag ? HomeFlag->GetHomeLocation()
+			: PFObjectiveLayout::FlagHome(MyTeam, PFGetArenaMapDef(GS->ArenaMap).CellsY);
 		if (bCarryingEnemyFlag)
 		{
 			OutGoal = MyHome;   // run it home to score

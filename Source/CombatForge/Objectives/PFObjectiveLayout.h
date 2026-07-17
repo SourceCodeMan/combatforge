@@ -28,10 +28,10 @@ namespace PFObjectiveLayout
 			Z);
 	}
 
-	/** CTF flag homes: team spawn column mid-Y (near each team's spawn strip). */
-	inline FVector FlagHome(uint8 Team)
+	/** CTF flag homes: team spawn column mid-Y (near each team's spawn strip). CellsY is the active map's rows. */
+	inline FVector FlagHome(uint8 Team, int32 CellsY)
 	{
-		const int32 MidY = PFGrid::CellsY / 2;
+		const int32 MidY = CellsY / 2;
 		if (Team == 0)
 		{
 			return CellCenter(PFGrid::SpawnColA, MidY);
@@ -46,9 +46,9 @@ namespace PFObjectiveLayout
 	 * Control-point world positions:
 	 *  0 = A-plot mid cell, 1 = neutral mid, 2 = B-plot mid. All at field mid-Y.
 	 */
-	inline FVector ControlPointLocation(int32 Index)
+	inline FVector ControlPointLocation(int32 Index, int32 CellsY)
 	{
-		const int32 MidY = PFGrid::CellsY / 2;
+		const int32 MidY = CellsY / 2;
 		const int32 Clamped = FMath::Clamp(Index, 0, ControlPointCount - 1);
 		switch (Clamped)
 		{

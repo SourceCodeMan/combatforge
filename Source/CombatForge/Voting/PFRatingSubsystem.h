@@ -24,6 +24,8 @@ struct COMBATFORGE_API FPFCommunityMapInfo
 	UPROPERTY() int32 Score = 0;
 	UPROPERTY() int32 PieceCount = 0;
 	UPROPERTY() int32 TeamSize = 0;
+	/** Build-grid rows the map was made on (Warehouse 10, Yard 20). Gates cross-map loads. */
+	UPROPERTY() int32 CellsY = PFGrid::CellsY;
 	UPROPERTY() int32 ThumbUp = 0;
 	UPROPERTY() int32 ThumbDown = 0;
 	UPROPERTY() FString CreatedUtc;

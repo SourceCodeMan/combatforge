@@ -248,6 +248,18 @@ FIntVector APFBuildGrid::WallEdgeKey(int32 Cx, int32 Cy, int32 Level, uint8 Edge
 	return FIntVector(Cx, Cy, Level * 2 + static_cast<int32>(EdgeNE));
 }
 
+int32 APFBuildGrid::ActiveCellsY() const
+{
+	if (const UWorld* W = GetWorld())
+	{
+		if (const ACombatForgeGameState* GS = W->GetGameState<ACombatForgeGameState>())
+		{
+			return PFGetArenaMapDef(GS->ArenaMap).CellsY;
+		}
+	}
+	return PFGrid::CellsY;   // pre-GameState fallback = the default (Warehouse) grid
+}
+
 // ---------------------------------------------------------------------------
 // Shared validation
 // ---------------------------------------------------------------------------
@@ -297,6 +309,7 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 	{
 		return EPFDenyReason::OutOfPlot;
 	}
+	const int32 CY = ActiveCellsY();   // per-map grid rows (Warehouse 10, Yard 20)
 	if (Q.Type == EPFPieceType::Wall)
 	{
 		// A canonical edge belongs to a team if either adjacent cell is in its plot — keeps the
@@ -305,14 +318,14 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		const int32 Cy = Q.Y / PFGrid::SubPerCell;
 		const int32 C2x = (Q.Rot == 1) ? Cx + 1 : Cx;
 		const int32 C2y = (Q.Rot == 0) ? Cy + 1 : Cy;
-		if (!FPFGridMath::IsCellInTeamPlot(Cx, Cy, Q.Team) && !FPFGridMath::IsCellInTeamPlot(C2x, C2y, Q.Team))
+		if (!FPFGridMath::IsCellInTeamPlot(Cx, Cy, Q.Team, CY) && !FPFGridMath::IsCellInTeamPlot(C2x, C2y, Q.Team, CY))
 		{
 			return EPFDenyReason::OutOfPlot;
 		}
 	}
 	else if (!bProp)
 	{
-		if (!FPFGridMath::IsInsideTeamPlot(Q.Type, Q.X, Q.Y, Q.Team))
+		if (!FPFGridMath::IsInsideTeamPlot(Q.Type, Q.X, Q.Y, Q.Team, CY))
 		{
 			return EPFDenyReason::OutOfPlot;
 		}
@@ -328,7 +341,7 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		constexpr float Eps = 0.5f;
 		const float PlotMinX = MinC * PFGrid::CellUU;
 		const float PlotMaxX = (MaxC + 1) * PFGrid::CellUU;
-		const float PlotMaxY = static_cast<float>(PFGrid::CellsY * PFGrid::CellUU);
+		const float PlotMaxY = static_cast<float>(CY * PFGrid::CellUU);
 		if (Bounds.Min.X < PlotMinX - Eps || Bounds.Max.X > PlotMaxX + Eps ||
 			Bounds.Min.Y < -Eps || Bounds.Max.Y > PlotMaxY + Eps)
 		{
@@ -479,10 +492,11 @@ bool APFBuildGrid::WouldSealMap(const FPFPlacementQuery& Q) const
 		return Key == NewEdge || WallEdges.Contains(Key) || RampEdges.Contains(Key);
 	};
 
-	constexpr int32 GW = PFGrid::CellsX;   // columns (X)
-	constexpr int32 GH = PFGrid::CellsY;   // rows (Y)
-	bool Visited[GW * GH] = {};
-	int32 Queue[GW * GH];
+	constexpr int32 GW = PFGrid::CellsX;      // columns (X) — frozen 16-wide on every map
+	constexpr int32 MaxGH = PFGrid::MaxCellsY;// arrays sized for the LARGEST map (Yard 20)
+	const int32 GH = ActiveCellsY();          // runtime rows for THIS map (Warehouse 10, Yard 20)
+	bool Visited[GW * MaxGH] = {};
+	int32 Queue[GW * MaxGH];
 	int32 Tail = 0;
 
 	// Seed at team A's spawn column, field mid-Y.
@@ -513,7 +527,7 @@ bool APFBuildGrid::WouldSealMap(const FPFPlacementQuery& Q) const
 	// Objectives: every control point must remain reachable (CTF flag homes sit in spawn columns → covered).
 	for (int32 i = 0; i < PFObjectiveLayout::ControlPointCount; ++i)
 	{
-		const FVector Loc = PFObjectiveLayout::ControlPointLocation(i);
+		const FVector Loc = PFObjectiveLayout::ControlPointLocation(i, GH);
 		const int32 Ox = FMath::Clamp(FMath::FloorToInt32(Loc.X / static_cast<float>(PFGrid::CellUU)), 0, GW - 1);
 		const int32 Oy = FMath::Clamp(FMath::FloorToInt32(Loc.Y / static_cast<float>(PFGrid::CellUU)), 0, GH - 1);
 		if (!Visited[Ox * GH + Oy]) { return true; }

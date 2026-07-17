@@ -59,6 +59,7 @@ const FPFArenaMapDef& PFGetArenaMapDef(EPFArenaMap Map)
 	// blow the floor out with exposure locked (see the 8.5 regression note in PFLightingSubsystem).
 	static const FPFArenaMapDef Warehouse = {
 		EPFArenaMap::Warehouse,
+		/*CellsY=*/PFGrid::CellsY,                                  // 10 rows
 		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400
 		static_cast<float>(PFGrid::CellsY * PFGrid::CellUU),        // 4000
 		/*bRoof=*/true, /*bPerimeter=*/true, /*bWarehouseScenery=*/false,
@@ -66,10 +67,13 @@ const FPFArenaMapDef& PFGetArenaMapDef(EPFArenaMap Map)
 	};
 	// Tom 2026-07-15: the Yard is a WIDE-OPEN desert field — no walls, no lid, nothing. The
 	// concrete pad sits in the open with the warehouse next door and desert to the horizon.
+	// 2026-07-17: now a genuinely BIGGER field — 16×20 grid (the whole 8000 is buildable/playable),
+	// its own arenaId grid-header so Yard maps don't load on the Warehouse and vice versa.
 	static const FPFArenaMapDef Yard = {
 		EPFArenaMap::Yard,
+		/*CellsY=*/2 * PFGrid::CellsY,                              // 20 rows — the extra field is now LIVE grid
 		static_cast<float>(PFGrid::CellsX * PFGrid::CellUU),        // 6400 — length unchanged
-		static_cast<float>(2 * PFGrid::CellsY * PFGrid::CellUU),    // 8000 — double width
+		static_cast<float>(2 * PFGrid::CellsY * PFGrid::CellUU),    // 8000
 		/*bRoof=*/false, /*bPerimeter=*/false, /*bWarehouseScenery=*/true,
 		/*SunIntensity=*/4.f, TEXT("THE YARD")
 	};
