@@ -17,7 +17,7 @@ class USceneComponent;
  *  - WallDoor: two-way swinging door (F to toggle)
  *  - WallDoorOneWay: door on the front face only; solid wall look/feel from the back when closed;
  *    can only be opened from the front
- *  - FloorTrap: floor that drops after 20 s continuous stand, then reseals
+ *  - FloorTrap: drops when an ENEMY of the placing team stands on it, then reseals
  *
  * Placement still lives in APFBuildGrid's FastArray; this actor is pure runtime collision/visuals/state.
  */
@@ -42,8 +42,11 @@ public:
 	/** True if User is within interact range of a usable door face. */
 	bool CanUserToggleDoor(const APawn* User) const;
 
-	static constexpr float DoorInteractRangeUU = 220.f;
-	static constexpr float TrapStandSeconds = 20.f;
+	/** World position used for door range checks (leaf center, not cell corner). */
+	FVector GetDoorInteractLocation() const { return DoorLeafClosedCenter(); }
+
+	static constexpr float DoorInteractRangeUU = 300.f;
+	/** How long the trap stays open after an enemy trips it. */
 	static constexpr float TrapOpenSeconds = 3.5f;
 
 protected:
@@ -52,10 +55,13 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION() void OnRep_Open();
+	/** Clients: rebuild mesh when PieceId/type arrive after BeginPlay. */
+	UFUNCTION() void OnRep_PieceMeta();
 
 	void RebuildGeometry();
 	void ApplyOpenState();
 	void ApplyCollisionPreset(UPrimitiveComponent* Comp, bool bBlock);
+	void EnsureGeometryBuilt();
 
 	UStaticMeshComponent* AddCubePart(const FName& Name, const FVector& WorldCenter,
 		const FVector& WorldExtent, const FRotator& WorldRot, UMaterialInterface* Mat, bool bBlock);
@@ -82,17 +88,16 @@ protected:
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> TrapPlate;
 	UPROPERTY() TObjectPtr<UBoxComponent> TrapTrigger;
 
-	UPROPERTY(Replicated) uint16 PieceId = 0;
-	UPROPERTY(Replicated) EPFPieceType PieceType = EPFPieceType::WallWindow;
-	UPROPERTY(Replicated) int16 GridX = 0;
-	UPROPERTY(Replicated) int16 GridY = 0;
-	UPROPERTY(Replicated) int16 GridZ = 0;
-	UPROPERTY(Replicated) uint8 GridRot = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_PieceMeta) uint16 PieceId = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_PieceMeta) EPFPieceType PieceType = EPFPieceType::WallWindow;
+	UPROPERTY(ReplicatedUsing=OnRep_PieceMeta) int16 GridX = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_PieceMeta) int16 GridY = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_PieceMeta) int16 GridZ = 0;
+	UPROPERTY(ReplicatedUsing=OnRep_PieceMeta) uint8 GridRot = 0;
 	UPROPERTY(Replicated) uint8 TeamId = 0;
 	UPROPERTY(ReplicatedUsing=OnRep_Open) bool bOpen = false;
 
 	float DoorYawAlpha = 0.f;     // 0 closed .. 1 open (visual)
-	float TrapStandAccum = 0.f;   // server only
 	float TrapOpenRemaining = 0.f;
 
 	UPROPERTY() TObjectPtr<UStaticMesh> CubeMesh;

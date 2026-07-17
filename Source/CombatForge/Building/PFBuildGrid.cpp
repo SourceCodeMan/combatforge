@@ -10,10 +10,12 @@
 #include "Core/CombatForgePlayerState.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/HitResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -720,6 +722,14 @@ void APFBuildGrid::ClearAll()
 		}
 	}
 	SpecialPieces.Empty();
+	for (auto& Pair : RampUnderfills)
+	{
+		if (IsValid(Pair.Value))
+		{
+			Pair.Value->Destroy();
+		}
+	}
+	RampUnderfills.Empty();
 	if (GetWorld())
 	{
 		for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
@@ -801,6 +811,12 @@ void APFBuildGrid::AddPieceLocal(const FPFBuildPieceRec& Rec)
 	const int32 InstanceIdx = PieceISMCs[K]->AddInstance(T, /*bWorldSpace=*/true);
 	InstanceToPiece[K].Add(InstanceIdx, Rec.PieceId);
 	PieceToInstance.Add(Rec.PieceId, InstanceIdx);
+
+	// Ramp: fill under the plank so standing heads can't crawl deep under (crouch can).
+	if (Rec.Type == EPFPieceType::Ramp)
+	{
+		SpawnRampUnderfill(Rec);
+	}
 }
 
 void APFBuildGrid::RemovePieceLocal(const FPFBuildPieceRec& Rec)
@@ -810,6 +826,11 @@ void APFBuildGrid::RemovePieceLocal(const FPFBuildPieceRec& Rec)
 		DestroySpecialPieceActor(Rec.PieceId);
 		UnregisterOccupancy(Rec);
 		return;
+	}
+
+	if (Rec.Type == EPFPieceType::Ramp)
+	{
+		DestroyRampUnderfill(Rec.PieceId);
 	}
 
 	const int32 K = ISMCIndexFor(Rec.Type, Rec.Team);
@@ -839,6 +860,174 @@ void APFBuildGrid::RemovePieceLocal(const FPFBuildPieceRec& Rec)
 		}
 	}
 	UnregisterOccupancy(Rec);
+}
+
+void APFBuildGrid::SpawnRampUnderfill(const FPFBuildPieceRec& Rec)
+{
+	UWorld* World = GetWorld();
+	if (!World || Rec.Type != EPFPieceType::Ramp)
+	{
+		return;
+	}
+	DestroyRampUnderfill(Rec.PieceId);
+
+	// Crouch capsule ≈ 116uu tall (half 58); leave a slightly taller tunnel so crouch isn't sticky.
+	// Standing ≈ 176uu — taller than the tunnel, so the solid steps block standing under the ramp.
+	// Crouch capsule ≈ 116uu; standing ≈ 176uu. Tunnel is tall enough to crouch-walk under the plank
+	// but short enough that a standing head hits the solid steps immediately.
+	constexpr float CrouchTunnelUU = 124.f;
+	constexpr float CellRunUU = static_cast<float>(PFGrid::CellUU);       // 400
+	constexpr float RiseUU = static_cast<float>(PFGrid::WallHeightUU);    // 300
+	constexpr int32 Steps = 8;
+	constexpr float StepRun = CellRunUU / static_cast<float>(Steps);      // 50
+	constexpr float WidthUU = CellRunUU;                                  // full cell width
+
+	const float S = static_cast<float>(PFGrid::SubUU);
+	const float Wx = Rec.X * S;
+	const float Wy = Rec.Y * S;
+	const float Wz = Rec.Z * S;
+	const uint8 Rot = Rec.Rot % 4;
+
+	// Low edge mid-point of the cell; ascent Rot 0=+X, 1=+Y, 2=-X, 3=-Y.
+	FVector Along = FVector::ZeroVector;
+	FVector LowMid = FVector::ZeroVector;
+	switch (Rot)
+	{
+	case 0: // +X — low at min X
+		Along = FVector(1.f, 0.f, 0.f);
+		LowMid = FVector(Wx, Wy + 200.f, Wz);
+		break;
+	case 1: // +Y
+		Along = FVector(0.f, 1.f, 0.f);
+		LowMid = FVector(Wx + 200.f, Wy, Wz);
+		break;
+	case 2: // -X
+		Along = FVector(-1.f, 0.f, 0.f);
+		LowMid = FVector(Wx + CellRunUU, Wy + 200.f, Wz);
+		break;
+	default: // -Y
+		Along = FVector(0.f, -1.f, 0.f);
+		LowMid = FVector(Wx + 200.f, Wy + CellRunUU, Wz);
+		break;
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = this;
+	Params.ObjectFlags |= RF_Transient;
+	AActor* Holder = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, Params);
+	if (!Holder)
+	{
+		return;
+	}
+	Holder->SetReplicates(false);
+	Holder->SetActorHiddenInGame(true);
+	USceneComponent* Root = NewObject<USceneComponent>(Holder, TEXT("Root"));
+	Holder->SetRootComponent(Root);
+	Root->RegisterComponent();
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!Cube)
+	{
+		Holder->Destroy();
+		return;
+	}
+
+	for (int32 i = 0; i < Steps; ++i)
+	{
+		// Distance along ascent from low edge to step midpoint.
+		const float DistMid = (static_cast<float>(i) + 0.5f) * StepRun;
+		// Underside height of the ramp plank (linear 0→300 over the cell).
+		const float PlankZ = (DistMid / CellRunUU) * RiseUU;
+		// Solid fill up to just below a crouch tunnel under the plank.
+		const float SolidTop = PlankZ - CrouchTunnelUU;
+		if (SolidTop < 18.f)
+		{
+			continue;   // near the low tip — nothing to fill; plank itself is the blocker
+		}
+
+		const float SolidHalfH = SolidTop * 0.5f;
+		const FVector StepCenter = LowMid
+			+ Along * DistMid
+			+ FVector(0.f, 0.f, SolidHalfH);
+
+		UStaticMeshComponent* Box = NewObject<UStaticMeshComponent>(Holder,
+			*FString::Printf(TEXT("RampFill_%d"), i));
+		Box->SetupAttachment(Root);
+		Box->SetStaticMesh(Cube);
+		Box->SetVisibility(false);
+		Box->SetHiddenInGame(true);
+		Box->SetCastShadow(false);
+		Box->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Box->SetCollisionObjectType(ECC_WorldStatic);
+		Box->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Box->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		Box->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		Box->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+		Box->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+		Box->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
+		Box->SetCollisionResponseToChannel(PF_ECC_BuildTrace, ECR_Block);
+		Box->SetCanEverAffectNavigation(true);
+		Box->RegisterComponent();
+		Box->SetWorldLocation(StepCenter);
+		Box->SetWorldRotation(FRotator::ZeroRotator);
+		// Axis-aligned: run along X or Y depending on ramp yaw.
+		if (Rot == 1 || Rot == 3)
+		{
+			Box->SetWorldScale3D(FVector(WidthUU / 100.f, StepRun / 100.f, SolidTop / 100.f));
+		}
+		else
+		{
+			Box->SetWorldScale3D(FVector(StepRun / 100.f, WidthUU / 100.f, SolidTop / 100.f));
+		}
+	}
+
+	// Also thicken the *plank* collision slightly via an extra thin plate on the underside so
+	// head hits against the slope are reliable (ISM thin cubes can tunnel).
+	{
+		const FTransform PlankT = FPFGridMath::PieceLocalTransform(
+			EPFPieceType::Ramp, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
+		UStaticMeshComponent* Plank = NewObject<UStaticMeshComponent>(Holder, TEXT("RampPlankCol"));
+		Plank->SetupAttachment(Root);
+		Plank->SetStaticMesh(Cube);
+		Plank->SetVisibility(false);
+		Plank->SetHiddenInGame(true);
+		Plank->SetCastShadow(false);
+		Plank->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Plank->SetCollisionObjectType(ECC_WorldStatic);
+		Plank->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Plank->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		Plank->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		Plank->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+		Plank->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+		Plank->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
+		Plank->SetCollisionResponseToChannel(PF_ECC_BuildTrace, ECR_Block);
+		Plank->SetCanEverAffectNavigation(true);
+		Plank->RegisterComponent();
+		// Slightly thicker than the visual 20uu plank so capsule heads catch cleanly.
+		FTransform Thick = PlankT;
+		const FVector Scale = Thick.GetScale3D();
+		Thick.SetScale3D(FVector(Scale.X, Scale.Y, FMath::Max(Scale.Z, 0.55f))); // ~55uu thick
+		// Keep the TOP surface roughly where the visual is: shift down along local -Z by half extra thickness.
+		const float ExtraHalf = (Thick.GetScale3D().Z - Scale.Z) * 50.f;
+		const FVector Down = Thick.GetRotation().RotateVector(FVector(0.f, 0.f, -ExtraHalf));
+		Thick.AddToTranslation(Down);
+		Plank->SetWorldTransform(Thick);
+	}
+
+	RampUnderfills.Add(Rec.PieceId, Holder);
+}
+
+void APFBuildGrid::DestroyRampUnderfill(uint16 PieceId)
+{
+	if (TObjectPtr<AActor>* Found = RampUnderfills.Find(PieceId))
+	{
+		if (IsValid(*Found))
+		{
+			(*Found)->Destroy();
+		}
+		RampUnderfills.Remove(PieceId);
+	}
 }
 
 void APFBuildGrid::SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec)

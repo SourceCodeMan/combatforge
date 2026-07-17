@@ -74,6 +74,11 @@ static TAutoConsoleVariable<int32> CVarWeaponDrag(
 	TEXT("pf.WeaponDrag"), 0,
 	TEXT("1 = middle-mouse-drag the FP weapon to reposition it (prints the pf.WeaponFP/ADS line on release)."));
 
+// Auto hip/ADS from mesh bounds (default on). pf.WeaponAutoPose 0 → use catalog FPLoc/AdsLoc only.
+static TAutoConsoleVariable<int32> CVarWeaponAutoPose(
+	TEXT("pf.WeaponAutoPose"), 1,
+	TEXT("1 = auto-generate FP hip + ADS from gun mesh bounds (default). 0 = catalog poses only. pf.WeaponFP/ADS still override live."));
+
 // Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
 // kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
 static void PFArmedAnimsSink()
@@ -184,6 +189,12 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	WeaponMeshComp->SetOwnerNoSee(true);             // slice: weapon rides the TP body only
 	WeaponMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	WeaponMeshComp->SetVisibility(false);
+
+	BackWeaponMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BackWeaponMeshComp"));
+	BackWeaponMeshComp->SetupAttachment(GetMesh());  // re-seated on spine in AttachWeaponToBack
+	BackWeaponMeshComp->SetOwnerNoSee(true);
+	BackWeaponMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BackWeaponMeshComp->SetVisibility(false);
 
 	// ---- First-person marker viewmodel: a rifle silhouette from engine primitives, owner-only-see.
 	// This is what the player stares at every second — the single biggest "it's an FPS" signal. A real
@@ -329,10 +340,17 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 		TEXT("/Game/Bandits/Demo/Animations/A_MM_Walk_Fwd.A_MM_Walk_Fwd"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> BanditRunFinder(
 		TEXT("/Game/Bandits/Demo/Animations/A_MM_Run_Fwd.A_MM_Run_Fwd"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> BanditJumpFinder(
+		TEXT("/Game/Bandits/Demo/Animations/A_MM_Jump.A_MM_Jump"));
+	// UE mannequin wall-jump — closest vault/climb clip in Content; remaps via compatible skeletons.
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> WallJumpFinder(
+		TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_WallJump.MM_WallJump"));
 	if (BanditBodyFinder.Succeeded()) { BanditBodyMesh = BanditBodyFinder.Object; }
 	if (BanditIdleFinder.Succeeded()) { BanditIdleAnim = BanditIdleFinder.Object; }
 	if (BanditWalkFinder.Succeeded()) { BanditWalkAnim = BanditWalkFinder.Object; }
 	if (BanditRunFinder.Succeeded())  { BanditRunAnim  = BanditRunFinder.Object; }
+	if (WallJumpFinder.Succeeded())   { MantleAnim = WallJumpFinder.Object; }
+	if (BanditJumpFinder.Succeeded()) { MantleAnimFallback = BanditJumpFinder.Object; }
 
 	// Rifle-hold locomotion from the UE5 template rifle kit (/Game/Characters, SK_Mannequin — Manny-family
 	// bone names, same family as the Bandit skeleton, so FSkeletonRemapping plays them cleanly; registered
@@ -531,6 +549,7 @@ void ACombatForgeCharacter::BeginPlay()
 	if (PFMovement != nullptr)
 	{
 		PFMovement->OnSlideStateChanged.AddUObject(this, &ACombatForgeCharacter::HandleSlideStateChanged);
+		PFMovement->OnMantleStateChanged.AddUObject(this, &ACombatForgeCharacter::HandleMantleStateChanged);
 	}
 
 	FallStartPeakZ = GetActorLocation().Z;
@@ -555,6 +574,7 @@ void ACombatForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (PFMovement != nullptr)
 	{
 		PFMovement->OnSlideStateChanged.RemoveAll(this);
+		PFMovement->OnMantleStateChanged.RemoveAll(this);
 	}
 	GetWorldTimerManager().ClearTimer(SprintOutTimerHandle);
 	GetWorldTimerManager().ClearTimer(BufferedJumpClearHandle);
@@ -679,9 +699,8 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 			// Dev pose drag (pf.WeaponDrag): apply the middle-mouse mouse delta to the held/ADS pose.
 			TickWeaponDrag();
 
-			// pf.ShowMuzzle 1: draw a marker at the cosmetic muzzle (where FP tracers spawn) + a short line
-			// along the shot direction, so the muzzle offset (last 3 args of pf.WeaponFP) can be aligned to
-			// the visible barrel by eye. Green sphere = origin; cyan line = shot path.
+			// pf.ShowMuzzle 1: draw the auto-resolved cosmetic muzzle (mesh socket/bounds tip) + shot line.
+			// Green sphere = origin; cyan line = shot path.
 			if (CVarShowMuzzle.GetValueOnGameThread() != 0)
 			{
 				const FVector MuzzleW = GetMuzzleLocation(true);
@@ -1109,6 +1128,7 @@ void ACombatForgeCharacter::OnInteractPressed()
 		}
 	}
 	// Doors: F toggles open/close (one-way doors only from the front face).
+	// Range must use the door leaf center — actor origin is the cell min-corner and is often >220uu away.
 	{
 		APFBuildPieceActor* BestDoor = nullptr;
 		float BestDistSq = FMath::Square(APFBuildPieceActor::DoorInteractRangeUU);
@@ -1120,8 +1140,7 @@ void ACombatForgeCharacter::OnInteractPressed()
 			{
 				continue;
 			}
-			// Prefer closest door by actor origin (door center is near the wall).
-			const float D = FVector::DistSquared(Me, Door->GetActorLocation());
+			const float D = FVector::DistSquared(Me, Door->GetDoorInteractLocation());
 			if (D <= BestDistSq)
 			{
 				BestDistSq = D;
@@ -1535,6 +1554,63 @@ void ACombatForgeCharacter::HandleSlideStateChanged(bool /*bSliding*/)
 	}
 }
 
+void ACombatForgeCharacter::HandleMantleStateChanged(bool bMantling)
+{
+	if (GetMesh() == nullptr || bEliminatedAppearanceActive)
+	{
+		return;
+	}
+	// AnimBP-driven bodies leave mantle cosmetics alone (no SingleNode override).
+	if (GetMesh()->GetAnimationMode() == EAnimationMode::AnimationBlueprint
+		&& GetMesh()->GetAnimInstance() != nullptr
+		&& !GetMesh()->GetAnimInstance()->IsA<UAnimSingleNodeInstance>())
+	{
+		return;
+	}
+
+	if (bMantling)
+	{
+		UAnimSequence* Seq = MantleAnim.Get();
+		if (Seq == nullptr)
+		{
+			Seq = MantleAnimFallback.Get();
+		}
+		if (Seq == nullptr)
+		{
+			return;
+		}
+		if (GetMesh()->GetAnimationMode() != EAnimationMode::AnimationSingleNode)
+		{
+			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		}
+		// Stretch/compress the clip to MantleTime so the climb ends with the interp.
+		float PlayRate = 1.f;
+		const float ClipLen = Seq->GetPlayLength();
+		const float MantleT = (PFMovement != nullptr) ? FMath::Max(0.05f, PFMovement->MantleTime) : 0.35f;
+		if (ClipLen > 0.05f)
+		{
+			PlayRate = ClipLen / MantleT;
+		}
+		GetMesh()->PlayAnimation(Seq, /*bLooping=*/false);
+		if (UAnimSingleNodeInstance* Node = GetMesh()->GetSingleNodeInstance())
+		{
+			Node->SetLooping(false);
+			Node->SetPlaying(true);
+			Node->SetPlayRate(PlayRate);
+			Node->SetPosition(0.f, false);
+		}
+		bMantleAnimActive = true;
+		SeqLocoState = 0;   // force locomotion re-pick when mantle ends
+	}
+	else
+	{
+		bMantleAnimActive = false;
+		SeqLocoState = 0;
+		// Resume idle/walk/run immediately (don't wait for the next speed bucket change).
+		UpdateSequenceLocomotion();
+	}
+}
+
 // ---------------------------------------------------------------------------
 // FOV arbiter (04 §1.3) — the single compose point; effects never fight
 // ---------------------------------------------------------------------------
@@ -1918,6 +1994,16 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 	{
 		const int32 Sel = ActiveCharConfig.Slots.IsValidIndex(s) ? ActiveCharConfig.Slots[s] : -1;
 		USkeletalMesh* M = (Sel >= 0) ? PFChar::LoadPart(s, Sel) : nullptr;
+		// Belt-and-braces: never mount weapon cosmetics even if an old save slot still points at them.
+		if (M != nullptr)
+		{
+			const FString N = M->GetName();
+			if (N.Contains(TEXT("AK_Drops")) || N.Contains(TEXT("AK_Drop"))
+				|| N.Contains(TEXT("SM_AK")) || N.Contains(TEXT("SM_Pistol")) || N.Contains(TEXT("SM_Rifle")))
+			{
+				M = nullptr;
+			}
+		}
 		Mount(CharSlotComps[s], M);
 	}
 }
@@ -1941,64 +2027,93 @@ void ACombatForgeCharacter::ReapplyCharacterConfig()
 
 void ACombatForgeCharacter::ApplyWeaponLoadout()
 {
-	// Kit-first: the replicated kit carries the OWNER's weapon choice, so the server runs the owner's stats
-	// (mag/ROF/spread) and remote machines render the owner's gun — not whatever THIS machine has saved.
-	// Fallback (no kit yet / bots): this machine's saved config, exactly as before.
+	// Resolve primary + secondary from kit (or local prefs / defaults for bots).
 	if (HasValidKit())
 	{
-		ActiveWeaponConfig.Category = KitRep.WeaponCategory;
-		ActiveWeaponConfig.Index    = KitRep.WeaponIndex;
+		PrimaryWeaponConfig.Category   = KitRep.WeaponCategory;
+		PrimaryWeaponConfig.Index      = KitRep.WeaponIndex;
+		SecondaryWeaponConfig.Category = KitRep.SecondaryCategory;
+		SecondaryWeaponConfig.Index    = KitRep.SecondaryIndex;
 	}
 	else
 	{
-		ActiveWeaponConfig = PFWeapon::LoadConfig();
+		PrimaryWeaponConfig   = PFWeapon::LoadConfig();
+		SecondaryWeaponConfig = PFWeapon::LoadSecondaryConfig();
 	}
-	// Pistol secondary (scroll-wheel swap): when the sidearm is drawn, override the equipped weapon with the
-	// universal pistol (PFWeaponCatalog GCats order: 0=Assault Rifle, 1=SMG, 2=Pistol). Mesh/pose/stats/mag all
-	// follow from its def below, so no other code needs to know which slot is active.
-	if (bSecondaryActive)
-	{
-		ActiveWeaponConfig.Category = 2;   // Pistol
-		ActiveWeaponConfig.Index    = 0;
-	}
+	// Clamp in case a save points past a category that shrank.
+	PrimaryWeaponConfig.Category   = FMath::Clamp(PrimaryWeaponConfig.Category, 0, PFWeapon::CategoryCount() - 1);
+	PrimaryWeaponConfig.Index      = FMath::Clamp(PrimaryWeaponConfig.Index, 0,
+		FMath::Max(0, PFWeapon::WeaponCount(PrimaryWeaponConfig.Category) - 1));
+	SecondaryWeaponConfig.Category = FMath::Clamp(SecondaryWeaponConfig.Category, 0, PFWeapon::CategoryCount() - 1);
+	SecondaryWeaponConfig.Index    = FMath::Clamp(SecondaryWeaponConfig.Index, 0,
+		FMath::Max(0, PFWeapon::WeaponCount(SecondaryWeaponConfig.Category) - 1));
+
+	// Hand = active slot; back = the other.
+	ActiveWeaponConfig = bSecondaryActive ? SecondaryWeaponConfig : PrimaryWeaponConfig;
+	const FPFWeaponConfig StowedConfig = bSecondaryActive ? PrimaryWeaponConfig : SecondaryWeaponConfig;
+
 	const FPFWeaponDef& Def = PFWeapon::Weapon(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
 	UStaticMesh* WpnMesh = PFWeapon::LoadMesh(Def);
 #if !UE_BUILD_SHIPPING
-	// Confirm what actually equipped (category logic is correct; if a weapon LOOKS wrong it's the per-weapon
-	// FP scale/pose, not the selection — tune with pf.WeaponFP).
 	if (IsLocallyControlled() && GEngine != nullptr)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Yellow, FString::Printf(TEXT("Weapon: %s / %s%s"),
-			*PFWeapon::CategoryLabel(ActiveWeaponConfig.Category), Def.DisplayName,
-			WpnMesh ? TEXT("") : TEXT("  [mesh missing]")));
+		const FPFWeaponDef& StowedDef = PFWeapon::Weapon(StowedConfig.Category, StowedConfig.Index);
+		GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Yellow,
+			FString::Printf(TEXT("Hand: %s | Back: %s"), Def.DisplayName, StowedDef.DisplayName));
 	}
 #endif
 	if (WpnMesh == nullptr)
 	{
 		return;   // asset missing — keep the current weapon
 	}
-	UMaterialInterface* Mat = PFWeapon::LoadMaterial(Def);   // nullptr = preserve the mesh's authored materials
-	RifleMaterial = Mat;   // AttachWeaponToHand + the FP block both key off this (null clears overrides)
+	UMaterialInterface* Mat = PFWeapon::LoadMaterial(Def);
+	RifleMaterial = Mat;
 
-	// First-person viewmodel: swap mesh, material (or revert to authored), and the per-weapon pose.
+	// First-person viewmodel: swap mesh/material, then pose (auto from bounds, or catalog if cvar off).
+	FVector  UseFPLoc   = Def.FPLoc;
+	FRotator UseFPRot   = Def.FPRot;
+	float    UseFPScale = Def.FPScale;
+	FVector  UseAdsLoc  = Def.AdsLoc;
+	FRotator UseAdsRot  = Def.AdsRot;
+	if (CVarWeaponAutoPose.GetValueOnGameThread() != 0)
+	{
+		FPFWeaponAutoPose Auto;
+		if (PFWeapon::ComputeAutoPose(WpnMesh, ActiveWeaponConfig.Category, Auto))
+		{
+			UseFPLoc   = Auto.FPLoc;
+			UseFPRot   = Auto.FPRot;
+			UseFPScale = Auto.FPScale;
+			UseAdsLoc  = Auto.AdsLoc;
+			UseAdsRot  = Auto.AdsRot;
+#if !UE_BUILD_SHIPPING
+			if (IsLocallyControlled())
+			{
+				UE_LOG(CombatForgeLog, Log,
+					TEXT("WeaponAutoPose [%s]: FPLoc=(%.1f,%.1f,%.1f) Rot=(%.1f,%.1f,%.1f) Sc=%.2f | AdsLoc=(%.1f,%.1f,%.1f)"),
+					Def.DisplayName, UseFPLoc.X, UseFPLoc.Y, UseFPLoc.Z,
+					UseFPRot.Pitch, UseFPRot.Yaw, UseFPRot.Roll, UseFPScale,
+					UseAdsLoc.X, UseAdsLoc.Y, UseAdsLoc.Z);
+			}
+#endif
+		}
+	}
+
 	if (RifleFPMesh != nullptr)
 	{
 		RifleFPMesh->SetStaticMesh(WpnMesh);
 		const int32 Mats = RifleFPMesh->GetNumMaterials();
 		for (int32 i = 0; i < Mats; ++i)
 		{
-			RifleFPMesh->SetMaterial(i, Mat);   // null reverts the slot to the mesh's authored material
+			RifleFPMesh->SetMaterial(i, Mat);
 		}
-		RifleFPMesh->SetRelativeLocation(Def.FPLoc);
-		RifleFPMesh->SetRelativeRotation(Def.FPRot);
-		RifleFPMesh->SetRelativeScale3D(FVector(Def.FPScale));
+		RifleFPMesh->SetRelativeLocation(UseFPLoc);
+		RifleFPMesh->SetRelativeRotation(UseFPRot);
+		RifleFPMesh->SetRelativeScale3D(FVector(UseFPScale));
 	}
 	MuzzleLocalFP = Def.MuzzleFP;
-	ViewModelAdsLoc = Def.AdsLoc;   // per-weapon aim pose (each weapon's sight sits differently)
-	ViewModelAdsRot = Def.AdsRot;
+	ViewModelAdsLoc = UseAdsLoc;
+	ViewModelAdsRot = UseAdsRot;
 
-	// Per-class fire behaviour + ballistics onto the weapon component (public EditDefaultsOnly — direct write OK;
-	// projectiles read MuzzleSpeedUU/ProjLifetime from here, so range flows automatically).
 	if (WeaponComponent != nullptr)
 	{
 		WeaponComponent->SpreadHip     = Def.SpreadHipDeg;
@@ -2006,15 +2121,20 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 		WeaponComponent->MuzzleSpeedUU = Def.MuzzleSpeedUU;
 		WeaponComponent->ProjLifetime  = Def.ProjLifetimeSec;
 		WeaponComponent->BurstCount    = Def.ClassBurstCount;
-		WeaponComponent->HopperCapacity = Def.MagSize;   // per-weapon mag (rifle 30 / SMG 25 / pistol 18)
-		WeaponComponent->HopperCount    = Def.MagSize;   // start full at the new capacity
-		WeaponComponent->FireRateBps    = Def.FireRateBps;   // per-weapon ROF (replaced the global marker preset)
+		WeaponComponent->HopperCapacity = Def.MagSize;
+		WeaponComponent->HopperCount    = Def.MagSize;
+		WeaponComponent->FireRateBps    = Def.FireRateBps;
 		WeaponComponent->SetAllowedFireModes(Def.AllowedFireModes, Def.DefaultFireMode);
 	}
 
-	// Third-person weapon (seen by other players) — swap + re-seat on the hand.
+	// TP hand gun + back-slung stowed gun.
 	WeaponMesh = WpnMesh;
 	AttachWeaponToHand();
+
+	const FPFWeaponDef& StowedDef = PFWeapon::Weapon(StowedConfig.Category, StowedConfig.Index);
+	UStaticMesh* StowedMesh = PFWeapon::LoadMesh(StowedDef);
+	UMaterialInterface* StowedMat = PFWeapon::LoadMaterial(StowedDef);
+	AttachWeaponToBack(StowedMesh, StowedMat);
 }
 
 void ACombatForgeCharacter::ReapplyWeaponLoadout()
@@ -2123,6 +2243,9 @@ void ACombatForgeCharacter::PushLocalKit()
 	const FPFWeaponConfig WpnCfg = PFWeapon::LoadConfig();
 	Kit.WeaponCategory = (uint8)WpnCfg.Category;
 	Kit.WeaponIndex    = (uint8)WpnCfg.Index;
+	const FPFWeaponConfig SecCfg = PFWeapon::LoadSecondaryConfig();
+	Kit.SecondaryCategory = (uint8)SecCfg.Category;
+	Kit.SecondaryIndex    = (uint8)SecCfg.Index;
 
 	KitRep = Kit;   // listen host: this IS the replicated copy; pure client: local preview until the RPC lands
 	ApplyKit();
@@ -2268,6 +2391,35 @@ static FAutoConsoleCommandWithWorldAndArgs GPFWeaponADSCmd(
 	TEXT("Tune the equipped weapon's aim-down-sight pose: x y z pitch yaw roll. Hold right-click to preview; prints values for PFWeaponCatalog."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponADSCmd));
 
+// Secondary / back-sling weapon (any catalog gun). Scroll wheel swaps hand ↔ back.
+static void PFWeapon2Cmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 2)
+	{
+		UE_LOG(CombatForgeLog, Log,
+			TEXT("usage: pf.Weapon2 <category> <index>   (0=AR 1=SMG 2=Pistol 3=Shotgun 4=Sniper 5=LMG)"));
+		return;
+	}
+	FPFWeaponConfig C;
+	C.Category = FCString::Atoi(*Args[0]);
+	C.Index = FCString::Atoi(*Args[1]);
+	PFWeapon::SaveSecondaryConfig(C);
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		if (It->IsLocallyControlled())
+		{
+			It->ReapplyWeaponLoadout();
+		}
+	}
+	const FPFWeaponDef& D = PFWeapon::Weapon(C.Category, C.Index);
+	UE_LOG(CombatForgeLog, Log, TEXT("pf.Weapon2: secondary = %s / %s (on back when primary is drawn)"),
+		*PFWeapon::CategoryLabel(C.Category), D.DisplayName);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeapon2Cmd(
+	TEXT("pf.Weapon2"),
+	TEXT("Set secondary (back-sling) weapon: <category> <index>. Scroll swaps with primary."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeapon2Cmd));
+
 void ACombatForgeCharacter::ApplyTeamBody(uint8 Team)
 {
 	// Mounts the per-team skeletal body. Gated so the frequent SetTeamColor calls (ready/budget/roster
@@ -2409,34 +2561,112 @@ void ACombatForgeCharacter::AttachWeaponToHand()
 	ApplyHandWeaponPose();
 }
 
+void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat)
+{
+	if (BackWeaponMeshComp == nullptr)
+	{
+		return;
+	}
+	if (StowedMesh == nullptr || !bUsingArtBody || GetMesh() == nullptr)
+	{
+		BackWeaponMeshComp->SetStaticMesh(nullptr);
+		BackWeaponMeshComp->SetVisibility(false);
+		BackWeaponMeshComp->SetHiddenInGame(true);
+		return;
+	}
+
+	BackWeaponMeshComp->SetStaticMesh(StowedMesh);
+	const int32 Mats = BackWeaponMeshComp->GetNumMaterials();
+	for (int32 i = 0; i < Mats; ++i)
+	{
+		BackWeaponMeshComp->SetMaterial(i, StowedMat);
+	}
+
+	USkeletalMeshComponent* Body = GetMesh();
+	// Spine / backpack bones — first hit wins (Manny + Bandit-compatible names).
+	static const FName BackBones[] = {
+		TEXT("spine_03"), TEXT("Spine_03"), TEXT("spine_02"), TEXT("Spine_02"),
+		TEXT("spine_01"), TEXT("Spine_01"), TEXT("spine_01_socket"),
+		TEXT("backpack"), TEXT("Backpack"), TEXT("ik_hand_gun"),
+	};
+	FName Bone = BackWeaponAttachBone;
+	auto Exists = [Body](FName N) -> bool
+	{
+		return Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE;
+	};
+	if (Bone.IsNone() || !Exists(Bone))
+	{
+		Bone = NAME_None;
+		for (const FName& N : BackBones)
+		{
+			if (Exists(N))
+			{
+				Bone = N;
+				break;
+			}
+		}
+		BackWeaponAttachBone = Bone;
+	}
+
+	if (!Bone.IsNone())
+	{
+		BackWeaponMeshComp->AttachToComponent(Body,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale, Bone);
+	}
+	else
+	{
+		// Mesh-root fallback: upper back-ish relative to pelvis.
+		BackWeaponMeshComp->AttachToComponent(Body,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	}
+	BackWeaponMeshComp->SetRelativeLocation(BackWeaponRelativeLocation);
+	BackWeaponMeshComp->SetRelativeRotation(BackWeaponRelativeRotation);
+	BackWeaponMeshComp->SetRelativeScale3D(BackWeaponRelativeScale);
+	BackWeaponMeshComp->SetOwnerNoSee(true);
+	BackWeaponMeshComp->SetCastShadow(true);
+	BackWeaponMeshComp->SetVisibility(true);
+	BackWeaponMeshComp->SetHiddenInGame(false);
+}
+
 FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const
 {
 	if (Body == nullptr)
 	{
 		return NAME_None;
 	}
-	// Prefer sockets first (weapon sockets), then common hand bone names (Manny + military packs).
-	static const FName Candidates[] = {
-		TEXT("hand_rSocket"),
-		TEXT("weapon_r"),
-		TEXT("WeaponPoint"),
+	// Prefer the RIGHT HAND bone for in-hand carry. Do NOT prefer "weapon_r" / holster sockets first —
+	// many packs put weapon_r on the hip; attaching there left a fixed hip gun while the FP viewmodel
+	// (or armed-hand pose) still looked "in hands" (double-gun bug).
+	static const FName HandFirst[] = {
 		TEXT("hand_r"),
 		TEXT("Hand_R"),
+		TEXT("hand_rSocket"),
 		TEXT("RightHand"),
 		TEXT("ik_hand_gun"),
 		TEXT("ik_hand_r"),
 		TEXT("HandR"),
-		TEXT("LowerArm_R"),   // last-resort closer to hand than pelvis
+		TEXT("LowerArm_R"),
+	};
+	static const FName HolsterLast[] = {
+		TEXT("weapon_r"),
+		TEXT("WeaponPoint"),
+		TEXT("weapon_l"),
 	};
 	auto Exists = [Body](FName N) -> bool
 	{
 		return Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE;
 	};
+	// Explicit default only if it's a hand (not a holster name).
 	if (!WeaponAttachSocket.IsNone() && Exists(WeaponAttachSocket))
 	{
-		return WeaponAttachSocket;
+		const FString Want = WeaponAttachSocket.ToString().ToLower();
+		const bool bHolsterName = Want.Contains(TEXT("weapon")) && !Want.Contains(TEXT("hand"));
+		if (!bHolsterName)
+		{
+			return WeaponAttachSocket;
+		}
 	}
-	for (const FName& N : Candidates)
+	for (const FName& N : HandFirst)
 	{
 		if (Exists(N))
 		{
@@ -2455,9 +2685,8 @@ FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponen
 		{
 			continue;
 		}
-		if ((Lower.Contains(TEXT("hand")) && (Lower.Contains(TEXT("_r")) || Lower.EndsWith(TEXT("r"))
+		if (Lower.Contains(TEXT("hand")) && (Lower.Contains(TEXT("_r")) || Lower.EndsWith(TEXT("r"))
 				|| Lower.Contains(TEXT("right"))))
-			|| Lower.Contains(TEXT("weapon")))
 		{
 			// Skip left hand.
 			if (Lower.Contains(TEXT("_l")) || Lower.Contains(TEXT("left")))
@@ -2465,6 +2694,14 @@ FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponen
 				continue;
 			}
 			return Body->GetBoneName(i);
+		}
+	}
+	// Holster sockets only if no hand bone exists at all.
+	for (const FName& N : HolsterLast)
+	{
+		if (Exists(N))
+		{
+			return N;
 		}
 	}
 	return NAME_None;
@@ -2569,6 +2806,11 @@ void ACombatForgeCharacter::UpdateSequenceLocomotion()
 	// Eliminated: the directional death fall owns the mesh until DeathHideTimer hides it. SeqLocoState=0
 	// (stamped at death AND on revive) re-arms the right locomotion anim at respawn.
 	if (bEliminatedAppearanceActive)
+	{
+		return;
+	}
+	// Mantle owns the mesh for the climb (MM_WallJump) — don't overwrite with walk/jog mid-pull-up.
+	if (bMantleAnimActive || (PFMovement != nullptr && PFMovement->IsMantling()))
 	{
 		return;
 	}
@@ -2682,7 +2924,12 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
 		ViewModelRoot->SetVisibility(!bHideForBuild && !bElim, /*bPropagateToChildren=*/true);
 	}
-	// TP rifle (remotes): also hide so builders don't look armed.
+	// TP rifles (hand + back sling): hide in build / elim so builders don't look armed.
+	if (BackWeaponMeshComp != nullptr)
+	{
+		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
+		BackWeaponMeshComp->SetHiddenInGame(bHideForBuild || bElim);
+	}
 	if (WeaponMeshComp != nullptr)
 	{
 		// Don't fight elimination hide — elim appearance owns that path.
@@ -2777,6 +3024,7 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 		if (H->bEliminated)
 		{
 			if (WeaponMeshComp != nullptr) { WeaponMeshComp->SetHiddenInGame(true); }
+			if (BackWeaponMeshComp != nullptr) { BackWeaponMeshComp->SetHiddenInGame(true); }
 			if (ViewModelRoot != nullptr)  { ViewModelRoot->SetVisibility(false, /*bPropagateToChildren=*/true); }
 			if (FirstPersonArms != nullptr) { FirstPersonArms->SetVisibility(false); }
 			return;
@@ -2980,6 +3228,10 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	{
 		WeaponMeshComp->SetHiddenInGame(bEliminated);
 	}
+	if (BackWeaponMeshComp != nullptr)
+	{
+		BackWeaponMeshComp->SetHiddenInGame(bEliminated);
+	}
 	if (ViewModelRoot != nullptr)
 	{
 		ViewModelRoot->SetVisibility(!bEliminated, /*bPropagateToChildren=*/true);
@@ -2994,26 +3246,92 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	}
 }
 
-FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
+FVector ACombatForgeCharacter::ResolveGunMuzzleWorld(const UStaticMeshComponent* Gun, const FVector& LocalFallback)
 {
-	// Owning-client cosmetic tracers: FP barrel tip (viewmodel on camera — correct FPS height).
-	if (bCosmetic && ViewModelRoot != nullptr && !MuzzleLocalFP.IsNearlyZero())
+	if (Gun == nullptr || Gun->GetStaticMesh() == nullptr)
 	{
-		return ViewModelRoot->GetComponentTransform().TransformPosition(MuzzleLocalFP);
-	}
-	if (bCosmetic && FirstPersonCamera != nullptr)
-	{
-		return FirstPersonCamera->GetComponentLocation() + FirstPersonCamera->GetForwardVector() * 55.f;
+		return FVector::ZeroVector;
 	}
 
-	// Authoritative / remote: spawn from the TP rifle barrel when it's seated on the body. IsAttachedTo (not a
-	// direct-parent check) so any future pose swap that inserts an intermediate parent can't silently kick every
-	// shot back to the eye fallback — that exact failure shipped once (see OnFireCosmetic).
+	// 1) Authored sockets (Marketplace / Bandits often ship these) — true barrel tip when present.
+	static const FName SocketNames[] = {
+		TEXT("Muzzle"), TEXT("muzzle"), TEXT("MuzzleFlash"), TEXT("muzzle_flash"),
+		TEXT("Muzzle_Flash"), TEXT("barrel"), TEXT("Barrel"), TEXT("barrel_end"),
+		TEXT("WP_Muzzle"), TEXT("socket_muzzle"), TEXT("Fire"), TEXT("fire")
+	};
+	for (const FName& Sock : SocketNames)
+	{
+		if (Gun->DoesSocketExist(Sock))
+		{
+			return Gun->GetSocketLocation(Sock);
+		}
+	}
+
+	// 2) Auto tip from mesh bounds: barrel runs along the longest horizontal axis; tip at the +end,
+	// slightly above the box center so grip/stock mass below the bore doesn't pull the point into the handguard.
+	const FBoxSphereBounds B = Gun->GetStaticMesh()->GetBounds();
+	const FVector O = B.Origin;
+	const FVector E = B.BoxExtent;
+	FVector TipLocal = O;
+	if (E.Y >= E.X)
+	{
+		// SM_Rifle / many Bandits: local +Y is barrel-forward.
+		TipLocal = FVector(O.X, O.Y + E.Y, O.Z + E.Z * 0.12f);
+	}
+	else
+	{
+		// Most MarketplaceBlockout statics: local +X is barrel-forward.
+		TipLocal = FVector(O.X + E.X, O.Y, O.Z + E.Z * 0.12f);
+	}
+	// Nudge past the tip so the BB doesn't spawn inside the solid.
+	const FVector Along = (TipLocal - O).GetSafeNormal();
+	if (!Along.IsNearlyZero())
+	{
+		TipLocal += Along * 3.f;
+	}
+	else if (!LocalFallback.IsNearlyZero())
+	{
+		TipLocal = LocalFallback;
+	}
+	return Gun->GetComponentTransform().TransformPosition(TipLocal);
+}
+
+FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
+{
+	// Owning-client cosmetic tracers: FP viewmodel gun mesh barrel (any catalog weapon).
+	if (bCosmetic)
+	{
+		if (RifleFPMesh != nullptr && RifleFPMesh->GetStaticMesh() != nullptr && RifleFPMesh->IsVisible())
+		{
+			// Mesh-local auto tip → world via the FP component (pose/scale already applied).
+			const FVector W = ResolveGunMuzzleWorld(RifleFPMesh, FVector::ZeroVector);
+			if (!W.IsNearlyZero())
+			{
+				return W;
+			}
+		}
+		// Graybox marker parts: fall back to the composed ViewModelRoot offset.
+		if (ViewModelRoot != nullptr && !MuzzleLocalFP.IsNearlyZero())
+		{
+			return ViewModelRoot->GetComponentTransform().TransformPosition(MuzzleLocalFP);
+		}
+		if (FirstPersonCamera != nullptr)
+		{
+			return FirstPersonCamera->GetComponentLocation() + FirstPersonCamera->GetForwardVector() * 55.f;
+		}
+	}
+
+	// Authoritative / remote: TP gun on the body — same auto barrel tip, no per-weapon hand offset.
+	// IsAttachedTo (not direct parent) so intermediate pose parents can't drop us to the eye fallback.
 	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr && bUsingArtBody
 		&& !WeaponMeshComp->bHiddenInGame
 		&& GetMesh() != nullptr && WeaponMeshComp->IsAttachedTo(GetMesh()))
 	{
-		return WeaponMeshComp->GetComponentTransform().TransformPosition(RifleMuzzleLocalTP);
+		const FVector W = ResolveGunMuzzleWorld(WeaponMeshComp, RifleMuzzleLocalTP);
+		if (!W.IsNearlyZero())
+		{
+			return W;
+		}
 	}
 
 	// Fallback: slightly forward of the eye (no art body / hidden gun).

@@ -71,7 +71,9 @@ public:
 	// ---- Team + elimination cosmetics (pkg-weapons calls these) ----
 	void  SetTeamColor(uint8 TeamId);      // MID tint on the graybox mesh
 	void  SetEliminatedAppearance(bool bEliminated); // hide mesh; collision handled by health component
-	FVector GetMuzzleLocation(bool bCosmetic) const; // FP viewmodel tip / TP rifle tip / eye-line fallback
+	/** BB/tracer origin. Prefers a Muzzle* socket on the gun mesh, else auto tip from mesh bounds
+	 *  (longest horizontal axis) so every catalog weapon fires from its barrel without hand offsets. */
+	FVector GetMuzzleLocation(bool bCosmetic) const;
 
 	/** Eye world position (capsule top - eye offset) — used for aim-line raise, muzzle fallback, grenade spawn. */
 	FVector GetEyeWorldLocation() const;
@@ -155,6 +157,8 @@ protected:
 
 	/** Slide state delegate from the CMC (both sides; we only use it locally). */
 	void HandleSlideStateChanged(bool bSliding);
+	/** Mantle enter/exit — plays MM_WallJump (or Bandit jump fallback) for the climb. */
+	void HandleMantleStateChanged(bool bMantling);
 
 	/**
 	 * Advances ADSAlpha toward IsADS() every Tick on EVERY role — the server
@@ -236,6 +240,8 @@ private:
 	// Set these on a BP subclass, or via ctor FObjectFinder once the assets are imported.
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
 	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UStaticMeshComponent>  WeaponMeshComp;
+	/** Stowed / inactive gun on the back (primary when secondary drawn, or vice versa). */
+	UPROPERTY(VisibleAnywhere, Category="PF|Components") TObjectPtr<UStaticMeshComponent>  BackWeaponMeshComp;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> ThirdPersonBodyMesh = nullptr;   // fallback TP body -> GetMesh()
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> Team0BodyMesh = nullptr;         // team 0 = Quantum operator
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> Team1BodyMesh = nullptr;         // team 1 = Survival character
@@ -267,6 +273,10 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> ArmedJogDir;
 	// Directional elimination reactions (0=front 1=right 2=back 3=left, relative to the shot).
 	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> DeathDirAnims;
+	/** Ledge climb anim — mannequin MM_WallJump preferred; Bandit A_MM_Jump as skeleton-safe fallback. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") TObjectPtr<UAnimSequence> MantleAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") TObjectPtr<UAnimSequence> MantleAnimFallback = nullptr;
+	bool bMantleAnimActive = false;
 	FTimerHandle DeathHideTimer;   // plays the fall, then hides the body
 	bool bEliminatedAppearanceActive = false;   // gates UpdateSequenceLocomotion off the corpse
 	UPROPERTY() TArray<TObjectPtr<USkeletalMeshComponent>> CharBaseComps;   // fixed base skin parts (head/legs)
@@ -289,17 +299,18 @@ private:
 	void ApplyKit();          // apply KitRep → ActiveCharConfig/ActiveWeaponConfig → visuals + weapon stats
 	bool HasValidKit() const { return KitRep.CharParts.Num() > 0; }
 
-	// ---- Weapon swap: primary (kit) ↔ pistol secondary, on the scroll wheel ----
-	// bSecondaryActive replicates so every machine re-equips the right gun mesh; ammo is stashed per slot on
-	// the server so a swap never refills. Respawn returns you to the primary (ResetToPrimaryWeapon).
+	// ---- Dual-weapon carry: primary + secondary (any catalog guns). Scroll swaps which is in hand;
+	// the other rides the back sling. bSecondaryActive = secondary is the hand gun.
 	UPROPERTY(ReplicatedUsing=OnRep_SecondaryActive) bool bSecondaryActive = false;
 	UFUNCTION() void OnRep_SecondaryActive();
 	UFUNCTION(Server, Reliable) void ServerSwapWeapon();
-	uint8 StashHopper[2]  = { 0, 0 };     // saved mag per slot (0=primary, 1=pistol)
+	uint8 StashHopper[2]  = { 0, 0 };     // saved mag per slot (0=primary, 1=secondary)
 	int32 StashReserve[2] = { 0, 0 };     // saved reserve per slot
 	bool  bStashValid[2]  = { false, false };
 	double LastSwapTime = -100.0;
 	static constexpr float SwapCooldown = 0.25f;   // debounce a multi-notch scroll into one swap
+	FPFWeaponConfig PrimaryWeaponConfig;
+	FPFWeaponConfig SecondaryWeaponConfig;
 public:
 	/** Owning client: scroll-wheel while alive → request a weapon swap (debounced). */
 	void OnWeaponSwapInput();
@@ -323,10 +334,12 @@ public:
 	/** Re-pick armed vs unarmed locomotion set from pf.ArmedAnims and re-arm a live pawn. Returns the idle. */
 	UAnimSequence* RefreshBanditAnimSet();
 
-	/** Apply the saved weapon selection: swap the FP viewmodel + TP weapon mesh/material/pose. */
+	/** Apply kit weapons: active in hand + inactive on back sling. */
 	void ApplyWeaponLoadout();
 	/** Reload the saved weapon config and re-apply (menu edits an already-spawned pawn). */
 	void ReapplyWeaponLoadout();
+	/** Seat the stowed (non-active) gun on the back. */
+	void AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat);
 	/** Live-tune the FP weapon pose (console: pf.WeaponFP) — the per-weapon poses need dialing in-editor. */
 	void TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle);
 	/** Live-tune the per-weapon aim-down-sight pose (console: pf.WeaponADS). Hold right-click to preview. */
@@ -344,6 +357,11 @@ private:
 	// Fallback when the mesh has no hand bone: hip-carry in mesh space (low — not chest/head).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(18.f, 22.f, 28.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(5.f, 90.f, -10.f);
+	// Back-sling pose (spine bone local): stock down-right, barrel up over the shoulder.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeLocation = FVector(-8.f, 12.f, -2.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator BackWeaponRelativeRotation = FRotator(10.f, 95.f, 75.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeScale = FVector(0.85f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName BackWeaponAttachBone = NAME_None; // resolved at runtime
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
 	// Optional single-slot overrides (mannequin only). Human models keep authored multi-slot mats.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> Team0BodyMaterial = nullptr;
@@ -362,8 +380,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilKickUU = 3.5f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilKickPitchDeg = 1.6f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float RecoilRecoverSpeed = 11.f;
-	// Local tip of SM_Rifle when barrel-forward is +Y (after TP world yaw -90).
+	// Fallback TP tip in gun-mesh local space when auto bounds fail (graybox / missing mesh).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") FVector RifleMuzzleLocalTP = FVector(0.f, 58.f, 4.f);
+	/** Resolve world muzzle from a gun mesh component (socket → bounds tip → optional local fallback). */
+	static FVector ResolveGunMuzzleWorld(const UStaticMeshComponent* Gun, const FVector& LocalFallback);
 	/** How long the TP gun stays raised after a shot (covers auto-fire gaps + remotes). */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.45f;
 	// Raised pose: mesh origin relative to eye (forward / right / down along aim basis).

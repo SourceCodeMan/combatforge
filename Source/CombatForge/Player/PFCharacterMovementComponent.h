@@ -44,7 +44,8 @@ public:
 	                                       // move stream — the character reads it back so the authoritative
 	                                       // spread cone matches the owning client's prediction
 
-	FPFOnSlideStateChanged OnSlideStateChanged;  // character binds for FOV kick; fired on both sides
+	FPFOnSlideStateChanged OnSlideStateChanged;    // character binds for FOV kick; fired on both sides
+	FPFOnMantleStateChanged OnMantleStateChanged;  // character binds for mantle climb anim
 
 	// ---- Config (ctor defaults per 04) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Movement") float WalkSpeed = 600.f;

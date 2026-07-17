@@ -304,9 +304,15 @@ void UPFCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 	}
 
 	const bool bWasMantling = (PreviousMovementMode == MOVE_Custom && PreviousCustomMode == CMOVE_Mantle);
-	if (bWasMantling && !IsMantling())
+	const bool bNowMantling = IsMantling();
+	if (bNowMantling && !bWasMantling)
+	{
+		OnMantleStateChanged.Broadcast(true);
+	}
+	else if (bWasMantling && !bNowMantling)
 	{
 		MantleElapsed = 0.f;
+		OnMantleStateChanged.Broadcast(false);
 	}
 }
 
@@ -526,52 +532,146 @@ bool UPFCharacterMovementComponent::DetectMantleLedge(FVector& OutStandTarget) c
 		return false;   // a floor/ramp surface or a glancing wall — not a mantle face
 	}
 
-	// 2) The ledge top: trace DOWN just inside the face from above the height band. A wall taller than the
-	//    band puts the trace start inside its body → degenerate/too-high hit → rejected by the band below.
-	const FVector TopProbeXY = FVector(WallHit.ImpactPoint.X, WallHit.ImpactPoint.Y, 0.f) + Fwd * 8.f;
-	const float ProbeTopZ = FeetZ + MantleMaxHeightUU + 40.f;
-	FHitResult TopHit;
-	if (!World->LineTraceSingleByObjectType(TopHit,
-		FVector(TopProbeXY.X, TopProbeXY.Y, ProbeTopZ),
-		FVector(TopProbeXY.X, TopProbeXY.Y, FeetZ), StaticOnly, Params))
+	// 2) Ledge top height: sample just past the hit face (and a backup on the face plane). Prefer the
+	//    highest solid within the one-level band so a thin wall top wins over a ramp deeper inside the cell.
+	const float ProbeTopZ = FeetZ + MantleMaxHeightUU + 80.f;
+	auto SampleTopZ = [&](const FVector& XY, float& OutZ) -> bool
+	{
+		FHitResult Hit;
+		if (!World->LineTraceSingleByObjectType(Hit,
+			FVector(XY.X, XY.Y, ProbeTopZ),
+			FVector(XY.X, XY.Y, FeetZ - 20.f), StaticOnly, Params))
+		{
+			return false;
+		}
+		OutZ = Hit.ImpactPoint.Z;
+		return true;
+	};
+
+	float LedgeTopZ = 0.f;
+	bool bHaveTop = false;
+	// Samples near the face (wall top). Avoid going deep into the far cell first — that often hits a ramp
+	// slope and rejects a valid 1-wall climb.
+	const FVector FaceN = FVector(WallHit.ImpactNormal).GetSafeNormal2D();
+	const FVector SamplePts[] = {
+		FVector(WallHit.ImpactPoint) - FaceN * 6.f,           // slightly into the wall volume / top
+		FVector(WallHit.ImpactPoint) + Fwd * 6.f,             // just past the face
+		FVector(WallHit.ImpactPoint) + Fwd * 14.f,
+	};
+	for (const FVector& P : SamplePts)
+	{
+		float Z = 0.f;
+		if (!SampleTopZ(P, Z))
+		{
+			continue;
+		}
+		const float Rel = Z - FeetZ;
+		if (Rel < MantleMinHeightUU || Rel > MantleMaxHeightUU)
+		{
+			continue;
+		}
+		if (!bHaveTop || Z > LedgeTopZ)
+		{
+			LedgeTopZ = Z;
+			bHaveTop = true;
+		}
+	}
+	if (!bHaveTop)
+	{
+		return false;   // no one-level lip (step-up, too tall, or no top)
+	}
+
+	// 3) Landing: try several spots past the face. Prefer standing ON whatever surface is there (floor,
+	//    far-side ramp, wall top) rather than requiring empty air — a ramp behind a 1-high wall used to
+	//    fail the full-capsule overlap even though the climb is legal.
+	const FCollisionShape ClearShape = FCollisionShape::MakeCapsule(
+		FMath::Max(10.f, Radius - 6.f), FMath::Max(12.f, StandHalfHeight - 6.f));
+	const FCollisionShape PathShape = FCollisionShape::MakeCapsule(
+		FMath::Max(10.f, Radius - 10.f), FMath::Max(10.f, StandHalfHeight - 10.f));
+
+	const float FwdOffsets[] = {
+		10.f,
+		18.f,
+		Radius * 0.35f + 12.f,
+		Radius + 12.f,
+		Radius + 28.f,
+		Radius + 48.f,
+	};
+
+	FVector BestStand = FVector::ZeroVector;
+	bool bFound = false;
+	for (const float Off : FwdOffsets)
+	{
+		const FVector LandXY = FVector(WallHit.ImpactPoint) + Fwd * Off;
+		// Surface under this XY: ramp / floor / wall top.
+		float SurfZ = LedgeTopZ;
+		{
+			FHitResult FloorHit;
+			const bool bFloor = World->LineTraceSingleByObjectType(FloorHit,
+				FVector(LandXY.X, LandXY.Y, LedgeTopZ + 220.f),
+				FVector(LandXY.X, LandXY.Y, LedgeTopZ - 320.f), StaticOnly, Params);
+			if (bFloor)
+			{
+				SurfZ = FloorHit.ImpactPoint.Z;
+			}
+		}
+		// Must stay near the grabbed lip: not a distant lower floor, not a roof far above.
+		if (SurfZ > LedgeTopZ + 100.f || SurfZ < LedgeTopZ - 280.f)
+		{
+			continue;
+		}
+
+		const FVector StandCandidate(
+			LandXY.X, LandXY.Y, SurfZ + StandHalfHeight + 4.f);
+		// Vertical rise corner: same XY as start, stand height (clear the lip).
+		const FVector RiseCorner(Loc.X, Loc.Y, FMath::Max(StandCandidate.Z, LedgeTopZ + StandHalfHeight + 4.f));
+
+		if (World->OverlapBlockingTestByChannel(RiseCorner, FQuat::Identity, ECC_Pawn, ClearShape, Params))
+		{
+			continue;   // no headroom to rise (true roof)
+		}
+		if (World->OverlapBlockingTestByChannel(StandCandidate, FQuat::Identity, ECC_Pawn, ClearShape, Params))
+		{
+			continue;   // landing capsule intersects solid
+		}
+		// Path: up, then over. Shrunk so flush wall scrapes don't false-block.
+		if (World->SweepTestByChannel(Loc, RiseCorner, FQuat::Identity, ECC_Pawn, PathShape, Params)
+			|| World->SweepTestByChannel(RiseCorner, StandCandidate, FQuat::Identity, ECC_Pawn, PathShape, Params))
+		{
+			continue;
+		}
+
+		BestStand = StandCandidate;
+		bFound = true;
+		break;
+	}
+
+	// 4) Last resort for thin walls: vault target ABOVE the lip with only a short forward tuck (then fall
+	//    onto the far-side ramp/floor). Overlap against far geometry is ignored as long as the rise is clear
+	//    and a small air pocket above the lip is free.
+	if (!bFound)
+	{
+		const FVector VaultXY = FVector(WallHit.ImpactPoint) + Fwd * 16.f;
+		const FVector VaultStand(VaultXY.X, VaultXY.Y, LedgeTopZ + StandHalfHeight + 12.f);
+		const FVector RiseCorner(Loc.X, Loc.Y, VaultStand.Z);
+		const FCollisionShape AirShape = FCollisionShape::MakeCapsule(
+			FMath::Max(8.f, Radius - 12.f), FMath::Max(10.f, StandHalfHeight * 0.55f));
+		if (!World->OverlapBlockingTestByChannel(RiseCorner, FQuat::Identity, ECC_Pawn, ClearShape, Params)
+			&& !World->OverlapBlockingTestByChannel(VaultStand, FQuat::Identity, ECC_Pawn, AirShape, Params)
+			&& !World->SweepTestByChannel(Loc, RiseCorner, FQuat::Identity, ECC_Pawn, PathShape, Params))
+		{
+			// Horizontal tuck may graze a far ramp — allow; PhysMantle ends in Falling with forward carry.
+			BestStand = VaultStand;
+			bFound = true;
+		}
+	}
+
+	if (!bFound)
 	{
 		return false;
 	}
-	const float LedgeTopZ = TopHit.ImpactPoint.Z;
-	const float RelHeight = LedgeTopZ - FeetZ;
-	if (RelHeight < MantleMinHeightUU || RelHeight > MantleMaxHeightUU)
-	{
-		return false;   // a normal step (walkable anyway) or too tall to grab — ONE build level max
-	}
 
-	// 3) End position: capsule centered just past the face, fully ABOVE the ledge top (so a thin 20uu wall is
-	//    vaulted and a thick slab is stood on). Verify capsule clearance there AND at the top-of-rise corner
-	//    (start XY at target Z) so the climb can't end inside a roof or another pawn.
-	const FVector StandTarget(
-		WallHit.ImpactPoint.X + Fwd.X * (Radius + 20.f),
-		WallHit.ImpactPoint.Y + Fwd.Y * (Radius + 20.f),
-		LedgeTopZ + StandHalfHeight + 4.f);
-	const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(Radius, StandHalfHeight);
-	const FVector RiseCorner(Loc.X, Loc.Y, StandTarget.Z);
-	if (World->OverlapBlockingTestByChannel(RiseCorner, FQuat::Identity, ECC_Pawn, CapsuleShape, Params)
-		|| World->OverlapBlockingTestByChannel(StandTarget, FQuat::Identity, ECC_Pawn, CapsuleShape, Params))
-	{
-		return false;   // no headroom (roof) or the landing spot is occupied
-	}
-
-	// 4) Sweep the actual L-shaped climb path (up, then over) with a slightly SHRUNK capsule: the interp runs
-	//    with collision off, so anything solid between the endpoints would be tunneled through — e.g. climbing
-	//    out through the roof of a sealed fort (review wf_e923820a). The shrink keeps a flush wall-scrape from
-	//    false-blocking the vertical rise.
-	const FCollisionShape SweptShape = FCollisionShape::MakeCapsule(
-		FMath::Max(10.f, Radius - 8.f), FMath::Max(10.f, StandHalfHeight - 8.f));
-	if (World->SweepTestByChannel(Loc, RiseCorner, FQuat::Identity, ECC_Pawn, SweptShape, Params)
-		|| World->SweepTestByChannel(RiseCorner, StandTarget, FQuat::Identity, ECC_Pawn, SweptShape, Params))
-	{
-		return false;   // something solid crosses the climb path
-	}
-
-	OutStandTarget = StandTarget;
+	OutStandTarget = BestStand;
 	return true;
 }
 

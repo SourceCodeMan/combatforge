@@ -6,6 +6,8 @@
 #include "Building/PFBuildPieceVisuals.h"
 #include "Building/PFGridMath.h"
 #include "Combat/PFHealthComponent.h"
+#include "Core/CombatForgeGameState.h"
+#include "Core/CombatForgePlayerState.h"
 #include "Player/CombatForgeCharacter.h"
 
 #include "Components/BoxComponent.h"
@@ -73,16 +75,7 @@ void APFBuildPieceActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 void APFBuildPieceActor::BeginPlay()
 {
 	Super::BeginPlay();
-	// Clients: geometry is rebuilt from replicated fields (server calls InitFromRecord).
-	if (PieceId != 0 && SolidParts.Num() == 0)
-	{
-		const float Wx = GridX * 100.f;
-		const float Wy = GridY * 100.f;
-		const float Wz = GridZ * 100.f;
-		SetActorLocation(FVector(Wx, Wy, Wz));
-		RebuildGeometry();
-		ApplyOpenState();
-	}
+	EnsureGeometryBuilt();
 }
 
 void APFBuildPieceActor::InitFromRecord(const FPFBuildPieceRec& Rec)
@@ -96,7 +89,6 @@ void APFBuildPieceActor::InitFromRecord(const FPFBuildPieceRec& Rec)
 	TeamId = Rec.Team;
 	bOpen = false;
 	DoorYawAlpha = 0.f;
-	TrapStandAccum = 0.f;
 	TrapOpenRemaining = 0.f;
 
 	const float Wx = GridX * Sub;
@@ -111,6 +103,30 @@ void APFBuildPieceActor::InitFromRecord(const FPFBuildPieceRec& Rec)
 
 void APFBuildPieceActor::OnRep_Open()
 {
+	EnsureGeometryBuilt();
+	ApplyOpenState();
+}
+
+void APFBuildPieceActor::OnRep_PieceMeta()
+{
+	EnsureGeometryBuilt();
+}
+
+void APFBuildPieceActor::EnsureGeometryBuilt()
+{
+	if (PieceId == 0)
+	{
+		return;
+	}
+	if (SolidParts.Num() > 0)
+	{
+		return;
+	}
+	const float Wx = GridX * Sub;
+	const float Wy = GridY * Sub;
+	const float Wz = GridZ * Sub;
+	SetActorLocation(FVector(Wx, Wy, Wz));
+	RebuildGeometry();
 	ApplyOpenState();
 }
 
@@ -540,7 +556,6 @@ void APFBuildPieceActor::TickTrap(float DeltaSeconds)
 		if (TrapOpenRemaining <= 0.f)
 		{
 			bOpen = false;
-			TrapStandAccum = 0.f;
 			TrapOpenRemaining = 0.f;
 			ApplyOpenState();
 			ForceNetUpdate();
@@ -548,52 +563,55 @@ void APFBuildPieceActor::TickTrap(float DeltaSeconds)
 		return;
 	}
 
-	// Anyone standing on the plate?
-	bool bOccupied = false;
+	// Trip only when an ENEMY of the placing team stands on the plate (owner team is safe).
 	UWorld* World = GetWorld();
-	if (World && TrapTrigger)
+	if (!World || !TrapTrigger)
 	{
-		const FVector Center = TrapTrigger->GetComponentLocation();
-		const FVector Ext = TrapTrigger->GetScaledBoxExtent();
-		const FBox TriggerBox(Center - Ext, Center + Ext);
-		for (TActorIterator<ACharacter> It(World); It; ++It)
-		{
-			ACharacter* C = *It;
-			if (!C)
-			{
-				continue;
-			}
-			if (const ACombatForgeCharacter* PFC = Cast<ACombatForgeCharacter>(C))
-			{
-				if (const UPFHealthComponent* H = PFC->GetHealth(); H && H->bEliminated)
-				{
-					continue;
-				}
-			}
-			const FVector Feet = C->GetActorLocation() - FVector(0.f, 0.f, C->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
-			if (TriggerBox.IsInsideOrOn(Feet) || TriggerBox.IsInsideOrOn(C->GetActorLocation()))
-			{
-				bOccupied = true;
-				break;
-			}
-		}
+		return;
+	}
+	const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>();
+	if (!GS || GS->Phase != EPFMatchPhase::Combat || !GS->IsFireAllowed())
+	{
+		return;   // combat-live only
 	}
 
-	if (bOccupied)
+	const FVector Center = TrapTrigger->GetComponentLocation();
+	const FVector Ext = TrapTrigger->GetScaledBoxExtent();
+	const FBox TriggerBox(Center - Ext, Center + Ext);
+	for (TActorIterator<ACharacter> It(World); It; ++It)
 	{
-		TrapStandAccum += DeltaSeconds;
-		if (TrapStandAccum >= TrapStandSeconds)
+		ACombatForgeCharacter* PFC = Cast<ACombatForgeCharacter>(*It);
+		if (!PFC)
 		{
-			bOpen = true;
-			TrapOpenRemaining = TrapOpenSeconds;
-			TrapStandAccum = 0.f;
-			ApplyOpenState();
-			ForceNetUpdate();
-			UE_LOG(CombatForgeLog, Log, TEXT("Trap floor %u OPEN (%.0fs stand)"), PieceId, TrapStandSeconds);
+			continue;
 		}
-	}
-	else
-	{
-		TrapStandAccum = 0.f; // leave → reset the 20s clock
+		if (const UPFHealthComponent* H = PFC->GetHealth(); H && H->bEliminated)
+		{
+			continue;
+		}
+		const ACombatForgePlayerState* PS = PFC->GetPlayerState<ACombatForgePlayerState>();
+		if (!PS)
+		{
+			continue;
+		}
+		// Placing team is immune. Anyone else (other team / FFA foe) trips the trap.
+		if (PS->TeamId == TeamId)
+		{
+			continue;
+		}
+		const FVector Feet = PFC->GetActorLocation()
+			- FVector(0.f, 0.f, PFC->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		if (!TriggerBox.IsInsideOrOn(Feet) && !TriggerBox.IsInsideOrOn(PFC->GetActorLocation()))
+		{
+			continue;
+		}
+
+		bOpen = true;
+		TrapOpenRemaining = TrapOpenSeconds;
+		ApplyOpenState();
+		ForceNetUpdate();
+		UE_LOG(CombatForgeLog, Log, TEXT("Trap floor %u tripped by enemy team %u (owner team %u)"),
+			PieceId, static_cast<uint32>(PS->TeamId), static_cast<uint32>(TeamId));
+		return;
 	}
 }

@@ -249,6 +249,74 @@ namespace PFWeapon
 		return Cast<UMaterialInterface>(FSoftObjectPath(Def.MaterialPath).TryLoad());
 	}
 
+	bool ComputeAutoPose(const UStaticMesh* Mesh, int32 Category, FPFWeaponAutoPose& Out)
+	{
+		if (Mesh == nullptr)
+		{
+			return false;
+		}
+
+		// Categories: 0 AR, 1 SMG, 2 Pistol, 3 Shotgun, 4 Sniper, 5 LMG
+		const bool bPistol  = (Category == 2);
+		const bool bCompact = (Category == 1 || Category == 2);   // SMG / pistol — shorter hold
+		const bool bLong    = (Category == 4 || Category == 5);   // sniper / LMG
+
+		const FBoxSphereBounds B = Mesh->GetBounds();
+		const FVector O = B.Origin;
+		const FVector E = B.BoxExtent;
+		const float LenX = FMath::Max(E.X * 2.f, 1.f);
+		const float LenY = FMath::Max(E.Y * 2.f, 1.f);
+		const float LenZ = FMath::Max(E.Z * 2.f, 1.f);
+		const bool bAlongY = (LenY >= LenX);   // SM_Rifle / many Bandits use +Y barrel
+		const float BarrelLen = bAlongY ? LenY : LenX;
+		const float BarrelHalf = BarrelLen * 0.5f;
+
+		// Fit longest horizontal axis into a target viewmodel length (uu).
+		float TargetLen = 48.f;
+		if (bPistol)       { TargetLen = 26.f; }
+		else if (bCompact) { TargetLen = 36.f; }
+		else if (bLong)    { TargetLen = 52.f; }
+		Out.FPScale = FMath::Clamp(TargetLen / BarrelLen, 0.12f, 0.85f);
+
+		// Point barrel along ViewModelRoot +X (camera forward).
+		// Mesh +Y barrel → yaw -90; mesh +X barrel → yaw 0. Slight pitch tucks the muzzle down a hair.
+		Out.FPRot = bAlongY
+			? FRotator(-2.f, -90.f, 0.f)
+			: FRotator(-2.f, 0.f, 0.f);
+
+		const FVector AlongMesh = bAlongY ? FVector(0.f, 1.f, 0.f) : FVector(1.f, 0.f, 0.f);
+		// Grip: rear of the gun, below the bore (stock / pistol grip region).
+		const FVector GripMesh = O - AlongMesh * (BarrelHalf * 0.55f) + FVector(0.f, 0.f, -E.Z * 0.55f);
+		// Iron-sight / optic line: top of receiver, a bit forward of center.
+		const FVector SightMesh = O + AlongMesh * (BarrelHalf * 0.15f) + FVector(0.f, 0.f, E.Z * 0.82f);
+
+		const FTransform MeshToParent(Out.FPRot, FVector::ZeroVector, FVector(Out.FPScale));
+		const FVector GripParent = MeshToParent.TransformPosition(GripMesh);
+		const FVector SightParentNoLoc = MeshToParent.TransformPosition(SightMesh);
+
+		// Desired grip in ViewModelRoot space (classic FPS hold: forward-right-down of eye).
+		FVector HoldGrip = bPistol
+			? FVector(10.f, 7.f, -11.f)
+			: (bCompact ? FVector(6.f, 8.f, -12.f) : FVector(4.f, 9.f, -13.f));
+		Out.FPLoc = HoldGrip - GripParent;
+
+		// Sight after hip pose (mesh + FPLoc).
+		const FVector SightAtHip = SightParentNoLoc + Out.FPLoc;
+
+		// ADS: move ViewModelRoot so the estimated sight sits on the camera forward axis at SightDist.
+		Out.AdsRot = FRotator(1.2f, 0.f, -0.4f);
+		const float SightDist = bPistol ? 14.f : 18.f;
+		const FVector DesiredSightCam(SightDist, 0.f, 0.f);
+		Out.AdsLoc = DesiredSightCam - Out.AdsRot.RotateVector(SightAtHip);
+
+		// Keep ADS root in a sane band (avoid flipping the gun behind the camera).
+		Out.AdsLoc.X = FMath::Clamp(Out.AdsLoc.X, -5.f, 40.f);
+		Out.AdsLoc.Y = FMath::Clamp(Out.AdsLoc.Y, -25.f, 25.f);
+		Out.AdsLoc.Z = FMath::Clamp(Out.AdsLoc.Z, -25.f, 20.f);
+
+		return true;
+	}
+
 	FPFWeaponConfig DefaultConfig()
 	{
 		return FPFWeaponConfig{ 0, 0 };   // SM_Rifle
@@ -297,5 +365,44 @@ namespace PFWeapon
 	FPFWeaponConfig LoadConfig()
 	{
 		return LoadConfig(PFChar::GetActiveSaveSlot());
+	}
+
+	void SaveSecondaryConfig(int32 ClassSlot, const FPFWeaponConfig& Config)
+	{
+		if (GConfig == nullptr)
+		{
+			return;
+		}
+		const FString CatKey = FString::Printf(TEXT("Weapon2Cat_%d"), ClassSlot);
+		const FString IdxKey = FString::Printf(TEXT("Weapon2Idx_%d"), ClassSlot);
+		GConfig->SetInt(TEXT("CombatForge"), *CatKey, FMath::Clamp(Config.Category, 0, GCatCount - 1), GGameUserSettingsIni);
+		GConfig->SetInt(TEXT("CombatForge"), *IdxKey, FMath::Max(0, Config.Index), GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+
+	FPFWeaponConfig LoadSecondaryConfig(int32 ClassSlot)
+	{
+		// Default second weapon: first pistol (still freely changeable via prefs / kit).
+		FPFWeaponConfig C{ 2, 0 };
+		if (GConfig != nullptr)
+		{
+			const FString CatKey = FString::Printf(TEXT("Weapon2Cat_%d"), ClassSlot);
+			const FString IdxKey = FString::Printf(TEXT("Weapon2Idx_%d"), ClassSlot);
+			GConfig->GetInt(TEXT("CombatForge"), *CatKey, C.Category, GGameUserSettingsIni);
+			GConfig->GetInt(TEXT("CombatForge"), *IdxKey, C.Index, GGameUserSettingsIni);
+		}
+		C.Category = FMath::Clamp(C.Category, 0, GCatCount - 1);
+		C.Index = FMath::Clamp(C.Index, 0, GCats[C.Category].Count - 1);
+		return C;
+	}
+
+	void SaveSecondaryConfig(const FPFWeaponConfig& Config)
+	{
+		SaveSecondaryConfig(PFChar::GetActiveSaveSlot(), Config);
+	}
+
+	FPFWeaponConfig LoadSecondaryConfig()
+	{
+		return LoadSecondaryConfig(PFChar::GetActiveSaveSlot());
 	}
 }

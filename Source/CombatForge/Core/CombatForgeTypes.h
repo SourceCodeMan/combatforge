@@ -153,8 +153,12 @@ USTRUCT()
 struct COMBATFORGE_API FPFKitRep
 {
 	GENERATED_BODY()
+	/** Primary weapon (hand when active; sling on back when secondary is drawn). */
 	UPROPERTY() uint8 WeaponCategory = 0;
 	UPROPERTY() uint8 WeaponIndex = 0;
+	/** Secondary weapon (any catalog gun — sling on back when primary is drawn). Default = first pistol. */
+	UPROPERTY() uint8 SecondaryCategory = 2;
+	UPROPERTY() uint8 SecondaryIndex = 0;
 	UPROPERTY() TArray<int16> CharParts;   // one per PFChar customization slot; -1 = none. Empty = not set yet.
 };
 
@@ -304,3 +308,4 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnPlaceDenied, EPFDenyReason);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnBuildWheelRequested, bool /*bOpen*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnToolSelected, EPFBuildTool);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnSlideStateChanged, bool /*bSliding*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnMantleStateChanged, bool /*bMantling*/);

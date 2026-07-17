@@ -63,16 +63,21 @@ namespace
 		{
 			EnumerateDir(GSlots[i].Dir, GSlotPartsCache[i]);
 
-			// Shirt-slot workaround (Adam's playtest, 2026-07-15): the long button-up field jackets
-			// (Jacket / Jacket_Gorka / Jacket_Hood / Jacket_M65) carry extra coat-tail/skirt bones that
-			// the Mannequin-compatible base skeleton never drives — attached via SetLeaderPoseComponent
-			// those bones freeze at bind pose and stick out as a rigid flat "tail" off the hip. Pullovers
-			// (Sweatshirt/Hoodie) and the tucked tee have no such bones, which is why it was "only
-			// button-ups". Hide the affected parts for the alpha until an art pass re-skins the coat verts
-			// to the pelvis (or drives the coat bones). Reversible: shrink/grow ExcludeSubstrings.
-			if (FCString::Stricmp(GSlots[i].Id, TEXT("Cloth")) == 0)
+			// Strip parts that must never ride the modular character:
+			//  - Jacket tails (frozen coat bones → rigid "hip fin")
+			//  - Weapon cosmetics (AK_Drops chest hangers, etc.): LeaderPose freezes them into a FIXED
+			//    second gun on the body while WeaponMeshComp is the real in-hand gun (Tom: everyone
+			//    carries two rifles — hands + hip). Gameplay weapons only come from PFWeaponCatalog.
 			{
-				static const TCHAR* ExcludeSubstrings[] = { TEXT("Jacket") };
+				static const TCHAR* ExcludeSubstrings[] = {
+					TEXT("Jacket"),
+					TEXT("AK_Drops"),
+					TEXT("AK_Drop"),
+					TEXT("/Weapon/"),
+					TEXT("SM_AK"),
+					TEXT("SM_Pistol"),
+					TEXT("SM_Rifle"),
+				};
 				GSlotPartsCache[i].RemoveAll([](const FSoftObjectPath& P)
 				{
 					const FString S = P.ToString();

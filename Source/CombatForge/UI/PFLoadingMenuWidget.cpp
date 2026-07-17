@@ -274,7 +274,7 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	AddHowToLine(Box, TEXT("OUT at 3 head, 5 chest, 8 limb, or 10 total hits (HUD pips + H/C/L). Showdown: one hit."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("BUILD"), 14, true, Head);
-	AddHowToLine(Box, TEXT("F1–F4 structure · Q wheel: Window / Door / 1-Way Door / Trap Floor / cover · LMB place · F open doors · Trap = 20s stand"), 12, false, Key);
+	AddHowToLine(Box, TEXT("F1–F4 structure · Q wheel: Window / Door / 1-Way Door / Trap Floor / cover · LMB place · F open doors · Trap = enemy footfall"), 12, false, Key);
 	AddHowToLine(Box, TEXT("Your half only. Full wall-offs OK — bomb a sealed path in combat."), 12, false, Body);
 
 	AddHowToLine(Box, TEXT("LOBBY"), 14, true, Head);

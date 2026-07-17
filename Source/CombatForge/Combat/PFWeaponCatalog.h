@@ -46,6 +46,16 @@ struct FPFWeaponConfig
 	int32 Index    = 0;
 };
 
+/** First-pass hip + ADS pose derived from mesh bounds (no hand tuning). */
+struct FPFWeaponAutoPose
+{
+	FVector  FPLoc   = FVector(3.f, 5.5f, -3.5f);
+	FRotator FPRot   = FRotator(-1.5f, -90.f, 1.5f);
+	float    FPScale = 0.48f;
+	FVector  AdsLoc  = FVector(15.f, -5.5f, -1.5f);
+	FRotator AdsRot  = FRotator(1.5f, 0.f, -0.5f);
+};
+
 /**
  * Curated weapon registry (categories -> weapons). NOT UObjectLibrary-enumerated like the character parts,
  * because each weapon needs its own FP pose + material handling. Mirrors the PFChar API shape so the loadout
@@ -62,6 +72,13 @@ namespace PFWeapon
 	UStaticMesh* LoadMesh(const FPFWeaponDef& Def);
 	UMaterialInterface* LoadMaterial(const FPFWeaponDef& Def);   // nullptr if the def preserves authored mats
 
+	/**
+	 * Auto hip-carry + ADS from mesh bounds. Category biases scale/hold (pistol vs rifle).
+	 * Returns false if Mesh is null (Out left unchanged). Catalog values remain the manual override path
+	 * when pf.WeaponAutoPose is 0.
+	 */
+	bool ComputeAutoPose(const UStaticMesh* Mesh, int32 Category, FPFWeaponAutoPose& Out);
+
 	FPFWeaponConfig DefaultConfig();
 
 	// ---- Persistence (GGameUserSettings.ini [CombatForge]) ----
@@ -71,4 +88,10 @@ namespace PFWeapon
 	FPFWeaponConfig LoadConfig(int32 ClassSlot);
 	void SaveConfig(const FPFWeaponConfig& Config);
 	FPFWeaponConfig LoadConfig();
+
+	/** Second weapon (sling / swap target) — any category, not forced to pistol. */
+	void SaveSecondaryConfig(int32 ClassSlot, const FPFWeaponConfig& Config);
+	FPFWeaponConfig LoadSecondaryConfig(int32 ClassSlot);
+	void SaveSecondaryConfig(const FPFWeaponConfig& Config);
+	FPFWeaponConfig LoadSecondaryConfig();
 }

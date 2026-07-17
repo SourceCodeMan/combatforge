@@ -155,6 +155,12 @@ private:
 	/** Server-only: spawn replicated special piece actor (window/door/trap). */
 	void SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec);
 	void DestroySpecialPieceActor(uint16 PieceId);
+	/**
+	 * Local (server+client): solid under-ramp steps leave a crouch-height tunnel under the plank.
+	 * Standing capsules (~176uu) cannot crawl deep under; crouch (~116uu) can go further in.
+	 */
+	void SpawnRampUnderfill(const FPFBuildPieceRec& Rec);
+	void DestroyRampUnderfill(uint16 PieceId);
 
 	/** Anchor rule (anti-sky-spam, 03 §4): touches terrain or any structural piece; floaters legal. */
 	bool HasAnchor(const FPFPlacementQuery& Q, const FBox& Bounds) const;
@@ -195,4 +201,6 @@ private:
 
 	// Special structural pieces (window / door / trap) — server-spawned, replicate to clients.
 	UPROPERTY() TMap<uint16, TObjectPtr<class APFBuildPieceActor>> SpecialPieces;
+	// Ramp underside fill (local per machine — mirrors FastArray adds; not a separate replicate).
+	UPROPERTY() TMap<uint16, TObjectPtr<AActor>> RampUnderfills;
 };
