@@ -2355,6 +2355,7 @@ void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, ui
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Params.Owner = this;
+	// Spawn at piece center; ServerArm repositions/orients to the planter's face (wall) or surface (floor/ramp).
 	APFBombActor* Bomb = GetWorld()->SpawnActor<APFBombActor>(
 		APFBombActor::StaticClass(), Center, FRotator::ZeroRotator, Params);
 	if (!Bomb)
@@ -2364,7 +2365,8 @@ void ACombatForgeGameMode::ServerTryPlantBomb(ACombatForgeCharacter* Planter, ui
 		BuildGrid->ClearPieceBomb(PieceId);
 		return;
 	}
-	Bomb->ServerArm(BuildGrid, PieceId, Center, PlanterPS->TeamId, PlanterPS);
+	Bomb->ServerArm(BuildGrid, PieceId, Rec, Center, Planter->GetActorLocation(),
+		PlanterPS->TeamId, PlanterPS);
 	ActiveBombs.Add(Bomb);
 }
 

@@ -32,8 +32,13 @@ class COMBATFORGE_API APFBombActor : public AActor
 public:
 	APFBombActor();
 
-	/** Authority: attach to the target piece and start the 15 s fuse. */
-	void ServerArm(APFBuildGrid* Grid, uint16 PieceId, const FVector& WorldLoc,
+	/**
+	 * Authority: attach to the target piece and start the 15 s fuse.
+	 * Orient/offset from PieceRec + Planter world pos so the charge sits on the planted face
+	 * (wall: planter's side only; floor/ramp: matches surface pitch/yaw).
+	 */
+	void ServerArm(APFBuildGrid* Grid, uint16 PieceId, const FPFBuildPieceRec& PieceRec,
+	               const FVector& PieceCenter, const FVector& PlanterWorldLoc,
 	               uint8 InPlanterTeam, ACombatForgePlayerState* InPlanterPS);
 
 	/** Server: a pawn began/stopped holding F on this bomb. The bomb's own Tick re-validates range/alive/team
@@ -80,9 +85,14 @@ protected:
 	void SpawnCosmeticFragBurst(const FVector& Center, const FVector& FaceAxis, uint32 Seed);
 	/** Guaranteed close-range paint: any non-teammate (and the planter) inside radius takes a hit. */
 	void ApplyProximityPaint(const FVector& Center);
-	/** Unit normal through the piece face: wall ±N/E, floor/roof ±Z, ramp ±sideways. */
+	/** Unit normal through the piece face: wall ±N/E, floor/roof ±Z, ramp ±sideways (burst only). */
 	static FVector FaceAxisForPiece(EPFPieceType Type, uint8 Rot);
+	/** World pose: on the planted surface, facing outward toward the planter (walls) or surface-up (floor/ramp). */
+	static void ComputePlantPose(const FPFBuildPieceRec& Rec, const FVector& PieceCenter,
+	                             const FVector& PlanterWorldLoc, FVector& OutLoc, FRotator& OutRot);
+	void ApplyPlantedPose();
 	void UpdateLabel();
+	UFUNCTION() void OnRep_PlantedPose();
 
 	/** Soft-load Bandits grenade mesh (red preferred) so the planted charge isn't a graybox cylinder. */
 	void SoftLoadMesh();
@@ -104,6 +114,10 @@ protected:
 	UPROPERTY(Replicated) uint32 BurstSeed = 0;
 	/** Face normal of the bombed piece — dual-side burst origins sit at Center ± Axis * Offset. */
 	UPROPERTY(Replicated) FVector_NetQuantizeNormal BurstAxis = FVector(0.f, 0.f, 1.f);
+	/** Planted transform (no continuous spin). Replicated so clients match wall-side / ramp pitch. */
+	UPROPERTY(ReplicatedUsing=OnRep_PlantedPose) FVector_NetQuantize100 PlantedLocation = FVector::ZeroVector;
+	UPROPERTY(ReplicatedUsing=OnRep_PlantedPose) FRotator PlantedRotation = FRotator::ZeroRotator;
+	UPROPERTY(Replicated) bool bPlantedPoseValid = false;
 
 	// Server-only.
 	uint16 TargetPieceId = 0;

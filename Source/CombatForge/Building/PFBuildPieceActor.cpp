@@ -29,14 +29,15 @@ namespace
 	constexpr float WallThick = 20.f;
 
 	// Large window opening (see + shoot through both ways).
-	constexpr float WinW = 280.f;
-	constexpr float WinH = 170.f;
-	constexpr float WinSill = 70.f;   // bottom of opening
+	// Prefixed names — unity builds share this TU with PFYardShell which also uses DoorW/DoorH.
+	constexpr float PieceWinW = 280.f;
+	constexpr float PieceWinH = 170.f;
+	constexpr float PieceWinSill = 70.f;   // bottom of opening
 
 	// Door opening (walk-through).
-	constexpr float DoorW = 140.f;
-	constexpr float DoorH = 230.f;
-	constexpr float DoorThick = 12.f;
+	constexpr float PieceDoorW = 140.f;
+	constexpr float PieceDoorH = 230.f;
+	constexpr float PieceDoorThick = 12.f;
 }
 
 APFBuildPieceActor::APFBuildPieceActor()
@@ -264,7 +265,7 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 	if (bWithWindowOpening)
 	{
 		// Left / right posts + sill + header around a large center hole.
-		const float SideW = (Cell - WinW) * 0.5f; // 60
+		const float SideW = (Cell - PieceWinW) * 0.5f; // 60
 		const float PostAlongHalf = SideW * 0.5f;
 		const float LeftAlong = SideW * 0.5f;
 		const float RightAlong = Cell - SideW * 0.5f;
@@ -275,10 +276,10 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 		AddCubePart(TEXT("WinPostR"), Center(RightAlong, MidZ), ExtentAlong(PostAlongHalf, MidZ),
 			FRotator::ZeroRotator, FrameMID, true);
 
-		const float SillZ = WinSill * 0.5f;
-		const float HeaderZ = WinSill + WinH + (WallH - WinSill - WinH) * 0.5f;
-		const float HeaderH = (WallH - WinSill - WinH) * 0.5f;
-		const float OpenAlongHalf = WinW * 0.5f;
+		const float SillZ = PieceWinSill * 0.5f;
+		const float HeaderZ = PieceWinSill + PieceWinH + (WallH - PieceWinSill - PieceWinH) * 0.5f;
+		const float HeaderH = (WallH - PieceWinSill - PieceWinH) * 0.5f;
+		const float OpenAlongHalf = PieceWinW * 0.5f;
 
 		AddCubePart(TEXT("WinSill"), Center(MidAlong, SillZ), ExtentAlong(OpenAlongHalf, SillZ),
 			FRotator::ZeroRotator, FrameMID, true);
@@ -286,9 +287,9 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 			FRotator::ZeroRotator, FrameMID, true);
 
 		// Visual-only glass pane (no collision) so the hole reads as a window, not empty air.
-		const float PaneZ = WinSill + WinH * 0.5f;
+		const float PaneZ = PieceWinSill + PieceWinH * 0.5f;
 		const float PaneThick = 4.f;
-		FVector PaneExt = ExtentAlong(OpenAlongHalf, WinH * 0.5f);
+		FVector PaneExt = ExtentAlong(OpenAlongHalf, PieceWinH * 0.5f);
 		if (bEast) { PaneExt.X = PaneThick * 0.5f; }
 		else { PaneExt.Y = PaneThick * 0.5f; }
 		AddCubePart(TEXT("WinPane"), Center(MidAlong, PaneZ), PaneExt,
@@ -299,7 +300,7 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 	if (bWithDoorOpening)
 	{
 		// Side posts + header; walk-through opening at center bottom.
-		const float SideW = (Cell - DoorW) * 0.5f; // 130
+		const float SideW = (Cell - PieceDoorW) * 0.5f; // 130
 		const float PostAlongHalf = SideW * 0.5f;
 		const float LeftAlong = SideW * 0.5f;
 		const float RightAlong = Cell - SideW * 0.5f;
@@ -310,10 +311,10 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 		AddCubePart(TEXT("DoorPostR"), Center(RightAlong, MidZ), ExtentAlong(PostAlongHalf, MidZ),
 			FRotator::ZeroRotator, FrameMID, true);
 
-		const float HeaderH = (WallH - DoorH) * 0.5f;
-		const float HeaderZ = DoorH + HeaderH;
+		const float HeaderH = (WallH - PieceDoorH) * 0.5f;
+		const float HeaderZ = PieceDoorH + HeaderH;
 		AddCubePart(TEXT("DoorHeader"), Center(MidAlong, HeaderZ),
-			ExtentAlong(DoorW * 0.5f, HeaderH), FRotator::ZeroRotator, FrameMID, true);
+			ExtentAlong(PieceDoorW * 0.5f, HeaderH), FRotator::ZeroRotator, FrameMID, true);
 		return;
 	}
 }
@@ -331,7 +332,7 @@ void APFBuildPieceActor::BuildDoorLeaf()
 		DoorLeaf->SetMaterial(0, DoorMID);
 	}
 	// Scale: door size 140 x 12 x 230 → extents
-	const FVector Scale(DoorW / 100.f, DoorThick / 100.f, DoorH / 100.f);
+	const FVector Scale(PieceDoorW / 100.f, PieceDoorThick / 100.f, PieceDoorH / 100.f);
 	DoorLeaf->SetWorldScale3D(Scale);
 	DoorLeaf->SetWorldLocation(DoorLeafClosedCenter());
 	DoorLeaf->SetWorldRotation(DoorLeafClosedRotation());
@@ -345,7 +346,7 @@ FVector APFBuildPieceActor::DoorLeafClosedCenter() const
 	const float Wy = GridY * Sub;
 	const float Wz = GridZ * Sub;
 	const float MidAlong = Cell * 0.5f;
-	const float Zc = DoorH * 0.5f;
+	const float Zc = PieceDoorH * 0.5f;
 	if (GridRot == 1)
 	{
 		return FVector(Wx + Cell, Wy + MidAlong, Wz + Zc);

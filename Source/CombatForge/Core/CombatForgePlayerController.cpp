@@ -14,9 +14,11 @@
 #include "Input/PFInputConfig.h"
 #include "UI/PFRootHUDWidget.h"
 #include "UI/PFLoadingMenuWidget.h"
+#include "Audio/PFMusicSubsystem.h"
 #include "Combat/PFCombatAudio.h"
 
 #include "Blueprint/UserWidget.h"
+#include "Engine/GameInstance.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/Engine.h"
@@ -195,6 +197,14 @@ void ACombatForgePlayerController::HandlePhaseChanged(EPFMatchPhase NewPhase)
 		return;
 	}
 	ApplyInputForPhase();
+	// Phase BGM: Build track during fort building, Combat track during live fight.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UPFMusicSubsystem* Music = GI->GetSubsystem<UPFMusicSubsystem>())
+		{
+			Music->SetPhaseMusic(NewPhase);
+		}
+	}
 }
 
 void ACombatForgePlayerController::HandleRoundStateChanged(EPFRoundState NewState)

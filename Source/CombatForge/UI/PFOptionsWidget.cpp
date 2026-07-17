@@ -12,6 +12,7 @@
 #include "InputCoreTypes.h"
 #include "Player/CombatForgeCharacter.h"
 #include "Player/PFCharacterCustomization.h"   // PFChar active class-slot switch (in-game)
+#include "Audio/PFMusicSubsystem.h"
 #include "Combat/PFCombatAudio.h"
 #include "Core/PFLightingSubsystem.h"
 
@@ -416,10 +417,10 @@ void UPFOptionsWidget::BuildAudioPage(UWidget* ParentBox)
 		}
 	}
 
-	// Background wind (Tom: "ambient bed" meant nothing to him — plain English)
+	// Background / phase music volume (also scales lobby wind bed).
 	{
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
-		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Background wind"), 15, false));
+		Row->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Music / ambience"), 15, false));
 		AmbientVolSlider = WidgetTree->ConstructWidget<USlider>();
 		AmbientVolSlider->SetMinValue(0.f);
 		AmbientVolSlider->SetMaxValue(1.f);
@@ -439,7 +440,7 @@ void UPFOptionsWidget::BuildAudioPage(UWidget* ParentBox)
 	}
 
 	UTextBlock* Note = MakeLabel(WidgetTree,
-		TEXT("SFX = gunfire and menu sounds. Background wind = a quiet outdoor wind loop."), 12, false);
+		TEXT("SFX = gunfire and menu sounds. Music / ambience = Build & Combat tracks + lobby wind."), 12, false);
 	Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
 	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Note))
 	{
@@ -1067,6 +1068,18 @@ void UPFOptionsWidget::OnSfxVolChanged(float Value)
 void UPFOptionsWidget::OnAmbientVolChanged(float Value)
 {
 	WorkingAmbientVol = FMath::Clamp(Value, 0.f, 1.f);
+	// Live preview: phase music uses AmbientVolume — push immediately while dragging.
+	FPFUserPrefs::SetAmbientVolume(WorkingAmbientVol);
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (UGameInstance* GI = PC->GetGameInstance())
+		{
+			if (UPFMusicSubsystem* Music = GI->GetSubsystem<UPFMusicSubsystem>())
+			{
+				Music->ApplyVolumeFromPrefs();
+			}
+		}
+	}
 	RefreshLabels();
 }
 
@@ -1366,7 +1379,7 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	ApplyFieldOfView(WorkingFov);
 	ApplyKeyBinds();
 
-	// Restart ambient at new volume if playing.
+	// Restart ambient at new volume if playing; live-update phase music volume.
 	if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(GetOwningPlayer()))
 	{
 		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
@@ -1375,6 +1388,13 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 			{
 				Audio->StopAmbientBed();
 				Audio->StartAmbientBed();
+			}
+		}
+		if (UGameInstance* GI = PC->GetGameInstance())
+		{
+			if (UPFMusicSubsystem* Music = GI->GetSubsystem<UPFMusicSubsystem>())
+			{
+				Music->ApplyVolumeFromPrefs();
 			}
 		}
 	}

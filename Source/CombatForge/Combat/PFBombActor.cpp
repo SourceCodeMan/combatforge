@@ -18,6 +18,7 @@
 #include "CollisionQueryParams.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Math/RotationMatrix.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -52,7 +53,10 @@ APFBombActor::APFBombActor()
 
 	CountdownText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Countdown"));
 	CountdownText->SetupAttachment(Root);
-	CountdownText->SetRelativeLocation(FVector(0.f, 0.f, 60.f));
+	// Local +X is the planted "outward" (wall room side / floor up). Label sits in front of the charge
+	// and faces that side only (TextRender is single-sided — not readable from behind a wall).
+	CountdownText->SetRelativeLocation(FVector(18.f, 0.f, 38.f));
+	CountdownText->SetRelativeRotation(FRotator::ZeroRotator);
 	CountdownText->SetHorizontalAlignment(EHTA_Center);
 	CountdownText->SetVerticalAlignment(EVRTA_TextCenter);
 	CountdownText->SetWorldSize(42.f);
@@ -70,6 +74,9 @@ void APFBombActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(APFBombActor, bArmed);
 	DOREPLIFETIME(APFBombActor, BurstSeed);
 	DOREPLIFETIME(APFBombActor, BurstAxis);
+	DOREPLIFETIME(APFBombActor, PlantedLocation);
+	DOREPLIFETIME(APFBombActor, PlantedRotation);
+	DOREPLIFETIME(APFBombActor, bPlantedPoseValid);
 }
 
 void APFBombActor::BeginPlay()
@@ -118,7 +125,8 @@ void APFBombActor::SoftLoadMesh()
 		TEXT("Bomb: Modern Weapons Explosive meshes missing — using red cylinder fallback"));
 }
 
-void APFBombActor::ServerArm(APFBuildGrid* Grid, uint16 PieceId, const FVector& WorldLoc,
+void APFBombActor::ServerArm(APFBuildGrid* Grid, uint16 PieceId, const FPFBuildPieceRec& PieceRec,
+                             const FVector& PieceCenter, const FVector& PlanterWorldLoc,
                              uint8 InPlanterTeam, ACombatForgePlayerState* InPlanterPS)
 {
 	if (!HasAuthority() || bArmed)
@@ -130,7 +138,14 @@ void APFBombActor::ServerArm(APFBuildGrid* Grid, uint16 PieceId, const FVector& 
 	TargetPieceId = PieceId;
 	PlanterTeam   = InPlanterTeam;
 	PlanterPS     = InPlanterPS;
-	SetActorLocation(WorldLoc);
+
+	FVector Loc = PieceCenter;
+	FRotator Rot = FRotator::ZeroRotator;
+	ComputePlantPose(PieceRec, PieceCenter, PlanterWorldLoc, Loc, Rot);
+	PlantedLocation = Loc;
+	PlantedRotation = Rot;
+	bPlantedPoseValid = true;
+	ApplyPlantedPose();
 
 	const ACombatForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
 	DetonateServerTime = (GS ? GS->GetServerWorldTimeSeconds() : 0.f) + FuseSeconds;
@@ -140,8 +155,77 @@ void APFBombActor::ServerArm(APFBuildGrid* Grid, uint16 PieceId, const FVector& 
 		CountdownText->SetTextRenderColor(PFColors::ForTeam(PlanterTeam % 2).ToFColor(true));
 	}
 	ForceNetUpdate();
-	UE_LOG(CombatForgeLog, Log, TEXT("Bomb armed on piece #%u by team %u (%.0fs fuse)"),
-		PieceId, static_cast<uint32>(PlanterTeam), FuseSeconds);
+	UE_LOG(CombatForgeLog, Log, TEXT("Bomb armed on piece #%u type %d by team %u (%.0fs fuse) at %s rot %s"),
+		PieceId, static_cast<int32>(PieceRec.Type), static_cast<uint32>(PlanterTeam), FuseSeconds,
+		*Loc.ToCompactString(), *Rot.ToCompactString());
+}
+
+void APFBombActor::ApplyPlantedPose()
+{
+	if (!bPlantedPoseValid)
+	{
+		return;
+	}
+	SetActorLocation(PlantedLocation);
+	SetActorRotation(PlantedRotation);
+	// Fixed label pose relative to the charge (no spin, no camera billboard).
+	if (CountdownText)
+	{
+		CountdownText->SetRelativeLocation(FVector(18.f, 0.f, 38.f));
+		CountdownText->SetRelativeRotation(FRotator::ZeroRotator);
+	}
+}
+
+void APFBombActor::OnRep_PlantedPose()
+{
+	ApplyPlantedPose();
+}
+
+void APFBombActor::ComputePlantPose(const FPFBuildPieceRec& Rec, const FVector& PieceCenter,
+                                    const FVector& PlanterWorldLoc, FVector& OutLoc, FRotator& OutRot)
+{
+	constexpr float SurfaceOffsetUU = 28.f;   // stick just outside the piece AABB center
+
+	switch (Rec.Type)
+	{
+	case EPFPieceType::Wall:
+	case EPFPieceType::WallWindow:
+	case EPFPieceType::WallDoor:
+	case EPFPieceType::WallDoorOneWay:
+	{
+		// N edge: ±Y; E edge: ±X. Pick the half-space the planter stands in so the charge is only
+		// visible/readable from that side of the wall (TextRender is single-sided).
+		const FVector Axis = FaceAxisForPiece(Rec.Type, Rec.Rot);
+		const float Side = FVector::DotProduct(PlanterWorldLoc - PieceCenter, Axis);
+		const FVector Outward = Axis * (Side >= 0.f ? 1.f : -1.f);
+		OutLoc = PieceCenter + Outward * SurfaceOffsetUU;
+		// +X faces into the planter's room; +Z world-up keeps the mesh upright on the wall face.
+		OutRot = FRotationMatrix::MakeFromXZ(Outward, FVector::UpVector).Rotator();
+		break;
+	}
+	case EPFPieceType::Floor:
+	case EPFPieceType::FloorTrap:
+	case EPFPieceType::Roof:
+	{
+		// Horizontal deck — bomb sits flat on top (zero pitch/roll).
+		OutLoc = PieceCenter + FVector(0.f, 0.f, SurfaceOffsetUU * 0.65f);
+		OutRot = FRotator::ZeroRotator;
+		break;
+	}
+	case EPFPieceType::Ramp:
+	{
+		// Match the plank: same pitch (36.87°) and yaw as the ramp ascent.
+		const float Yaw = static_cast<float>(Rec.Rot) * 90.f;
+		OutRot = FRotator(FPFGridMath::RampPitchDeg, Yaw, 0.f);
+		const FVector SurfaceNormal = OutRot.RotateVector(FVector::UpVector).GetSafeNormal();
+		OutLoc = PieceCenter + SurfaceNormal * SurfaceOffsetUU * 0.65f;
+		break;
+	}
+	default:
+		OutLoc = PieceCenter;
+		OutRot = FRotator::ZeroRotator;
+		break;
+	}
 }
 
 void APFBombActor::ServerSetDefuser(APawn* Defuser, bool bActive)
@@ -223,37 +307,21 @@ void APFBombActor::UpdateLabel()
 		// Tint from the REPLICATED team here (not just in server-side ServerArm) so clients see it too.
 		CountdownText->SetTextRenderColor(PFColors::ForTeam(PlanterTeam).ToFColor(true));
 	}
-	float FuseRemain = FuseSeconds;
-	if (GS)
+	if (!GS)
 	{
-		if (DefuseAccumSeconds > 0.05f)
-		{
-			CountdownText->SetText(FText::FromString(FString::Printf(
-				TEXT("DEFUSING %d%%"),
-				FMath::Clamp(FMath::RoundToInt(100.f * DefuseAccumSeconds / DefuseHoldSeconds), 0, 100))));
-		}
-		else
-		{
-			FuseRemain = FMath::Max(0.f, DetonateServerTime - GS->GetServerWorldTimeSeconds());
-			const int32 Secs = FMath::CeilToInt(FuseRemain);
-			CountdownText->SetText(FText::FromString(FString::Printf(TEXT("BOMB  %d"), Secs)));
-		}
+		return;
 	}
-	// Fuse timer spins a full 360° over the 15 s fuse (elapsed fraction of FuseSeconds).
-	// Defusing freezes the spin so the player can still read the % label.
-	if (DefuseAccumSeconds <= 0.05f)
+	if (DefuseAccumSeconds > 0.05f)
 	{
-		const float Elapsed = FMath::Clamp(FuseSeconds - FuseRemain, 0.f, FuseSeconds);
-		const float SpinYaw = (Elapsed / FuseSeconds) * 360.f;
-		CountdownText->SetWorldRotation(FRotator(0.f, SpinYaw, 0.f));
+		CountdownText->SetText(FText::FromString(FString::Printf(
+			TEXT("DEFUSING %d%%"),
+			FMath::Clamp(FMath::RoundToInt(100.f * DefuseAccumSeconds / DefuseHoldSeconds), 0, 100))));
 	}
-	else if (const APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr)
+	else
 	{
-		// While defusing: face the local viewer so the % reads cleanly.
-		FVector CamLoc; FRotator CamRot;
-		PC->GetPlayerViewPoint(CamLoc, CamRot);
-		const FVector ToCam = CamLoc - CountdownText->GetComponentLocation();
-		CountdownText->SetWorldRotation(ToCam.GetSafeNormal2D().Rotation());
+		const float FuseRemain = FMath::Max(0.f, DetonateServerTime - GS->GetServerWorldTimeSeconds());
+		const int32 Secs = FMath::CeilToInt(FuseRemain);
+		CountdownText->SetText(FText::FromString(FString::Printf(TEXT("BOMB  %d"), Secs)));
 	}
 }
 
