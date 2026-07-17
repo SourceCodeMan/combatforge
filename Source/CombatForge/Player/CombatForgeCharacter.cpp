@@ -15,6 +15,7 @@
 #include "Combat/PFWeaponComponent.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFCombatAudio.h"
+#include "Core/CombatForgePlayerState.h"   // melee: victim/attacker team + kill credit
 #include "Combat/PFCombatVFX.h"
 #include "Combat/PFAmmoBarrel.h"
 #include "Building/PFBuildComponent.h"
@@ -763,6 +764,10 @@ void ACombatForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	{
 		EIC->BindAction(Cfg->IA_ThrowSmoke, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnThrowSmokePressed);
 	}
+	if (Cfg->IA_Melee)
+	{
+		EIC->BindAction(Cfg->IA_Melee, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnMeleePressed);
+	}
 	if (Cfg->IA_WeaponDrag)
 	{
 		EIC->BindAction(Cfg->IA_WeaponDrag, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnWeaponDragPressed);
@@ -1078,6 +1083,89 @@ void ACombatForgeCharacter::OnThrowSmokePressed()
 	if (WeaponComponent != nullptr)
 	{
 		WeaponComponent->StartThrow(EPFGrenadeType::Smoke);
+	}
+}
+
+void ACombatForgeCharacter::OnMeleePressed()
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	// Local cooldown gate so a mashed key doesn't spam Server RPCs; the server re-validates authoritatively.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (Now - LastMeleeTime < MeleeCooldown)
+	{
+		return;
+	}
+	LastMeleeTime = Now;
+	ServerMelee();
+}
+
+void ACombatForgeCharacter::ServerMelee_Implementation()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+	// Authoritative cooldown (small RTT tolerance) + no meleeing while eliminated.
+	const double Now = World->GetTimeSeconds();
+	if (Now - LastMeleeTime < MeleeCooldown * 0.9)
+	{
+		return;
+	}
+	LastMeleeTime = Now;
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
+	{
+		return;
+	}
+
+	ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
+	const uint8 MyTeam = MyPS ? MyPS->TeamId : 255;
+
+	// Short forward reach from the eye line; first blocking pawn wins (a wall in between blocks the tag).
+	FVector EyeLoc; FRotator EyeRot;
+	GetActorEyesViewPoint(EyeLoc, EyeRot);
+	const FVector End = EyeLoc + EyeRot.Vector() * MeleeRange;
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PFMelee), /*bTraceComplex=*/false, this);
+	FHitResult Hit;
+	const bool bHit = World->SweepSingleByChannel(Hit, EyeLoc, End, FQuat::Identity, ECC_Pawn,
+		FCollisionShape::MakeSphere(MeleeRadius), Params);
+	if (!bHit)
+	{
+		return;
+	}
+	ACombatForgeCharacter* Victim = Cast<ACombatForgeCharacter>(Hit.GetActor());
+	if (Victim == nullptr || Victim == this)
+	{
+		return;
+	}
+	UPFHealthComponent* VictimHealth = Victim->GetHealth();
+	ACombatForgePlayerState* VictimPS = Victim->GetPlayerState<ACombatForgePlayerState>();
+	if (VictimHealth == nullptr || VictimHealth->bEliminated)
+	{
+		return;
+	}
+	if (VictimPS != nullptr && MyTeam <= 1 && VictimPS->TeamId == MyTeam)
+	{
+		return;   // no friendly-fire tags
+	}
+
+	// The tag: instant elimination, credited to the attacker (feeds the kill feed + score via OnEliminatedEvent).
+	FPFPaintHitInfo MeleeHit;
+	MeleeHit.ShooterPS   = MyPS;
+	MeleeHit.ShooterTeam = MyTeam;
+	MeleeHit.ImpactPoint = Hit.ImpactPoint;
+	MeleeHit.ImpactNormal= Hit.ImpactNormal;
+	MeleeHit.Region      = EPFBodyRegion::Chest;
+	MeleeHit.ServerTime  = static_cast<float>(Now);
+	VictimHealth->ApplyPaintHit(MeleeHit, /*bForceEliminate=*/true);
+
+	if (UPFCombatAudio* Audio = GetCombatAudio())
+	{
+		Audio->PlayImpactAt(Hit.ImpactPoint);   // contact "thwack" (host-side; elim feedback covers clients)
 	}
 }
 

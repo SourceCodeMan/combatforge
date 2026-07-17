@@ -49,7 +49,9 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_Eliminated) bool  bEliminated = false;
 
 	// ---- Server API ----
-	void ApplyPaintHit(const FPFPaintHitInfo& HitTemplate);
+	// bForceEliminate = this hit eliminates outright regardless of the region thresholds (a melee tag —
+	// "you're out"); the shooter in HitTemplate still gets the elim-feed + score credit.
+	void ApplyPaintHit(const FPFPaintHitInfo& HitTemplate, bool bForceEliminate = false);
 		// resolves the body region (bone name → nearest-bone scan → Z-band), bumps the region +
 		// total counters, fires ClientPaintHitTaken; when a threshold crosses → bEliminated,
 		// OnEliminatedEvent broadcast, corpse blocks paintballs 0.5 s then collision off (04 §2.4).

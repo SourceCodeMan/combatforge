@@ -112,6 +112,10 @@ protected:
 	void OnFireSelectPressed();    // V — cycle fire mode
 	void OnThrowFragPressed();     // E — throw frag
 	void OnThrowSmokePressed();    // Q — throw smoke
+	void OnMeleePressed();         // B / mouse-thumb — close-range melee tag ("you're out")
+	// Server-authoritative melee: short forward trace from the camera; first live enemy pawn in range is
+	// eliminated outright (the tag). Client requests; server re-validates the cooldown + range + team.
+	UFUNCTION(Server, Reliable) void ServerMelee();
 	// Dev pose-tuning drag (gated by pf.WeaponDrag): hold MIDDLE MOUSE and move to slide the FP weapon in 3D.
 	// Not ADS = edits the held pose (FPLoc); ADS = edits the ADS pose. Shift = depth, Ctrl = rotate. On
 	// release, prints the pf.WeaponFP / pf.WeaponADS line to paste into PFWeaponCatalog.cpp.
@@ -416,6 +420,12 @@ private:
 	uint8 bFireHeld : 1;
 	uint8 bJumpKeyHeld : 1;
 	uint8 bADSToggleMode : 1;    // cached FPFUserPrefs::GetADSToggle(): false = hold, true = toggle
+
+	// Melee tag: last swing time (server + owning client) for the cooldown gate, and its tuning.
+	double LastMeleeTime = -100.0;
+	static constexpr float MeleeCooldown = 0.8f;   // seconds between swings
+	static constexpr float MeleeRange    = 200.f;  // reach from the camera (uu)
+	static constexpr float MeleeRadius   = 34.f;   // sweep radius so a near-miss still tags
 
 	// ---- FOV arbiter state ----
 	float ADSAlpha = 0.f;

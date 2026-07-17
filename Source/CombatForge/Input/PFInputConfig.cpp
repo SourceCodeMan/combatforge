@@ -82,6 +82,7 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IA_FireSelect  = MakeAction(Outer, TEXT("IA_FireSelect"),  EInputActionValueType::Boolean);
 	IA_ThrowFrag   = MakeAction(Outer, TEXT("IA_ThrowFrag"),   EInputActionValueType::Boolean);
 	IA_ThrowSmoke  = MakeAction(Outer, TEXT("IA_ThrowSmoke"),  EInputActionValueType::Boolean);
+	IA_Melee       = MakeAction(Outer, TEXT("IA_Melee"),       EInputActionValueType::Boolean);
 
 	// Interact shares F with IA_Ready (IMC_Common). Don't consume the key, so the priority-1 Combat mapping
 	// lets the priority-0 Ready mapping also fire — the two handlers are phase-disjoint (Ready only acts in
@@ -172,6 +173,8 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IMC_Combat->MapKey(IA_FireSelect, EKeys::V); // cycle fire mode
 	IMC_Combat->MapKey(IA_ThrowFrag,  EKeys::E); // frag grenade (E freed by interact->F)
 	IMC_Combat->MapKey(IA_ThrowSmoke, EKeys::Q); // smoke grenade (Q also IMC_Build QuickEquip; Combat/Build never coexist)
+	IMC_Combat->MapKey(IA_Melee,      EKeys::B);                 // melee tag — keyboard
+	IMC_Combat->MapKey(IA_Melee,      EKeys::ThumbMouseButton);  // melee tag — mouse thumb (genre-standard)
 
 	// ================= IMC_Build =================
 

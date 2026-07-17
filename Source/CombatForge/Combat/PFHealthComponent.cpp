@@ -103,7 +103,7 @@ void UPFHealthComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(UPFHealthComponent, bEliminated);
 }
 
-void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate)
+void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate, bool bForceEliminate)
 {
 	if (GetOwnerRole() != ROLE_Authority)
 	{
@@ -129,9 +129,8 @@ void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate)
 	case EPFBodyRegion::Limbs: ++LimbHits;  break;
 	default:                   ++ChestHits; break;
 	}
-	const bool bOut = bOneHitMode
-		? (TotalHits >= 1)
-		: (HeadHits >= HeadOut || ChestHits >= ChestOut || LimbHits >= LimbOut || TotalHits >= TotalOut);
+	const bool bOut = bForceEliminate || bOneHitMode
+		|| HeadHits >= HeadOut || ChestHits >= ChestOut || LimbHits >= LimbOut || TotalHits >= TotalOut;
 
 	OnHitsChangedEvent.Broadcast(HeadHits, ChestHits, LimbHits, TotalHits);
 	OnHPChangedEvent.Broadcast(bOut ? 0 : NearestRemaining());   // manual host broadcast (§5.9)
