@@ -433,19 +433,50 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 
 bool APFBuildGrid::WouldSealMap(const FPFPlacementQuery& Q) const
 {
-	// Only a GROUND-LEVEL WALL can sever the cross-map ground path. Floors/ramps/roofs are walkable, and
-	// upper-level walls don't block the floor. (Spawn columns + neutral strip are no-build, so those cells
-	// always stay open — the flood-fill depends on that to seed + cross.)
-	if (Q.Type != EPFPieceType::Wall || (Q.Z / 3) != 0)
+	// Only a GROUND-LEVEL barrier can sever the cross-map ground path: a WALL, or a RAMP (its HIGH edge
+	// stands a full wall-height up — a solid 300 uu face a pawn can't cross on the ground, exactly like a
+	// wall). Floors/roofs are walkable, and upper-level pieces don't block the floor. (Spawn columns +
+	// neutral strip are no-build, so those cells always stay open — the flood-fill seeds + crosses there.)
+	const bool bGroundBarrier = (Q.Type == EPFPieceType::Wall) || (Q.Type == EPFPieceType::Ramp);
+	if (!bGroundBarrier || (Q.Z / 3) != 0)
 	{
 		return false;
 	}
 
-	const FIntVector NewEdge = WallEdgeKey(Q.X / PFGrid::SubPerCell, Q.Y / PFGrid::SubPerCell, 0, Q.Rot);
-	auto EdgeBlocked = [this, &NewEdge](int32 Cx, int32 Cy, uint8 EdgeNE) -> bool
+	// A ground ramp's high edge sits on its ASCENT side (Rot 0=+X, 1=+Y, 2=-X, 3=-Y). Map it into the same
+	// N/E WallEdgeKey space walls use, canonicalizing the -X/-Y sides onto the neighbor cell's E/N edge
+	// (a ramp's Rot is a 4-way ascent index, NOT a 2-way wall edge, so it can't go through WallEdgeKey raw).
+	auto RampHighEdgeKey = [](int32 Cx, int32 Cy, uint8 Rot) -> FIntVector
+	{
+		switch (Rot)
+		{
+		case 0:  return WallEdgeKey(Cx,     Cy,     0, 1);   // +X → E edge of (Cx,Cy)
+		case 1:  return WallEdgeKey(Cx,     Cy,     0, 0);   // +Y → N edge of (Cx,Cy)
+		case 2:  return WallEdgeKey(Cx - 1, Cy,     0, 1);   // -X → E edge of (Cx-1,Cy)
+		default: return WallEdgeKey(Cx,     Cy - 1, 0, 0);   // -Y → N edge of (Cx,Cy-1)
+		}
+	};
+
+	const int32 QCx = Q.X / PFGrid::SubPerCell;
+	const int32 QCy = Q.Y / PFGrid::SubPerCell;
+	const FIntVector NewEdge = (Q.Type == EPFPieceType::Ramp)
+		? RampHighEdgeKey(QCx, QCy, Q.Rot)
+		: WallEdgeKey(QCx, QCy, 0, Q.Rot);
+
+	// Existing ground ramps block their high edge too — collect them once (few pieces on a 16×10 grid).
+	TSet<FIntVector> RampEdges;
+	for (const FPFBuildPieceRec& Rec : Pieces.Items)
+	{
+		if (Rec.Type == EPFPieceType::Ramp && (Rec.Z / 3) == 0)
+		{
+			RampEdges.Add(RampHighEdgeKey(Rec.X / PFGrid::SubPerCell, Rec.Y / PFGrid::SubPerCell, Rec.Rot));
+		}
+	}
+
+	auto EdgeBlocked = [this, &NewEdge, &RampEdges](int32 Cx, int32 Cy, uint8 EdgeNE) -> bool
 	{
 		const FIntVector Key = WallEdgeKey(Cx, Cy, 0, EdgeNE);
-		return Key == NewEdge || WallEdges.Contains(Key);
+		return Key == NewEdge || WallEdges.Contains(Key) || RampEdges.Contains(Key);
 	};
 
 	constexpr int32 GW = PFGrid::CellsX;   // columns (X)
