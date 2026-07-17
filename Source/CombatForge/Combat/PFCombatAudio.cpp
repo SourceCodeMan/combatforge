@@ -183,8 +183,11 @@ namespace
 
 	TArray<int16> SynthFootstep()
 	{
-		return MixAdd(SynthNoiseBurst(0.035f, 0.32f, 0.55f),
-			SynthSineBlip(95.f, 0.04f, 0.22f, 0.001f, 0.025f), 0.7f);
+		// Soft concrete step (Tom hated the old sharp rock-clack): a warm low BODY thud carries the weight,
+		// with only a brief, heavily low-passed scuff mixed well under it. Low-frequency dominant + short +
+		// gentle → reads as a footfall, not an impact. The high-frequency grit (the harsh part) is gone.
+		return MixAdd(SynthSineBlip(58.f, 0.06f, 0.30f, 0.002f, 0.045f),
+			SynthNoiseBurst(0.022f, 0.14f, 0.16f), 0.5f);
 	}
 
 	TArray<int16> SynthFireSelect()
@@ -346,11 +349,10 @@ void UPFCombatAudio::EnsureSounds()
 	{
 		CueReady = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Magical_Interface_5-1_Cue.Magical_Interface_5-1_Cue"));
 	}
-	CueFootstep = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Rock_Impact_11_Cue.Rock_Impact_11_Cue"));
-	if (CueFootstep == nullptr)
-	{
-		CueFootstep = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Wood_14-8_Cue.Wood_14-8_Cue"));
-	}
+	// Tom 2026-07-17 "I hate the footstep sound": the pack's Rock_Impact clack is too sharp for a footstep and
+	// the pack ships no real footstep. Use the (reworked) soft procedural step instead — leave CueFootstep null
+	// so PlayFootstep falls through to PcmFootstep.
+	CueFootstep = nullptr;
 	CueAmbient = LoadCue(TEXT("/Game/Free_Sounds_Pack/cue/Ambient_Wind_Loop_1_Cue.Ambient_Wind_Loop_1_Cue"));
 	if (CueAmbient == nullptr)
 	{
@@ -692,9 +694,9 @@ void UPFCombatAudio::PlayFootstep(bool bSprint)
 		return;
 	}
 	const float Pitch = bSprint ? FMath::FRandRange(1.05f, 1.18f) : FMath::FRandRange(0.9f, 1.05f);
-	// Tom 2026-07-17 "I hate the footstep sound": cut to ~1/3 so it's a subtle scuff, not intrusive.
-	// (Morning Q: keep quiet, remove entirely, or swap the cue?)
-	const float Vol = (bSprint ? 0.16f : 0.11f) * ReadSfxVolumeScale();
+	// Tom 2026-07-17: replaced the harsh rock-clack with a soft procedural step (SynthFootstep). It's a
+	// gentle low thud now, so bring the volume back up a bit — footsteps are a useful stealth cue.
+	const float Vol = (bSprint ? 0.24f : 0.16f) * ReadSfxVolumeScale();
 
 	FVector Loc = FVector::ZeroVector;
 	if (const AActor* Owner = GetOwner())
