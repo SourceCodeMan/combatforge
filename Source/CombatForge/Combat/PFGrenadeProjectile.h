@@ -23,7 +23,8 @@ class UMaterialInstanceDynamic;
  *           hit -> UPFHealthComponent::ApplyPaintHit -> elimination + splat pipeline, so it is a literal
  *           non-lethal "burst of BBs". Team-tagged, so teammates are immune (B12). Cover blocks it because
  *           each BB is a real swept projectile (no through-wall radial).
- *   Smoke = a translucent concealment cloud (cosmetic; no gameplay collision, does not block AI in v1).
+ *   Smoke = a translucent concealment cloud. Mesh puffs + post-pop root are NoCollision so paintballs
+ *           pass straight through; bot LOS alone treats the cloud as a sight-breaker (not a bullet shield).
  *
  * Detonation cosmetics/audio replicate via bDetonated + OnRep (robust for the smoke's whole lifetime and
  * for late-relevant clients); the listen host runs them directly in ServerDetonate. Non-host clients rebuild
@@ -76,7 +77,8 @@ protected:
 	TArray<float>   PuffDriftRate;        // per-puff upward drift, uu/s (scaled by the billow-in)
 	TArray<float>   PuffWobblePhase;      // per-puff sin phase for the ±8% scale wobble
 	float SmokeStartTime = -1.f;
-	float SmokeAppearDur = 0.6f;
+	/** CoD-style instant pop (~120 ms) — GZW's multi-second billow is too slow for paintball tempo. */
+	float SmokeAppearDur = 0.12f;
 	bool  bSmokeVolumetric = false;       // true when M_PF_SmokeVolume is in use (drives the Density param)
 
 	UPROPERTY(ReplicatedUsing=OnRep_Detonated) bool bDetonated = false;

@@ -16,9 +16,10 @@ struct FPFSmokeSphere
 };
 
 /**
- * Registry of active smoke clouds so SMOKE ACTUALLY CONCEALS: bot line-of-sight consults IsSegmentSmoked and
- * treats a smoked segment like world geometry (sight broken). Server-side users only (bots live on the host);
- * clients simply see the cosmetic cloud.
+ * Registry of active smoke clouds so SMOKE ACTUALLY CONCEALS for bots: IsSegmentSmoked breaks bot LOS
+ * (treated like a sight-line wall). This is AI-only — paintballs / traces never consult this registry and
+ * smoke mesh/collider is NoCollision, so bullets always fly through. Server-side (bots live on the host);
+ * clients just see the cosmetic cloud.
  */
 UCLASS()
 class COMBATFORGE_API UPFSmokeSubsystem : public UWorldSubsystem

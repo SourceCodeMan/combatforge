@@ -52,12 +52,13 @@ def make_unlit(name, color_rgba, strength):
     log("saved " + full)
 
 def make_smoke_volume(name):
-    # UNLIT translucent smoke (the lit version read as flat soap bubbles under the locked-exposure rig):
-    # emissive is the SmokeColor param straight through; opacity = Density x (1 - Fresnel, thins the sphere
-    # silhouette at grazing angles) x DepthFade (soft floor/wall/pawn contact) x procedural world-space noise
-    # (MaterialExpressionNoise on Absolute World Position + a small Time pan so the cloud billows — headless-safe,
-    # no texture dependency). Param names SmokeColor + Density are a C++ contract
-    # (PFGrenadeProjectile::StartSmokeVisual / Tick) — do not rename.
+    # UNLIT translucent smoke — CoD-style bank, NOT anime soap bubbles.
+    # The old soft Fresnel silhouette outlined every engine sphere as a hard circle. Fix:
+    #   * aggressive edge kill (high-power Fresnel) so sphere rims dissolve instead of outlining
+    #   * dual-scale world noise (large billow + fine grain) so density is irregular, not a filled ball
+    #   * depth fade softens floor/wall contact
+    # Opacity = Density x EdgeSoft x DepthFade x (LargeNoise x FineNoise)
+    # Param names SmokeColor + Density are a C++ contract (PFGrenadeProjectile) — do not rename.
     path = "/Game/Materials"
     full = path + "/" + name
     if unreal.EditorAssetLibrary.does_asset_exist(full):
@@ -68,53 +69,91 @@ def make_smoke_volume(name):
     trySet(mat, "shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
     trySet(mat, "two_sided", True)
     trySet(mat, "dither_opacity_mask", False)
+    # Translucent sort: treat as volume-ish so overlapping puffs blend instead of hard-sorting disks.
+    trySet(mat, "translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_VOLUMETRIC_NON_DIRECTIONAL)
 
     color = MEL.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -640, -120)
     color.set_editor_property("parameter_name", "SmokeColor")
-    color.set_editor_property("default_value", unreal.LinearColor(0.60, 0.60, 0.62, 1.0))
-    MEL.connect_material_property(color, "", MP.MP_EMISSIVE_COLOR)
+    color.set_editor_property("default_value", unreal.LinearColor(0.55, 0.56, 0.58, 1.0))
+    # Slightly dim emissive so the bank reads as smoke, not glowing orbs under locked exposure.
+    emul = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -360, -120)
+    emul_k = MEL.create_material_expression(mat, unreal.MaterialExpressionConstant, -500, -40)
+    trySet(emul_k, "r", 0.55)
+    MEL.connect_material_expressions(color, "", emul, "A")
+    MEL.connect_material_expressions(emul_k, "", emul, "B")
+    MEL.connect_material_property(emul, "", MP.MP_EMISSIVE_COLOR)
 
-    density = MEL.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -1150, 160)
+    density = MEL.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -1400, 120)
     density.set_editor_property("parameter_name", "Density")
-    density.set_editor_property("default_value", 0.85)
+    density.set_editor_property("default_value", 1.0)
 
-    fres = MEL.create_material_expression(mat, unreal.MaterialExpressionFresnel, -1150, 300)
-    trySet(fres, "exponent", 2.6)
-    trySet(fres, "base_reflect_fraction", 0.05)
-    inv = MEL.create_material_expression(mat, unreal.MaterialExpressionOneMinus, -950, 300)
-    MEL.connect_material_expressions(fres, "", inv, "")
+    # Edge softener: high exponent → only the extreme rim fades, killing the hard circular outline
+    # without hollowing the cloud into a shell (the classic soap-bubble fresnel look).
+    fres = MEL.create_material_expression(mat, unreal.MaterialExpressionFresnel, -1400, 280)
+    trySet(fres, "exponent", 5.5)
+    trySet(fres, "base_reflect_fraction", 0.02)
+    # Power the fresnel so edge falloff is steeper, then 1-x so center stays opaque.
+    fpow = MEL.create_material_expression(mat, unreal.MaterialExpressionPower, -1180, 280)
+    fexp = MEL.create_material_expression(mat, unreal.MaterialExpressionConstant, -1300, 360)
+    trySet(fexp, "r", 1.8)
+    MEL.connect_material_expressions(fres, "", fpow, "Base")
+    MEL.connect_material_expressions(fexp, "", fpow, "Exp")
+    inv = MEL.create_material_expression(mat, unreal.MaterialExpressionOneMinus, -1000, 280)
+    MEL.connect_material_expressions(fpow, "", inv, "")
 
-    dfade = MEL.create_material_expression(mat, unreal.MaterialExpressionDepthFade, -1150, 440)
-    trySet(dfade, "fade_distance_default", 70.0)   # was 220 — tighter contact soften, less "bubble on the floor"
+    dfade = MEL.create_material_expression(mat, unreal.MaterialExpressionDepthFade, -1400, 460)
+    trySet(dfade, "fade_distance_default", 90.0)
 
-    # Procedural billow: world-space noise slowly panned by Time so the cloud crawls even on parked puffs.
-    wpos = MEL.create_material_expression(mat, unreal.MaterialExpressionWorldPosition, -1400, 620)
-    tim = MEL.create_material_expression(mat, unreal.MaterialExpressionTime, -1400, 780)
-    pan = MEL.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -1400, 880)
-    trySet(pan, "constant", unreal.LinearColor(9.0, 6.0, 14.0, 0.0))   # uu/s drift of the noise field
-    panofs = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -1200, 800)
-    MEL.connect_material_expressions(tim, "", panofs, "A")
-    MEL.connect_material_expressions(pan, "", panofs, "B")
-    noisepos = MEL.create_material_expression(mat, unreal.MaterialExpressionAdd, -1050, 660)
-    MEL.connect_material_expressions(wpos, "", noisepos, "A")
-    MEL.connect_material_expressions(panofs, "", noisepos, "B")
-    noise = MEL.create_material_expression(mat, unreal.MaterialExpressionNoise, -880, 640)
-    trySet(noise, "scale", 0.006)
-    trySet(noise, "levels", 3)
-    trySet(noise, "turbulence", True)
-    trySet(noise, "output_min", 0.30)
-    trySet(noise, "output_max", 1.0)
-    MEL.connect_material_expressions(noisepos, "", noise, "Position")
+    # Dual world-space noise: large slow billow + finer grain. Multiplied so density has holes and
+    # clumps — the silhouette stops reading as "filled sphere".
+    wpos = MEL.create_material_expression(mat, unreal.MaterialExpressionWorldPosition, -1600, 640)
+    tim = MEL.create_material_expression(mat, unreal.MaterialExpressionTime, -1600, 800)
 
-    m1 = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -760, 240)
+    pan_big = MEL.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -1600, 900)
+    trySet(pan_big, "constant", unreal.LinearColor(7.0, 4.5, 11.0, 0.0))
+    panofs_big = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -1400, 860)
+    MEL.connect_material_expressions(tim, "", panofs_big, "A")
+    MEL.connect_material_expressions(pan_big, "", panofs_big, "B")
+    npos_big = MEL.create_material_expression(mat, unreal.MaterialExpressionAdd, -1220, 700)
+    MEL.connect_material_expressions(wpos, "", npos_big, "A")
+    MEL.connect_material_expressions(panofs_big, "", npos_big, "B")
+    noise_big = MEL.create_material_expression(mat, unreal.MaterialExpressionNoise, -1000, 640)
+    trySet(noise_big, "scale", 0.0045)      # large clumps
+    trySet(noise_big, "levels", 4)
+    trySet(noise_big, "turbulence", True)
+    trySet(noise_big, "output_min", 0.15)   # deeper holes so spheres don't fill solid
+    trySet(noise_big, "output_max", 1.0)
+    MEL.connect_material_expressions(npos_big, "", noise_big, "Position")
+
+    pan_fine = MEL.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -1600, 1040)
+    trySet(pan_fine, "constant", unreal.LinearColor(-18.0, 12.0, 9.0, 0.0))
+    panofs_fine = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -1400, 1000)
+    MEL.connect_material_expressions(tim, "", panofs_fine, "A")
+    MEL.connect_material_expressions(pan_fine, "", panofs_fine, "B")
+    npos_fine = MEL.create_material_expression(mat, unreal.MaterialExpressionAdd, -1220, 900)
+    MEL.connect_material_expressions(wpos, "", npos_fine, "A")
+    MEL.connect_material_expressions(panofs_fine, "", npos_fine, "B")
+    noise_fine = MEL.create_material_expression(mat, unreal.MaterialExpressionNoise, -1000, 860)
+    trySet(noise_fine, "scale", 0.018)      # fine grain breaks remaining disk edges
+    trySet(noise_fine, "levels", 2)
+    trySet(noise_fine, "turbulence", True)
+    trySet(noise_fine, "output_min", 0.35)
+    trySet(noise_fine, "output_max", 1.0)
+    MEL.connect_material_expressions(npos_fine, "", noise_fine, "Position")
+
+    noise_mul = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -780, 760)
+    MEL.connect_material_expressions(noise_big, "", noise_mul, "A")
+    MEL.connect_material_expressions(noise_fine, "", noise_mul, "B")
+
+    m1 = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -780, 220)
     MEL.connect_material_expressions(density, "", m1, "A")
     MEL.connect_material_expressions(inv, "", m1, "B")
     m2 = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -560, 300)
     MEL.connect_material_expressions(m1, "", m2, "A")
     MEL.connect_material_expressions(dfade, "", m2, "B")
-    m3 = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -360, 380)
+    m3 = MEL.create_material_expression(mat, unreal.MaterialExpressionMultiply, -360, 400)
     MEL.connect_material_expressions(m2, "", m3, "A")
-    MEL.connect_material_expressions(noise, "", m3, "B")
+    MEL.connect_material_expressions(noise_mul, "", m3, "B")
     MEL.connect_material_property(m3, "", MP.MP_OPACITY)
 
     MEL.recompile_material(mat)

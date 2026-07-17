@@ -5,6 +5,8 @@
 #include "CombatForge.h"
 #include "Core/PFUserPrefs.h"
 #include "Dom/JsonObject.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -53,6 +55,21 @@ void UCombatForgeGameInstance::Init()
 	// Pipeline method switches (Lumen/VSM/TSR vs the budget path) for the saved quality — these cvars are
 	// not scalability-flagged, so the ini can't set them (see FPFUserPrefs::ApplyQualityMethodCVars).
 	FPFUserPrefs::ApplyQualityMethodCVars(FPFUserPrefs::GetQualityLevel());
+}
+
+void UCombatForgeGameInstance::Shutdown()
+{
+	// Process/PIE teardown: always drop listen-server / client net drivers so the next boot never inherits
+	// a hosted session. HOST LAN is opt-in only (menu HOST button or an explicit ?listen launch URL).
+	if (UWorld* World = GetWorld())
+	{
+		if (World->GetNetMode() != NM_Standalone && GEngine != nullptr)
+		{
+			UE_LOG(CombatForgeLog, Log, TEXT("GameInstance::Shutdown: tearing down net driver"));
+			GEngine->ShutdownWorldNetDriver(World);
+		}
+	}
+	Super::Shutdown();
 }
 
 FGuid UCombatForgeGameInstance::GetLocalPlayerGuid() const

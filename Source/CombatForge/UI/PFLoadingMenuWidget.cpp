@@ -2244,6 +2244,7 @@ void UPFLoadingMenuWidget::OnStopHostingClicked()
 {
 	// Travel back to a plain standalone session: the net driver shuts down, joined clients are returned to
 	// their own menus, and the multiplayer row shows HOST/JOIN again — anyone can host next.
+	// Must NOT use ?listen — that was the bug that left the menu stuck "HOSTING" after a stop.
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		UE_LOG(CombatForgeLog, Log, TEXT("Menu: stop hosting — returning to standalone"));

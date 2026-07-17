@@ -20,6 +20,7 @@ class COMBATFORGE_API UCombatForgeGameInstance : public UGameInstance
 
 public:
 	virtual void Init() override;                 // loads/creates identity file
+	virtual void Shutdown() override;             // tear down listen/client net so exit never leaves a hosted session
 
 	FGuid   GetLocalPlayerGuid() const;           // per-install identity (T24)
 	FString GetLocalPlayerGuidHash() const;       // SHA1-hex of the GUID — what goes on the wire/disk

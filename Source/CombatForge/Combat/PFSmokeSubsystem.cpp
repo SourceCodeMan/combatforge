@@ -15,7 +15,9 @@ void UPFSmokeSubsystem::RegisterSmoke(const FVector& Center, float Radius, float
 	FPFSmokeSphere S;
 	S.Center = Center;
 	S.Radius = Radius;
-	S.StartTime = Now + 0.3f;                                 // billow-in (visual SmokeAppearDur is 0.6s)
+	// Match the CoD-style instant visual pop (~0.12 s) — concealment must land with the cloud,
+	// not half a second later (old 0.3 s delay lagged the 0.6 s billow).
+	S.StartTime = Now + 0.08f;
 	S.EndTime = Now + FMath::Max(1.f, DurationSec - 1.5f);    // stop occluding as the cloud dissolves
 	Smokes.Add(S);
 }

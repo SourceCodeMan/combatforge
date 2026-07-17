@@ -32,7 +32,8 @@ APFGrenadeProjectile::APFGrenadeProjectile()
 	bAlwaysRelevant = true;   // small arena + short-lived; guarantees OnRep for cosmetics/smoke
 
 	// Collision sphere is the movement root. Bounces off world geometry, passes through pawns and
-	// (critically) the PF_ECC_Paintball channel so its own frag BBs don't self-hit the fading grenade.
+	// (critically) NEVER blocks the Paintball channel — smoke/frag canisters must not eat BBs
+	// (playtest report: "smoke blocked my shot"). Detonation also disables this collider entirely.
 	Collision = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
 	Collision->InitSphereRadius(10.f);
 	Collision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
@@ -40,7 +41,9 @@ APFGrenadeProjectile::APFGrenadeProjectile()
 	Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
 	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 	Collision->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+	Collision->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Ignore);   // belt-and-braces vs paintballs
 	Collision->SetCanEverAffectNavigation(false);
+	Collision->SetGenerateOverlapEvents(false);
 	SetRootComponent(Collision);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
@@ -177,6 +180,14 @@ void APFGrenadeProjectile::ServerDetonate()
 	if (Movement)
 	{
 		Movement->StopMovementImmediately();
+		Movement->Deactivate();
+	}
+	// Drop ALL gameplay collision the moment it pops — the actor may live for the whole smoke
+	// lifetime as a visual host; a lingering WorldDynamic collider must never intercept paintballs.
+	if (Collision)
+	{
+		Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
 	}
 
 	// Authoritative gameplay: frag spawns the real BB burst on the server (damage + host visuals).
@@ -184,8 +195,8 @@ void APFGrenadeProjectile::ServerDetonate()
 	{
 		SpawnFragBurst(At, BurstSeed);
 	}
-	// Smoke is CONCEALMENT, not just a visual: register the cloud so bot line-of-sight treats it as a
-	// sight-blocker for its lifetime. Single bounding sphere over the 9-puff cluster (center lifted, 1.1x).
+	// Smoke is CONCEALMENT only (bot LOS via UPFSmokeSubsystem). It never collides with pawns/BBs —
+	// cosmetic mesh puffs are NoCollision, and the canister collider is already off above.
 	else if (Kind == EPFGrenadeType::Smoke)
 	{
 		if (UPFSmokeSubsystem* Smoke = GetWorld() ? GetWorld()->GetSubsystem<UPFSmokeSubsystem>() : nullptr)
@@ -212,6 +223,13 @@ void APFGrenadeProjectile::OnRep_Detonated()
 	if (Movement)
 	{
 		Movement->StopMovementImmediately();
+		Movement->Deactivate();
+	}
+	// Clients: same post-pop collision kill as the authority (no BB-eating leftover collider).
+	if (Collision)
+	{
+		Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
 	}
 	HandleDetonateVisualsLocal();
 }
@@ -316,7 +334,7 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 	{
 		return;
 	}
-	// Prefer the translucent volumetric smoke material (soft, depth-faded edges); fall back to the old unlit
+	// Prefer the translucent volumetric smoke material (soft, noise-broken edges); fall back to the old unlit
 	// puff if it hasn't been generated yet (run Scripts/gen_combat_fx.py).
 	UMaterialInterface* SmokeMat = Cast<UMaterialInterface>(
 		FSoftObjectPath(TEXT("/Game/Materials/M_PF_SmokeVolume.M_PF_SmokeVolume")).TryLoad());
@@ -346,25 +364,17 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 	PuffDriftRate.Reset();
 	PuffWobblePhase.Reset();
 
-	// Engine sphere is 50 uu radius; scale so the main puff radius ~= SmokeRadius. A denser overlapping cluster
-	// of smaller varied spheres reads as a billowing cloud (not a few hard balls) and conceals better.
-	constexpr int32 NumPuffs = 12;
+	// CoD-style cloud: a TIGHT overlapping stack of non-uniform ellipsoids. Uniform spheres with
+	// slow billow read as anime soap bubbles; heavy overlap + axis stretch + instant density hide
+	// the individual primitives so it reads as one grey bank.
+	// Engine sphere is 50 uu radius; BaseScale maps that to SmokeRadius.
+	constexpr int32 NumPuffs = 20;
 	const float BaseScale = SmokeRadius / 50.f;
-	const FVector Offsets[NumPuffs] = {
-		FVector(0.f, 0.f, SmokeRadius * 0.35f),
-		FVector(SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.1f),
-		FVector(-SmokeRadius * 0.5f, 0.f, SmokeRadius * 0.15f),
-		FVector(0.f, SmokeRadius * 0.5f, SmokeRadius * 0.2f),
-		FVector(0.f, -SmokeRadius * 0.5f, SmokeRadius * 0.1f),
-		FVector(SmokeRadius * 0.32f, SmokeRadius * 0.32f, SmokeRadius * 0.55f),
-		FVector(-SmokeRadius * 0.32f, SmokeRadius * 0.3f, SmokeRadius * 0.05f),
-		FVector(SmokeRadius * 0.28f, -SmokeRadius * 0.34f, SmokeRadius * 0.4f),
-		FVector(-SmokeRadius * 0.3f, -SmokeRadius * 0.28f, SmokeRadius * 0.45f),
-		FVector(SmokeRadius * 0.15f, SmokeRadius * 0.55f, SmokeRadius * 0.5f),
-		FVector(-SmokeRadius * 0.5f, -SmokeRadius * 0.15f, SmokeRadius * 0.35f),
-		FVector(SmokeRadius * 0.05f, -SmokeRadius * 0.5f, SmokeRadius * 0.55f),
-	};
-	const float Scales[NumPuffs] = { 0.95f, 0.66f, 0.68f, 0.64f, 0.66f, 0.55f, 0.6f, 0.57f, 0.53f, 0.5f, 0.52f, 0.48f };
+	// Seeded from actor location so every client rebuilds the same shape from OnRep.
+	FRandomStream Stream(static_cast<int32>(FMath::RoundToInt(At.X * 0.1f)
+		^ (FMath::RoundToInt(At.Y * 0.1f) << 8)
+		^ (FMath::RoundToInt(At.Z * 0.1f) << 16)
+		^ static_cast<int32>(GetUniqueID())));
 
 	for (int32 i = 0; i < NumPuffs; ++i)
 	{
@@ -373,14 +383,42 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 		{
 			continue;
 		}
-		const FVector TargetScale(BaseScale * Scales[i]);
+		// Core puffs sit denser near the center; outer shells fill the bank. Tighter radial pack
+		// than the old "12 clearly-separated balls" layout.
+		const float RingT = static_cast<float>(i) / static_cast<float>(NumPuffs - 1);
+		const float Radial = SmokeRadius * FMath::Lerp(0.05f, 0.55f, RingT * RingT);
+		const float Yaw = Stream.FRandRange(0.f, 360.f);
+		const float Pitch = Stream.FRandRange(-25.f, 55.f);
+		const FVector Dir = FRotator(Pitch, Yaw, 0.f).Vector();
+		const FVector Offset = Dir * Radial + FVector(0.f, 0.f, SmokeRadius * Stream.FRandRange(0.15f, 0.55f));
+
+		// Size: one big core + many mid/small shells that fill silhouette gaps.
+		const float SizeMul = (i < 3)
+			? Stream.FRandRange(0.95f, 1.15f)
+			: Stream.FRandRange(0.45f, 0.85f);
+		const FVector Uniform(BaseScale * SizeMul);
+		// Stretch into ellipsoids so no puff reads as a perfect circle from most camera angles.
+		const FVector Stretch(
+			Stream.FRandRange(0.70f, 1.35f),
+			Stream.FRandRange(0.70f, 1.35f),
+			Stream.FRandRange(0.55f, 1.10f));   // flatter Z → ground-hugging bank, less "ball stack"
+		const FVector TargetScale = Uniform * Stretch;
+
 		Puff->SetupAttachment(Collision);
 		Puff->SetStaticMesh(Sphere);
-		Puff->SetRelativeLocation(Offsets[i]);
-		Puff->SetRelativeScale3D(TargetScale * 0.2f);   // start small; billows up in Tick
+		Puff->SetRelativeLocation(Offset);
+		// Random orientation so the stretched axes don't align into a grid of ovals.
+		Puff->SetRelativeRotation(FRotator(Stream.FRandRange(-40.f, 40.f),
+			Stream.FRandRange(0.f, 360.f), Stream.FRandRange(-30.f, 30.f)));
+		// Start almost full-size — CoD pops, it doesn't grow from a pea.
+		Puff->SetRelativeScale3D(TargetScale * 0.55f);
+		// CRITICAL: smoke meshes never block anything (pawns, paintballs, traces).
 		Puff->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Puff->SetCollisionResponseToAllChannels(ECR_Ignore);
 		Puff->SetCastShadow(false);
 		Puff->SetCanEverAffectNavigation(false);
+		Puff->SetGenerateOverlapEvents(false);
+		Puff->bReceivesDecals = false;
 		Puff->RegisterComponent();
 
 		UMaterialInstanceDynamic* PuffMID = nullptr;
@@ -389,11 +427,13 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 			PuffMID = UMaterialInstanceDynamic::Create(SmokeMat, this);
 			if (PuffMID != nullptr)
 			{
-				const FLinearColor Grey(0.6f, 0.6f, 0.62f, 1.f);
+				// Cool grey bank — slight per-puff variation so the mass isn't one flat tone.
+				const float Tint = Stream.FRandRange(0.52f, 0.68f);
+				const FLinearColor Grey(Tint, Tint, Tint + 0.02f, 1.f);
 				if (bVolumetric)
 				{
 					PuffMID->SetVectorParameterValue(TEXT("SmokeColor"), Grey);
-					PuffMID->SetScalarParameterValue(TEXT("Density"), 0.f);   // start invisible; ramps up in Tick
+					PuffMID->SetScalarParameterValue(TEXT("Density"), 0.f);   // ramps in Tick
 				}
 				else
 				{
@@ -404,18 +444,17 @@ void APFGrenadeProjectile::StartSmokeVisual(const FVector& At)
 			}
 		}
 
-		// Staggered dissolve: puffs begin fading at different times-before-end (2.6 s .. 0.7 s), so they thin
-		// out one at a time instead of all vanishing on one frame. Keep every window < SmokeDuration.
+		// Staggered dissolve: outer shells thin first, core last — cloud frays, doesn't pop off.
 		SmokePuffs.Add(Puff);
 		SmokeMIDs.Add(PuffMID);
 		PuffTargetScale.Add(TargetScale);
-		PuffMaxDensity.Add(0.9f);   // clamped from 1.3 — the unlit volume material reads denser per unit
-		PuffDissolveWindow.Add(FMath::Lerp(2.6f, 0.7f, static_cast<float>(i) / static_cast<float>(NumPuffs - 1)));
-		// Per-puff life: a lazy signed swirl, a slow rise, and an out-of-phase scale wobble (Tick applies them)
-		// keep the cluster from reading as a static bunch of soap bubbles.
-		PuffYawRateDeg.Add(FMath::FRandRange(3.f, 8.f) * (FMath::RandBool() ? 1.f : -1.f));
-		PuffDriftRate.Add(FMath::FRandRange(4.f, 8.f));
-		PuffWobblePhase.Add(FMath::FRandRange(0.f, 2.f * UE_PI));
+		// Dense enough to conceal; material noise keeps it from reading as solid grey balls.
+		PuffMaxDensity.Add(Stream.FRandRange(0.95f, 1.25f));
+		PuffDissolveWindow.Add(FMath::Lerp(3.2f, 0.9f, RingT));
+		// Almost no spin — rotating spheres is what made the old cloud look like anime bubbles.
+		PuffYawRateDeg.Add(Stream.FRandRange(0.4f, 1.6f) * (Stream.RandRange(0, 1) == 0 ? 1.f : -1.f));
+		PuffDriftRate.Add(Stream.FRandRange(2.f, 5.f));
+		PuffWobblePhase.Add(Stream.FRandRange(0.f, 2.f * UE_PI));
 	}
 	SetActorTickEnabled(true);   // begin the appear/dissolve animation
 }
@@ -429,7 +468,8 @@ void APFGrenadeProjectile::Tick(float DeltaSeconds)
 	}
 	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : SmokeStartTime;
 	const float Elapsed = Now - SmokeStartTime;
-	const float Appear = FMath::SmoothStep(0.f, SmokeAppearDur, Elapsed);   // billow-in over ~0.6 s
+	// Instant pop (SmoothStep over SmokeAppearDur ≈ 0.12 s) — opaque bank in a blink, CoD-style.
+	const float Appear = FMath::SmoothStep(0.f, SmokeAppearDur, Elapsed);
 	const float Remain = SmokeDuration - Elapsed;
 	for (int32 i = 0; i < SmokePuffs.Num(); ++i)
 	{
@@ -440,15 +480,15 @@ void APFGrenadeProjectile::Tick(float DeltaSeconds)
 		const float Window = PuffDissolveWindow.IsValidIndex(i) ? PuffDissolveWindow[i] : 1.f;
 		const float Diss = 1.f - FMath::Clamp(Remain / FMath::Max(0.1f, Window), 0.f, 1.f);
 		const float Fade = FMath::SmoothStep(0.f, 1.f, Diss);   // this puff's own dissolve 0..1
-		// Volumetric fades via opacity (Density) so keep near full size; the unlit fallback has no opacity param,
-		// so shrink it away instead.
-		const float FadeScaleTarget = bSmokeVolumetric ? 0.85f : 0.05f;
-		const float ScaleFactor = FMath::Lerp(0.2f, 1.f, Appear) * FMath::Lerp(1.f, FadeScaleTarget, Fade);
-		// ±8% breathing on a per-puff phase — the cloud shimmers instead of sitting like glued-together bubbles.
+		// Volumetric fades via Density so keep size; unlit fallback shrinks away (no opacity param).
+		const float FadeScaleTarget = bSmokeVolumetric ? 0.92f : 0.05f;
+		// Start at 55% size, hit 100% almost immediately — no slow balloon growth.
+		const float ScaleFactor = FMath::Lerp(0.55f, 1.f, Appear) * FMath::Lerp(1.f, FadeScaleTarget, Fade);
+		// Tiny breathing only (±3%) — larger wobble made each sphere pulse like a cartoon bubble.
 		const float Phase = PuffWobblePhase.IsValidIndex(i) ? PuffWobblePhase[i] : 0.f;
-		const float Wobble = 1.f + 0.08f * FMath::Sin(Elapsed * 1.7f + Phase);
+		const float Wobble = 1.f + 0.03f * FMath::Sin(Elapsed * 1.1f + Phase);
 		SmokePuffs[i]->SetRelativeScale3D(PuffTargetScale[i] * ScaleFactor * Wobble);
-		// Lazy signed swirl + slow rise (rise gated by Appear so the cloud doesn't climb while still forming).
+		// Barely-there crawl (keeps the bank alive without spinning balls).
 		if (PuffYawRateDeg.IsValidIndex(i))
 		{
 			SmokePuffs[i]->AddLocalRotation(FRotator(0.f, PuffYawRateDeg[i] * DeltaSeconds, 0.f));

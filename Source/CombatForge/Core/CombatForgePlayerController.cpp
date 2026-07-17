@@ -19,6 +19,7 @@
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
@@ -712,7 +713,18 @@ void ACombatForgePlayerController::QuitToDesktop()
 	{
 		return;
 	}
-	// Hard quit — used from the boot loading menu.
+	// Always tear down listen/client networking BEFORE process exit. Without this, a HOST LAN session
+	// that was quit via "QUIT TO DESKTOP" left the process looking hosted for the rest of the run, and
+	// Editor PIE with PlayNetMode=ListenServer made every subsequent Play open already hosting
+	// (Tom 2026-07-17: "every time I open the game I'm already hosting").
+	if (UWorld* World = GetWorld())
+	{
+		if (World->GetNetMode() != NM_Standalone && GEngine != nullptr)
+		{
+			UE_LOG(CombatForgeLog, Log, TEXT("QuitToDesktop: shutting down net driver (was hosting/joined)"));
+			GEngine->ShutdownWorldNetDriver(World);
+		}
+	}
 	ConsoleCommand(TEXT("quit"));
 }
 
@@ -727,17 +739,24 @@ void ACombatForgePlayerController::QuitToMenu()
 	{
 		ToggleOptionsMenu();
 	}
-	if (IsHostController())
+	if (GetWorld() && GetWorld()->GetNetMode() == NM_ListenServer)
 	{
 		// END the hosted session and reload as a STANDALONE boot menu. A listen server stays NM_ListenServer
 		// until the level is re-opened WITHOUT ?listen, so the old soft-reset left the menu permanently stuck in
 		// "hosting" mode after a single HOST click — every later match auto-hosted (Tom 2026-07-17). Reopening the
 		// map resets the net mode to Standalone; the startup path re-shows the boot menu with the HOST button.
+		UE_LOG(CombatForgeLog, Log, TEXT("QuitToMenu: stop hosting → standalone L_Graybox"));
 		ConsoleCommand(TEXT("open L_Graybox"));
 		return;
 	}
-	// Remote client / standalone guest: leave the session (default-map reload lands on a fresh boot menu).
-	ConsoleCommand(TEXT("disconnect"));
+	if (GetWorld() && GetWorld()->GetNetMode() == NM_Client)
+	{
+		// Remote client: leave the session (default-map reload lands on a fresh boot menu).
+		ConsoleCommand(TEXT("disconnect"));
+		return;
+	}
+	// Already standalone: soft-reload the boot map so the loading menu returns without networking.
+	ConsoleCommand(TEXT("open L_Graybox"));
 }
 
 void ACombatForgePlayerController::ServerHostSetFormat_Implementation(uint8 TeamSize)
