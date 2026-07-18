@@ -5,15 +5,20 @@ everything here is additive and Mac-guarded.
 
 ## TL;DR — what works now
 
-**Both targets build on macOS / Apple Silicon, with no engine modifications.**
+**Both targets build on macOS / Apple Silicon**, once the two environment prerequisites below are met
+(one engine config line + a complete UE install). No workarounds live in the project.
 
 | Target | Command | Result |
 |---|---|---|
-| Game / client (Monolithic) | `Build.sh CombatForge Mac Development` | `Binaries/Mac/CombatForge` — Mach-O arm64 (~390 MB) |
+| Game / client (Monolithic) | `Build.sh CombatForge Mac Development` | `Binaries/Mac/CombatForge` — Mach-O arm64 (~390 MB); `.app` finalize OK |
 | Editor (Modular) | `Build.sh CombatForgeEditor Mac Development` | `Binaries/Mac/UnrealEditor-CombatForge.dylib` — arm64. **This is what opening `CombatForge.uproject` needs.** |
 
-Compiled under Apple clang 21 with UE's `-Werror`: **zero code errors**, one non-fatal deprecation
-warning (see below).
+Xcode project generation (`GenerateProjectFiles.sh`) also succeeds. Compiled under Apple clang 21 with
+UE's `-Werror`: **zero code errors**, one non-fatal deprecation warning (see below).
+
+> `CombatForgeServer` cannot be built on a Launcher/binary engine ("Server targets are not currently
+> supported from this engine distribution") — expected and identical on Windows; see
+> `Source/CombatForgeServer.Target.cs`.
 
 Two genuinely Mac-only bugs were found and fixed (both invisible to MSVC on Windows):
 
@@ -28,67 +33,87 @@ Two genuinely Mac-only bugs were found and fixed (both invisible to MSVC on Wind
 ## Prerequisites on the Mac (all satisfied as of 2026-07-18)
 
 - **Xcode 26.6** (Apple clang 21) at `/Applications/Xcode.app`, selected via `xcode-select`.
-- **UE 5.6** (Launcher binary) at `/Users/Shared/Epic Games/UE_5.6`.
+- **UE 5.6** (Launcher binary) at `/Users/Shared/Epic Games/UE_5.6` — and the install must be
+  **complete**. A partial install silently omits the Mac target-platform dylibs and the editor asserts on
+  startup; see Troubleshooting below. Verify with:
+  `ls "/Users/Shared/Epic Games/UE_5.6/Engine/Binaries/Mac/" | grep MacTargetPlatform`
+  (expect `MacTargetPlatform`, `MacTargetPlatformControls`, `MacTargetPlatformSettings`).
+- **Engine SDK cap raised** — `Apple_SDK.json` `MaxVersion` → `26.9.0` (see "The SDK-version gate").
+  **Re-apply after any engine update.**
 - **git-lfs** installed and **all LFS content hydrated** (`git lfs pull` — 23 GB, incl. `Content/Bandits`).
   The old "manually sync Bandits to the Mac" note in `packaging.md` is obsolete.
 - **Metal Toolchain** (`metallib`) installed: `xcodebuild -downloadComponent MetalToolchain`
   (verify with `xcrun -f metallib`). Needed for shader compile/cook; recent Xcode ships it separately.
 
+## Troubleshooting: editor crashes on launch — `check(TargetPlatform)` / `RunningPlatform`
+
+Symptom (either assert, both same cause):
+```
+Assertion failed: TargetPlatform  [RenderCore/Private/GlobalShader.cpp:384]
+Assertion failed: RunningPlatform [Engine/Private/StaticMesh.cpp:6821]
+```
+Look earlier in `~/Library/Logs/Unreal Engine/CombatForgeEditor/CombatForge.log` for:
+```
+ModuleManager: Unable to load module 'MacTargetPlatform' ... UnrealEditor-MacTargetPlatform.dylib was not found
+LogTargetPlatformManager: Failed to load module 'MacTargetPlatform' for platform Mac (Reason=FileNotFound)
+```
+
+**Cause: an incomplete UE install, not the project.** `Engine/Binaries/Mac/UnrealEditor.modules`
+declares three Mac modules — `MacTargetPlatform`, `MacTargetPlatformControls`, `MacTargetPlatformSettings`
+— but a partial install can ship only `Settings`. With no Mac target platform registered,
+`GetRunningTargetPlatform()` returns null and the editor asserts during startup.
+
+Diagnose:
+```bash
+UE="/Users/Shared/Epic Games/UE_5.6"
+grep -o '"MacTargetPlatform[^"]*"[^,]*' "$UE/Engine/Binaries/Mac/UnrealEditor.modules"   # what's required
+ls "$UE/Engine/Binaries/Mac/" | grep MacTargetPlatform                                    # what's present
+```
+(For comparison, complete platforms look like `Engine/Binaries/Mac/IOS/UnrealEditor-IOSTargetPlatform*.dylib`
+— umbrella + Controls + Settings.)
+
+**Fix:** Epic Games Launcher → Library → UE 5.6 → the `...` dropdown → **Verify**. That re-downloads the
+missing dylibs. Reinstall if Verify doesn't restore them.
+
 ## The SDK-version gate (Xcode 26.6 is newer than UE 5.6 allows)
 
 UBT rejects Mac builds outright: `Found Sdk Version=26.6, MinRequired=15.2.0, MaxRequired=16.9.0` →
 `Platform Mac is not a valid platform to build`. The cap lives in the engine's
-`Engine/Config/Apple/Apple_SDK.json` (`MaxVersion`). **Both fixes below are in-repo — the engine is
-not modified.**
+`Engine/Config/Apple/Apple_SDK.json` (`MaxVersion`).
 
-### 1. `Config/Mac/Mac_SDK.json` — clears the version gate
+### The fix (required, engine-side)
 
-```json
-{ "MainVersion": "26.6" }
-```
-
-UBT reads a project-local `Config/<Platform>/<Platform>_SDK.json` and honors **only** its `MainVersion`.
-When `MainVersion` equals the installed SDK version, `UEBuildPlatformSDK.IsVersionValidInternal`
-short-circuits (`IntVersion == GetMainVersion()` → valid) and never checks the max.
-
-> **When Xcode updates, bump `MainVersion` here** to the new version string — the value UBT prints as
-> `Found Sdk Version=…`.
-
-### 2. `bAllowSDKOverrideModulesWithSharedEnvironment` — lets the EDITOR accept that override
-
-Fix 1 alone is enough for the **game** target (Monolithic → `AllowsPerProjectSDKVersion()` is true),
-but the **editor** is a Modular target on a **Shared build environment**, where UBT rejects per-project
-SDK overrides:
+One line in `/Users/Shared/Epic Games/UE_5.6/Engine/Config/Apple/Apple_SDK.json`:
 
 ```
-Target CombatForgeEditor is being built with a overridden Mac SDK version to '26.6',
-but this target is not allowed - likely due to a modular build using a Shared BuildEnvironment.
+"MaxVersion": "16.9.0"   →   "MaxVersion": "26.9.0"
+```
+```bash
+sed -i '' 's/"MaxVersion": "16.9.0"/"MaxVersion": "26.9.0"/' \
+  "/Users/Shared/Epic Games/UE_5.6/Engine/Config/Apple/Apple_SDK.json"
 ```
 
-That `RulesError` is exactly what blocks double-clicking `CombatForge.uproject` on a Mac. The fix is a
-Mac-guarded opt-in in `Source/CombatForgeEditor.Target.cs`:
+A backup sits next to it (`Apple_SDK.json.combatforge-backup`). **Caveat: this lives outside the repo and
+is lost on every engine hotfix/reinstall** — re-apply it after updating UE. Raise the value again when
+Xcode moves past 26.9.
 
-```csharp
-if (Target.Platform == UnrealTargetPlatform.Mac)
-{
-    bAllowSDKOverrideModulesWithSharedEnvironment = true;
-}
-```
+### Why not a project-local override? (tried, rejected — don't retry)
 
-Safe here because we aren't switching toolchains — clang is the same either way; we're only bypassing a
-version-**range** check.
+UBT *does* read a project-local `Config/Mac/Mac_SDK.json` and honors its `MainVersion`; setting it to the
+installed SDK version makes `IsVersionValidInternal` short-circuit valid and bypasses the max check. That
+builds the **game** target (Monolithic → `AllowsPerProjectSDKVersion()` true). Adding
+`bAllowSDKOverrideModulesWithSharedEnvironment = true` also gets the **editor** to *compile*.
 
-> **Gotcha:** the engine's own error text suggests `bAreTargetSDKVersionsRelevantOverride = false`.
-> That does **not** work for this case — `TargetRules.IsSDKVersionRelevant()` returns `true`
-> unconditionally when the target's platform *is* the SDK's platform, so the flag is never consulted.
+**But it breaks the editor at runtime.** That flag makes SDK-version-sensitive modules resolve to a
+*project-side* copy — so the editor looks for
+`<Project>/Binaries/Mac/UnrealEditor-MacTargetPlatform.dylib`, which can never exist on an Installed
+(Launcher) engine, since engine modules can't be rebuilt into the project. Result: no running target
+platform → `check(TargetPlatform)` assert on startup. Both workarounds were removed; the engine-side
+`MaxVersion` bump is the only correct fix.
 
-### Optional: the engine-side alternative
-
-One line in `/Users/Shared/Epic Games/UE_5.6/Engine/Config/Apple/Apple_SDK.json`
-(`"MaxVersion": "16.9.0"` → `"26.9.0"`) would clear the gate globally and make fixes 1–2 unnecessary.
-A backup was made next to it (`*.combatforge-backup`). **Not applied** — it lives outside the repo, is
-lost on every engine hotfix/reinstall, and the in-repo fixes make it unnecessary for building. It is
-still the cleanest way to make **full Xcode project-file generation** work (see below).
+> **Gotcha:** the engine's error text suggests `bAreTargetSDKVersionsRelevantOverride = false`.
+> That does **not** work — `TargetRules.IsSDKVersionRelevant()` returns `true` unconditionally when the
+> target's platform *is* the SDK's platform, so the flag is never consulted.
 
 ## Build commands
 
@@ -100,14 +125,14 @@ UE="/Users/Shared/Epic Games/UE_5.6"
 "$UE/Engine/Build/BatchFiles/Mac/Build.sh" CombatForge Mac Development -project="$PWD/CombatForge.uproject"
 ```
 
-### Known caveats
-- **Game target `.app` finalize.** `Build.sh CombatForge` compiles and links the binary successfully but
-  exits non-zero on the last step — "Modern Xcode" wraps the binary into a `.app` via `xcodebuild` and
-  can't find a generated scheme (`does not contain a scheme named "CombatForge"`). The raw
-  `Binaries/Mac/CombatForge` executable is complete and runnable. The editor target is unaffected.
-- **Full Xcode project generation** (`GenerateProjectFiles.sh`) fails with a cross-target conflict:
-  engine program targets (e.g. `IoStoreOnDemandTests`) don't carry the project's SDK override, and UBT
-  errors on the mismatch. Only needed for the Xcode IDE workflow; the engine-side alternative above fixes it.
+Generate Xcode project files with:
+```bash
+"$UE/Engine/Build/BatchFiles/Mac/GenerateProjectFiles.sh" -project="$PWD/CombatForge.uproject" -game
+```
+
+> Earlier revisions of this doc listed a failing `.app` finalize and a cross-target project-generation
+> conflict. Both were symptoms of the project-local SDK override and disappeared once it was removed in
+> favour of the engine-side `MaxVersion` fix.
 
 ## Remaining / verify-in-person
 
