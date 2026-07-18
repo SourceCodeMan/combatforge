@@ -156,7 +156,11 @@ void APFCharacterPreviewActor::EnsureRenderTarget()
 	RenderTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 	RenderTarget->ClearColor = FLinearColor(0.03f, 0.035f, 0.05f, 1.f);
 	RenderTarget->bAutoGenerateMips = false;
-	RenderTarget->InitAutoFormat(512, 768);
+	// Match the on-screen image box aspect (CharPreviewImage is 300x400 = 0.75). The RT was 512x768
+	// (0.667), so the square-pixel capture got stretched ~12% wider when drawn into the taller box —
+	// that's the "stretched" preview (the in-world character, which uses no such capture, is correct).
+	// 600x800 is the same 0.75 aspect (and a bit crisper), so the preview draws undistorted.
+	RenderTarget->InitAutoFormat(600, 800);
 	RenderTarget->UpdateResourceImmediate(true);
 }
 

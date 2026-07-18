@@ -1600,6 +1600,30 @@ void ACombatForgeGameMode::RespawnCombatant(ACombatForgePlayerState* PS, uint8 R
 	}
 }
 
+void ACombatForgeGameMode::RequestResetToSpawn(ACombatForgeCharacter* Pawn)
+{
+	if (!Pawn || !Pawn->HasAuthority())
+	{
+		return;
+	}
+	ACombatForgePlayerState* PS = Pawn->GetPlayerState<ACombatForgePlayerState>();
+	if (!PS)
+	{
+		return;
+	}
+	// The same in-place reset the respawn timer performs (full heal + full loadout), then a teleport to the
+	// current-phase team spawn — with no "out"/death gating, so a stuck or fallen LIVE player can recover.
+	if (UPFHealthComponent* Health = Pawn->GetHealth())
+	{
+		Health->ResetForRound(3);
+	}
+	if (UPFWeaponComponent* Weapon = Pawn->GetWeapon())
+	{
+		Weapon->ServerResetLoadout();
+	}
+	TeleportPawnTo(Pawn, GetSpawnTransform(PS));
+}
+
 void ACombatForgeGameMode::RespawnVictimAtTeamSpawn(ACombatForgeCharacter* Victim, float DelaySec)
 {
 	if (!Victim)

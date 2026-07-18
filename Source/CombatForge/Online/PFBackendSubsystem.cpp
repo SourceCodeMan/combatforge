@@ -10,6 +10,7 @@
 #include "Dom/JsonObject.h"
 #include "GameFramework/PlayerState.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Misc/CommandLine.h"
@@ -135,7 +136,11 @@ void UPFBackendSubsystem::Deinitialize()
 
 FString UPFBackendSubsystem::AuthFilePath() const
 {
-	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("CombatForge"), TEXT("Auth.json"));
+	// PER-USER, per-machine location — NOT ProjectSavedDir. For a portable/packaged build run from a writable
+	// folder, ProjectSavedDir resolves to INSIDE the package, so the session token would land in the shippable
+	// folder and get distributed to everyone who downloads it (this leaked one login to every alpha download,
+	// 2026-07-17). %LOCALAPPDATA%/CombatForge is per-user and never packaged (same root arenas already use).
+	return FPaths::Combine(FString(FPlatformProcess::UserSettingsDir()), TEXT("CombatForge"), TEXT("Auth.json"));
 }
 
 void UPFBackendSubsystem::LoadAuthFromDisk()

@@ -23,6 +23,7 @@
 #include "Components/Image.h"
 #include "Components/ProgressBar.h"
 #include "Components/ScrollBox.h"
+#include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -1878,8 +1879,17 @@ void UPFLoadingMenuWidget::BuildTree()
 	// Wrap the whole menu in a full-viewport scroll box: content stays top-anchored (so clicking tabs never
 	// shifts the layout — the old "jumping" bug) and long pages (e.g. Play-Only + community map picker) scroll
 	// so the START GAME button is always reachable instead of falling off the bottom.
+	// The two-column body is a fixed 948px wide (600 + 28 + 320). On a viewport whose effective (DPI-scaled)
+	// width falls below that — narrower windows / non-16:9 aspects, which packaged builds hit where PIE didn't —
+	// the right column (LOG IN / SERVERS / START GAME) clipped off the edge. Scale the whole menu DOWN to fit
+	// the width (DownOnly = never upscale, so wide resolutions stay 1:1). Vertical scroll still handles height.
+	UScaleBox* FitBox = WidgetTree->ConstructWidget<UScaleBox>();
+	FitBox->SetStretch(EStretch::ScaleToFitX);
+	FitBox->SetStretchDirection(EStretchDirection::DownOnly);
+	FitBox->AddChild(Col);
+
 	UScrollBox* MenuScroll = WidgetTree->ConstructWidget<UScrollBox>();
-	MenuScroll->AddChild(Col);
+	MenuScroll->AddChild(FitBox);
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(MenuScroll))
 	{
 		S->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));

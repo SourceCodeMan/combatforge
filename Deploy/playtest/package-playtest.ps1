@@ -52,6 +52,15 @@ Write-Host "    Config=$Config  (editor must be closed)"
 if ($LASTEXITCODE -ne 0) { throw "Package failed ($LASTEXITCODE)" }
 
 $ClientDir = Join-Path $ArchiveDir "Windows"
+
+# SECURITY SCRUB (durable fix for the 2026-07-17 token leak): a packaged build run from a writable folder
+# writes runtime data into <package>\CombatForge\Saved — INCLUDING a logged-in session token on pre-fix
+# builds. That must NEVER be distributed. Also drop debug PDBs (size). The per-user auth-path fix already
+# keeps fresh logins out of the package, but this guarantees a stray login or crash dump can't ship.
+$SavedDir = Join-Path $ClientDir "CombatForge\Saved"
+if (Test-Path $SavedDir) { Remove-Item $SavedDir -Recurse -Force -ErrorAction SilentlyContinue; Write-Host "Scrubbed $SavedDir (never ship runtime login/crash data)" }
+Get-ChildItem $ClientDir -Recurse -Filter *.pdb -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
 $ConnectSrc = Join-Path $PSScriptRoot "connect.ps1"
 if ((Test-Path $ClientDir) -and (Test-Path $ConnectSrc)) {
 	Copy-Item $ConnectSrc (Join-Path $ClientDir "connect.ps1") -Force

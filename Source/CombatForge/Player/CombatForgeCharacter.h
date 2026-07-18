@@ -92,6 +92,12 @@ public:
 	/** Authority: consume a carried charge (returns false if none). */
 	bool ConsumeBombCharge();
 
+	/**
+	 * Local interact prompt for the combat HUD (e.g. "F to open" near a door).
+	 * Empty when nothing usable is in range. Client display only.
+	 */
+	FString GetInteractPromptText() const;
+
 	// ---- AActor / ACharacter ----
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
@@ -295,6 +301,8 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_Kit) FPFKitRep KitRep;
 	UFUNCTION(Server, Reliable) void ServerSetKit(const FPFKitRep& NewKit);
 	UFUNCTION() void OnRep_Kit();
+	/** Server RPC backing RequestResetToSpawn(): owning client → server teleport-to-spawn (heal + refill). */
+	UFUNCTION(Server, Reliable) void ServerRequestResetToSpawn();
 	void ApplyKit();          // apply KitRep → ActiveCharConfig/ActiveWeaponConfig → visuals + weapon stats
 	bool HasValidKit() const { return KitRep.CharParts.Num() > 0; }
 
@@ -315,6 +323,8 @@ public:
 	void OnWeaponSwapInput();
 	/** Server: force the primary weapon + full ammo (respawn). */
 	void ResetToPrimaryWeapon();
+	/** Options-menu "reset to spawn": owning client → server teleport-to-spawn (full heal + refill). No-op without a pawn. */
+	void RequestResetToSpawn();
 
 	/** Log paste-ready hip + ADS pose lines (includes WeaponId for catalog paste). Console: pf.Weapon dump. */
 	void PrintWeaponPoseLine() const;

@@ -68,6 +68,7 @@ protected:
 	UFUNCTION() void OnADSToggleChanged(bool bIsChecked);
 	UFUNCTION() void OnCrouchToggleChanged(bool bIsChecked);
 	UFUNCTION() void OnClassClicked();   // cycle the active class slot + apply to the local pawn (in-game)
+	UFUNCTION() void OnResetToSpawnClicked();   // in-match: teleport the local pawn back to its spawn (heal + refill)
 	UFUNCTION() void OnMasterVolChanged(float Value);
 	UFUNCTION() void OnSfxVolChanged(float Value);
 	UFUNCTION() void OnAmbientVolChanged(float Value);
@@ -121,6 +122,7 @@ private:
 	UPROPERTY() TObjectPtr<UButton> BackButton;
 	UPROPERTY() TObjectPtr<UButton> QuitMenuButton;
 	UPROPERTY() TObjectPtr<UButton> QuitDesktopButton;
+	UPROPERTY() TObjectPtr<UButton> ResetSpawnButton;   // in-match only (hidden in embedded boot-menu options)
 	UPROPERTY() TObjectPtr<UButton> QualityButton;
 	UPROPERTY() TObjectPtr<UTextBlock> QualityValueText;
 	UPROPERTY() TObjectPtr<UButton> WindowModeButton;

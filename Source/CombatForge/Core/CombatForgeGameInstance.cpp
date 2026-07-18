@@ -9,6 +9,7 @@
 #include "Engine/World.h"
 #include "GameFramework/GameUserSettings.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/NetworkVersion.h"
 #include "Misc/Paths.h"
@@ -84,7 +85,9 @@ FString UCombatForgeGameInstance::GetLocalPlayerGuidHash() const
 
 FString UCombatForgeGameInstance::GetIdentityFilePath() const
 {
-	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("CombatForge"), TEXT("Identity.json"));
+	// Per-user location (NOT ProjectSavedDir, which is inside a portable/packaged build) so the install GUID is
+	// never shipped and each machine gets its own. Matches Auth.json + arenas under %LOCALAPPDATA%/CombatForge.
+	return FPaths::Combine(FString(FPlatformProcess::UserSettingsDir()), TEXT("CombatForge"), TEXT("Identity.json"));
 }
 
 void UCombatForgeGameInstance::LoadOrCreateIdentity()

@@ -37,7 +37,7 @@ public:
 
 	// ---- Config (contract §3.2 / §4.3) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFRespawnMode RespawnMode = EPFRespawnMode::RoundElimination;   // B1
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float BuildPhaseDuration   = 90.f;   // T2 (Tom 2026-07-17: 180 -> 90s)
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float BuildPhaseDuration   = 180.f;  // T2 — 3 minute build window
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float LobbyStartCountdown  = 0.f;     // 0: no pre-match grace — the per-round Freeze ("GET READY") is the single spawn countdown (was a double)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float FreezeDuration       = 5.f;     // T6
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float RoundDuration        = 90.f;    // 60 at ≤2v2 (T15)
@@ -96,6 +96,11 @@ public:
 
 	// Spawn transform for a player in the current round (side swap: even rounds swapped — B1):
 	FTransform GetSpawnTransform(const ACombatForgePlayerState* PS) const;
+
+	// Player-invoked "reset to spawn" (Options menu): full heal + refill, then teleport the pawn to its
+	// current-phase team spawn. Server-authoritative; routed from the owning client via
+	// ACombatForgeCharacter::ServerRequestResetToSpawn. Safe with a live pawn in any phase.
+	void RequestResetToSpawn(ACombatForgeCharacter* Pawn);
 
 protected:
 	// ---- Engine overrides ----

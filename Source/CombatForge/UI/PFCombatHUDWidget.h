@@ -60,6 +60,8 @@ private:
 	void HandleGrenadeCountChanged(uint8 Frag, uint8 Smoke);
 	/** Polls bound pawn bCarryingBomb (replicated) — show/hide BOMB · G. */
 	void UpdateBombCarryIndicator();
+	/** Center prompt when a door (etc.) is in interact range — "F to open". */
+	void UpdateInteractPrompt();
 
 	void UpdateCrosshair();
 	void UpdateBanner(float InDeltaTime);
@@ -87,6 +89,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> GrenadeText;
 	/** Visible only while the local pawn holds a mid-field bomb charge (G to plant). */
 	UPROPERTY() TObjectPtr<UTextBlock> BombCarryText;
+	/** Contextual interact cue (e.g. door in range). */
+	UPROPERTY() TObjectPtr<UTextBlock> InteractPromptText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundTimerText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundNumberText;
 	UPROPERTY() TObjectPtr<UTextBlock> AliveTextA;

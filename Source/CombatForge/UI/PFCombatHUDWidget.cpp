@@ -146,6 +146,22 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetAutoSize(true);
 	}
 
+	// Contextual interact prompt (center, under reticle) — doors, etc.
+	InteractPromptText = WidgetTree->ConstructWidget<UTextBlock>();
+	InteractPromptText->SetText(FText::GetEmpty());
+	InteractPromptText->SetFont(PFCombatFont(18, true));
+	InteractPromptText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.92f)));
+	InteractPromptText->SetJustification(ETextJustify::Center);
+	InteractPromptText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(InteractPromptText))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		CSlot->SetAlignment(FVector2D(0.5f, 0.f));
+		CSlot->SetPosition(FVector2D(0.f, 48.f));   // just below the crosshair
+		CSlot->SetAutoSize(true);
+		CSlot->SetZOrder(25);
+	}
+
 	// Bomb charge from mid-field pickup (hidden until claimed).
 	BombCarryText = WidgetTree->ConstructWidget<UTextBlock>();
 	BombCarryText->SetText(FText::FromString(TEXT("BOMB · G")));
@@ -761,6 +777,29 @@ void UPFCombatHUDWidget::UpdateBombCarryIndicator()
 		: ESlateVisibility::Collapsed);
 }
 
+void UPFCombatHUDWidget::UpdateInteractPrompt()
+{
+	if (!InteractPromptText)
+	{
+		return;
+	}
+	// Hide while out / eliminated overlay is up.
+	if (BoundHealth.IsValid() && BoundHealth->bEliminated)
+	{
+		InteractPromptText->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	const ACombatForgeCharacter* Char = BoundPawn.Get();
+	const FString Prompt = Char ? Char->GetInteractPromptText() : FString();
+	if (Prompt.IsEmpty())
+	{
+		InteractPromptText->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	InteractPromptText->SetText(FText::FromString(Prompt));
+	InteractPromptText->SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
 void UPFCombatHUDWidget::HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint8 LimbHits, uint8 TotalHits)
 {
 	const UPFHealthComponent* Health = BoundHealth.Get();
@@ -1330,6 +1369,7 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 	UpdateObjectiveStatus();
 	UpdateDominationHUD();
 	UpdateBombCarryIndicator();
+	UpdateInteractPrompt();
 
 	if (const ACombatForgeGameState* GS = BoundGameState.Get())
 	{

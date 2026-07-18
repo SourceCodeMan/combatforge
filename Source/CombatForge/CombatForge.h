@@ -23,7 +23,7 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 5;   // alpha.5 — per-weapon HitValue / pellets / bloom decay (weapon-implementation-spec)
+	constexpr int32 NetProtocol = 6;   // alpha.6 — reset-to-spawn RPC (Options) + WmfMedia music + preview-aspect fix
 }
 
 /**

@@ -161,15 +161,21 @@ void UPFOptionsWidget::BuildTree()
 	BackButton = MakeTabButton(TEXT("  BACK  "), TEXT("BackBtn"));
 	QuitMenuButton = MakeTabButton(TEXT("  QUIT TO MENU  "), TEXT("QuitMenuBtn"));
 	QuitDesktopButton = MakeTabButton(TEXT("  QUIT TO DESKTOP  "), TEXT("QuitDeskBtn"));
+	ResetSpawnButton = MakeTabButton(TEXT("  RESET TO SPAWN  "), TEXT("ResetSpawnBtn"));
 	ApplyButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnApplyClicked);
 	BackButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnBackClicked);
 	QuitMenuButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnQuitToMenuClicked);
 	QuitDesktopButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnQuitToDesktopClicked);
+	ResetSpawnButton->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnResetToSpawnClicked);
 	if (UHorizontalBoxSlot* H = Footer->AddChildToHorizontalBox(ApplyButton))
 	{
 		H->SetPadding(FMargin(6.f));
 	}
 	if (UHorizontalBoxSlot* H = Footer->AddChildToHorizontalBox(BackButton))
+	{
+		H->SetPadding(FMargin(6.f));
+	}
+	if (UHorizontalBoxSlot* H = Footer->AddChildToHorizontalBox(ResetSpawnButton))
 	{
 		H->SetPadding(FMargin(6.f));
 	}
@@ -896,6 +902,7 @@ void UPFOptionsWidget::ApplyEmbeddedChrome()
 	if (BackButton)        { BackButton->SetVisibility(ESlateVisibility::Collapsed); }
 	if (QuitMenuButton)    { QuitMenuButton->SetVisibility(ESlateVisibility::Collapsed); }
 	if (QuitDesktopButton) { QuitDesktopButton->SetVisibility(ESlateVisibility::Collapsed); }
+	if (ResetSpawnButton)  { ResetSpawnButton->SetVisibility(ESlateVisibility::Collapsed); }
 	// The boot menu has its own top-level HOW TO PLAY tab, so the embedded options card showing
 	// a second one read as a duplicate (Tom 2026-07-15). The in-game pause overlay never routes
 	// through here (bEmbedded=false), so it keeps its How to Play tab.
@@ -1134,6 +1141,18 @@ void UPFOptionsWidget::OnClassClicked()
 		ClassValueText->SetText(FText::FromString(
 			FString::Printf(TEXT("  Class %d  "), PFChar::GetActiveSaveSlot() + 1)));
 	}
+}
+
+void UPFOptionsWidget::OnResetToSpawnClicked()
+{
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
+		{
+			Char->RequestResetToSpawn();
+		}
+	}
+	Close();   // dismiss options so the player sees the teleport
 }
 
 const TCHAR* UPFOptionsWidget::QualityName(int32 Level)

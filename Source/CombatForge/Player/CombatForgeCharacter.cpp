@@ -1255,6 +1255,47 @@ void ACombatForgeCharacter::OnReloadPressed()
 	}
 }
 
+FString ACombatForgeCharacter::GetInteractPromptText() const
+{
+	if (!IsLocallyControlled())
+	{
+		return FString();
+	}
+	if (const UPFHealthComponent* Health = GetHealth(); Health && Health->bEliminated)
+	{
+		return FString();
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return FString();
+	}
+
+	// Nearest usable door in range (same gate as OnInteractPressed).
+	const APFBuildPieceActor* BestDoor = nullptr;
+	float BestDistSq = FMath::Square(APFBuildPieceActor::DoorInteractRangeUU);
+	const FVector Me = GetActorLocation();
+	for (TActorIterator<APFBuildPieceActor> It(World); It; ++It)
+	{
+		const APFBuildPieceActor* Door = *It;
+		if (!Door || !Door->CanUserToggleDoor(this))
+		{
+			continue;
+		}
+		const float D = FVector::DistSquared(Me, Door->GetDoorInteractLocation());
+		if (D <= BestDistSq)
+		{
+			BestDistSq = D;
+			BestDoor = Door;
+		}
+	}
+	if (BestDoor)
+	{
+		return BestDoor->IsOpen() ? TEXT("F to close") : TEXT("F to open");
+	}
+	return FString();
+}
+
 void ACombatForgeCharacter::OnInteractPressed()
 {
 	if (!IsLocallyControlled())
@@ -2459,6 +2500,20 @@ void ACombatForgeCharacter::PushLocalKit()
 	if (!HasAuthority())
 	{
 		ServerSetKit(Kit);
+	}
+}
+
+void ACombatForgeCharacter::RequestResetToSpawn()
+{
+	// Owning-client entry (Options menu button). The server performs the authoritative teleport + heal.
+	ServerRequestResetToSpawn();
+}
+
+void ACombatForgeCharacter::ServerRequestResetToSpawn_Implementation()
+{
+	if (ACombatForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ACombatForgeGameMode>() : nullptr)
+	{
+		GM->RequestResetToSpawn(this);
 	}
 }
 
