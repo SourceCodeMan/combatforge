@@ -386,6 +386,10 @@ public:
 	void TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle);
 	/** Live-tune the per-weapon aim-down-sight pose (console: pf.WeaponADS). Hold right-click to preview. */
 	void TuneWeaponADS(const FVector& Loc, const FRotator& Rot);
+	/** Live-tune the THIRD-PERSON grip in hand_r (console: pf.WeaponTP) — what everyone else sees. */
+	void TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale);
+	/** Drop the cached TP attach bone so it re-resolves next tick (pf.ArmedAnims / pf.WeaponBoneAttach toggles). */
+	void InvalidateWeaponAttachBone() { CachedWeaponAttachBone = NAME_None; }
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms

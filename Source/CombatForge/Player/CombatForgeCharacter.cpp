@@ -58,9 +58,12 @@
 // a compatible-skeletons entry — visually unverifiable headless, so keep a live revert (`pf.ArmedAnims 0` +
 // respawn) in case the retarget T-poses or slides on some machine.
 // Default 0 (Tom playtest 2026-07-16): the rifle-hold anim packs are on foreign mannequin skeletons
-// Rifle-hold locomotion (AS_Rifle_* low-ready). Compatible-skeleton remap can slightly elongate the Bandit
-// (full IK bake to Bandit_Retargeted/*_Bandit is the permanent fix — docs/retarget-rifle-anims.md). Default ON
-// so TP bots/players look like they're holding the gun; pf.ArmedAnims 0 reverts to empty-handed A_MM_*.
+// Rifle-hold locomotion (AS_Rifle_* low-ready). ✅ IK-RETARGET BAKE DONE (Tom, 2026-07-18): these paths now
+// point at animations baked onto SKM_Bandit_Skeleton, which live in the ROOT of /Game/RifleAnims/ (NOT the
+// originals under Animations/BlendSpaces/Standing_IdleWalkJogRun/, which are still on UE4_Mannequin_Skeleton
+// and elongate the body via the name-based compatible-skeleton remap). Same asset NAMES in both folders —
+// the package path is what disambiguates, so do NOT "tidy" these paths back to the BlendSpaces folder or the
+// stretched torso returns. Default ON: hands on the gun, no stretch. pf.ArmedAnims 0 = empty-handed A_MM_*.
 static TAutoConsoleVariable<int32> CVarArmedAnims(
 	TEXT("pf.ArmedAnims"), 1,
 	TEXT("1 = rifle-hold pack anims (default; hands on gun), 0 = native unarmed Bandit anims. Applies live."));
@@ -84,22 +87,55 @@ static TAutoConsoleVariable<int32> CVarWeaponAutoPose(
 	TEXT("pf.WeaponAutoPose"), 0,
 	TEXT("1 = auto-generate FP hip+ADS from mesh bounds (ignores catalog). 0 = catalog poses only (default)."));
 
+// Third-person grip source. 1 (default) = attach the TP gun to the ANIMATION's own weapon bone (ik_hand_gun),
+// which the rifle pack animates to sit exactly in the grip and which the IK-retarget carried onto the Bandit —
+// so the position is correct by construction and tracks the animation, with NO hand-tuned offset.
+// 0 = legacy hand_r + the WeaponRelative* offset (still used automatically whenever the unarmed anim set is on,
+// since ik_hand_gun isn't meaningfully posed there). Flip to 0 to A/B it live if a gun ever looks wrong.
+// DEFAULT 0 (Tom playtest 2026-07-18): ik_hand_gun turned out NOT to be animated even after adding an IKGun
+// retarget chain — it stays parked near its parent ik_hand_root down at the pelvis, which is why the rifle hung
+// at the hip while the hands were correctly posed in front. Attach to hand_r instead and orient from the hands
+// (see CVarWeaponAimFromHands). Kept as a switch only for A/B.
+static TAutoConsoleVariable<int32> CVarWeaponBoneAttach(
+	TEXT("pf.WeaponBoneAttach"), 0,
+	TEXT("1 = attach TP weapon to ik_hand_gun (NOT animated on this skeleton — leaves the gun at the hip). 0 = hand_r (default)."));
+
+// THE fix for "gun isn't where the hands are". The rifle-hold animation poses BOTH hands correctly (right hand
+// on the grip, left on the foregrip) — so the weapon's line IS the vector between them. Orienting the gun along
+// hand_r -> hand_l is derived entirely from the live animated pose: no hand-tuned numbers, correct for every
+// frame of every clip, and self-correcting if the animation set ever changes. Falls back to the old fixed
+// offset for one-handed weapons or if hand_l is missing.
+static TAutoConsoleVariable<int32> CVarWeaponAimFromHands(
+	TEXT("pf.WeaponAimFromHands"), 1,
+	TEXT("1 = orient the TP weapon along the animated hand_r->hand_l line (default). 0 = fixed WeaponRelative* offset."));
+
 // Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
 // kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
 static void PFArmedAnimsSink()
 {
 	static int32 LastArmed = CVarArmedAnims.GetValueOnGameThread();
+	static int32 LastBoneAttach = CVarWeaponBoneAttach.GetValueOnGameThread();
 	const int32 Now = CVarArmedAnims.GetValueOnGameThread();
-	if (Now == LastArmed)
+	const int32 NowBone = CVarWeaponBoneAttach.GetValueOnGameThread();
+	if (Now == LastArmed && NowBone == LastBoneAttach)
 	{
 		return;
 	}
+	const bool bArmedChanged = (Now != LastArmed);
 	LastArmed = Now;
+	LastBoneAttach = NowBone;
 	for (TObjectIterator<ACombatForgeCharacter> It; It; ++It)
 	{
 		if (It->GetWorld() != nullptr && It->GetWorld()->IsGameWorld())
 		{
-			It->RefreshBanditAnimSet();
+			// The attach bone is resolved ONCE and cached, but which bone is correct depends on both cvars
+			// (ik_hand_gun only while the armed set plays). Clear it so the next tick re-resolves — otherwise
+			// a live A/B toggle silently keeps the old bone and looks like the flag did nothing.
+			It->InvalidateWeaponAttachBone();
+			if (bArmedChanged)
+			{
+				It->RefreshBanditAnimSet();
+			}
 		}
 	}
 }
@@ -368,9 +404,9 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	// pack is on its own UE4 mannequin skeleton, registered compatible with SKM_Bandit_Skeleton via
 	// Scripts/add_compatible_skeleton.py so FSkeletonRemapping plays it on the Bandit body.
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedIdleFinder(
-		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_Idle.AS_Rifle_Idle"));
+		TEXT("/Game/RifleAnims/AS_Rifle_Idle.AS_Rifle_Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedRunFinder(
-		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_RunFwd.AS_Rifle_RunFwd"));
+		TEXT("/Game/RifleAnims/AS_Rifle_RunFwd.AS_Rifle_RunFwd"));
 	if (ArmedIdleFinder.Succeeded()) { ArmedIdleAnim = ArmedIdleFinder.Object; }
 	if (ArmedRunFinder.Succeeded())  { ArmedRunAnim  = ArmedRunFinder.Object; }
 
@@ -380,24 +416,24 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 		// Relaxed LOW-READY set (Shooter Rifle Animations pack) so MOVING bots are also gun-down, not
 		// shouldered-at-the-face. Pack has 6 dirs (no fwd-diagonals) → map fwd-diagonals to pure L/R.
 		static const TCHAR* WalkDirPaths[8] = {
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkFwd.AS_Rifle_WalkFwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwdRight.AS_Rifle_WalkBwdRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwd.AS_Rifle_WalkBwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwdLeft.AS_Rifle_WalkBwdLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkFwd.AS_Rifle_WalkFwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkBwdRight.AS_Rifle_WalkBwdRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkBwd.AS_Rifle_WalkBwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkBwdLeft.AS_Rifle_WalkBwdLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
 		};
 		static const TCHAR* JogDirPaths[8] = {
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogFwd.AS_Rifle_JogFwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogRight.AS_Rifle_JogRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogRight.AS_Rifle_JogRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwdRight.AS_Rifle_JogBwdRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwd.AS_Rifle_JogBwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwdLeft.AS_Rifle_JogBwdLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogFwd.AS_Rifle_JogFwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogRight.AS_Rifle_JogRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogRight.AS_Rifle_JogRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogBwdRight.AS_Rifle_JogBwdRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogBwd.AS_Rifle_JogBwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogBwdLeft.AS_Rifle_JogBwdLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
 		};
 		ArmedWalkDir.SetNum(8);
 		ArmedJogDir.SetNum(8);
@@ -2514,6 +2550,30 @@ void ACombatForgeCharacter::ReapplyCharacterConfig()
 
 void ACombatForgeCharacter::ApplyWeaponLoadout()
 {
+	// BOTS ROLL THEIR OWN GUN (Tom 2026-07-18: "bots always have whatever weapon the player has — they ought to
+	// be chosen at random"). Without this a bot has no kit, so it fell through to PFWeapon::LoadConfig() below,
+	// which is the HOST'S saved loadout — hence every bot mirroring the player's current weapon.
+	// Server-authoritative and written into the REPLICATED kit, so every client sees the same gun on that bot.
+	// Rolled exactly ONCE per pawn: populating CharParts makes HasValidKit() true, so this block can't re-roll
+	// on later calls (respawn reuses the pawn, and a gun that changed every tick would be worse than the bug).
+	if (HasAuthority() && !HasValidKit() && IsBotControlled())
+	{
+		const FPFCharacterConfig BotLook = PFChar::DefaultConfig();
+		KitRep.CharParts.Reset(BotLook.Slots.Num());
+		for (const int32 Slot : BotLook.Slots)
+		{
+			KitRep.CharParts.Add(static_cast<int16>(Slot));
+		}
+		const int32 Cat = FMath::RandRange(0, PFWeapon::CategoryCount() - 1);
+		const int32 Idx = FMath::RandRange(0, FMath::Max(0, PFWeapon::WeaponCount(Cat) - 1));
+		KitRep.WeaponCategory = static_cast<uint8>(Cat);
+		KitRep.WeaponIndex    = static_cast<uint8>(Idx);
+		KitRep.SecondaryCategory = 2;   // pistol sidearm, same as a player's default secondary
+		KitRep.SecondaryIndex    = 0;
+		UE_LOG(CombatForgeLog, Verbose, TEXT("Bot loadout rolled: %s"),
+			*PFWeapon::WeaponDisplayName(Cat, Idx));
+	}
+
 	// Resolve primary + secondary from kit (or local prefs / defaults for bots).
 	if (HasValidKit())
 	{
@@ -2982,6 +3042,45 @@ static FAutoConsoleCommandWithWorldAndArgs GPFWeaponFPCmd(
 	TEXT("Tune the equipped weapon's first-person pose: x y z pitch yaw roll scale [muzX muzY muzZ]. Prints values to paste into PFWeaponCatalog."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponFPCmd));
 
+void ACombatForgeCharacter::TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale)
+{
+	// Third-person grip: where the gun sits in hand_r. Applied by ApplyHandWeaponPose every tick, so simply
+	// writing the members takes effect on the next frame — no re-attach needed.
+	WeaponRelativeLocation = Loc;
+	WeaponRelativeRotation = Rot;
+	WeaponRelativeScale = FVector(Scale);
+	ApplyHandWeaponPose();   // immediate feedback while dragging numbers in the console
+}
+
+// Live-tune the THIRD-PERSON grip (what everyone else sees). The FP tools above only move the viewmodel; this
+// is the one that fixes "the rifle is canted across the chest". Needed after the IK-retarget bake because the
+// Bandit's hand bone orientation changed, so the old rifle-tuned offset no longer lands in the grip.
+// Applies to EVERY character in the world (including bots) so you can eyeball a bot while tuning.
+static void PFWeaponTPCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 6)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("usage: pf.WeaponTP x y z pitch yaw roll [scale]   (third-person grip in hand_r)"));
+		return;
+	}
+	const FVector Loc(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
+	const float Scale = (Args.Num() >= 7) ? FCString::Atof(*Args[6]) : 0.85f;
+	int32 Applied = 0;
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		It->TuneWeaponTP(Loc, Rot, Scale);
+		++Applied;
+	}
+	UE_LOG(CombatForgeLog, Log,
+		TEXT("pf.WeaponTP (%d pawns): WeaponRelativeLocation=FVector(%.2ff,%.2ff,%.2ff), WeaponRelativeRotation=FRotator(%.2ff,%.2ff,%.2ff), WeaponRelativeScale=FVector(%.3ff)"),
+		Applied, Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Scale);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponTPCmd(
+	TEXT("pf.WeaponTP"),
+	TEXT("Tune the THIRD-PERSON weapon grip (hand_r): x y z pitch yaw roll [scale]. Applies to all pawns incl. bots; prints paste-ready values."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponTPCmd));
+
 void ACombatForgeCharacter::TuneWeaponADS(const FVector& Loc, const FRotator& Rot)
 {
 	ViewModelAdsLoc = Loc;
@@ -3364,9 +3463,17 @@ FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponen
 	{
 		return NAME_None;
 	}
-	// Prefer the RIGHT HAND bone for in-hand carry. Do NOT prefer "weapon_r" / holster sockets first —
-	// many packs put weapon_r on the hip; attaching there left a fixed hip gun while the FP viewmodel
-	// (or armed-hand pose) still looked "in hands" (double-gun bug).
+	// ik_hand_gun FIRST when the rifle-hold animation set is driving the arms (Tom 2026-07-18: "just use whatever
+	// the animation says is correct — don't hand-tune it"). On mannequin-family skeletons ik_hand_gun IS the
+	// animator's weapon marker: the rifle pack animates it to sit exactly in the grip, and the IK-retarget carried
+	// it onto SKM_Bandit_Skeleton. Attaching there needs NO offset — position/orientation come from the animation
+	// itself and track it for free, which is why this beats a hand-tuned hand_r offset that only matches one pose.
+	// Only preferred while the armed set is active; with the unarmed set the arms hang and ik_hand_gun isn't
+	// meaningfully posed, so hand_r + the tuned offset remains correct there.
+	const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
+	static const FName WeaponBoneFirst[] = { TEXT("ik_hand_gun"), TEXT("IK_hand_gun") };
+	// Do NOT prefer "weapon_r" / holster sockets first — many packs put weapon_r on the hip; attaching there left
+	// a fixed hip gun while the FP viewmodel (or armed-hand pose) still looked "in hands" (double-gun bug).
 	static const FName HandFirst[] = {
 		TEXT("hand_r"),
 		TEXT("Hand_R"),
@@ -3386,6 +3493,17 @@ FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponen
 	{
 		return Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE;
 	};
+	// Animation-authored weapon bone wins while the rifle-hold set is playing (see note above).
+	if (bArmedIdleActive && CVarWeaponBoneAttach.GetValueOnGameThread() != 0)
+	{
+		for (const FName& N : WeaponBoneFirst)
+		{
+			if (Exists(N))
+			{
+				return N;
+			}
+		}
+	}
 	// Explicit default only if it's a hand (not a holster name).
 	if (!WeaponAttachSocket.IsNone() && Exists(WeaponAttachSocket))
 	{
@@ -3485,9 +3603,53 @@ void ACombatForgeCharacter::ApplyHandWeaponPose()
 			WeaponMeshComp->AttachToComponent(Body,
 				FAttachmentTransformRules::SnapToTargetNotIncludingScale, CachedWeaponAttachBone);
 		}
-		WeaponMeshComp->SetRelativeLocation(WeaponRelativeLocation);
-		WeaponMeshComp->SetRelativeRotation(WeaponRelativeRotation);
+		// On the ANIMATION's weapon bone (ik_hand_gun) the grip transform is already baked into the bone by the
+		// animator — applying the hand_r-tuned offset on top would re-introduce exactly the cant we're removing.
+		// So: identity offset there, tuned offset on a plain hand bone. Scale is a mesh-size choice either way.
+		const bool bOnWeaponBone = CachedWeaponAttachBone.ToString().StartsWith(TEXT("ik_hand_gun"), ESearchCase::IgnoreCase);
+		WeaponMeshComp->SetRelativeLocation(bOnWeaponBone ? FVector::ZeroVector : WeaponRelativeLocation);
+		WeaponMeshComp->SetRelativeRotation(bOnWeaponBone ? FRotator::ZeroRotator : WeaponRelativeRotation);
 		WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
+
+		// ---- Orient the gun from the ANIMATED HANDS (the fix for "gun at the hip / bicep") ----
+		// Every fixed offset we tried was wrong for at least one pose, and ik_hand_gun turned out not to be
+		// animated on this skeleton (it sits at ik_hand_root near the pelvis — the hip gun). But the rifle-hold
+		// animation DOES pose both hands correctly, so the weapon's own line is simply hand_r -> hand_l:
+		// right hand on the grip, left on the foregrip. Deriving the barrel from that needs no tuned numbers and
+		// stays correct for every frame of every clip. Two-handed only; a one-handed pose keeps the fixed offset.
+		if (CVarWeaponAimFromHands.GetValueOnGameThread() != 0 && WeaponMesh != nullptr)
+		{
+			static const FName LeftHandNames[] = { TEXT("hand_l"), TEXT("Hand_L"), TEXT("LeftHand"), TEXT("HandL") };
+			FName LeftHand = NAME_None;
+			for (const FName& N : LeftHandNames)
+			{
+				if (Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE) { LeftHand = N; break; }
+			}
+			if (!LeftHand.IsNone())
+			{
+				const FVector GripLoc  = Body->GetSocketLocation(CachedWeaponAttachBone);
+				const FVector FrontLoc = Body->GetSocketLocation(LeftHand);
+				const FVector Barrel   = (FrontLoc - GripLoc).GetSafeNormal();
+				// Guard: if the hands are together (holstered/unarmed poses) the direction is meaningless.
+				if (!Barrel.IsNearlyZero() && FVector::Dist(FrontLoc, GripLoc) > 10.f)
+				{
+					// Which local axis is the barrel? Same bounds test the FP auto-pose uses: the longest
+					// horizontal extent of the mesh IS the barrel (SM_Rifle family is +Y; others are +X).
+					const FBoxSphereBounds B = WeaponMesh->GetBounds();
+					const bool bBarrelAlongY = (B.BoxExtent.Y >= B.BoxExtent.X);
+					// Roll reference: the hand's up keeps the gun from spinning about its own barrel.
+					const FVector HandUp = Body->GetSocketQuaternion(CachedWeaponAttachBone).GetUpVector();
+					const FRotator WorldRot = bBarrelAlongY
+						? FRotationMatrix::MakeFromYZ(Barrel, HandUp).Rotator()
+						: FRotationMatrix::MakeFromXZ(Barrel, HandUp).Rotator();
+					WeaponMeshComp->SetWorldRotation(WorldRot);
+					// Seat the GRIP (rear of the gun) in the right hand rather than the mesh centre, so the
+					// receiver doesn't float forward of the fist.
+					const float BarrelHalf = (bBarrelAlongY ? B.BoxExtent.Y : B.BoxExtent.X) * WeaponRelativeScale.X;
+					WeaponMeshComp->SetWorldLocation(GripLoc + Barrel * (BarrelHalf * 0.35f));
+				}
+			}
+		}
 		return;
 	}
 
@@ -3757,20 +3919,32 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 	// thigh — never a large world-Z teleport (that was the "gun on neck/armpit" bug with the dual sling).
 	if (ShouldRaiseWeapon())
 	{
-		const FRotator Aim = GetBaseAimRotation();
-		// PER-WEAPON barrel-axis correction (default -90 / 0 = SM_Rifle +Y barrel; pistols flip roll).
-		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw + CachedTPRaisedYaw, CachedTPRaisedRoll));
-
-		// Modest lift only when unarmed hang pose leaves the hand low. Hard-clamped — cannot reach head.
+		// WHO OWNS THE WEAPON POSE?
+		// With the IK-retargeted rifle-hold set active, the ANIMATION already puts both hands on the gun and
+		// points it down the aim — the mesh is parented to hand_r, so it follows that pose for free. Overriding
+		// the rotation here FOUGHT the animation: ShouldRaiseWeapon() flips on/off constantly (bots re-arm fire
+		// every few frames), so the gun snapped between the animated pose and this aim-derived one every tick.
+		// That was the "rifle glitching between correct and angled down" flicker (Tom 2026-07-18).
+		// So: only pose the gun in code when the UNARMED fallback set is driving the arms (they hang, and the
+		// gun genuinely has to be pointed + lifted by hand). Otherwise leave it to the animation.
 		const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
-		if (!bArmedIdleActive && WeaponMaxShoulderLiftUU > 0.f)
+		if (!bArmedIdleActive)
 		{
-			const float TargetZ = GetEyeWorldLocation().Z - WeaponShoulderDropFromEyeUU;
-			const float CurrentZ = WeaponMeshComp->GetComponentLocation().Z;
-			const float Lift = FMath::Clamp(TargetZ - CurrentZ, 0.f, WeaponMaxShoulderLiftUU);
-			if (Lift > 0.f)
+			const FRotator Aim = GetBaseAimRotation();
+			// PER-WEAPON barrel-axis correction (default -90 / 0 = SM_Rifle +Y barrel; pistols flip roll).
+			WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw + CachedTPRaisedYaw, CachedTPRaisedRoll));
+
+			// Modest lift so the hanging-arm pose doesn't leave the barrel in the thigh. Hard-clamped —
+			// cannot reach the head (that was the forehead-gun bug).
+			if (WeaponMaxShoulderLiftUU > 0.f)
 			{
-				WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, Lift));
+				const float TargetZ = GetEyeWorldLocation().Z - WeaponShoulderDropFromEyeUU;
+				const float CurrentZ = WeaponMeshComp->GetComponentLocation().Z;
+				const float Lift = FMath::Clamp(TargetZ - CurrentZ, 0.f, WeaponMaxShoulderLiftUU);
+				if (Lift > 0.f)
+				{
+					WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, Lift));
+				}
 			}
 		}
 	}

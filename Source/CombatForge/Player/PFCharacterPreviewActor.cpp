@@ -42,7 +42,7 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	// looks nicer (both hands on the gun) but is authored on a UE4-MANNEQUIN skeleton — running it on the
 	// Bandit via the compatible-skeleton remap STRETCHES the torso/legs, which was the "stretched preview".
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleIdleFinder(
-		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_Idle.AS_Rifle_Idle"));
+		TEXT("/Game/RifleAnims/AS_Rifle_Idle.AS_Rifle_Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> UnarmedIdleFinder(
 		TEXT("/Game/Bandits/Demo/Animations/A_MM_Idle.A_MM_Idle"));
 	if (RifleIdleFinder.Succeeded())   { RifleIdleAnimAsset   = RifleIdleFinder.Object; }

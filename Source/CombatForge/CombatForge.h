@@ -23,8 +23,10 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 7;   // alpha.7 — ServerSetPlayerName RPC (account name in game) + forces all
-	                                   // clients onto matching content (fixes old-build black-checker props)
+	constexpr int32 NetProtocol = 8;   // alpha.8 — rifle-hold anims default ON + real punch clips, bot roof-launch
+	                                   // (capsule depenetration) fix, modular skin, per-weapon TP pose, Punch rebind,
+	                                   // sniper zoom, class-save fixes. Content + behaviour changed, so the gate MUST
+	                                   // step or alpha-7 clients still join and silently mis-render.
 }
 
 /**
