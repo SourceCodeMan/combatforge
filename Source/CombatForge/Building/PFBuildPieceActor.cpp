@@ -26,7 +26,10 @@
 namespace
 {
 	constexpr float Sub = 100.f; // PFGrid::SubUU
-	constexpr float Cell = 400.f;
+	// NOTE: named CellUU (not Cell) — on macOS, Apple's Carbon HIToolbox/Lists.h defines
+	// `typedef Point Cell`, which is pulled in transitively by the engine and makes a bare
+	// `Cell` ambiguous (clang error). The UU suffix matches SubUU and dodges the collision.
+	constexpr float CellUU = 400.f;
 	constexpr float WallH = 300.f;
 	constexpr float WallThick = 20.f;
 
@@ -274,17 +277,17 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 
 	// Wall plane centerline.
 	const float Along0 = 0.f;
-	const float Along1 = Cell;
-	const float MidAlong = Cell * 0.5f;
+	const float Along1 = CellUU;
+	const float MidAlong = CellUU * 0.5f;
 	const float ThickHalf = WallThick * 0.5f;
 
 	auto AlongPos = [&](float Along) -> FVector
 	{
 		if (bEast)
 		{
-			return FVector(Wx + Cell, Wy + Along, 0.f);
+			return FVector(Wx + CellUU, Wy + Along, 0.f);
 		}
-		return FVector(Wx + Along, Wy + Cell, 0.f);
+		return FVector(Wx + Along, Wy + CellUU, 0.f);
 	};
 	auto ExtentAlong = [&](float AlongHalf, float ZHalf) -> FVector
 	{
@@ -304,10 +307,10 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 	if (bWithWindowOpening)
 	{
 		// Left / right posts + sill + header around a large center hole.
-		const float SideW = (Cell - PieceWinW) * 0.5f; // 60
+		const float SideW = (CellUU - PieceWinW) * 0.5f; // 60
 		const float PostAlongHalf = SideW * 0.5f;
 		const float LeftAlong = SideW * 0.5f;
-		const float RightAlong = Cell - SideW * 0.5f;
+		const float RightAlong = CellUU - SideW * 0.5f;
 		const float MidZ = WallH * 0.5f;
 
 		AddCubePart(TEXT("WinPostL"), Center(LeftAlong, MidZ), ExtentAlong(PostAlongHalf, MidZ),
@@ -333,10 +336,10 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 	if (bWithDoorOpening)
 	{
 		// Side posts + header; walk-through opening at center bottom.
-		const float SideW = (Cell - PieceDoorW) * 0.5f; // 130
+		const float SideW = (CellUU - PieceDoorW) * 0.5f; // 130
 		const float PostAlongHalf = SideW * 0.5f;
 		const float LeftAlong = SideW * 0.5f;
-		const float RightAlong = Cell - SideW * 0.5f;
+		const float RightAlong = CellUU - SideW * 0.5f;
 		const float MidZ = WallH * 0.5f;
 
 		AddCubePart(TEXT("DoorPostL"), Center(LeftAlong, MidZ), ExtentAlong(PostAlongHalf, MidZ),
@@ -378,13 +381,13 @@ FVector APFBuildPieceActor::DoorLeafClosedCenter() const
 	const float Wx = GridX * Sub;
 	const float Wy = GridY * Sub;
 	const float Wz = GridZ * Sub;
-	const float MidAlong = Cell * 0.5f;
+	const float MidAlong = CellUU * 0.5f;
 	const float Zc = PieceDoorH * 0.5f;
 	if (GridRot == 1)
 	{
-		return FVector(Wx + Cell, Wy + MidAlong, Wz + Zc);
+		return FVector(Wx + CellUU, Wy + MidAlong, Wz + Zc);
 	}
-	return FVector(Wx + MidAlong, Wy + Cell, Wz + Zc);
+	return FVector(Wx + MidAlong, Wy + CellUU, Wz + Zc);
 }
 
 FRotator APFBuildPieceActor::DoorLeafClosedRotation() const

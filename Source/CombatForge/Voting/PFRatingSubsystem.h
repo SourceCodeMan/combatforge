@@ -93,7 +93,7 @@ public:
 
 	/**
 	 * Ranked community catalog for the map picker (top MaxCount, default 100).
-	 * Host disk only (Saved/Arenas/*.json). Safe to call from the listen-host boot menu.
+	 * Host disk only (Saved/Arenas *.json). Safe to call from the listen-host boot menu.
 	 *
 	 * Warehouse and Yard catalogs are independent: only maps whose grid rows match the active
 	 * arena shell (Warehouse 10 / Yard 20) are returned. Cross-map picks are never listed or loaded.
@@ -117,7 +117,7 @@ private:
 	/** True on listen server / standalone host; false on pure clients (no world = false). */
 	bool IsServerContext() const;
 
-	/** Loads + parses the most-recent Saved/Arenas/*.json into records. False if none/parse fail. */
+	/** Loads + parses the most-recent Saved/Arenas *.json into records. False if none/parse fail. */
 	bool LoadMostRecentArena(TArray<FPFBuildPieceRec>& OutPieces) const;
 
 	/** Parse one arena JSON file into map info + pieces; false if unusable. */
