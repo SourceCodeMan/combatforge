@@ -548,9 +548,10 @@ void APFBuildPieceActor::AuthorityTryToggleDoor(APawn* User)
 		ApplyOpenState();
 		ForceNetUpdate();
 	}
+	// bOneWaySealed is dropped for the swing on the close path, so log the PENDING seal instead.
 	UE_LOG(CombatForgeLog, Log, TEXT("Door piece %u %s by %s%s"),
 		PieceId, bOpen ? TEXT("OPEN") : TEXT("CLOSE"), *GetNameSafe(User),
-		(PieceType == EPFPieceType::WallDoorOneWay && bOneWaySealed) ? TEXT(" (one-way sealed)") : TEXT(""));
+		(PieceType == EPFPieceType::WallDoorOneWay && bOneWaySealPending) ? TEXT(" (one-way seal pending)") : TEXT(""));
 }
 
 void APFBuildPieceActor::AuthorityCloseDoor()
@@ -623,9 +624,11 @@ void APFBuildPieceActor::TickDoorAnim(float DeltaSeconds)
 	// Keep hinge near closed center (simple swing about center — good enough for graybox).
 	DoorLeaf->SetWorldLocation(DoorLeafClosedCenter());
 
-	// One-way seal completion: once the close swing has fully landed, solidify into the flush wall plate.
-	// Server drives the state change; bOneWaySealed replicates (OnRep_OneWaySealed → ApplyOpenState) so each
-	// client swaps to the wall plate only after its own leaf finished swinging shut.
+	// One-way seal completion: once the close swing has fully landed ON THE SERVER, solidify into the flush
+	// wall plate. bOneWaySealed replicates (OnRep_OneWaySealed → ApplyOpenState) and the client applies it on
+	// ARRIVAL — there is no client-side alpha gate. That's fine in practice: the client's swing also started
+	// one half-RTT late (OnRep_Open), so the two delays cancel and its leaf is within frame-jitter of closed
+	// when the plate pops in.
 	if (bOneWaySealPending && HasAuthority() && !bOpen && DoorYawAlpha <= 0.02f)
 	{
 		bOneWaySealPending = false;

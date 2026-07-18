@@ -664,10 +664,11 @@ void APFBotController::Tick(float DeltaSeconds)
 						continue;
 					}
 					// NORMAL doors only. Bots must never touch a one-way door: a stalled front-side bot
-					// toggles it open, then its next stall-toggle closes it — and a sealed one-way
-					// re-closing snapped straight to the wall plate. To a player that read as the door
-					// "flashing open and turning into a wall" right after it sealed (Tom, alpha-9).
-					// One-way doors also still carve the navmesh, so bots path around them anyway.
+					// opened it, the 3s auto-close shut it, and the still-stalled bot re-opened on its
+					// next 0.5s cooldown — an endless flicker (this loop skips OPEN doors, so bots only
+					// ever open). Each re-close of a SEALED one-way snapped straight to the wall plate,
+					// which players saw as "flashes open and turns into a wall" right after sealing
+					// (Tom, alpha-9). One-ways also still carve the navmesh, so bots path around them.
 					const EPFPieceType PT = Piece->GetPieceType();
 					if (PT != EPFPieceType::WallDoor)
 					{
