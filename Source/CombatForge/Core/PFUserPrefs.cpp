@@ -221,7 +221,12 @@ void FPFUserPrefs::SetQualityLevel(int32 Level)
 
 int32 FPFUserPrefs::GetResolutionIndex()
 {
-	return FMath::Clamp(ReadInt(TEXT("ResolutionIndex"), 3), 0, 4);
+	// Default 4 (1440p, the table max) not 3 (1080p). In BORDERLESS the resolution index is folded into the
+	// render scale (PFOptionsWidget PushToSettings), so a 1080p default silently rendered SUB-NATIVE on every
+	// 1440p/4K monitor -> TSR upscale -> the "blurry since the AAA pass" complaint (Tom 2026-07-18). At index 4
+	// the fold clamps to native on 1080p AND 1440p desktops (H>=DesktopY => scale 1.0); 4K still caps at 1440p
+	// by design. Users who WANT the perf downscale just pick a lower resolution — the knob is preserved.
+	return FMath::Clamp(ReadInt(TEXT("ResolutionIndex"), 4), 0, 4);
 }
 
 void FPFUserPrefs::SetResolutionIndex(int32 Idx)

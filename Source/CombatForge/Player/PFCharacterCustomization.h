@@ -30,8 +30,25 @@ namespace PFChar
 	/** Enumerated part mesh paths for a slot (lazy-built + cached, sorted). */
 	const TArray<FSoftObjectPath>& SlotParts(int32 Slot);
 
-	/** Base body parts always mounted on top of SKM_Body (head + legs skin) to complete the naked body. */
+	/**
+	 * Visible base SKIN parts, mounted as followers of the leader mesh.
+	 *
+	 * ⚠️ SKM_Body is a ONE-PIECE naked body — it already contains torso + arms + LEGS (its material is
+	 * M_Body_FULL and PA_Body_PhysicsAsset carries thigh/calf/foot bodies, unlike the torso-only PA_Torso).
+	 * It is therefore used ONLY as the skeleton/anim/bounds carrier and is NOT rendered. The visible skin is
+	 * this modular set, so a REGION can be hidden when a garment covers it — that is what makes it possible to
+	 * drop the bare legs under jeans instead of having skin poke through the inner thigh (Tom 2026-07-18).
+	 * Do NOT "fix" leg clipping with HideBoneByName: followers inherit the LEADER's bone visibility, so hiding
+	 * thigh bones would collapse the trousers along with the skin.
+	 * Order MUST match the kBase* indices below.
+	 */
 	const TArray<FSoftObjectPath>& BaseParts();
+
+	// Base skin part indices (order of BaseParts()).
+	constexpr int32 kBaseHead = 0, kBaseTorso = 1, kBaseArms = 2, kBaseLegs = 3;
+	constexpr int32 kBasePartCount = 4;
+	// GSlots indices used by garment-vs-skin hiding.
+	constexpr int32 kSlotPants = 6;
 
 	/** Load the selected part mesh for a slot (nullptr if index is out of range / -1 / load fails). */
 	USkeletalMesh* LoadPart(int32 Slot, int32 Index);

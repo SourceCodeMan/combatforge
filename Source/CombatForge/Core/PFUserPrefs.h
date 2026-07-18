@@ -54,7 +54,7 @@ struct COMBATFORGE_API FPFUserPrefs
 	// the next Apply). The user's true choices seed the UI; the engine values are derived from them.
 	static int32 GetQualityLevel();         // 0..3, default 2 (High)
 	static void SetQualityLevel(int32 Level);
-	static int32 GetResolutionIndex();      // 0..4 into the options table, default 3 (1920x1080)
+	static int32 GetResolutionIndex();      // 0..4 into the options table, default 4 (2560x1440) so borderless renders native on 1080p/1440p
 	static void SetResolutionIndex(int32 Idx);
 	static float GetResolutionScalePct();   // 50..100, default 100
 	static void SetResolutionScalePct(float Pct);

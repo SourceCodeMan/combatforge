@@ -5,6 +5,7 @@
 #include "CombatForge.h"
 #include "AI/PFSquadSubsystem.h"
 #include "Building/PFArenaShell.h"
+#include "Building/PFBuildPieceActor.h"   // bots open closed doors when a path stalls
 #include "Combat/PFSmokeSubsystem.h"
 #include "Player/CombatForgeCharacter.h"
 #include "Core/CombatForgeGameState.h"
@@ -642,6 +643,45 @@ void APFBotController::Tick(float DeltaSeconds)
 		JumpCooldown -= DeltaSeconds;
 		const float Speed2D = Bot->GetVelocity().Size2D();
 		JumpStallTimer = (Speed2D < 60.f) ? (JumpStallTimer + DeltaSeconds) : 0.f;
+
+		// OPEN DOORS (Tom 2026-07-18): a closed player-built door is a hard navmesh obstacle, so bots used to
+		// stall against one and route the long way (or fail). When stalled, open any closed door within reach.
+		// The bot Tick runs on the host (authority), so we can call the door API directly; AuthorityTryToggleDoor
+		// re-validates range + a one-way door's front face, so a wrong-side approach simply no-ops and the bot
+		// routes on. Throttled, and only on a stall, so it's cheap.
+		DoorTryCooldown -= DeltaSeconds;
+		if (DoorTryCooldown <= 0.f && JumpStallTimer > 0.3f)
+		{
+			DoorTryCooldown = 0.5f;
+			if (UWorld* DW = GetWorld())
+			{
+				const float DoorRangeSq = FMath::Square(APFBuildPieceActor::DoorInteractRangeUU);
+				for (TActorIterator<APFBuildPieceActor> It(DW); It; ++It)
+				{
+					APFBuildPieceActor* Piece = *It;
+					if (Piece == nullptr || Piece->IsOpen())
+					{
+						continue;
+					}
+					// NORMAL doors only. Bots must never touch a one-way door: a stalled front-side bot
+					// opened it, the 3s auto-close shut it, and the still-stalled bot re-opened on its
+					// next 0.5s cooldown — an endless flicker (this loop skips OPEN doors, so bots only
+					// ever open). Each re-close of a SEALED one-way snapped straight to the wall plate,
+					// which players saw as "flashes open and turns into a wall" right after sealing
+					// (Tom, alpha-9). One-ways also still carve the navmesh, so bots path around them.
+					const EPFPieceType PT = Piece->GetPieceType();
+					if (PT != EPFPieceType::WallDoor)
+					{
+						continue;
+					}
+					if (FVector::DistSquared(Piece->GetDoorInteractLocation(), BotLoc) <= DoorRangeSq)
+					{
+						Piece->AuthorityTryToggleDoor(Bot);   // opens if the face/range check passes; harmless no-op otherwise
+					}
+				}
+			}
+		}
+
 		if (JumpCooldown <= 0.f && JumpStallTimer > 0.4f)
 		{
 			if (UWorld* JW = GetWorld())
@@ -698,9 +738,26 @@ void APFBotController::MoveToGoal(const FVector& RawGoal, AActor* FallbackActor)
 	FAIMoveRequest Req;
 	if (!bGoalOnMesh && FallbackActor != nullptr)
 	{
-		// No mesh near the desired heading (e.g. facing straight into a wall). Path to the enemy instead — a
-		// pawn is always on the mesh — so the bot advances toward the fight rather than standing still.
-		Req.SetGoalActor(FallbackActor);
+		// No mesh near the desired heading (e.g. facing straight into a wall). Path toward the enemy, but
+		// NEVER use SetGoalActor on a live pawn — PathFollowing will try to reach the capsule center and
+		// the overlap depenetration is what launches bots into the air. Aim at a point standoff away.
+		const FVector BotHere = GetPawn() ? GetPawn()->GetActorLocation() : Goal;
+		const FVector EnemyHere = FallbackActor->GetActorLocation();
+		FVector Away = (BotHere - EnemyHere).GetSafeNormal2D();
+		if (Away.IsNearlyZero())
+		{
+			Away = FVector(1.f, 0.f, 0.f);
+		}
+		FVector Standoff = EnemyHere + Away * FMath::Max(BotBodyClearanceUU, MoveAcceptUU);
+		if (Nav != nullptr)
+		{
+			FNavLocation Proj;
+			if (Nav->ProjectPointToNavigation(Standoff, Proj, FVector(600.f, 600.f, 500.f)))
+			{
+				Standoff = Proj.Location;
+			}
+		}
+		Req.SetGoalLocation(Standoff);
 	}
 	else
 	{
@@ -804,6 +861,15 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 		{
 			return;   // can't shoot from out here
 		}
+		// HARD REJECT body-contact spots. The LOS term below is worth a 5.5-point swing, which used to dwarf the
+		// old -0.75 "don't stand inside them" nudge — so whenever nearby cover lacked LOS, the WINNING firing
+		// position was effectively the enemy's own capsule. Bots then pressed into each other at full acceleration,
+		// and the resulting capsule overlap got resolved by a vertical depenetration teleport = the "bots launch to
+		// the roof" bug. Two capsule radii is 68uu; 150 keeps a real body gap even with path-follow overshoot.
+		if (Dist < BotBodyClearanceUU)
+		{
+			return;
+		}
 
 		float Score = 0.f;
 
@@ -886,7 +952,10 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 	// level) so ProjectPointToNavigation lands them on the enemy's floor; MoveToGoal then paths UP the ramp
 	// that connects the levels (and the knee/head jump code carries a lip). These go through the same scorer,
 	// so cover/flank/spread still apply — they're just reachable options the bot never had before.
-	Evaluate(EnemyLoc);
+	// NOTE: the enemy's OWN location used to be evaluated here as a candidate standing spot. It is deliberately
+	// gone — it asked bots to walk inside another pawn's capsule, which is what produced the vertical
+	// depenetration "launch to the roof". The ring below (ReposSampleNearUU = 350uu) still seeds the enemy's
+	// ELEVATION, which is all vertical pursuit actually needed.
 	for (int32 i = 0; i < 8; ++i)
 	{
 		const FVector Dir = FRotator(0.f, i * 45.f, 0.f).Vector();

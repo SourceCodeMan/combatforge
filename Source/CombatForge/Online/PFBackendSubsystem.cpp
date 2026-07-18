@@ -6,6 +6,7 @@
 #include "Core/CombatForgeGameInstance.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
+#include "Core/PFPaths.h"
 
 #include "Dom/JsonObject.h"
 #include "GameFramework/PlayerState.h"
@@ -106,13 +107,15 @@ void UPFBackendSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		ApiBaseUrl.LeftChopInline(1);
 	}
 
-	// Fleet key (dedicated boxes only): command line, then Saved/CombatForge/ServerKey.txt.
+	// Fleet key (dedicated boxes only): command line, then <ServerDataDir>/ServerKey.txt. ServerDataDir is a
+	// PERSISTENT dir (honors -ArenaDir on the box) — NOT ProjectSavedDir, which is inside the package and gets
+	// wiped on every redeploy, silently disabling XP minting until the key was re-placed (#8, Tom 2026-07-18).
 	FParse::Value(FCommandLine::Get(), TEXT("PFServerKey="), ServerKey);
 	if (ServerKey.IsEmpty())
 	{
 		FString FromDisk;
 		if (FFileHelper::LoadFileToString(FromDisk,
-			*FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("CombatForge"), TEXT("ServerKey.txt"))))
+			*FPaths::Combine(FPFPaths::ServerDataDir(), TEXT("ServerKey.txt"))))
 		{
 			ServerKey = FromDisk.TrimStartAndEnd();
 		}
@@ -643,7 +646,7 @@ void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 			{
 				UE_LOG(CombatForgeLog, Display, TEXT("Backend: PRIVATE MATCH CODE: %s"), *JoinCode);
 				FFileHelper::SaveStringToFile(JoinCode, *FPaths::Combine(
-					FPaths::ProjectSavedDir(), TEXT("CombatForge"), TEXT("JoinCode.txt")));
+					FPFPaths::ServerDataDir(), TEXT("JoinCode.txt")));
 			}
 			Self->bFleetRegistered = true;
 			UE_LOG(CombatForgeLog, Log, TEXT("Backend: fleet registered (port %d)"), Self->FleetPort);
@@ -660,9 +663,10 @@ void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 			Self->SendHeartbeat();
 
 			// Crash recovery: re-send any match reports that never reached the API. The Worker is
-			// idempotent on matchId, so double delivery is harmless (progression-plan §1).
+			// idempotent on matchId, so double delivery is harmless (progression-plan §1). Persistent dir so a
+			// redeploy mid-unsent-report doesn't drop that match's XP (#8) — must match the GameMode's write path.
 			TArray<FString> Pending;
-			const FString Dir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PendingReports"));
+			const FString Dir = FPaths::Combine(FPFPaths::ServerDataDir(), TEXT("PendingReports"));
 			IFileManager::Get().FindFiles(Pending, *FPaths::Combine(Dir, TEXT("*.json")), true, false);
 			for (const FString& File : Pending)
 			{
@@ -803,4 +807,36 @@ void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FStri
 				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: match report failed (%d) %s"), Code, *Resp);
 			}
 		}, Headers);
+}
+
+void UPFBackendSubsystem::SendCasualReport(const FString& MatchId, const FString& Mode, const FString& Map,
+	int32 DurationSec, int32 Elims, int32 Tags, int32 Objective, int32 Builder, bool bCompleted, bool bWon)
+{
+	if (!IsLoggedIn())
+	{
+		return;   // casual XP credits THIS account only — nothing to credit when logged out
+	}
+	// Proper JSON serialization (community-map labels are free text — quotes would corrupt a Printf body).
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("matchId"), MatchId);
+	Root->SetStringField(TEXT("mode"), Mode);
+	Root->SetStringField(TEXT("map"), Map);
+	Root->SetNumberField(TEXT("durationSec"), DurationSec);
+	const TSharedRef<FJsonObject> Stats = MakeShared<FJsonObject>();
+	Stats->SetNumberField(TEXT("elims"), Elims);
+	Stats->SetNumberField(TEXT("tags"), Tags);
+	Stats->SetNumberField(TEXT("objective"), Objective);
+	Stats->SetNumberField(TEXT("builder"), Builder);
+	Stats->SetBoolField(TEXT("completed"), bCompleted);
+	Stats->SetBoolField(TEXT("won"), bWon);
+	Root->SetObjectField(TEXT("stats"), Stats);
+	FString Body;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(Root, Writer);
+	// Session-token auth (AuthMode 1) — the Worker resolves the account from the token and clamps/caps the XP.
+	Request(TEXT("POST"), TEXT("/v1/casual-report"), Body, /*AuthMode=*/1,
+		[](int32 Code, const FString& Resp)
+		{
+			UE_LOG(CombatForgeLog, Log, TEXT("Backend: casual-report -> %d %s"), Code, *Resp);
+		});
 }

@@ -145,7 +145,16 @@ private:
 	 *  BeginPlay and lazily from AddPieceLocal so client-side FastArray rebuilds that precede
 	 *  BeginPlay don't render prop pieces on the GCube placeholder (giant unskinned cube). */
 	void EnsurePieceVisualsApplied();
+	/** Latches only on a COMPLETE load — a partial one must be retried, not frozen in. */
 	bool bPieceVisualsReady = false;
+
+	/** Re-stamp placed prop instances after a mesh swap (fallback transforms don't fit real props). */
+	void RefreshPropInstanceTransforms();
+	/** Poll EnsurePieceVisualsApplied until the warehouse content resolves (or we give up). */
+	void StartPieceVisualsRetry();
+	void TickPieceVisualsRetry();
+	FTimerHandle PieceVisualsRetryHandle;
+	int32 PieceVisualsRetryCount = 0;
 
 	/** Add/remove the local mirror of a record: ISM instance + occupancy (server AND client path). */
 	void AddPieceLocal(const FPFBuildPieceRec& Rec);

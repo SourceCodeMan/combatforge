@@ -68,7 +68,16 @@ private:
 	UPROPERTY() TObjectPtr<UTextureRenderTarget2D> RenderTarget;
 
 	UPROPERTY() TObjectPtr<USkeletalMesh> BodyMeshAsset;
-	UPROPERTY() TObjectPtr<UAnimSequence> IdleAnimAsset;
+	// TWO idle candidates, resolved at play time (NOT in the ctor) against the same pf.ArmedAnims CVar the pawn
+	// reads — see PickIdleAnim. The rifle-hold packs are authored on a UE4-MANNEQUIN skeleton; playing them on
+	// the Bandit goes through a name-based compatible-skeleton remap that carries the source bone TRANSLATIONS
+	// and ELONGATES the torso/legs. The pawn already avoids this (pf.ArmedAnims defaults 0 -> native A_MM_Idle);
+	// the preview used to hardcode the rifle idle, which is exactly the "stretched preview" (Tom 2026-07-18).
+	UPROPERTY() TObjectPtr<UAnimSequence> RifleIdleAnimAsset;     // /Game/RifleAnims/... (foreign skeleton, stretches)
+	UPROPERTY() TObjectPtr<UAnimSequence> UnarmedIdleAnimAsset;   // /Game/Bandits/... A_MM_Idle (native, correct)
+	UPROPERTY() TObjectPtr<UAnimSequence> IdleAnimAsset;          // the one actually played (set by PickIdleAnim)
+	/** Choose the idle the PAWN would use, so preview + in-world never diverge again. */
+	UAnimSequence* PickIdleAnim() const;
 
 	bool bPreviewActive = false;
 	bool bBodyMounted = false;

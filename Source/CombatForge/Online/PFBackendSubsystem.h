@@ -118,6 +118,15 @@ public:
 	 *  PendingFilePath is deleted on a 200 (the crash-retry queue under Saved/PendingReports/). */
 	void SendMatchReport(const FString& ReportJson, const FString& PendingFilePath = FString());
 
+	/**
+	 * POST /v1/casual-report — honor-system XP for a LOCAL / listen-hosted / offline match (Tom 2026-07-18).
+	 * Authenticated by the PLAYER'S OWN session token (not a server key), so it only ever credits this account;
+	 * the Worker halves + daily-caps it and tags every event 'casual_*'. No-op if not logged in. Body carries
+	 * only the local player's own stats. Use ONLY when the match is NOT on a fleet server (else XP double-counts).
+	 */
+	void SendCasualReport(const FString& MatchId, const FString& Mode, const FString& Map, int32 DurationSec,
+		int32 Elims, int32 Tags, int32 Objective, int32 Builder, bool bCompleted, bool bWon);
+
 	// ---- UI subscription points ----
 	FPFOnBackendAuthChanged OnAuthChanged;   // token gained/lost, profile refreshed
 	FPFOnBackendStatus      OnStatus;        // human-readable one-liners for the menu status row

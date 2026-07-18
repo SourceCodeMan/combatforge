@@ -88,6 +88,15 @@ $LogDir = Join-Path $Here "Logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir "server.log"
 
+# --- PERSISTENT data dir (built maps + un-sent XP reports) — MUST live OUTSIDE the extracted build ---
+# The build runs with -NOHOMEDIR, so UE's UserSettingsDir() (where maps + PendingReports would otherwise land)
+# resolves INSIDE this folder and is wiped every time you re-extract a new build over it — which silently
+# dropped built maps AND un-minted XP on every redeploy (#8/#9). Passing -ArenaDir pins them to ProgramData
+# (survives re-extraction). The game derives PendingReports/JoinCode/ServerKey.txt from this dir's parent too.
+$DataDir = Join-Path $env:ProgramData "CombatForge"
+$ArenaDir = Join-Path $DataDir "Arenas"
+New-Item -ItemType Directory -Force -Path $ArenaDir | Out-Null
+
 $mapUrl = "$Map`?listen"
 # CombatForge.exe is a GUI-subsystem app, so PowerShell's "& $exe" call operator returns INSTANTLY without
 # waiting for it — which made the restart loop below spawn a new server every 3 s (stacked processes fighting
@@ -96,6 +105,7 @@ $mapUrl = "$Map`?listen"
 # space-containing args (e.g. -LogCmds="CombatForgeLog Verbose, LogNet Log"), corrupting them.
 $cmdLine = @(
     $mapUrl, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR", "-PFServerKey=$Key",
+    "`"-ArenaDir=$ArenaDir`"",
     "`"-ABSLOG=$LogFile`"", "`"-LogCmds=CombatForgeLog Verbose, LogNet Log`""
 ) -join " "
 
@@ -105,6 +115,7 @@ Write-Host "  Exe     : $Exe"
 Write-Host "  Backend : https://api.playcombatforge.com (LIVE)"
 Write-Host "  Port    : $Port/udp"
 Write-Host "  Map     : $Map"
+Write-Host "  Data    : $DataDir  (persistent: maps + un-sent XP survive redeploys)"
 Write-Host "  Log     : $LogFile"
 Write-Host "            (live-tail in another window:  Get-Content '$LogFile' -Wait -Tail 50)" -ForegroundColor DarkGray
 Write-Host "  Watch the log for:  Backend: fleet registered (port $Port)" -ForegroundColor Cyan

@@ -231,6 +231,10 @@ void UPFInputConfig::BuildRebindRegistry()
 	Add(FName(TEXT("FireSelect")), TEXT("Fire Mode"),    IA_FireSelect, IMC_Combat, EKeys::V);
 	Add(FName(TEXT("ThrowFrag")),  TEXT("Throw Frag"),   IA_ThrowFrag,  IMC_Combat, EKeys::E);
 	Add(FName(TEXT("ThrowSmoke")), TEXT("Throw Smoke"),  IA_ThrowSmoke, IMC_Combat, EKeys::Q);
+	// Punch (the former "melee") — Tom 2026-07-18: expose it in the rebind UI so it can be set to a mouse
+	// button OR a key. Its default keyboard bind is B; the ThumbMouseButton default (mapped above) stays as a
+	// second bind, so a rebind ADDS the chosen key alongside the thumb button (a feature here, unlike CrouchSlide).
+	Add(FName(TEXT("Punch")),      TEXT("Punch"),        IA_Melee,      IMC_Combat, EKeys::B);
 }
 
 void UPFInputConfig::ApplySavedKeyOverrides()

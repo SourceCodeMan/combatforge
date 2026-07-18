@@ -102,6 +102,8 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	/** Bots roll their random weapon here: BeginPlay runs pre-possession, so IsBotControlled() was false then. */
+	virtual void PossessedBy(AController* NewController) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void PawnClientRestart() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -135,6 +137,9 @@ protected:
 	// Server-authoritative melee: short forward trace from the camera; first live enemy pawn in range is
 	// eliminated outright (the tag). Client requests; server re-validates the cooldown + range + team.
 	UFUNCTION(Server, Reliable) void ServerMelee();
+	/** Cosmetic punch: FP viewmodel jab + 3P raise. Multicast so remotes see the swing. */
+	UFUNCTION(NetMulticast, Unreliable) void MulticastMeleeSwing();
+	void PlayMeleeSwingLocal();
 
 	// ---- Demolition bomb plant / defuse (charges from mid-field F pickup) ----
 	void OnPlantPressed();         // G — plant a carried bomb on the aimed structural build piece (Combat only)
@@ -202,8 +207,8 @@ protected:
 	/** Snap to resolved hand bone with grip offsets (idle carry). */
 	void ApplyHandWeaponPose();
 
-	/** Capsule/eye aim-line pose (shooting) — re-parented off the hand for this window only. */
-	void ApplyRaisedWeaponPose();
+	// (ApplyRaisedWeaponPose was deleted 2026-07-18 — it was never called. UpdateWeaponHoldPose is the ONE
+	//  live third-person weapon-pose path; edit that, not a helper that looks like it does the job.)
 
 	/**
 	 * Quantum (no matching AnimBP): drive idle/walk/run via AnimSingleNodeInstance.
@@ -278,6 +283,8 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> ArmedJogDir;
 	// Directional elimination reactions (0=front 1=right 2=back 3=left, relative to the shot).
 	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> DeathDirAnims;
+	// Unarmed punch clips for B-melee (MM_Attack_01..03). Empty = procedural-only fallback.
+	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> MeleeAnims;
 	/** Ledge climb anim — mannequin MM_WallJump preferred; Bandit A_MM_Jump as skeleton-safe fallback. */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") TObjectPtr<UAnimSequence> MantleAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") TObjectPtr<UAnimSequence> MantleAnimFallback = nullptr;
@@ -381,23 +388,28 @@ public:
 	void TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle);
 	/** Live-tune the per-weapon aim-down-sight pose (console: pf.WeaponADS). Hold right-click to preview. */
 	void TuneWeaponADS(const FVector& Loc, const FRotator& Rot);
+	/** Live-tune the THIRD-PERSON grip in hand_r (console: pf.WeaponTP) — what everyone else sees. */
+	void TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale);
+	/** Drop the cached TP attach bone so it re-resolves next tick (pf.ArmedAnims / pf.WeaponBoneAttach toggles). */
+	void InvalidateWeaponAttachBone() { CachedWeaponAttachBone = NAME_None; }
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
-	// Grip in hand bone space (SM_Rifle / olive: local +Y barrel-forward). Tuned for hand_r.
-	// Keep modest so Quantum/Survival hands don't shove the mesh into the skull.
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(-2.f, 8.f, -2.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(0.f, 90.f, 0.f);
+	// Grip in hand_r bone space (SM_Rifle family: local +Y = barrel-forward).
+	// Bandit/Mannequin hang pose: palm faces roughly inward; these keep the stock in the palm and the
+	// barrel forward-down along the thigh — NOT up into the armpit/neck (the dual-gun "neck+armpit" bug).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeLocation = FVector(-3.f, 4.f, 2.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponRelativeRotation = FRotator(10.f, 0.f, 90.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponRelativeScale = FVector(0.85f);
-	// Fallback when the mesh has no hand bone: hip-carry in mesh space (low — not chest/head).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(18.f, 22.f, 28.f);
+	// Fallback when the mesh has no hand bone: low hip-carry in mesh space (never chest/head).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(12.f, 18.f, 10.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(5.f, 90.f, -10.f);
-	// Back-sling pose (spine bone local): stock down-right, barrel up over the shoulder.
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeLocation = FVector(-8.f, 12.f, -2.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator BackWeaponRelativeRotation = FRotator(10.f, 95.f, 75.f);
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeScale = FVector(0.85f);
+	// Back-sling pose (spine bone local): clearly ON THE BACK (behind the torso), not glued to the neck.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeLocation = FVector(-18.f, 6.f, -6.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator BackWeaponRelativeRotation = FRotator(0.f, 0.f, 75.f);
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeScale = FVector(0.80f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName BackWeaponAttachBone = NAME_None; // resolved at runtime
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
 	// Optional single-slot overrides (mannequin only). Human models keep authored multi-slot mats.
@@ -425,6 +437,15 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.45f;
 	// Raised pose: mesh origin relative to eye (forward / right / down along aim basis).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedFromEye = FVector(28.f, 14.f, -8.f);
+	// Per-weapon barrel-axis correction for the raised (fire/ADS) TP pose, cached from the equipped Def in
+	// ApplyWeaponLoadout. Default = SM_Rifle (+Y barrel). Pistols override so they don't render upside-down.
+	float CachedTPRaisedYaw  = -90.f;
+	float CachedTPRaisedRoll = 0.f;
+	// Firing shoulder lift when the ARMED idle isn't driving the arms up (arms hang -> gun sat at the hip).
+	// Kept SMALL so a raised gun stays near the hand (hip/low-ready), not teleported to armpit/neck.
+	// The old 42uu adaptive lift is what put guns on necks while the secondary sat on the spine.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") float WeaponShoulderDropFromEyeUU = 28.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") float WeaponMaxShoulderLiftUU     = 16.f;
 	// FP viewmodel: hip-ish rest vs ADS. AdsLoc puts the TOP-SIGHT line on the camera axis: Y=-5.5 cancels the
 	// rifle mesh's built-in +5.5 Y; Z lowered to -1.5 so the camera looks down the TOP sight, not the bore (the
 	// iron sight sits above the barrel, so the whole gun drops that much). X~15 keeps the aperture in focus.
@@ -443,6 +464,10 @@ private:
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
+	/** Use the authored MuzzleLocalFP instead of the mesh-bounds auto-tip. Set for guns whose bounds fool the
+	 *  geometry heuristic (the minigun: a fat multi-barrel cluster whose auto-tip lands at a bounds corner
+	 *  → tracer from the top-right of the screen). Lets pf.WeaponFP muzzle tuning actually take effect too. */
+	bool bMuzzleFromAuthoredFP = false;
 	bool bWeaponDragging = false;                     // middle-mouse pose drag active (pf.WeaponDrag)
 
 	// Procedural reload dip — FP viewmodel lowers + tilts while reloading (no skeletal reload anim).
@@ -523,11 +548,26 @@ private:
 	/** One plantable charge from the mid-field pickup (not granted at spawn). Replicated for HUD. */
 	UPROPERTY(Replicated) bool bCarryingBomb = false;
 
-	// Melee tag: last swing time (server + owning client) for the cooldown gate, and its tuning.
-	double LastMeleeTime = -100.0;
-	static constexpr float MeleeCooldown = 0.8f;   // seconds between swings
-	static constexpr float MeleeRange    = 200.f;  // reach from the camera (uu)
-	static constexpr float MeleeRadius   = 34.f;   // sweep radius so a near-miss still tags
+	// Melee tag: last swing time. CLIENT and SERVER track separately so a listen-host
+	// (where OnMeleePressed and ServerMelee_Implementation share one object) can't self-block.
+	double LastMeleeTimeClient = -100.0;
+	double LastMeleeTimeServer = -100.0;
+	float  MeleeSwingAnimRemain = 0.f;            // procedural FP punch dip remaining (seconds)
+	static constexpr float MeleeCooldown = 0.7f;   // seconds between swings
+	static constexpr float MeleeRange    = 250.f;  // reach from the camera (uu)
+	static constexpr float MeleeRadius   = 48.f;   // sweep radius so a near-miss still tags
+	static constexpr float MeleeSwingAnimSec = 0.28f;
+
+	// ---- AFK idle-kick (server-authoritative; anti-farm) ----
+	// Poll the pawn's location + view rotation on the server; a REMOTE player who moves neither for
+	// AfkKickSeconds is returned to their main menu (so they can't hold a slot / accrue XP while idle).
+	// Never applies to bots (AIController) or the listen-server host / standalone (local controller).
+	void TickServerAfk(float DeltaSeconds);
+	float    ServerLastActiveTime = -1.f;   // world-seconds of last detected activity (-1 = needs reseed on (re)spawn)
+	float    ServerAfkPollAccum   = 0.f;    // throttles the poll to ~1 Hz
+	FVector  ServerAfkLastLoc     = FVector::ZeroVector;
+	FRotator ServerAfkLastAim     = FRotator::ZeroRotator;
+	static constexpr float AfkKickSeconds = 180.f;   // 3 full minutes of complete idle
 
 	// ---- FOV arbiter state ----
 	float ADSAlpha = 0.f;

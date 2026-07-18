@@ -41,6 +41,7 @@
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"   // melee fallback: OverlapMultiByObjectType
 #include "EngineUtils.h"
 #include "UObject/UObjectIterator.h"   // pf.ArmedAnims live-toggle sink
 #include "GameFramework/CharacterMovementComponent.h"
@@ -57,12 +58,15 @@
 // a compatible-skeletons entry — visually unverifiable headless, so keep a live revert (`pf.ArmedAnims 0` +
 // respawn) in case the retarget T-poses or slides on some machine.
 // Default 0 (Tom playtest 2026-07-16): the rifle-hold anim packs are on foreign mannequin skeletons
-// and the compatible-skeleton remap STRETCHES the Bandit body (verified: forehead fixed but torso/legs
-// elongated). Reverted to the native unarmed Bandit set — no retarget = no stretch, hands down = no
-// forehead (rifle carried at the hip). Flip to 1 only once the rifle anims are properly IK-retargeted.
+// Rifle-hold locomotion (AS_Rifle_* low-ready). ✅ IK-RETARGET BAKE DONE (Tom, 2026-07-18): these paths now
+// point at animations baked onto SKM_Bandit_Skeleton, which live in the ROOT of /Game/RifleAnims/ (NOT the
+// originals under Animations/BlendSpaces/Standing_IdleWalkJogRun/, which are still on UE4_Mannequin_Skeleton
+// and elongate the body via the name-based compatible-skeleton remap). Same asset NAMES in both folders —
+// the package path is what disambiguates, so do NOT "tidy" these paths back to the BlendSpaces folder or the
+// stretched torso returns. Default ON: hands on the gun, no stretch. pf.ArmedAnims 0 = empty-handed A_MM_*.
 static TAutoConsoleVariable<int32> CVarArmedAnims(
-	TEXT("pf.ArmedAnims"), 0,
-	TEXT("0 = native unarmed Bandit anims (default; no retarget stretch), 1 = rifle-hold pack anims. Applies live."));
+	TEXT("pf.ArmedAnims"), 1,
+	TEXT("1 = rifle-hold pack anims (default; hands on gun), 0 = native unarmed Bandit anims. Applies live."));
 
 // Tuning aid: draw the FP cosmetic muzzle (where owner tracers spawn) so pf.WeaponFP's muzzle offset can be
 // aligned to the visible barrel. Off by default; local player only (drawn in Tick's IsLocallyControlled block).
@@ -83,22 +87,55 @@ static TAutoConsoleVariable<int32> CVarWeaponAutoPose(
 	TEXT("pf.WeaponAutoPose"), 0,
 	TEXT("1 = auto-generate FP hip+ADS from mesh bounds (ignores catalog). 0 = catalog poses only (default)."));
 
+// Third-person grip source. 1 (default) = attach the TP gun to the ANIMATION's own weapon bone (ik_hand_gun),
+// which the rifle pack animates to sit exactly in the grip and which the IK-retarget carried onto the Bandit —
+// so the position is correct by construction and tracks the animation, with NO hand-tuned offset.
+// 0 = legacy hand_r + the WeaponRelative* offset (still used automatically whenever the unarmed anim set is on,
+// since ik_hand_gun isn't meaningfully posed there). Flip to 0 to A/B it live if a gun ever looks wrong.
+// DEFAULT 0 (Tom playtest 2026-07-18): ik_hand_gun turned out NOT to be animated even after adding an IKGun
+// retarget chain — it stays parked near its parent ik_hand_root down at the pelvis, which is why the rifle hung
+// at the hip while the hands were correctly posed in front. Attach to hand_r instead and orient from the hands
+// (see CVarWeaponAimFromHands). Kept as a switch only for A/B.
+static TAutoConsoleVariable<int32> CVarWeaponBoneAttach(
+	TEXT("pf.WeaponBoneAttach"), 0,
+	TEXT("1 = attach TP weapon to ik_hand_gun (NOT animated on this skeleton — leaves the gun at the hip). 0 = hand_r (default)."));
+
+// THE fix for "gun isn't where the hands are". The rifle-hold animation poses BOTH hands correctly (right hand
+// on the grip, left on the foregrip) — so the weapon's line IS the vector between them. Orienting the gun along
+// hand_r -> hand_l is derived entirely from the live animated pose: no hand-tuned numbers, correct for every
+// frame of every clip, and self-correcting if the animation set ever changes. Falls back to the old fixed
+// offset for one-handed weapons or if hand_l is missing.
+static TAutoConsoleVariable<int32> CVarWeaponAimFromHands(
+	TEXT("pf.WeaponAimFromHands"), 1,
+	TEXT("1 = orient the TP weapon along the animated hand_r->hand_l line (default). 0 = fixed WeaponRelative* offset."));
+
 // Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
 // kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
 static void PFArmedAnimsSink()
 {
 	static int32 LastArmed = CVarArmedAnims.GetValueOnGameThread();
+	static int32 LastBoneAttach = CVarWeaponBoneAttach.GetValueOnGameThread();
 	const int32 Now = CVarArmedAnims.GetValueOnGameThread();
-	if (Now == LastArmed)
+	const int32 NowBone = CVarWeaponBoneAttach.GetValueOnGameThread();
+	if (Now == LastArmed && NowBone == LastBoneAttach)
 	{
 		return;
 	}
+	const bool bArmedChanged = (Now != LastArmed);
 	LastArmed = Now;
+	LastBoneAttach = NowBone;
 	for (TObjectIterator<ACombatForgeCharacter> It; It; ++It)
 	{
 		if (It->GetWorld() != nullptr && It->GetWorld()->IsGameWorld())
 		{
-			It->RefreshBanditAnimSet();
+			// The attach bone is resolved ONCE and cached, but which bone is correct depends on both cvars
+			// (ik_hand_gun only while the armed set plays). Clear it so the next tick re-resolves — otherwise
+			// a live A/B toggle silently keeps the old bone and looks like the flag did nothing.
+			It->InvalidateWeaponAttachBone();
+			if (bArmedChanged)
+			{
+				It->RefreshBanditAnimSet();
+			}
 		}
 	}
 }
@@ -367,9 +404,9 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	// pack is on its own UE4 mannequin skeleton, registered compatible with SKM_Bandit_Skeleton via
 	// Scripts/add_compatible_skeleton.py so FSkeletonRemapping plays it on the Bandit body.
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedIdleFinder(
-		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_Idle.AS_Rifle_Idle"));
+		TEXT("/Game/RifleAnims/AS_Rifle_Idle.AS_Rifle_Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ArmedRunFinder(
-		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_RunFwd.AS_Rifle_RunFwd"));
+		TEXT("/Game/RifleAnims/AS_Rifle_RunFwd.AS_Rifle_RunFwd"));
 	if (ArmedIdleFinder.Succeeded()) { ArmedIdleAnim = ArmedIdleFinder.Object; }
 	if (ArmedRunFinder.Succeeded())  { ArmedRunAnim  = ArmedRunFinder.Object; }
 
@@ -379,24 +416,24 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 		// Relaxed LOW-READY set (Shooter Rifle Animations pack) so MOVING bots are also gun-down, not
 		// shouldered-at-the-face. Pack has 6 dirs (no fwd-diagonals) → map fwd-diagonals to pure L/R.
 		static const TCHAR* WalkDirPaths[8] = {
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkFwd.AS_Rifle_WalkFwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwdRight.AS_Rifle_WalkBwdRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwd.AS_Rifle_WalkBwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkBwdLeft.AS_Rifle_WalkBwdLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkFwd.AS_Rifle_WalkFwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkRight.AS_Rifle_WalkRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkBwdRight.AS_Rifle_WalkBwdRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkBwd.AS_Rifle_WalkBwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkBwdLeft.AS_Rifle_WalkBwdLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_WalkLeft.AS_Rifle_WalkLeft"),
 		};
 		static const TCHAR* JogDirPaths[8] = {
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogFwd.AS_Rifle_JogFwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogRight.AS_Rifle_JogRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogRight.AS_Rifle_JogRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwdRight.AS_Rifle_JogBwdRight"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwd.AS_Rifle_JogBwd"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogBwdLeft.AS_Rifle_JogBwdLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
-			TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogFwd.AS_Rifle_JogFwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogRight.AS_Rifle_JogRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogRight.AS_Rifle_JogRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogBwdRight.AS_Rifle_JogBwdRight"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogBwd.AS_Rifle_JogBwd"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogBwdLeft.AS_Rifle_JogBwdLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
+			TEXT("/Game/RifleAnims/AS_Rifle_JogLeft.AS_Rifle_JogLeft"),
 		};
 		ArmedWalkDir.SetNum(8);
 		ArmedJogDir.SetNum(8);
@@ -426,6 +463,22 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 		}
 	}
 
+	// Unarmed melee punches (UE5 Mannequin Attack set — same bone family as Bandit via compatible skeletons).
+	// No dedicated "punch" montage exists in Content; these three short attack clips are the real ones.
+	{
+		static const TCHAR* MeleePaths[] = {
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03.MM_Attack_03"),
+		};
+		MeleeAnims.SetNum(UE_ARRAY_COUNT(MeleePaths));
+		for (int32 i = 0; i < UE_ARRAY_COUNT(MeleePaths); ++i)
+		{
+			ConstructorHelpers::FObjectFinder<UAnimSequence> M(MeleePaths[i]);
+			if (M.Succeeded()) { MeleeAnims[i] = M.Object; }
+		}
+	}
+
 	// Config-driven modular slot components (base skin head/legs + one per PFChar customization slot). Part
 	// meshes are assigned at assembly time from the active FPFCharacterConfig via the registry — no hardcoded
 	// part paths, so all ~437 parts are reachable.
@@ -441,7 +494,9 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 		}
 		return C;
 	};
-	for (int32 i = 0; i < 2; ++i)
+	// 4 base SKIN comps (head/torso/arms/legs) — the visible skin is modular so the LEG region can be dropped
+	// under trousers. SKM_Body (the leader) is a one-piece naked body and is only the skeleton/anim carrier.
+	for (int32 i = 0; i < PFChar::kBasePartCount; ++i)
 	{
 		if (USkeletalMeshComponent* C = MakePartComp(FString::Printf(TEXT("CharBase%d"), i)))
 		{
@@ -573,6 +628,22 @@ void ACombatForgeCharacter::BeginPlay()
 	}
 }
 
+void ACombatForgeCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);   // attaches Controller + PlayerState (bIsABot is now readable)
+
+	// BOTS: roll the random weapon HERE, not in BeginPlay. A bot pawn is spawned UNPOSSESSED, so BeginPlay's
+	// ApplyWeaponLoadout() ran before this: IsBotControlled() was false (no controller/PlayerState yet), the
+	// random-roll guard at ApplyWeaponLoadout() was skipped, and the bot fell through to PFWeapon::LoadConfig()
+	// — the HOST'S saved gun. Hence "all bots use whatever gun the player has." Now the AI controller + the
+	// bot PlayerState (bIsABot set in GameMode::AddBot) are attached, so IsBotControlled() is true and the kit
+	// is still empty; re-apply so the roll fires. Server-authoritative; KitRep replicates to dress every client.
+	if (HasAuthority() && IsBotControlled() && !HasValidKit())
+	{
+		ApplyWeaponLoadout();
+	}
+}
+
 void ACombatForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (PFMovement != nullptr)
@@ -622,8 +693,26 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 		}
 	}
 
-	// Quantum (and any sequence-driven body): idle ↔ walk ↔ run without an AnimBP.
-	UpdateSequenceLocomotion();
+	// Melee punch clip: hold locomotion off while the attack sequence plays, then resume.
+	if (MeleeSwingAnimRemain > 0.f)
+	{
+		MeleeSwingAnimRemain = FMath::Max(0.f, MeleeSwingAnimRemain - DeltaSeconds);
+		if (MeleeSwingAnimRemain <= 0.f)
+		{
+			// Restore TP gun if we hid it for the punch, and re-pick idle/walk.
+			if (WeaponMeshComp != nullptr && !bEliminatedAppearanceActive)
+			{
+				WeaponMeshComp->SetHiddenInGame(false);
+			}
+			SeqLocoState = 0;
+			UpdateSequenceLocomotion();
+		}
+	}
+	else
+	{
+		// Quantum (and any sequence-driven body): idle ↔ walk ↔ run without an AnimBP.
+		UpdateSequenceLocomotion();
+	}
 
 	// Build phase: no marker in hands (placement HUD has its own aim dot).
 	UpdateBuildPhaseWeaponVisibility();
@@ -634,6 +723,12 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 		WeaponRaiseHoldSec = FMath::Max(0.f, WeaponRaiseHoldSec - DeltaSeconds);
 	}
 	UpdateWeaponHoldPose();
+
+	// Server-only: police completely-idle remote players (AFK kick).
+	if (HasAuthority())
+	{
+		TickServerAfk(DeltaSeconds);
+	}
 
 	if (IsLocallyControlled())
 	{
@@ -1594,14 +1689,99 @@ void ACombatForgeCharacter::OnMeleePressed()
 	{
 		return;
 	}
-	// Local cooldown gate so a mashed key doesn't spam Server RPCs; the server re-validates authoritatively.
-	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-	if (Now - LastMeleeTime < MeleeCooldown)
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
 	{
 		return;
 	}
-	LastMeleeTime = Now;
+	// Local cooldown only — do NOT write LastMeleeTimeServer here. On a listen host,
+	// ServerMelee_Implementation runs on this same object; writing the shared timer first
+	// made the server always see "still on cooldown" and never apply damage (Tom: punch did nothing).
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (Now - LastMeleeTimeClient < MeleeCooldown)
+	{
+		return;
+	}
+	LastMeleeTimeClient = Now;
+	PlayMeleeSwingLocal();   // instant local feedback; Multicast covers remotes from the server
 	ServerMelee();
+}
+
+void ACombatForgeCharacter::PlayMeleeSwingLocal()
+{
+	// Prefer a real unarmed attack clip (MM_Attack_01/02/03) when the pack is present; fall back to a
+	// short procedural timer so the cooldown/feedback still works if assets fail to load.
+	UAnimSequence* Clip = nullptr;
+	{
+		int32 Loaded = 0;
+		for (const TObjectPtr<UAnimSequence>& A : MeleeAnims)
+		{
+			if (A != nullptr) { ++Loaded; }
+		}
+		if (Loaded > 0)
+		{
+			// Cycle clips so repeated punches aren't identical (local counter is fine for cosmetics).
+			static int32 MeleeClipCursor = 0;
+			for (int32 n = 0; n < MeleeAnims.Num(); ++n)
+			{
+				const int32 Idx = (MeleeClipCursor + n) % MeleeAnims.Num();
+				if (MeleeAnims[Idx] != nullptr)
+				{
+					Clip = MeleeAnims[Idx].Get();
+					MeleeClipCursor = Idx + 1;
+					break;
+				}
+			}
+		}
+	}
+
+	const float ClipLen = (Clip != nullptr) ? FMath::Max(0.2f, Clip->GetPlayLength()) : MeleeSwingAnimSec;
+	MeleeSwingAnimRemain = ClipLen;
+
+	// Play the TP punch on the body mesh (sequence-loco path). Hide the hand-held gun for the swing so
+	// it doesn't float mid-punch on the fist.
+	if (Clip != nullptr && GetMesh() != nullptr && bUsingArtBody && !bEliminatedAppearanceActive)
+	{
+		if (GetMesh()->GetAnimationMode() != EAnimationMode::AnimationSingleNode)
+		{
+			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		}
+		GetMesh()->PlayAnimation(Clip, /*bLooping=*/false);
+		if (UAnimSingleNodeInstance* Node = GetMesh()->GetSingleNodeInstance())
+		{
+			Node->SetLooping(false);
+			Node->SetPlaying(true);
+			Node->SetPlayRate(1.f);
+			Node->SetPosition(0.f, false);
+		}
+		SeqLocoState = 0;   // force re-pick of idle/walk when the punch ends
+		if (WeaponMeshComp != nullptr)
+		{
+			WeaponMeshComp->SetHiddenInGame(true);
+		}
+	}
+	else
+	{
+		// No clip: keep the old raise-gun jab as a last resort visual.
+		WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, MeleeSwingAnimSec);
+	}
+
+	// Small FP viewmodel kick so the owner feels the punch even without FP arms anims.
+	RecoilOffset += FVector(6.f, 0.f, -4.f);
+	RecoilPitch  += 8.f;
+	if (UPFCombatAudio* Audio = GetCombatAudio())
+	{
+		// Whoosh / contact-ready cue at the pawn (impact plays on hit).
+		Audio->PlayImpactAt(GetActorLocation() + FVector(0.f, 0.f, 40.f));
+	}
+}
+
+void ACombatForgeCharacter::MulticastMeleeSwing_Implementation()
+{
+	// Owning client already played in OnMeleePressed; remotes + simulated proxies need this.
+	if (!IsLocallyControlled())
+	{
+		PlayMeleeSwingLocal();
+	}
 }
 
 void ACombatForgeCharacter::ServerMelee_Implementation()
@@ -1613,33 +1793,70 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 	}
 	// Authoritative cooldown (small RTT tolerance) + no meleeing while eliminated.
 	const double Now = World->GetTimeSeconds();
-	if (Now - LastMeleeTime < MeleeCooldown * 0.9)
+	if (Now - LastMeleeTimeServer < MeleeCooldown * 0.85)
 	{
 		return;
 	}
-	LastMeleeTime = Now;
 	if (HealthComponent != nullptr && HealthComponent->bEliminated)
 	{
 		return;
 	}
+	LastMeleeTimeServer = Now;
+	MulticastMeleeSwing();   // remotes see the swing even on a miss
 
 	ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
 	const uint8 MyTeam = MyPS ? MyPS->TeamId : 255;
 
-	// Short forward reach from the eye line; first blocking pawn wins (a wall in between blocks the tag).
+	// Short forward reach from the eye line. Prefer pawn channel; also try a multi-sweep over
+	// overlapping capsules so a bot standing slightly off-center still gets tagged.
 	FVector EyeLoc; FRotator EyeRot;
 	GetActorEyesViewPoint(EyeLoc, EyeRot);
 	const FVector End = EyeLoc + EyeRot.Vector() * MeleeRange;
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(PFMelee), /*bTraceComplex=*/false, this);
 	FHitResult Hit;
-	const bool bHit = World->SweepSingleByChannel(Hit, EyeLoc, End, FQuat::Identity, ECC_Pawn,
-		FCollisionShape::MakeSphere(MeleeRadius), Params);
-	if (!bHit)
+	ACombatForgeCharacter* Victim = nullptr;
+	FVector ImpactPoint = FVector::ZeroVector;
+	FVector ImpactNormal = FVector::ForwardVector;
+
+	if (World->SweepSingleByChannel(Hit, EyeLoc, End, FQuat::Identity, ECC_Pawn,
+		FCollisionShape::MakeSphere(MeleeRadius), Params))
 	{
-		return;
+		Victim = Cast<ACombatForgeCharacter>(Hit.GetActor());
+		ImpactPoint = Hit.ImpactPoint;
+		ImpactNormal = Hit.ImpactNormal;
 	}
-	ACombatForgeCharacter* Victim = Cast<ACombatForgeCharacter>(Hit.GetActor());
+
+	// Fallback: sphere-overlap scan (some pawns ignore ECC_Pawn traces if capsule responses changed).
+	// Cheap — only runs when the channel sweep missed a CombatForge pawn.
+	if (Victim == nullptr)
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionObjectQueryParams ObjParams;
+		ObjParams.AddObjectTypesToQuery(ECC_Pawn);
+		const FVector Mid = EyeLoc + EyeRot.Vector() * (MeleeRange * 0.5f);
+		if (World->OverlapMultiByObjectType(Overlaps, Mid, FQuat::Identity, ObjParams,
+			FCollisionShape::MakeSphere(MeleeRange * 0.55f), Params))
+		{
+			float BestDistSq = TNumericLimits<float>::Max();
+			for (const FOverlapResult& O : Overlaps)
+			{
+				ACombatForgeCharacter* Cand = Cast<ACombatForgeCharacter>(O.GetActor());
+				if (Cand == nullptr || Cand == this)
+				{
+					continue;
+				}
+				const float Dsq = FVector::DistSquared(Cand->GetActorLocation(), EyeLoc);
+				if (Dsq < BestDistSq && Dsq <= FMath::Square(MeleeRange + MeleeRadius))
+				{
+					BestDistSq = Dsq;
+					Victim = Cand;
+					ImpactPoint = Cand->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+					ImpactNormal = (EyeLoc - ImpactPoint).GetSafeNormal();
+				}
+			}
+		}
+	}
 	if (Victim == nullptr || Victim == this)
 	{
 		return;
@@ -1659,15 +1876,77 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 	FPFPaintHitInfo MeleeHit;
 	MeleeHit.ShooterPS   = MyPS;
 	MeleeHit.ShooterTeam = MyTeam;
-	MeleeHit.ImpactPoint = Hit.ImpactPoint;
-	MeleeHit.ImpactNormal= Hit.ImpactNormal;
+	MeleeHit.ImpactPoint = ImpactPoint;
+	MeleeHit.ImpactNormal= ImpactNormal;
 	MeleeHit.Region      = EPFBodyRegion::Chest;
 	MeleeHit.ServerTime  = static_cast<float>(Now);
 	VictimHealth->ApplyPaintHit(MeleeHit, /*bForceEliminate=*/true);
 
 	if (UPFCombatAudio* Audio = GetCombatAudio())
 	{
-		Audio->PlayImpactAt(Hit.ImpactPoint);   // contact "thwack" (host-side; elim feedback covers clients)
+		Audio->PlayImpactAt(ImpactPoint);   // contact "thwack" (host-side; elim feedback covers clients)
+	}
+}
+
+void ACombatForgeCharacter::TickServerAfk(float DeltaSeconds)
+{
+	// Authority-only; called from Tick under HasAuthority().
+	AController* C = GetController();
+	APlayerController* PC = Cast<APlayerController>(C);
+	// Only police REMOTE humans: bots are AIControllers (Cast<APlayerController> fails), and the listen-server
+	// host / a standalone player are local controllers (never kick the person running the server).
+	if (PC == nullptr || PC->IsLocalController())
+	{
+		return;
+	}
+	// Don't accrue idle time while eliminated / awaiting respawn — reseed the baseline on the next live poll.
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
+	{
+		ServerLastActiveTime = -1.f;
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.f;
+
+	// Poll ~1 Hz — cheap, and the 3-minute window doesn't need sub-second resolution.
+	ServerAfkPollAccum += DeltaSeconds;
+	if (ServerAfkPollAccum < 1.f)
+	{
+		return;
+	}
+	ServerAfkPollAccum = 0.f;
+
+	const FVector Loc = GetActorLocation();
+	const FRotator Aim = PC->GetControlRotation();   // remote client's view rotation, replicated via ServerMove
+
+	if (ServerLastActiveTime < 0.f)
+	{
+		// First poll since (re)spawn — seed the baseline and treat as active.
+		ServerLastActiveTime = Now;
+		ServerAfkLastLoc = Loc;
+		ServerAfkLastAim = Aim;
+		return;
+	}
+
+	const bool bMoved = FVector::DistSquared(Loc, ServerAfkLastLoc) > (8.f * 8.f);
+	const float AimDelta = FMath::Abs(FRotator::NormalizeAxis(Aim.Yaw - ServerAfkLastAim.Yaw))
+	                     + FMath::Abs(FRotator::NormalizeAxis(Aim.Pitch - ServerAfkLastAim.Pitch));
+	if (bMoved || AimDelta > 1.0f)
+	{
+		ServerLastActiveTime = Now;
+		ServerAfkLastLoc = Loc;
+		ServerAfkLastAim = Aim;
+		return;
+	}
+
+	if (Now - ServerLastActiveTime >= AfkKickSeconds)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("AFK kick: %s idle %.0fs — returned to main menu"),
+			*GetNameSafe(PC->PlayerState), AfkKickSeconds);
+		PC->ClientReturnToMainMenuWithTextReason(
+			NSLOCTEXT("CombatForge", "AfkKick", "You were idle for 3 minutes and were returned to the menu."));
+		ServerLastActiveTime = Now;   // don't re-fire while the client travel is in flight
 	}
 }
 
@@ -2225,6 +2504,47 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 		}
 		Mount(CharSlotComps[s], M);
 	}
+
+	// ---- Modular skin: stop the one-piece body's legs rendering under the trousers ----
+	// SKM_Body (the leader) is a ONE-PIECE naked body (torso+arms+LEGS). Hiding only SKM_Legs left the
+	// body's own legs poking through the inner thigh. Visible skin = modular set; leader = skeleton/anim only.
+	// Require torso + arms + head so we never hide the leader into an invisible character.
+	const bool bModularSkinReady =
+		CharBaseComps.IsValidIndex(PFChar::kBaseHead) && CharBaseComps[PFChar::kBaseHead] != nullptr
+		&& CharBaseComps[PFChar::kBaseHead]->GetSkeletalMeshAsset() != nullptr
+		&& CharBaseComps.IsValidIndex(PFChar::kBaseTorso) && CharBaseComps[PFChar::kBaseTorso] != nullptr
+		&& CharBaseComps[PFChar::kBaseTorso]->GetSkeletalMeshAsset() != nullptr
+		&& CharBaseComps.IsValidIndex(PFChar::kBaseArms) && CharBaseComps[PFChar::kBaseArms] != nullptr
+		&& CharBaseComps[PFChar::kBaseArms]->GetSkeletalMeshAsset() != nullptr;
+	if (USkeletalMeshComponent* Leader = GetMesh())
+	{
+		// A hidden leader would normally stop evaluating its pose (OnlyTickPoseWhenRendered), which would FREEZE
+		// every follower. Force it to keep ticking bones while invisible.
+		Leader->VisibilityBasedAnimTickOption = bModularSkinReady
+			? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones
+			: EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+		// Both visibility flags — SetVisibility alone was not enough on some paths (shadows / ISM).
+		Leader->SetVisibility(!bModularSkinReady, /*bPropagateToChildren=*/false);
+		Leader->SetHiddenInGame(bModularSkinReady, /*bPropagateToChildren=*/false);
+		if (bModularSkinReady)
+		{
+			Leader->SetCastShadow(false);   // no naked-body shadow under the clothes
+		}
+	}
+
+	// Drop bare LEG skin whenever a Pants garment is worn (privates / thighs printing through jeans).
+	// Pants = GSlots index 6. If modular legs failed to load we still hide nothing extra on the leader
+	// (leader is already fully hidden when modular skin is ready).
+	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
+		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
+	if (CharBaseComps.IsValidIndex(PFChar::kBaseLegs) && CharBaseComps[PFChar::kBaseLegs] != nullptr)
+	{
+		const bool bShowLegs = bModularSkinReady && !bPantsWorn
+			&& CharBaseComps[PFChar::kBaseLegs]->GetSkeletalMeshAsset() != nullptr;
+		CharBaseComps[PFChar::kBaseLegs]->SetVisibility(bShowLegs);
+		CharBaseComps[PFChar::kBaseLegs]->SetHiddenInGame(!bShowLegs);
+		CharBaseComps[PFChar::kBaseLegs]->SetCastShadow(bShowLegs);
+	}
 }
 
 void ACombatForgeCharacter::ReapplyCharacterConfig()
@@ -2246,6 +2566,30 @@ void ACombatForgeCharacter::ReapplyCharacterConfig()
 
 void ACombatForgeCharacter::ApplyWeaponLoadout()
 {
+	// BOTS ROLL THEIR OWN GUN (Tom 2026-07-18: "bots always have whatever weapon the player has — they ought to
+	// be chosen at random"). Without this a bot has no kit, so it fell through to PFWeapon::LoadConfig() below,
+	// which is the HOST'S saved loadout — hence every bot mirroring the player's current weapon.
+	// Server-authoritative and written into the REPLICATED kit, so every client sees the same gun on that bot.
+	// Rolled exactly ONCE per pawn: populating CharParts makes HasValidKit() true, so this block can't re-roll
+	// on later calls (respawn reuses the pawn, and a gun that changed every tick would be worse than the bug).
+	if (HasAuthority() && !HasValidKit() && IsBotControlled())
+	{
+		const FPFCharacterConfig BotLook = PFChar::DefaultConfig();
+		KitRep.CharParts.Reset(BotLook.Slots.Num());
+		for (const int32 Slot : BotLook.Slots)
+		{
+			KitRep.CharParts.Add(static_cast<int16>(Slot));
+		}
+		const int32 Cat = FMath::RandRange(0, PFWeapon::CategoryCount() - 1);
+		const int32 Idx = FMath::RandRange(0, FMath::Max(0, PFWeapon::WeaponCount(Cat) - 1));
+		KitRep.WeaponCategory = static_cast<uint8>(Cat);
+		KitRep.WeaponIndex    = static_cast<uint8>(Idx);
+		KitRep.SecondaryCategory = 2;   // pistol sidearm, same as a player's default secondary
+		KitRep.SecondaryIndex    = 0;
+		UE_LOG(CombatForgeLog, Verbose, TEXT("Bot loadout rolled: %s"),
+			*PFWeapon::WeaponDisplayName(Cat, Idx));
+	}
+
 	// Resolve primary + secondary from kit (or local prefs / defaults for bots).
 	if (HasValidKit())
 	{
@@ -2339,6 +2683,10 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	MuzzleLocalFP = UseMuzzle;
 	ViewModelAdsLoc = UseAdsLoc;
 	ViewModelAdsRot = UseAdsRot;
+	// Minigun: its fat multi-barrel bounds fool the mesh-tip heuristic in ResolveGunMuzzleWorld (the tip lands
+	// at a bounds CORNER → tracer from the top-right of the screen). Route it through the authored MuzzleFP
+	// instead. Only this gun — slim rifles/SMGs/snipers auto-tip correctly and stay on that path.
+	bMuzzleFromAuthoredFP = (Def.WeaponId != nullptr && FCString::Strcmp(Def.WeaponId, TEXT("lmg_minigun")) == 0);
 
 	if (WeaponComponent != nullptr)
 	{
@@ -2369,10 +2717,37 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	}
 	// Per-weapon ADS-in (out stays the character's ADSOutTime). Both sides read kit-derived Def.
 	ADSInTime = Def.ADSTimeSec;
+	// CoD-style WHOLE-SCREEN zoom while ADS, only for weapons that have a scope/sight on the gun.
+	// Category 4 = Sniper (every catalog sniper ships with an optic mesh). Explicit Def.ScopedADSFOV
+	// wins when set; otherwise snipers get a hard ~5x FOV pull (BaseFOV 105 → ~18). Other categories
+	// keep a mild iron-sight zoom. Scope MASK (black ring + reticle) is a separate HUD piece.
+	if (Def.ScopedADSFOV > 0.f)
+	{
+		ADSFOV = Def.ScopedADSFOV;
+	}
+	else if (ActiveWeaponConfig.Category == 4)
+	{
+		ADSFOV = 18.f;   // CoD-style sniper magnification (whole-screen zoom)
+	}
+	else
+	{
+		ADSFOV = 58.f;   // standard iron-sight magnification
+	}
 	// Prediction-safe move mult — only from replicated kit + which slot is drawn.
 	if (UPFCharacterMovementComponent* CMC = GetPFMovement())
 	{
 		CMC->CachedWeaponMoveSpeedMult = Def.MoveSpeedMult;
+	}
+
+	// TP RAISED (fire/ADS) rotation is per-weapon (Tom 2026-07-18): the default (-90 / 0) is SM_Rifle's
+	// +Y-barrel axis; pistols/revolvers render UPSIDE DOWN with it (different mesh barrel axis), so category 2
+	// flips 180° about the barrel unless the catalog row explicitly overrides TPRaisedRoll. Best-guess — the
+	// pistol mesh axis is unverified in-editor; if a pistol still looks off, adjust TPRaisedYawOffset/Roll.
+	CachedTPRaisedYaw  = Def.TPRaisedYawOffset;
+	CachedTPRaisedRoll = Def.TPRaisedRoll;
+	if (ActiveWeaponConfig.Category == 2 && FMath::IsNearlyZero(Def.TPRaisedRoll))
+	{
+		CachedTPRaisedRoll = 180.f;
 	}
 
 	// TP hand gun + back-slung stowed gun.
@@ -2686,6 +3061,45 @@ static FAutoConsoleCommandWithWorldAndArgs GPFWeaponFPCmd(
 	TEXT("pf.WeaponFP"),
 	TEXT("Tune the equipped weapon's first-person pose: x y z pitch yaw roll scale [muzX muzY muzZ]. Prints values to paste into PFWeaponCatalog."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponFPCmd));
+
+void ACombatForgeCharacter::TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale)
+{
+	// Third-person grip: where the gun sits in hand_r. Applied by ApplyHandWeaponPose every tick, so simply
+	// writing the members takes effect on the next frame — no re-attach needed.
+	WeaponRelativeLocation = Loc;
+	WeaponRelativeRotation = Rot;
+	WeaponRelativeScale = FVector(Scale);
+	ApplyHandWeaponPose();   // immediate feedback while dragging numbers in the console
+}
+
+// Live-tune the THIRD-PERSON grip (what everyone else sees). The FP tools above only move the viewmodel; this
+// is the one that fixes "the rifle is canted across the chest". Needed after the IK-retarget bake because the
+// Bandit's hand bone orientation changed, so the old rifle-tuned offset no longer lands in the grip.
+// Applies to EVERY character in the world (including bots) so you can eyeball a bot while tuning.
+static void PFWeaponTPCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 6)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("usage: pf.WeaponTP x y z pitch yaw roll [scale]   (third-person grip in hand_r)"));
+		return;
+	}
+	const FVector Loc(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
+	const float Scale = (Args.Num() >= 7) ? FCString::Atof(*Args[6]) : 0.85f;
+	int32 Applied = 0;
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		It->TuneWeaponTP(Loc, Rot, Scale);
+		++Applied;
+	}
+	UE_LOG(CombatForgeLog, Log,
+		TEXT("pf.WeaponTP (%d pawns): WeaponRelativeLocation=FVector(%.2ff,%.2ff,%.2ff), WeaponRelativeRotation=FRotator(%.2ff,%.2ff,%.2ff), WeaponRelativeScale=FVector(%.3ff)"),
+		Applied, Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Scale);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponTPCmd(
+	TEXT("pf.WeaponTP"),
+	TEXT("Tune the THIRD-PERSON weapon grip (hand_r): x y z pitch yaw roll [scale]. Applies to all pawns incl. bots; prints paste-ready values."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponTPCmd));
 
 void ACombatForgeCharacter::TuneWeaponADS(const FVector& Loc, const FRotator& Rot)
 {
@@ -3019,11 +3433,10 @@ void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMateria
 	}
 
 	USkeletalMeshComponent* Body = GetMesh();
-	// Spine / backpack bones — first hit wins (Manny + Bandit-compatible names).
+	// Mid/lower spine for a backpack sling — NEVER neck/head, and never ik_hand_gun (chest/hip holster).
 	static const FName BackBones[] = {
-		TEXT("spine_03"), TEXT("Spine_03"), TEXT("spine_02"), TEXT("Spine_02"),
-		TEXT("spine_01"), TEXT("Spine_01"), TEXT("spine_01_socket"),
-		TEXT("backpack"), TEXT("Backpack"), TEXT("ik_hand_gun"),
+		TEXT("spine_02"), TEXT("Spine_02"), TEXT("spine_01"), TEXT("Spine_01"),
+		TEXT("spine_03"), TEXT("Spine_03"), TEXT("backpack"), TEXT("Backpack"),
 	};
 	FName Bone = BackWeaponAttachBone;
 	auto Exists = [Body](FName N) -> bool
@@ -3070,9 +3483,17 @@ FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponen
 	{
 		return NAME_None;
 	}
-	// Prefer the RIGHT HAND bone for in-hand carry. Do NOT prefer "weapon_r" / holster sockets first —
-	// many packs put weapon_r on the hip; attaching there left a fixed hip gun while the FP viewmodel
-	// (or armed-hand pose) still looked "in hands" (double-gun bug).
+	// ik_hand_gun FIRST when the rifle-hold animation set is driving the arms (Tom 2026-07-18: "just use whatever
+	// the animation says is correct — don't hand-tune it"). On mannequin-family skeletons ik_hand_gun IS the
+	// animator's weapon marker: the rifle pack animates it to sit exactly in the grip, and the IK-retarget carried
+	// it onto SKM_Bandit_Skeleton. Attaching there needs NO offset — position/orientation come from the animation
+	// itself and track it for free, which is why this beats a hand-tuned hand_r offset that only matches one pose.
+	// Only preferred while the armed set is active; with the unarmed set the arms hang and ik_hand_gun isn't
+	// meaningfully posed, so hand_r + the tuned offset remains correct there.
+	const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
+	static const FName WeaponBoneFirst[] = { TEXT("ik_hand_gun"), TEXT("IK_hand_gun") };
+	// Do NOT prefer "weapon_r" / holster sockets first — many packs put weapon_r on the hip; attaching there left
+	// a fixed hip gun while the FP viewmodel (or armed-hand pose) still looked "in hands" (double-gun bug).
 	static const FName HandFirst[] = {
 		TEXT("hand_r"),
 		TEXT("Hand_R"),
@@ -3092,6 +3513,17 @@ FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponen
 	{
 		return Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE;
 	};
+	// Animation-authored weapon bone wins while the rifle-hold set is playing (see note above).
+	if (bArmedIdleActive && CVarWeaponBoneAttach.GetValueOnGameThread() != 0)
+	{
+		for (const FName& N : WeaponBoneFirst)
+		{
+			if (Exists(N))
+			{
+				return N;
+			}
+		}
+	}
 	// Explicit default only if it's a hand (not a holster name).
 	if (!WeaponAttachSocket.IsNone() && Exists(WeaponAttachSocket))
 	{
@@ -3191,9 +3623,53 @@ void ACombatForgeCharacter::ApplyHandWeaponPose()
 			WeaponMeshComp->AttachToComponent(Body,
 				FAttachmentTransformRules::SnapToTargetNotIncludingScale, CachedWeaponAttachBone);
 		}
-		WeaponMeshComp->SetRelativeLocation(WeaponRelativeLocation);
-		WeaponMeshComp->SetRelativeRotation(WeaponRelativeRotation);
+		// On the ANIMATION's weapon bone (ik_hand_gun) the grip transform is already baked into the bone by the
+		// animator — applying the hand_r-tuned offset on top would re-introduce exactly the cant we're removing.
+		// So: identity offset there, tuned offset on a plain hand bone. Scale is a mesh-size choice either way.
+		const bool bOnWeaponBone = CachedWeaponAttachBone.ToString().StartsWith(TEXT("ik_hand_gun"), ESearchCase::IgnoreCase);
+		WeaponMeshComp->SetRelativeLocation(bOnWeaponBone ? FVector::ZeroVector : WeaponRelativeLocation);
+		WeaponMeshComp->SetRelativeRotation(bOnWeaponBone ? FRotator::ZeroRotator : WeaponRelativeRotation);
 		WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
+
+		// ---- Orient the gun from the ANIMATED HANDS (the fix for "gun at the hip / bicep") ----
+		// Every fixed offset we tried was wrong for at least one pose, and ik_hand_gun turned out not to be
+		// animated on this skeleton (it sits at ik_hand_root near the pelvis — the hip gun). But the rifle-hold
+		// animation DOES pose both hands correctly, so the weapon's own line is simply hand_r -> hand_l:
+		// right hand on the grip, left on the foregrip. Deriving the barrel from that needs no tuned numbers and
+		// stays correct for every frame of every clip. Two-handed only; a one-handed pose keeps the fixed offset.
+		if (CVarWeaponAimFromHands.GetValueOnGameThread() != 0 && WeaponMesh != nullptr)
+		{
+			static const FName LeftHandNames[] = { TEXT("hand_l"), TEXT("Hand_L"), TEXT("LeftHand"), TEXT("HandL") };
+			FName LeftHand = NAME_None;
+			for (const FName& N : LeftHandNames)
+			{
+				if (Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE) { LeftHand = N; break; }
+			}
+			if (!LeftHand.IsNone())
+			{
+				const FVector GripLoc  = Body->GetSocketLocation(CachedWeaponAttachBone);
+				const FVector FrontLoc = Body->GetSocketLocation(LeftHand);
+				const FVector Barrel   = (FrontLoc - GripLoc).GetSafeNormal();
+				// Guard: if the hands are together (holstered/unarmed poses) the direction is meaningless.
+				if (!Barrel.IsNearlyZero() && FVector::Dist(FrontLoc, GripLoc) > 10.f)
+				{
+					// Which local axis is the barrel? Same bounds test the FP auto-pose uses: the longest
+					// horizontal extent of the mesh IS the barrel (SM_Rifle family is +Y; others are +X).
+					const FBoxSphereBounds B = WeaponMesh->GetBounds();
+					const bool bBarrelAlongY = (B.BoxExtent.Y >= B.BoxExtent.X);
+					// Roll reference: the hand's up keeps the gun from spinning about its own barrel.
+					const FVector HandUp = Body->GetSocketQuaternion(CachedWeaponAttachBone).GetUpVector();
+					const FRotator WorldRot = bBarrelAlongY
+						? FRotationMatrix::MakeFromYZ(Barrel, HandUp).Rotator()
+						: FRotationMatrix::MakeFromXZ(Barrel, HandUp).Rotator();
+					WeaponMeshComp->SetWorldRotation(WorldRot);
+					// Seat the GRIP (rear of the gun) in the right hand rather than the mesh centre, so the
+					// receiver doesn't float forward of the fist.
+					const float BarrelHalf = (bBarrelAlongY ? B.BoxExtent.Y : B.BoxExtent.X) * WeaponRelativeScale.X;
+					WeaponMeshComp->SetWorldLocation(GripLoc + Barrel * (BarrelHalf * 0.35f));
+				}
+			}
+		}
 		return;
 	}
 
@@ -3247,6 +3723,11 @@ void ACombatForgeCharacter::UpdateSequenceLocomotion()
 	}
 	// Mantle owns the mesh for the climb (MM_WallJump) — don't overwrite with walk/jog mid-pull-up.
 	if (bMantleAnimActive || (PFMovement != nullptr && PFMovement->IsMantling()))
+	{
+		return;
+	}
+	// Melee punch clip owns the mesh for its duration (MM_Attack_*) — don't stomp with idle/walk.
+	if (MeleeSwingAnimRemain > 0.f)
 	{
 		return;
 	}
@@ -3417,37 +3898,10 @@ FVector ACombatForgeCharacter::GetEyeWorldLocation() const
 	return GetActorLocation() + FVector(0.f, 0.f, 60.f);
 }
 
-void ACombatForgeCharacter::ApplyRaisedWeaponPose()
-{
-	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
-	{
-		return;
-	}
-
-	const FRotator Aim = GetBaseAimRotation();
-	const FRotationMatrix AimM(Aim);
-	// Place mesh origin so the barrel sits on the aim line at eye height (not hip).
-	// ADS pulls the TP raise slightly closer for cleaner silhouette.
-	const float Ads = FMath::Clamp(GetADSAlpha(), 0.f, 1.f);
-	const FVector Raised = FMath::Lerp(WeaponRaisedFromEye, FVector(22.f, 10.f, -6.f), Ads);
-	const FVector Origin = GetEyeWorldLocation()
-		+ AimM.GetUnitAxis(EAxis::X) * Raised.X
-		+ AimM.GetUnitAxis(EAxis::Y) * Raised.Y
-		+ AimM.GetUnitAxis(EAxis::Z) * Raised.Z;
-
-	if (USceneComponent* Root = GetRootComponent())
-	{
-		if (WeaponMeshComp->GetAttachParent() != Root)
-		{
-			WeaponMeshComp->AttachToComponent(Root,
-				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		}
-	}
-	WeaponMeshComp->SetWorldLocation(Origin);
-	// SM_Rifle / olive: local +Y is barrel-forward → yaw -90 into aim +X.
-	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
-	WeaponMeshComp->SetWorldScale3D(WeaponRelativeScale);
-}
+// NOTE: the old ApplyRaisedWeaponPose() lived here and was DEAD CODE — nothing ever called it (it re-parented
+// the TP gun to the capsule at eye height, which is the bug that put guns on heads and broke muzzle sampling).
+// It was deleted 2026-07-18 because it silently absorbed a pistol-rotation fix that therefore never ran. The
+// ONE live TP weapon-pose path is UpdateWeaponHoldPose() below — edit that.
 
 void ACombatForgeCharacter::UpdateWeaponHoldPose()
 {
@@ -3480,25 +3934,38 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 	// and auth balls spawned from that tip. FP viewmodel (camera) stays separate for the owner.
 	ApplyHandWeaponPose();
 
-	// While aiming/shooting, POINT the hand-held gun along the aim instead of the hip-carry angle. Without
-	// this, bots + remote players visibly fired from a barrel aimed at the ground ("shooting from their
-	// ankles") once the muzzle started sampling the real barrel tip. The gun STAYS attached to the hand —
-	// the muzzle-origin gate depends on that — it's only re-oriented in place + lifted a touch so the
-	// barrel clears the thigh. (SM_Rifle family: local +Y is barrel-forward → yaw -90 onto the aim.)
+	// While aiming/shooting, POINT the hand-held gun along the aim. Gun STAYS attached to hand_r (muzzle
+	// sampling depends on that). We re-orient in place and apply a SMALL lift so the barrel clears the
+	// thigh — never a large world-Z teleport (that was the "gun on neck/armpit" bug with the dual sling).
 	if (ShouldRaiseWeapon())
 	{
-		const FRotator Aim = GetBaseAimRotation();
-		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
-		// Shoulder lift belongs ONLY to the unarmed hip-carry anim set. With pf.ArmedAnims (default 1)
-		// everyone idles in MF_Rifle_Idle_ADS — hands already at shoulder/cheek — so the old
-		// unconditional +30uu stacked a second raise on top and planted the rifle at the EYE line:
-		// that was the "bot guns come out of their forehead" bug (bots hold ADS/fire continuously on
-		// the listen host, so they showed it constantly while remote humans only flashed it per shot).
+		// WHO OWNS THE WEAPON POSE?
+		// With the IK-retargeted rifle-hold set active, the ANIMATION already puts both hands on the gun and
+		// points it down the aim — the mesh is parented to hand_r, so it follows that pose for free. Overriding
+		// the rotation here FOUGHT the animation: ShouldRaiseWeapon() flips on/off constantly (bots re-arm fire
+		// every few frames), so the gun snapped between the animated pose and this aim-derived one every tick.
+		// That was the "rifle glitching between correct and angled down" flicker (Tom 2026-07-18).
+		// So: only pose the gun in code when the UNARMED fallback set is driving the arms (they hang, and the
+		// gun genuinely has to be pointed + lifted by hand). Otherwise leave it to the animation.
 		const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
 		if (!bArmedIdleActive)
 		{
-			// Hip-carry fallback set: small lift so the barrel clears the thigh (was 30 — tuned down).
-			WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, 10.f));
+			const FRotator Aim = GetBaseAimRotation();
+			// PER-WEAPON barrel-axis correction (default -90 / 0 = SM_Rifle +Y barrel; pistols flip roll).
+			WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw + CachedTPRaisedYaw, CachedTPRaisedRoll));
+
+			// Modest lift so the hanging-arm pose doesn't leave the barrel in the thigh. Hard-clamped —
+			// cannot reach the head (that was the forehead-gun bug).
+			if (WeaponMaxShoulderLiftUU > 0.f)
+			{
+				const float TargetZ = GetEyeWorldLocation().Z - WeaponShoulderDropFromEyeUU;
+				const float CurrentZ = WeaponMeshComp->GetComponentLocation().Z;
+				const float Lift = FMath::Clamp(TargetZ - CurrentZ, 0.f, WeaponMaxShoulderLiftUU);
+				if (Lift > 0.f)
+				{
+					WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, Lift));
+				}
+			}
 		}
 	}
 }
@@ -3737,6 +4204,11 @@ FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 	// Owning-client cosmetic tracers: FP viewmodel gun mesh barrel (any catalog weapon).
 	if (bCosmetic)
 	{
+		// Guns whose bounds fool the auto-tip (minigun) use the authored ViewModelRoot-space muzzle instead.
+		if (bMuzzleFromAuthoredFP && ViewModelRoot != nullptr && !MuzzleLocalFP.IsNearlyZero())
+		{
+			return ViewModelRoot->GetComponentTransform().TransformPosition(MuzzleLocalFP);
+		}
 		if (RifleFPMesh != nullptr && RifleFPMesh->GetStaticMesh() != nullptr && RifleFPMesh->IsVisible())
 		{
 			// Mesh-local auto tip → world via the FP component (pose/scale already applied).

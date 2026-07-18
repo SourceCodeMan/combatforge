@@ -603,6 +603,16 @@ void ACombatForgeGameMode::RestartPlayer(AController* NewPlayer)
 		return;
 	}
 
+	// The headless box runs the server with ?listen, so it has its OWN local player controller ("CombatForge
+	// Server"). It has no human at a screen and no AI, so if it spawns a pawn that pawn just stands there with
+	// the default two-gun loadout, cluttering the arena (Tom's "phantom bot that never plays"). Give it no pawn.
+	// This only matches the non-rendering server phantom — a real listen HOST (a human playing) renders, so
+	// IsHeadlessServerPhantom() is false for them and they still spawn normally.
+	if (PS->IsHeadlessServerPhantom())
+	{
+		return;
+	}
+
 	RestartPlayerAtTransform(NewPlayer, GetSpawnTransform(PS));
 
 	if (ACombatForgeCharacter* Pawn = Cast<ACombatForgeCharacter>(NewPlayer->GetPawn()))
@@ -3182,11 +3192,39 @@ void ACombatForgeGameMode::EmitMatchReport() const
 	{
 		if (Backend->IsFleetActive())
 		{
-			const FString Pending = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PendingReports"),
+			// PERSISTENT queue dir (FPFPaths::ServerDataDir honors -ArenaDir on the box) so a redeploy mid-unsent
+			// report doesn't drop that match's XP. MUST match the re-send path in PFBackendSubsystem (#8).
+			const FString Pending = FPaths::Combine(FPFPaths::ServerDataDir(), TEXT("PendingReports"),
 				GS->MatchId + TEXT(".json"));
 			IFileManager::Get().MakeDirectory(*FPaths::GetPath(Pending), /*Tree=*/true);
 			FFileHelper::SaveStringToFile(Json, *Pending);
 			Backend->SendMatchReport(Json, Pending);
+		}
+		else if (Backend->IsLoggedIn())
+		{
+			// CASUAL XP (#13, Tom 2026-07-18): not a fleet server (solo / listen host / offline) but the host is
+			// logged in — award honor-system XP for the HOST'S OWN result (the Worker halves + daily-caps it and
+			// tags it 'casual_*'). This covers the big case (kids vs bots + a friend hosting). Joined clients on a
+			// listen server would self-report from their OWN machines — that's a follow-up (EmitMatchReport is
+			// server-only, so it can only speak for the host's account here).
+			if (const APlayerController* HostPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+			{
+				const ACombatForgePlayerState* HostPS = HostPC->GetPlayerState<ACombatForgePlayerState>();
+				if (HostPS != nullptr && !HostPS->IsABot() && !HostPS->PlayerGuidHash.IsEmpty())
+				{
+					const bool bHostWon = (PendingMatchResult.WinnerTeam != 255)
+						&& (HostPS->TeamId == PendingMatchResult.WinnerTeam);
+					Backend->SendCasualReport(GS->MatchId,
+						StaticEnum<EPFMatchType>()->GetNameStringByValue((int64)GS->MatchType),
+						GS->SelectedCommunityMapLabel.IsEmpty()
+							? StaticEnum<EPFArenaMap>()->GetNameStringByValue((int64)GS->ArenaMap)
+							: GS->SelectedCommunityMapLabel,
+						PendingMatchResult.MatchDurationSec,
+						HostPS->Eliminations, HostPS->TagCount, /*objective=*/0,
+						PiecesByRoster.FindRef(HostPS->RosterIndex),
+						/*completed=*/true, bHostWon);
+				}
+			}
 		}
 	}
 }

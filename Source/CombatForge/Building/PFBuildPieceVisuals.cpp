@@ -5,6 +5,8 @@
 #include "CombatForge.h"
 #include "Building/PFGridMath.h"
 
+#include "HAL/IConsoleManager.h"
+
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "Materials/MaterialInterface.h"
@@ -48,7 +50,22 @@ namespace
 		bool bLoaded = false;
 	};
 
+	// GLoaded latches ONLY on a successful load (see EnsureLoaded). GLastAttemptFrame throttles
+	// retries to one per frame — EnsureLoaded sits on hot paths (PieceWorldTransform runs per
+	// instance), so an unthrottled retry loop after a miss would soft-load 20+ assets every call.
 	bool GLoaded = false;
+	uint64 GLastAttemptFrame = TNumericLimits<uint64>::Max();   // sentinel: never equals a real frame
+
+	// Test hook: force the first N EnsureLoaded attempts to resolve nothing, reproducing the
+	// too-early-load race that a joining client hits for real. Lets the self-heal path be verified
+	// deterministically instead of hoping to catch the race in a playtest. 0 = off (shipping).
+	int32 GFailFirstN = 0;
+	int32 GFailedSoFar = 0;
+	FAutoConsoleVariableRef CVarPropVisualsFailFirstN(
+		TEXT("pf.PropVisualsFailFirstN"),
+		GFailFirstN,
+		TEXT("DEBUG: make the first N build-piece asset loads fail, to test fallback recovery. 0=off."),
+		ECVF_Cheat);
 	FPropSlot GBarrel;   // PropCan
 	FPropSlot GCrate;    // PropDorito
 	FPropSlot GBoxes;    // PropSnake
@@ -445,7 +462,37 @@ void EnsureLoaded()
 	{
 		return;
 	}
-	GLoaded = true;
+
+	// THE "giant checkered cone/cylinder/box" BUG (tasks #47, #89 — recurred through alpha-8).
+	//
+	// This used to set GLoaded = true on entry, so whatever the first attempt resolved was final. The
+	// first attempt is NOT always at a safe moment: a joining client rebuilds the fort from the
+	// FastArray, so PostReplicatedAdd -> AddPieceLocal -> EnsureLoaded can run inside net
+	// serialization while the async loader owns the package. Every FSoftObjectPath::TryLoad below
+	// then returns null, and the latch made that permanent for the whole session:
+	//   - meshes  -> engine BasicShapes fallbacks (Cylinder / Cone / Cube at the legacy graybox
+	//                scales in FPFGridMath::PieceLocalTransform) = the barrel/crate/box shapes
+	//   - textures-> the triplanar master's texture params stay UNSET, and an unset Texture2D
+	//                param samples the engine default, which is the gray CHECKERBOARD
+	// One latch, both halves of the symptom. Never latch a miss: bail and let the next call retry.
+	if (IsInAsyncLoadingThread() || IsGarbageCollecting())
+	{
+		return;
+	}
+	if (GFrameCounter == GLastAttemptFrame)
+	{
+		return;   // already tried this frame — don't re-walk 20 soft paths per placed instance
+	}
+	GLastAttemptFrame = GFrameCounter;
+
+	if (GFailFirstN > 0 && GFailedSoFar < GFailFirstN)
+	{
+		++GFailedSoFar;
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("BuildPieceVisuals: SIMULATED load failure %d/%d (pf.PropVisualsFailFirstN)"),
+			GFailedSoFar, GFailFirstN);
+		return;   // nothing resolved, nothing latched — exactly the real race
+	}
 
 	// Engine fallbacks (always present). Soft-load so EnsureLoaded is safe outside constructors.
 	GCube = SoftLoadMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -513,13 +560,27 @@ void EnsureLoaded()
 		Keep(P->BaseColor); Keep(P->Normal); Keep(P->ORD);
 	}
 
+	// Latch only when the real content resolved. A partial result means we ran too early (see the
+	// note at the top): keep GLoaded false so the next call — next frame, or the grid's retry timer —
+	// tries again and upgrades the ISMs in place. Props falling back to engine shapes is the visible
+	// failure; textures matter too (unset param = checkerboard).
+	GLoaded = GBarrel.bWarehouse && GCrate.bWarehouse && GBoxes.bWarehouse
+		&& GSurfWall.bLoaded && GSurfFloor.bLoaded && GSurfRamp.bLoaded && GSurfRoof.bLoaded;
+
 	UE_LOG(CombatForgeLog, Log,
-		TEXT("BuildPieceVisuals: props Barrel=%s Crate=%s Boxes=%s | warehouseMI floor=%d metal=%d roof=%d | triplanar wall=%d floorAsset=%d(black-do-not-use)"),
-		GBarrel.Mesh ? *GBarrel.Mesh->GetName() : TEXT("null"),
-		GCrate.Mesh ? *GCrate.Mesh->GetName() : TEXT("null"),
-		GBoxes.Mesh ? *GBoxes.Mesh->GetName() : TEXT("null"),
+		TEXT("BuildPieceVisuals: %s | props Barrel=%s%s Crate=%s%s Boxes=%s%s | tex wall=%d floor=%d ramp=%d roof=%d | warehouseMI floor=%d metal=%d roof=%d | triplanar wall=%d floorAsset=%d(black-do-not-use)"),
+		GLoaded ? TEXT("READY") : TEXT("INCOMPLETE (will retry)"),
+		GBarrel.Mesh ? *GBarrel.Mesh->GetName() : TEXT("null"), GBarrel.bWarehouse ? TEXT("") : TEXT("[FALLBACK]"),
+		GCrate.Mesh  ? *GCrate.Mesh->GetName()  : TEXT("null"), GCrate.bWarehouse  ? TEXT("") : TEXT("[FALLBACK]"),
+		GBoxes.Mesh  ? *GBoxes.Mesh->GetName()  : TEXT("null"), GBoxes.bWarehouse  ? TEXT("") : TEXT("[FALLBACK]"),
+		GSurfWall.bLoaded ? 1 : 0, GSurfFloor.bLoaded ? 1 : 0, GSurfRamp.bLoaded ? 1 : 0, GSurfRoof.bLoaded ? 1 : 0,
 		GWhFloor ? 1 : 0, GWhMetal ? 1 : 0, GWhRoof ? 1 : 0,
 		GMasterWall ? 1 : 0, GMasterFloor ? 1 : 0);
+}
+
+bool IsFullyLoaded()
+{
+	return GLoaded;
 }
 
 UStaticMesh* MeshForType(EPFPieceType Type)
@@ -601,7 +662,15 @@ UMaterialInstanceDynamic* CreatePaletteMID(UObject* Outer, EPFSurfaceRole Role)
 	}
 
 	// 2) Working triplanar wall master + texture rebind (never ArenaFloor).
-	UMaterialInterface* Master = TriplanarFallbackMaster();
+	//
+	// Only if we actually HAVE textures to rebind. ApplyProfileToMID skips null textures, so a
+	// triplanar MID built before the warehouse/CC0 textures resolve keeps the master's defaults —
+	// and an unset Texture2D param samples the engine default texture, which is the gray
+	// CHECKERBOARD players were seeing on barrels/crates/boxes. A flat BasicShapeMaterial gray
+	// reads as untextured concrete instead: still wrong, but not alarming, and it self-corrects
+	// on the retry once the real textures land.
+	const FSurfaceProfile& Profile = SurfaceForRole(Role);
+	UMaterialInterface* Master = Profile.bLoaded ? TriplanarFallbackMaster() : nullptr;
 	if (Master == nullptr)
 	{
 		Master = Cast<UMaterialInterface>(
@@ -614,7 +683,12 @@ UMaterialInstanceDynamic* CreatePaletteMID(UObject* Outer, EPFSurfaceRole Role)
 	UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Master, Outer);
 	if (MID)
 	{
-		ApplyProfileToMID(MID, SurfaceForRole(Role));
+		ApplyProfileToMID(MID, Profile);
+		if (!Profile.bLoaded)
+		{
+			// BasicShapeMaterial's full-surface tint — neutral concrete-ish gray, no checker.
+			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.42f, 0.42f, 0.40f));
+		}
 	}
 	return MID;
 }
