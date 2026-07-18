@@ -1472,6 +1472,12 @@ void ACombatForgeGameMode::StartNextRound()
 	GS->ServerSetRoundNumber(GS->RoundNumber + 1);
 	const uint8 RoundHP = bSuddenDeathRoundActive ? 1 : 3;   // B2; sudden death is a parameter, not a system
 
+	// Respawn Elimination tallies TeamScores per Live period; clear so each round starts 0–0.
+	if (RespawnMode == EPFRespawnMode::Respawn)
+	{
+		GS->ServerSetTeamScores(0, 0);
+	}
+
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
@@ -2005,15 +2011,31 @@ void ACombatForgeGameMode::ResolveRoundOnTimer()
 	{
 		return;
 	}
-	// Timer expiry: more players alive wins; equal alive = draw round (no point).
 	uint8 Winner = TeamNone;
-	if (GS->AliveCounts[0] > GS->AliveCounts[1])
+	if (RespawnMode == EPFRespawnMode::Respawn)
 	{
-		Winner = 0;
+		// Respawn variant: everyone stays "alive", so score the round by team tags credited on
+		// each elim (B1). Equal tags = draw round (no point).
+		if (GS->TeamScores[0] > GS->TeamScores[1])
+		{
+			Winner = 0;
+		}
+		else if (GS->TeamScores[1] > GS->TeamScores[0])
+		{
+			Winner = 1;
+		}
 	}
-	else if (GS->AliveCounts[1] > GS->AliveCounts[0])
+	else
 	{
-		Winner = 1;
+		// Round Elimination: more players alive wins; equal alive = draw round (no point).
+		if (GS->AliveCounts[0] > GS->AliveCounts[1])
+		{
+			Winner = 0;
+		}
+		else if (GS->AliveCounts[1] > GS->AliveCounts[0])
+		{
+			Winner = 1;
+		}
 	}
 	EndRound(Winner);
 }
@@ -3306,7 +3328,9 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 		return;
 	}
 
-	// Fall death (ShooterTeam 255): no elim credit, near-instant respawn in every mode.
+	// Fall death (ShooterTeam 255): no elim credit to a shooter. Continuous modes + Respawn-variant
+	// Elimination soft-respawn; Round Elimination treats fall as a normal out-for-round (C4 — no
+	// mid-round free reposition exploit).
 	const bool bFallDeath = (ShooterPS == nullptr && FinalHit.ShooterTeam == 255);
 	if (bFallDeath)
 	{
@@ -3328,6 +3352,33 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 			VictimPS->ServerSetFlagCarry(false, 255);
 		}
 		VictimPS->ServerSetStandingOnPoint(255);
+
+		const bool bRoundElimFall = (GS->MatchType == EPFMatchType::Elimination
+			&& RespawnMode == EPFRespawnMode::RoundElimination);
+		if (bRoundElimFall)
+		{
+			UE_LOG(CombatForgeLog, Log, TEXT("GameMode: fall death → out for round (%s)"),
+				*VictimPS->GetPlayerName());
+			VictimPS->bAliveInRound = false;
+			VictimPS->ServerSetOutForRound();
+			if (ACombatForgePlayerController* VictimPC =
+				Cast<ACombatForgePlayerController>(VictimPS->GetPlayerController()))
+			{
+				VictimPC->SetEliminatedMoveLock(true);
+				VictimPC->StartDeathCamera();
+			}
+			RecountAlive();
+			for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(It->Get()))
+				{
+					PC->RetargetSpectatorFrom(Victim);
+				}
+			}
+			CheckElimVictory();
+			return;
+		}
+
 		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: fall death → instant respawn (%s, fall≥3 levels)"),
 			*VictimPS->GetPlayerName());
 		RespawnVictimAtTeamSpawn(Victim, 0.35f);   // near-instant (short "you're out" flash)
@@ -3414,6 +3465,16 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 
 	if (RespawnMode == EPFRespawnMode::Respawn)
 	{
+		// Respawn Elimination (B1): credit the shooter's TEAM a tag so the Live timer can resolve
+		// by score (AliveCounts never drop while everyone respawns). No early match-end on tag
+		// cap — rounds still end on the timer / first-to-N round wins series.
+		if (ShooterPS && FinalHit.ShooterTeam != VictimPS->TeamId && FinalHit.ShooterTeam <= 1)
+		{
+			uint16 TagsA = GS->TeamScores[0];
+			uint16 TagsB = GS->TeamScores[1];
+			if (FinalHit.ShooterTeam == 0) { ++TagsA; } else { ++TagsB; }
+			GS->ServerSetTeamScores(TagsA, TagsB);
+		}
 		RespawnVictimAtTeamSpawn(Victim);   // 04 Variant B: timed reset in place of round elimination
 		return;
 	}
@@ -3846,17 +3907,24 @@ uint8 ACombatForgeGameMode::FindFreeRosterIndex() const
 void ACombatForgeGameMode::ComputeEffectiveScaling()
 {
 	// Continuous timed modes: bypass Elimination round scaling. RoundWinsToTake carries the score
-	// TARGET for the HUD (CTF uses CaptureFlagTarget; others use SkirmishTagTarget).
+	// TARGET for the HUD (CTF CaptureFlagTarget, Dom DominationTargetScore, else SkirmishTagTarget).
 	if (ACombatForgeGameState* SkGS = GetPFGameState())
 	{
 		if (SkGS->MatchType == EPFMatchType::Skirmish
 			|| SkGS->MatchType == EPFMatchType::FreeForAll
 			|| IsTeamScoreObjectiveMode(SkGS->MatchType))
 		{
-			const int32 Target = (SkGS->MatchType == EPFMatchType::CaptureFlag)
-				? static_cast<int32>(CaptureFlagTarget)
-				: static_cast<int32>(SkirmishTagTarget);
-			const uint8 TargetU8 = static_cast<uint8>(FMath::Min(Target, 255));
+			int32 Target = static_cast<int32>(SkirmishTagTarget);
+			if (SkGS->MatchType == EPFMatchType::CaptureFlag)
+			{
+				Target = static_cast<int32>(CaptureFlagTarget);
+			}
+			else if (SkGS->MatchType == EPFMatchType::Domination)
+			{
+				// Dom win logic uses DominationTargetScore (default 200); HUD must match (C1).
+				Target = DominationTargetScore;
+			}
+			const uint8 TargetU8 = static_cast<uint8>(FMath::Clamp(Target, 1, 255));
 			EffectiveRoundWinsToTake = TargetU8;
 			EffectiveMaxRounds = 1;
 			EffectiveRoundDuration = SkirmishMatchDuration;
