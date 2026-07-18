@@ -18,6 +18,12 @@
 # ============================================================================
 set -e
 
+# Preflight: catch the known recurring env breakages (Launcher reverting the SDK
+# cap, missing engine dylibs, ...) BEFORE a long cook dies half-way.
+if [ "${CF_SKIP_PREFLIGHT:-0}" != 1 ]; then
+	"$(dirname "${BASH_SOURCE[0]:-$0}")/check-mac-env.command" || exit 1
+fi
+
 # --- EDIT THESE for your Mac ---
 UE="/Users/Shared/Epic Games/UE_5.6"
 PROJ="$HOME/projects/combatforge/CombatForge.uproject"

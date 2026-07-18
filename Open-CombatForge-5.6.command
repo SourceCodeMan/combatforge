@@ -5,6 +5,12 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]:-$0}")"
 
+# Preflight: catch the known recurring env breakages (Launcher reverting the SDK
+# cap, missing engine dylibs, poisoned manifest, ...) BEFORE a cryptic failure.
+if [ "${CF_SKIP_PREFLIGHT:-0}" != 1 ]; then
+	./Scripts/check-mac-env.command || exit 1
+fi
+
 ENGINE="${CF_ENGINE:-/Users/Shared/Epic Games/UE_5.6}"
 EDITOR="$ENGINE/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor"
 UPROJECT="$PWD/CombatForge.uproject"

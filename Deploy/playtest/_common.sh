@@ -37,6 +37,18 @@ cf_game_binary() {
 	return 1
 }
 
+# Raw Development binaries under <project>/Binaries/Mac (incl. the UBT-wrapped
+# .app there) have no cooked content baked in — they need -project=<uproject> to
+# find the loose Content/, exactly like the Windows run-*.ps1 append -project for
+# exes under Binaries\Win64. Packaged builds (under Packaged/) must NOT get it.
+# Prints the -project arg, or nothing.
+cf_project_arg() {
+	local game="$1" root="$2"
+	case "$game" in
+		"$root/Binaries/Mac/"*) printf -- '-project=%s' "$root/CombatForge.uproject" ;;
+	esac
+}
+
 # Print this machine's join addresses (LAN + VPN), one per active interface.
 cf_print_ips() {
 	echo "Host IPs (share one with friends):"

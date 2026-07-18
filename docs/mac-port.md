@@ -32,18 +32,53 @@ Two genuinely Mac-only bugs were found and fixed (both invisible to MSVC on Wind
 
 ## Prerequisites on the Mac (all satisfied as of 2026-07-18)
 
+**Step 0 — run the preflight. It checks all of this in ~2 s and prints the exact fix for anything broken:**
+```bash
+./Scripts/check-mac-env.command
+```
+Run it after **every** Epic Launcher operation (Verify/update reverts the SDK cap silently) and whenever
+a Mac build or editor launch fails mysteriously. `Open-CombatForge-5.6.command` and
+`Scripts/Package-Mac.command` run it automatically (skip with `CF_SKIP_PREFLIGHT=1`).
+
+What it covers:
 - **Xcode 26.6** (Apple clang 21) at `/Applications/Xcode.app`, selected via `xcode-select`.
-- **UE 5.6** (Launcher binary) at `/Users/Shared/Epic Games/UE_5.6` — and the install must be
-  **complete**. A partial install silently omits the Mac target-platform dylibs and the editor asserts on
-  startup; see Troubleshooting below. Verify with:
-  `ls "/Users/Shared/Epic Games/UE_5.6/Engine/Binaries/Mac/" | grep MacTargetPlatform`
-  (expect `MacTargetPlatform`, `MacTargetPlatformControls`, `MacTargetPlatformSettings`).
-- **Engine SDK cap raised** — `Apple_SDK.json` `MaxVersion` → `26.9.0` (see "The SDK-version gate").
-  **Re-apply after any engine update.**
+- **UE 5.6** (Launcher binary) at `/Users/Shared/Epic Games/UE_5.6`, install **complete** (a partial
+  install omits the Mac target-platform dylibs → startup assert; see Troubleshooting).
+- **Engine SDK cap raised** — `Apple_SDK.json` `MaxVersion` → `26.9.0`. **Re-apply after any Launcher
+  Verify/update — they silently revert it** (confirmed happening).
+- **Metal Toolchain** (`metallib`) present.
+- **LFS content hydrated** (no pointer stubs).
+- **Project module manifest clean** (see Troubleshooting: stale-manifest assert).
+
+**Also required before heavy editor work — DISK HEADROOM: ≥30 GB free.** The first editor open writes
+an estimated 10–25 GB of shader DDC + one-time Virtual Texture build into `~/Library`. macOS degrades
+badly under ~5 GB free; do not start a first-time map open, an SM6 shader rebuild, or a cook without
+`df -h` showing ≥30 GB.
 - **git-lfs** installed and **all LFS content hydrated** (`git lfs pull` — 23 GB, incl. `Content/Bandits`).
   The old "manually sync Bandits to the Mac" note in `packaging.md` is obsolete.
 - **Metal Toolchain** (`metallib`) installed: `xcodebuild -downloadComponent MetalToolchain`
   (verify with `xcrun -f metallib`). Needed for shader compile/cook; recent Xcode ships it separately.
+
+## First editor open — what to expect (so nothing reads as a new bug)
+
+- **Time:** 10–30+ min to an interactive `L_Graybox`. Global Metal shaders compile at the splash, then
+  materials as the map loads, plus the one-time Virtual Texture build. **Do not force-quit mid-wave** —
+  a killed compile leaves a half-built cache.
+- **Expected warnings (all normal):** ~18 `CDO Constructor … Failed to find /Game/RifleAnims/…` errors —
+  the RifleAnims Fab pack is deliberately gitignored (`.gitignore`: local paid content) and absent on
+  this Mac, so characters **T-pose in PIE** until it's delivered (LFS-track it from Windows like
+  Bandits, or re-download from Fab). Also: `SkipPackage /Game/Survival_01/…` (stale path, exists on
+  Windows too), ProxyLOD module missing (Windows-only), "No Audio Capture implementations" (mic only),
+  MikkTSpace normal warning on SKM_QuantumCharacter.
+- **Rendering:** until Metal SM6 is enabled (below), Mac renders **SM5 → Nanite is OFF** — warehouse
+  geometry uses fallback meshes. Enable SM6 in Project Settings → Platforms → Mac → Targeted RHIs
+  (writes `[/Script/MacTargetPlatform.MacTargetSettings]` `+TargetedRHIs=SF_METAL_SM6`), restart, and
+  expect a **second full shader wave**. Runtime gate (macOS 15+, non-M1) passes on this M4 Pro.
+- **Headless smoke recipe:** `UnrealEditor-Cmd CombatForge.uproject -ExecCmds="QUIT_EDITOR" -unattended`
+  (`-run=NullCommandlet` "class not found" noise is expected on installed engines).
+- **Playtest scripts:** until a packaged build exists, prefer `run-listen.command --editor` /
+  `run-server.command --editor`. Raw Development binaries get `-project=` appended automatically
+  (they have no cooked content); VPN (utun) IPs don't print in `print-host-ips` — use LAN IPv4.
 
 ## Troubleshooting: editor crashes on launch — `check(TargetPlatform)` / `RunningPlatform`
 
@@ -73,7 +108,19 @@ ls "$UE/Engine/Binaries/Mac/" | grep MacTargetPlatform                          
 — umbrella + Controls + Settings.)
 
 **Fix:** Epic Games Launcher → Library → UE 5.6 → the `...` dropdown → **Verify**. That re-downloads the
-missing dylibs. Reinstall if Verify doesn't restore them.
+missing dylibs. Reinstall if Verify doesn't restore them. **Then re-run the preflight — Verify also
+reverts the `Apple_SDK.json` cap.**
+
+**Same assert, second cause — stale/poisoned project module manifest.** If the log's module path points
+at the **project** (`<Project>/Binaries/Mac/UnrealEditor-MacTargetPlatform.dylib`) instead of the
+engine, the project's `Binaries/Mac/UnrealEditor.modules` manifest has non-project entries (residue of
+any UBT build-config experiment — this happened here). The module manager trusts the project manifest
+and never falls back to the engine copy, and ordinary rebuilds **preserve** stale entries. Fix:
+```bash
+rm -rf Binaries/Mac Intermediate/Build/Mac Intermediate/ProjectFiles
+"$UE/Engine/Build/BatchFiles/Mac/Build.sh" CombatForgeEditor Mac Development -project="$PWD/CombatForge.uproject"
+```
+then confirm `Binaries/Mac/UnrealEditor.modules` lists only `"CombatForge"` (preflight check 3 does this).
 
 ## The SDK-version gate (Xcode 26.6 is newer than UE 5.6 allows)
 

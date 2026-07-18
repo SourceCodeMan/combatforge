@@ -19,7 +19,8 @@ if [ -n "${GAME:-}" ] && [ "${1:-}" != "--editor" ]; then
 	echo "==> CombatForge SERVER (game -server) — Map: $CF_MAP  Port: $CF_PORT"
 	cf_print_ips
 	echo "Ctrl+C or close the window to stop."
-	exec "$GAME" "${CF_MAP}?listen" -server -nullrhi -nosound -log -port="$CF_PORT"
+	PROJ_ARG="$(cf_project_arg "$GAME" "$ROOT")"
+	exec "$GAME" "${CF_MAP}?listen" -server -nullrhi -nosound -log -port="$CF_PORT" ${PROJ_ARG:+"$PROJ_ARG"}
 elif [ -n "${EDITOR:-}" ]; then
 	echo "==> CombatForge SERVER (editor -server) — Map: $CF_MAP  Port: $CF_PORT"
 	cf_print_ips

@@ -21,7 +21,8 @@ if [ -n "${GAME:-}" ] && [ "${1:-}" != "--editor" ]; then
 	echo "    Exe:  $GAME"
 	echo "    URL:  $LISTEN_URL   Port: $CF_PORT"
 	cf_print_ips
-	exec "$GAME" "$LISTEN_URL" -port="$CF_PORT" -log
+	PROJ_ARG="$(cf_project_arg "$GAME" "$ROOT")"
+	exec "$GAME" "$LISTEN_URL" -port="$CF_PORT" -log ${PROJ_ARG:+"$PROJ_ARG"}
 elif [ -n "${EDITOR:-}" ]; then
 	echo "==> CombatForge LISTEN host (editor -game) — you play on this Mac"
 	echo "    URL:  $LISTEN_URL   Port: $CF_PORT"

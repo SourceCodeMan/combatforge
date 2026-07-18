@@ -28,4 +28,5 @@ if [ -z "${GAME:-}" ]; then
 fi
 
 echo "Connecting to $TARGET ..."
-exec "$GAME" "$TARGET" -log
+PROJ_ARG="$(cf_project_arg "$GAME" "$ROOT")"
+exec "$GAME" "$TARGET" -log ${PROJ_ARG:+"$PROJ_ARG"}
