@@ -15,7 +15,7 @@ param(
     [string]$Tunnel = "",                                   # full URL or just the random words
     [string]$Root   = "C:\Users\Administrator\Desktop",     # folder that CONTAINS the game folder
     [string]$GameFolderName = "Windows",                    # the extracted build folder
-    [string]$ZipName = "CombatForge-alpha8.zip"             # file to fetch from the tunnel
+    [string]$ZipName = ""                                   # blank = auto-discover from the tunnel
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +55,33 @@ try {
     Say "  Check that BOTH windows are still open on the PC (python http.server AND cloudflared)," Yellow
     Say "  and that you pasted the address cloudflared actually printed." Yellow
     throw "Aborting before download."
+}
+
+# ---- 2b. Pick the build zip ----
+# This used to default to a hardcoded "CombatForge-alpha8.zip". Every new build gets a new name, so the
+# stale default silently fetched the WRONG (or a missing) file - and because the running server is stopped
+# in step 4 BEFORE the download, a failure here left the box with no server at all while the directory still
+# advertised the old version. Auto-discover instead, so the script always deploys whatever is being served.
+if (-not $ZipName) {
+    Say ""
+    Say "Looking up the build file on the tunnel..." Gray
+    $index = $null
+    try { $index = Invoke-WebRequest -Uri "$Tunnel/" -TimeoutSec 20 -UseBasicParsing } catch { }
+    if ($null -eq $index) {
+        throw "Could not list $Tunnel - re-run with -ZipName <file> if there is no directory listing."
+    }
+    $found = @([regex]::Matches($index.Content, 'CombatForge[-A-Za-z0-9._]*\.zip') |
+               ForEach-Object { $_.Value } | Sort-Object -Unique)
+    if ($found.Count -eq 0) {
+        throw "No CombatForge-*.zip is being served at $Tunnel - check the serve folder on the PC."
+    }
+    if ($found.Count -gt 1) {
+        Say "  More than one build zip is being served:" Yellow
+        $found | ForEach-Object { Say "    $_" Yellow }
+        throw "Serve exactly one zip, or re-run with -ZipName <file>."
+    }
+    $ZipName = $found[0]
+    Say "  Found: $ZipName" Green
 }
 
 # ---- 3. Protect the server key ----
