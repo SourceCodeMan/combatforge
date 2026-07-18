@@ -146,11 +146,9 @@ void APFCharacterPreviewActor::BeginPlay()
 
 UAnimSequence* APFCharacterPreviewActor::PickIdleAnim() const
 {
-	// Mirror the PAWN's rule exactly (ACombatForgeCharacter::RefreshBanditAnimSet): use the rifle-hold idle ONLY
-	// when pf.ArmedAnims is on. That CVar ships at 0 precisely because the rifle packs are on a foreign
-	// (UE4-mannequin) skeleton and the runtime name-based remap elongates the Bandit's torso/legs. Reading the
-	// same CVar here keeps the menu preview and the in-world character in lockstep forever — including after the
-	// IK-retarget bake lands and the CVar flips to 1 (docs/retarget-rifle-anims.md).
+	// Mirror the PAWN's rule exactly (ACombatForgeCharacter::RefreshBanditAnimSet): use the rifle-hold idle when
+	// pf.ArmedAnims is on (default 1 — hands on the gun). pf.ArmedAnims 0 reverts to empty-handed A_MM_Idle.
+	// Same CVar keeps the menu preview and in-world character in lockstep.
 	bool bArmed = false;
 	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("pf.ArmedAnims")))
 	{

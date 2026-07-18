@@ -58,12 +58,12 @@
 // a compatible-skeletons entry — visually unverifiable headless, so keep a live revert (`pf.ArmedAnims 0` +
 // respawn) in case the retarget T-poses or slides on some machine.
 // Default 0 (Tom playtest 2026-07-16): the rifle-hold anim packs are on foreign mannequin skeletons
-// and the compatible-skeleton remap STRETCHES the Bandit body (verified: forehead fixed but torso/legs
-// elongated). Reverted to the native unarmed Bandit set — no retarget = no stretch, hands down = no
-// forehead (rifle carried at the hip). Flip to 1 only once the rifle anims are properly IK-retargeted.
+// Rifle-hold locomotion (AS_Rifle_* low-ready). Compatible-skeleton remap can slightly elongate the Bandit
+// (full IK bake to Bandit_Retargeted/*_Bandit is the permanent fix — docs/retarget-rifle-anims.md). Default ON
+// so TP bots/players look like they're holding the gun; pf.ArmedAnims 0 reverts to empty-handed A_MM_*.
 static TAutoConsoleVariable<int32> CVarArmedAnims(
-	TEXT("pf.ArmedAnims"), 0,
-	TEXT("0 = native unarmed Bandit anims (default; no retarget stretch), 1 = rifle-hold pack anims. Applies live."));
+	TEXT("pf.ArmedAnims"), 1,
+	TEXT("1 = rifle-hold pack anims (default; hands on gun), 0 = native unarmed Bandit anims. Applies live."));
 
 // Tuning aid: draw the FP cosmetic muzzle (where owner tracers spawn) so pf.WeaponFP's muzzle offset can be
 // aligned to the visible barrel. Off by default; local player only (drawn in Tick's IsLocallyControlled block).
@@ -427,6 +427,22 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 		}
 	}
 
+	// Unarmed melee punches (UE5 Mannequin Attack set — same bone family as Bandit via compatible skeletons).
+	// No dedicated "punch" montage exists in Content; these three short attack clips are the real ones.
+	{
+		static const TCHAR* MeleePaths[] = {
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03.MM_Attack_03"),
+		};
+		MeleeAnims.SetNum(UE_ARRAY_COUNT(MeleePaths));
+		for (int32 i = 0; i < UE_ARRAY_COUNT(MeleePaths); ++i)
+		{
+			ConstructorHelpers::FObjectFinder<UAnimSequence> M(MeleePaths[i]);
+			if (M.Succeeded()) { MeleeAnims[i] = M.Object; }
+		}
+	}
+
 	// Config-driven modular slot components (base skin head/legs + one per PFChar customization slot). Part
 	// meshes are assigned at assembly time from the active FPFCharacterConfig via the registry — no hardcoded
 	// part paths, so all ~437 parts are reachable.
@@ -625,8 +641,26 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 		}
 	}
 
-	// Quantum (and any sequence-driven body): idle ↔ walk ↔ run without an AnimBP.
-	UpdateSequenceLocomotion();
+	// Melee punch clip: hold locomotion off while the attack sequence plays, then resume.
+	if (MeleeSwingAnimRemain > 0.f)
+	{
+		MeleeSwingAnimRemain = FMath::Max(0.f, MeleeSwingAnimRemain - DeltaSeconds);
+		if (MeleeSwingAnimRemain <= 0.f)
+		{
+			// Restore TP gun if we hid it for the punch, and re-pick idle/walk.
+			if (WeaponMeshComp != nullptr && !bEliminatedAppearanceActive)
+			{
+				WeaponMeshComp->SetHiddenInGame(false);
+			}
+			SeqLocoState = 0;
+			UpdateSequenceLocomotion();
+		}
+	}
+	else
+	{
+		// Quantum (and any sequence-driven body): idle ↔ walk ↔ run without an AnimBP.
+		UpdateSequenceLocomotion();
+	}
 
 	// Build phase: no marker in hands (placement HUD has its own aim dot).
 	UpdateBuildPhaseWeaponVisibility();
@@ -1622,10 +1656,64 @@ void ACombatForgeCharacter::OnMeleePressed()
 
 void ACombatForgeCharacter::PlayMeleeSwingLocal()
 {
-	MeleeSwingAnimRemain = MeleeSwingAnimSec;
-	// Raise the TP gun briefly so remotes see a "jab" motion even without a punch montage.
-	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, MeleeSwingAnimSec);
-	// Small FP viewmodel kick (procedural punch until a montage ships).
+	// Prefer a real unarmed attack clip (MM_Attack_01/02/03) when the pack is present; fall back to a
+	// short procedural timer so the cooldown/feedback still works if assets fail to load.
+	UAnimSequence* Clip = nullptr;
+	{
+		int32 Loaded = 0;
+		for (const TObjectPtr<UAnimSequence>& A : MeleeAnims)
+		{
+			if (A != nullptr) { ++Loaded; }
+		}
+		if (Loaded > 0)
+		{
+			// Cycle clips so repeated punches aren't identical (local counter is fine for cosmetics).
+			static int32 MeleeClipCursor = 0;
+			for (int32 n = 0; n < MeleeAnims.Num(); ++n)
+			{
+				const int32 Idx = (MeleeClipCursor + n) % MeleeAnims.Num();
+				if (MeleeAnims[Idx] != nullptr)
+				{
+					Clip = MeleeAnims[Idx].Get();
+					MeleeClipCursor = Idx + 1;
+					break;
+				}
+			}
+		}
+	}
+
+	const float ClipLen = (Clip != nullptr) ? FMath::Max(0.2f, Clip->GetPlayLength()) : MeleeSwingAnimSec;
+	MeleeSwingAnimRemain = ClipLen;
+
+	// Play the TP punch on the body mesh (sequence-loco path). Hide the hand-held gun for the swing so
+	// it doesn't float mid-punch on the fist.
+	if (Clip != nullptr && GetMesh() != nullptr && bUsingArtBody && !bEliminatedAppearanceActive)
+	{
+		if (GetMesh()->GetAnimationMode() != EAnimationMode::AnimationSingleNode)
+		{
+			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		}
+		GetMesh()->PlayAnimation(Clip, /*bLooping=*/false);
+		if (UAnimSingleNodeInstance* Node = GetMesh()->GetSingleNodeInstance())
+		{
+			Node->SetLooping(false);
+			Node->SetPlaying(true);
+			Node->SetPlayRate(1.f);
+			Node->SetPosition(0.f, false);
+		}
+		SeqLocoState = 0;   // force re-pick of idle/walk when the punch ends
+		if (WeaponMeshComp != nullptr)
+		{
+			WeaponMeshComp->SetHiddenInGame(true);
+		}
+	}
+	else
+	{
+		// No clip: keep the old raise-gun jab as a last resort visual.
+		WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, MeleeSwingAnimSec);
+	}
+
+	// Small FP viewmodel kick so the owner feels the punch even without FP arms anims.
 	RecoilOffset += FVector(6.f, 0.f, -4.f);
 	RecoilPitch  += 8.f;
 	if (UPFCombatAudio* Audio = GetCombatAudio())
@@ -3453,6 +3541,11 @@ void ACombatForgeCharacter::UpdateSequenceLocomotion()
 	}
 	// Mantle owns the mesh for the climb (MM_WallJump) — don't overwrite with walk/jog mid-pull-up.
 	if (bMantleAnimActive || (PFMovement != nullptr && PFMovement->IsMantling()))
+	{
+		return;
+	}
+	// Melee punch clip owns the mesh for its duration (MM_Attack_*) — don't stomp with idle/walk.
+	if (MeleeSwingAnimRemain > 0.f)
 	{
 		return;
 	}

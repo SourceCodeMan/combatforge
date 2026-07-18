@@ -281,6 +281,8 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> ArmedJogDir;
 	// Directional elimination reactions (0=front 1=right 2=back 3=left, relative to the shot).
 	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> DeathDirAnims;
+	// Unarmed punch clips for B-melee (MM_Attack_01..03). Empty = procedural-only fallback.
+	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> MeleeAnims;
 	/** Ledge climb anim — mannequin MM_WallJump preferred; Bandit A_MM_Jump as skeleton-safe fallback. */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") TObjectPtr<UAnimSequence> MantleAnim = nullptr;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Mantle") TObjectPtr<UAnimSequence> MantleAnimFallback = nullptr;
