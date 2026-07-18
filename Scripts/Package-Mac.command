@@ -47,5 +47,24 @@ echo ""
   -archive -archivedirectory="$OUT"
 
 echo ""
+# UAT's Mac archive step is unreliable: it has been seen copying the bare 370MB binary wrapper
+# (no pak/iostore files) into the archive dir instead of the staged app. If that happened, swap
+# in the real staged build from Saved/StagedBuilds/Mac.
+PROJROOT="$(dirname "$PROJ")"
+ARCHIVED_APP="$OUT/CombatForge.app"
+STAGED_APP="$PROJROOT/Saved/StagedBuilds/Mac/CombatForge.app"
+if [ -d "$ARCHIVED_APP" ] && ! find "$ARCHIVED_APP" -name '*.pak' -o -name '*.ucas' | grep -q .; then
+	if [ -d "$STAGED_APP" ] && find "$STAGED_APP" -name '*.pak' -o -name '*.ucas' | grep -q .; then
+		echo "WARNING: archive step produced a pak-less app — swapping in the real staged build."
+		rm -rf "$ARCHIVED_APP"
+		mv "$STAGED_APP" "$ARCHIVED_APP"
+	else
+		echo "ERROR: archived app has no paks and no staged fallback exists — package is BROKEN." >&2
+		exit 1
+	fi
+fi
+
 echo "=== Done. App is in $OUT ==="
 echo "NOTE: it's unsigned — first launch needs right-click > Open (Gatekeeper). See packaging.md."
+echo "TIP:  Saved/Cooked + Saved/StagedBuilds hold ~16GB of re-cook cache — delete them if disk is tight"
+echo "      (next package then does a full recook, ~40+ min instead of minutes)."
