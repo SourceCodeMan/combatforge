@@ -163,10 +163,17 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 	{
 		return;
 	}
-	bPieceVisualsReady = true;
 
 	// Soft-load warehouse prop meshes + structural surface textures after CDO so first compile doesn't freeze PIE.
 	PFBuildPieceVisuals::EnsureLoaded();
+
+	// Latch only once the real content is in hand. This used to latch unconditionally, so a client
+	// whose first call landed mid-replication (PostReplicatedAdd, below) kept the engine-shape
+	// placeholders and checker materials for the rest of the match. Applying is cheap and
+	// idempotent, so run it anyway on a partial load — the props look better each pass — but leave
+	// the flag clear so the retry timer upgrades them when the content lands.
+	bPieceVisualsReady = PFBuildPieceVisuals::IsFullyLoaded();
+	bool bMeshSwapped = false;
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
 	{
 		const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
@@ -179,7 +186,7 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 			for (uint8 Team = 0; Team < 2; ++Team)
 			{
 				const int32 K = ISMCIndexFor(Type, Team);
-				if (PieceISMCs[K])
+				if (PieceISMCs[K] && PieceISMCs[K]->GetStaticMesh() != PropMesh)
 				{
 					PieceISMCs[K]->SetStaticMesh(PropMesh);
 					// Warehouse assets keep their own materials (looks like real cover, not neon cubes).
@@ -187,9 +194,20 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 					{
 						PieceISMCs[K]->EmptyOverrideMaterials();
 					}
+					bMeshSwapped = true;
 				}
 			}
 		}
+	}
+
+	// Instances placed while a fallback mesh was active carry the fallback's transform — the legacy
+	// graybox scales in FPFGridMath::PieceLocalTransform (e.g. PropCan 1.2/1.2/2.2). Those are sized
+	// for a UNIT engine cylinder; applied to a real ~1m warehouse barrel they render it several
+	// metres tall. Swapping the mesh without re-stamping is how a late-resolving prop turned into a
+	// giant. PieceWorldTransform now returns the fitted warehouse transform, so recompute in place.
+	if (bMeshSwapped)
+	{
+		RefreshPropInstanceTransforms();
 	}
 
 	// Cohesion palette: triplanar M_PF_Arena* masters + warehouse textures (same stack as arena shell).
@@ -228,11 +246,89 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 	}
 
 	UE_LOG(CombatForgeLog, Log,
-		TEXT("BuildGrid: cohesion palette Wall=%s Floor=%s Ramp=%s Roof=%s"),
+		TEXT("BuildGrid: cohesion palette Wall=%s Floor=%s Ramp=%s Roof=%s (visualsReady=%d)"),
 		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Wall),
 		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Floor),
 		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Ramp),
-		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Roof));
+		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Roof),
+		bPieceVisualsReady ? 1 : 0);
+
+	// Don't wait on the next placed piece to retry — a client that joins a finished fort places
+	// nothing, so a partial first load would stay visible all match. Poll until the content lands.
+	if (!bPieceVisualsReady)
+	{
+		StartPieceVisualsRetry();
+	}
+}
+
+void APFBuildGrid::RefreshPropInstanceTransforms()
+{
+	int32 Updated = 0;
+	for (const FPFBuildPieceRec& Rec : Pieces.Items)
+	{
+		if (!PFIsProp(Rec.Type))
+		{
+			continue;
+		}
+		const int32 K = ISMCIndexFor(Rec.Type, Rec.Team);
+		if (K < 0 || K >= 14 || !PieceISMCs[K])
+		{
+			continue;
+		}
+		if (const int32* InstancePtr = PieceToInstance.Find(Rec.PieceId))
+		{
+			const FTransform T = PFBuildPieceVisuals::PieceWorldTransform(Rec.Type, Rec.X, Rec.Y, Rec.Z, Rec.Rot);
+			// bMarkRenderStateDirty so the change shows this frame; bTeleport since these are static.
+			PieceISMCs[K]->UpdateInstanceTransform(*InstancePtr, T,
+				/*bWorldSpace=*/true, /*bMarkRenderStateDirty=*/true, /*bTeleport=*/true);
+			++Updated;
+		}
+	}
+	if (Updated > 0)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("BuildGrid: re-stamped %d prop instances after mesh swap"), Updated);
+	}
+}
+
+void APFBuildGrid::StartPieceVisualsRetry()
+{
+	UWorld* W = GetWorld();
+	if (W == nullptr || W->GetTimerManager().IsTimerActive(PieceVisualsRetryHandle))
+	{
+		return;
+	}
+	PieceVisualsRetryCount = 0;
+	W->GetTimerManager().SetTimer(PieceVisualsRetryHandle, this,
+		&APFBuildGrid::TickPieceVisualsRetry, 0.5f, /*bLoop=*/true);
+}
+
+void APFBuildGrid::TickPieceVisualsRetry()
+{
+	// ~15s of half-second retries. Streaming/async-load contention resolves in well under that;
+	// past it the content genuinely isn't in the build (a cook gap) and retrying won't help.
+	static constexpr int32 MaxRetries = 30;
+
+	++PieceVisualsRetryCount;
+	EnsurePieceVisualsApplied();
+
+	if (bPieceVisualsReady || PieceVisualsRetryCount >= MaxRetries)
+	{
+		if (UWorld* W = GetWorld())
+		{
+			W->GetTimerManager().ClearTimer(PieceVisualsRetryHandle);
+		}
+		if (bPieceVisualsReady)
+		{
+			UE_LOG(CombatForgeLog, Log,
+				TEXT("BuildGrid: piece visuals resolved after %d retries"), PieceVisualsRetryCount);
+		}
+		else
+		{
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("BuildGrid: piece visuals GAVE UP after %d retries — props stay on fallback shapes (check the cook)"),
+				PieceVisualsRetryCount);
+		}
+	}
 }
 
 void APFBuildGrid::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

@@ -39,8 +39,15 @@ namespace PFBuildPieceVisuals
 	/**
 	 * Ensure prop meshes + structural surface textures + triplanar masters are soft-loaded
 	 * (idempotent, safe from game thread). Falls back to engine shapes / Concrete034.
+	 *
+	 * A partial result is NOT latched: called too early (e.g. inside net serialization on a
+	 * joining client) the soft loads fail, and latching that gave the permanent "giant checkered
+	 * cone/cylinder/box" props. Misses retry on later calls, at most once per frame.
 	 */
 	void EnsureLoaded();
+
+	/** True once every prop mesh AND surface texture actually resolved (no fallbacks in use). */
+	bool IsFullyLoaded();
 
 	/** Mesh for a piece type (after EnsureLoaded). Never null if engine basic shapes exist. */
 	UStaticMesh* MeshForType(EPFPieceType Type);
