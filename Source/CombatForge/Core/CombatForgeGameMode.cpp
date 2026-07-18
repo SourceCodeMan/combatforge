@@ -408,10 +408,24 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 			}
 		}
 
-		if (GetPFGameState() && GetPFGameState()->Phase == EPFMatchPhase::Combat)
+		if (ACombatForgeGameState* JoinGS = GetPFGameState();
+			JoinGS && JoinGS->Phase == EPFMatchPhase::Combat)
 		{
-			PS->bAliveInRound = (GetPFGameState()->RoundState == EPFRoundState::Freeze ||
-			                     GetPFGameState()->RoundState == EPFRoundState::Live);
+			const bool bAlive = (JoinGS->RoundState == EPFRoundState::Freeze ||
+			                     JoinGS->RoundState == EPFRoundState::Live);
+			PS->ServerSetAliveInRound(bAlive);
+			// Mid-combat joiners miss StartNextRound's RoundHP stamp — apply sudden-death
+			// one-hit mode if the live round is showdown (C2).
+			if (bAlive && bSuddenDeathRoundActive)
+			{
+				if (ACombatForgeCharacter* JoinPawn = Cast<ACombatForgeCharacter>(PS->GetPawn()))
+				{
+					if (UPFHealthComponent* Health = JoinPawn->GetHealth())
+					{
+						Health->ResetForRound(1);
+					}
+				}
+			}
 		}
 		RecountAlive();
 
@@ -435,7 +449,7 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 
 		// The leaver's PlayerState may linger in PlayerArray briefly; take them out of the
 		// alive count NOW so the post-logout victory check below is correct.
-		ExitingPS->bAliveInRound = false;
+		ExitingPS->ServerSetAliveInRound(false);
 		ExitingPS->ServerSetReady(false);   // ghosts must not block lobby Ready
 		// CTF: return any carried flag so the match doesn't soft-lock with a phantom carrier.
 		if (ExitingPS->bCarryingFlag)
@@ -629,6 +643,19 @@ void ACombatForgeGameMode::RestartPlayer(AController* NewPlayer)
 		{
 			Health->OnEliminatedEvent.RemoveAll(this);
 			Health->OnEliminatedEvent.AddUObject(this, &ACombatForgeGameMode::HandlePawnHealthEliminated);
+			// Mid-combat RestartPlayer (e.g. PostLogin join) skips StartNextRound's RoundHP —
+			// stamp sudden-death one-hit mode when showdown is live (C2).
+			if (bSuddenDeathRoundActive)
+			{
+				if (const ACombatForgeGameState* GS = GetPFGameState())
+				{
+					if (GS->Phase == EPFMatchPhase::Combat
+						&& (GS->RoundState == EPFRoundState::Freeze || GS->RoundState == EPFRoundState::Live))
+					{
+						Health->ResetForRound(1);
+					}
+				}
+			}
 		}
 	}
 }
@@ -876,11 +903,13 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 	}
 	const EPFMatchPhase OldPhase = GS->Phase;
 
-	// Every transition cancels pending phase machinery.
+	// Every transition cancels pending phase machinery (incl. Dom/HP 1 Hz score + HP rotate).
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
 	GetWorldTimerManager().ClearTimer(LobbyCountdownHandle);
 	GetWorldTimerManager().ClearTimer(LobbyTopUpHandle);
+	GetWorldTimerManager().ClearTimer(ObjectiveScoreTimerHandle);
+	GetWorldTimerManager().ClearTimer(HardpointRotateTimerHandle);
 	bLobbyCountdownActive = false;
 	bLobbyCountdownForced = false;
 	bBuildEarlyEndActive = false;
@@ -916,7 +945,7 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 				continue;
 			}
 			PS->ServerSetReady(false);
-			PS->bAliveInRound = true;
+			PS->ServerSetAliveInRound(true);
 			if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
 			{
 				PC->SetEliminatedMoveLock(false);
@@ -986,7 +1015,7 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			}
 			PS->ServerSetBudgets(BudgetStructural, BudgetProps);
 			PS->ServerSetReady(false);
-			PS->bAliveInRound = true;
+			PS->ServerSetAliveInRound(true);
 			if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
 			{
 				PC->SetEliminatedMoveLock(false);
@@ -1137,15 +1166,8 @@ void ACombatForgeGameMode::NotifyReadyChangedInternal(const ACombatForgePlayerSt
 		return;
 	}
 
-	// Connected-player count excluding a lingering leaver (Logout path).
-	int32 Connected = 0;
-	for (APlayerState* PSBase : GS->PlayerArray)
-	{
-		if (PSBase && PSBase != IgnorePS)
-		{
-			++Connected;
-		}
-	}
+	// Active human roster only (exclude bots, ghosts, and a lingering leaver on Logout).
+	const int32 Connected = CountHumans(IgnorePS);
 
 	if (GS->Phase == EPFMatchPhase::Lobby)
 	{
@@ -1305,8 +1327,8 @@ void ACombatForgeGameMode::HostSetFormat(uint8 NewTeamSize)
 	{
 		return;   // format locks once the match starts (bots + scaling resolve at Lobby→Build)
 	}
-	// Only 4v4 or 6v6 from the host UI (internal smoke can still use smaller sizes via other paths).
-	const uint8 Clamped = (NewTeamSize >= 6) ? 6 : 4;
+	// Allow 1–6 so smoke / small-format scaling (T15 ≤2v2) work. Lobby UI only offers 4/6.
+	const uint8 Clamped = static_cast<uint8>(FMath::Clamp<int32>(static_cast<int32>(NewTeamSize), 1, 6));
 	GS->ServerSetTargetTeamSize(Clamped);
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: host set format to %dv%d"),
 		GS->TargetTeamSize, GS->TargetTeamSize);
@@ -1485,7 +1507,7 @@ void ACombatForgeGameMode::StartNextRound()
 		{
 			continue;
 		}
-		PS->bAliveInRound = true;
+		PS->ServerSetAliveInRound(true);
 		if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
 		{
 			PC->SetEliminatedMoveLock(false);   // back alive; freeze-state lock reapplies below
@@ -1672,6 +1694,26 @@ void ACombatForgeGameMode::RespawnVictimAtTeamSpawn(ACombatForgeCharacter* Victi
 			{
 				return;
 			}
+			// Gate on still-live combat: a tag-cap / abandon / force-lobby can fire while this
+			// timer is pending — do not heal/teleport into Vote/Results (C7).
+			const UWorld* World = WeakThis->GetWorld();
+			const ACombatForgeGameState* GS = World
+				? World->GetGameState<ACombatForgeGameState>() : nullptr;
+			if (!GS || GS->Phase != EPFMatchPhase::Combat || GS->RoundState != EPFRoundState::Live)
+			{
+				if (WeakVictimPS.IsValid())
+				{
+					WeakVictimPS->ServerClearOutState();
+				}
+				else if (WeakVictim.IsValid())
+				{
+					if (ACombatForgePlayerState* PS = WeakVictim->GetPlayerState<ACombatForgePlayerState>())
+					{
+						PS->ServerClearOutState();
+					}
+				}
+				return;
+			}
 			if (WeakVictim.IsValid())
 			{
 				// Pawn survived the out window — reset it in place.
@@ -1764,7 +1806,7 @@ ACombatForgePlayerState* ACombatForgeGameMode::AddBot(uint8 Team)
 	// FFA: unique combat TeamId (= roster) so projectile B12 never treats two players as teammates.
 	PS->ServerSetTeam(bFFA ? Roster : Team, Roster);
 	PS->SetPlayerName(FString::Printf(TEXT("Bot %d"), PS->RosterIndex + 1));
-	PS->bAliveInRound = true;
+	PS->ServerSetAliveInRound(true);
 	// The pawn itself is spawned by the caller's reset loop (RespawnCombatant → RestartPlayer), exactly
 	// like a human — that path also binds Health->OnEliminatedEvent so bot deaths reach the match logic.
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: added bot '%s' (team %d, roster %d)"),
@@ -3290,6 +3332,25 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 				{
 					return;
 				}
+				// Lobby-only: if the match left Lobby before the timer, drop the out UI and stop.
+				const UWorld* World = WeakThis->GetWorld();
+				const ACombatForgeGameState* GS = World
+					? World->GetGameState<ACombatForgeGameState>() : nullptr;
+				if (!GS || GS->Phase != EPFMatchPhase::Lobby)
+				{
+					if (WeakVictimPS.IsValid())
+					{
+						WeakVictimPS->ServerClearOutState();
+					}
+					else if (WeakVictim.IsValid())
+					{
+						if (ACombatForgePlayerState* PS = WeakVictim->GetPlayerState<ACombatForgePlayerState>())
+						{
+							PS->ServerClearOutState();
+						}
+					}
+					return;
+				}
 				if (WeakVictim.IsValid())
 				{
 					if (ACombatForgePlayerState* PS = WeakVictim->GetPlayerState<ACombatForgePlayerState>())
@@ -3334,7 +3395,7 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 	const bool bFallDeath = (ShooterPS == nullptr && FinalHit.ShooterTeam == 255);
 	if (bFallDeath)
 	{
-		VictimPS->TimesEliminated = VictimPS->TimesEliminated + 1;
+		VictimPS->ServerAddTimesEliminated();
 		FPFElimEntry Entry;
 		Entry.ShooterName = TEXT("Fall");
 		Entry.ShooterTeam = 255;
@@ -3359,7 +3420,7 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 		{
 			UE_LOG(CombatForgeLog, Log, TEXT("GameMode: fall death → out for round (%s)"),
 				*VictimPS->GetPlayerName());
-			VictimPS->bAliveInRound = false;
+			VictimPS->ServerSetAliveInRound(false);
 			VictimPS->ServerSetOutForRound();
 			if (ACombatForgePlayerController* VictimPC =
 				Cast<ACombatForgePlayerController>(VictimPS->GetPlayerController()))
@@ -3386,10 +3447,10 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 	}
 
 	// Bookkeeping + feed (elim feed is GameState-array replicated — late-join correct, 02 D11).
-	VictimPS->TimesEliminated = VictimPS->TimesEliminated + 1;
+	VictimPS->ServerAddTimesEliminated();
 	if (ShooterPS && FinalHit.ShooterTeam != VictimPS->TeamId)
 	{
-		ShooterPS->Eliminations = ShooterPS->Eliminations + 1;
+		ShooterPS->ServerAddElimination();
 		ShooterPS->ServerAddScore(ScoreElimination);
 	}
 
@@ -3483,7 +3544,7 @@ void ACombatForgeGameMode::NotifyPawnEliminated(ACombatForgeCharacter* Victim, c
 	// spectate (T5). Corpse collision handling (paintball 0.5 s window, capsule off) is
 	// UPFHealthComponent's job (§3.4); the move lock here keeps the hidden pawn from being
 	// walked around for the rest of the round.
-	VictimPS->bAliveInRound = false;
+	VictimPS->ServerSetAliveInRound(false);
 	VictimPS->ServerSetOutForRound();   // HUD: "YOU'RE OUT" / out for this round
 	if (ACombatForgePlayerController* VictimPC = Cast<ACombatForgePlayerController>(VictimPS->GetPlayerController()))
 	{
@@ -3554,7 +3615,7 @@ void ACombatForgeGameMode::SubmitVote(ACombatForgePlayerController* Voter, EPFTh
 	TArray<uint8> Disliked = DislikedIds;
 	SanitizeVoteIds(Liked, Disliked);
 
-	PS->bHasVoted = true;
+	PS->ServerSetHasVoted(true);
 
 	FPFVoteTally Tally = GS->VoteTally;
 	switch (Thumb)
@@ -3629,7 +3690,7 @@ void ACombatForgeGameMode::FinalizeVotePhase()
 			continue;   // bots don't vote — excluding them here matches CheckAllVotesIn so the
 			            // timeout tally + persisted rating record aren't polluted with bot abstains
 		}
-		PS->bHasVoted = true;
+		PS->ServerSetHasVoted(true);
 		++Tally.Abstained;
 		if (Rating)
 		{
@@ -3717,15 +3778,10 @@ void ACombatForgeGameMode::ResetPlayerMatchStats()
 	{
 		if (ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
 		{
-			PS->Eliminations = 0;
-			PS->TimesEliminated = 0;
-			PS->TagCount = 0;
-			PS->MatchScore = 0;
-			PS->bHasVoted = false;
+			PS->ServerResetMatchCombatStats();
 			PS->ServerSetFlagCarry(false, 255);
 			PS->ServerSetStandingOnPoint(255);
 			PS->ServerClearOutState();
-			PS->ForceNetUpdate();
 		}
 	}
 }

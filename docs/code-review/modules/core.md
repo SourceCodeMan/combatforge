@@ -46,7 +46,7 @@ Open residual risk is mode-specific correctness: **Respawn** Elimination (B1), D
 
 ### C2. Mid-combat join during sudden death gets full round HP (3), not 1
 - **Severity:** minor
-- **Status:** open
+- **Status:** fixed (optional PR) — PostLogin + RestartPlayer stamp ResetForRound(1) when SD live
 - **File:** `Source/CombatForge/Core/CombatForgeGameMode.cpp:411-415` (`PostLogin` alive flag only); spawn HP from default pawn / `RestartPlayer` without `ResetForRound(1)`
 - **Symptom:** A player who joins while a sudden-death round is Live can enter with 3 HP while everyone else has 1 HP.
 - **Why:** `PostLogin` only stamps `bAliveInRound` for Freeze/Live; it does not call `ResetForRound` with the active round HP. `StartNextRound` already uses `RoundHP = bSuddenDeathRoundActive ? 1 : 3` for the full roster.
@@ -55,23 +55,23 @@ Open residual risk is mode-specific correctness: **Respawn** Elimination (B1), D
 
 ### C3. Contract drift: Build duration / lobby countdown vs §3.2 defaults
 - **Severity:** nit
-- **Status:** open
-- **File:** `Source/CombatForge/Core/CombatForgeGameMode.h:40-41`
-- **Symptom:** Docs still say Build **180 s** (T2) and LobbyStartCountdown **5 s**; code defaults are **90 s** Build and **0 s** lobby countdown.
-- **Fix:** Update `05-code-contract.md` (or note “tuned from contract”) so law matches shipping defaults.
-- **Confidence:** high
+- **Status:** verified (no code change) — `BuildPhaseDuration` is already **180 s** (matches T2). `LobbyStartCountdown = 0` is intentional (comment: freeze is the single spawn countdown). Contract still lists 5 s pre-match grace; product chose 0.
 
 ## Hardening (from independent pass — suggestions, not majors)
 
 Not on the fix queue; track if polishing multiplayer hygiene:
 
-| ID | Topic | File (approx) |
-|----|--------|----------------|
-| C5 | `HostSetFormat` clamps any size &lt;6 to 4 — smoke `HostSetFormat(2)` becomes 4v4 | GameMode ~1291 |
-| C6 | `SetPhase` does not clear objective score/rotate timers (safe today if End* always clear) | GameMode ~860 |
-| C7 | Pending respawn lambdas not cancelled on match end | GameMode RespawnVictimAtTeamSpawn |
-| C8 | Raw `bAliveInRound` / elim counts without `ForceNetUpdate` | GameMode + PlayerState |
-| C9 | Lobby “Connected” count not filtered like ready roster | GameMode ~1130 |
+| ID | Topic | File (approx) | Status |
+|----|--------|----------------|--------|
+| C5 | `HostSetFormat` clamps any size &lt;6 to 4 — smoke `HostSetFormat(2)` becomes 4v4 | GameMode ~1291 | **fixed** (allow 1–6; UI still 4/6) |
+| C6 | `SetPhase` does not clear objective score/rotate timers | GameMode ~860 | **fixed** |
+| C7 | Pending respawn lambdas not cancelled on match end | GameMode RespawnVictimAtTeamSpawn | **fixed** (gate on Combat+Live / Lobby) |
+| C8 | Raw `bAliveInRound` / elim counts without `ForceNetUpdate` | GameMode + PlayerState | **fixed** (ServerSet* helpers) |
+| C9 | Lobby “Connected” count not filtered like ready roster | GameMode ~1130 | **fixed** (`CountHumans`) |
+| I11 | Early-end `PhaseDuration` not restamped | GameState ServerSetPhaseEndTime | **fixed** |
+| I12 | Warehouse stream not unloaded on map switch | PFWarehouseStreamSubsystem | **fixed** (OnRep_ArenaMap) |
+| I10 | SD `ResetForRound(1)` one-hit semantics | PFHealthComponent | **verified** (`bOneHitMode`) |
+| I8 | Join-as-spectator mid Elimination | GameMode PostLogin | **skipped** (product; C2 is the minimal fix) |
 
 Full independent writeup: [core-reviewer-independent.md](./core-reviewer-independent.md).
 

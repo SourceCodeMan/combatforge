@@ -88,10 +88,82 @@ void UPFWarehouseStreamSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(BackdropRetryHandle);
+		UnloadWarehouse(*World);
 	}
 	StreamedWarehouse = nullptr;
 	bStreamSucceeded = false;
 	Super::Deinitialize();
+}
+
+void UPFWarehouseStreamSubsystem::OnArenaMapChanged(UWorld& World)
+{
+	// Dedicated servers never stream the visual backdrop.
+	if (World.GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	const ACombatForgeGameState* GS = World.GetGameState<ACombatForgeGameState>();
+	const bool bWantWarehouse = GS && GS->ArenaMap == EPFArenaMap::Warehouse
+		&& CVarStreamWarehouseMap.GetValueOnGameThread() != 0;
+
+	if (!bWantWarehouse)
+	{
+		UnloadWarehouse(World);
+		return;
+	}
+
+	if (StreamedWarehouse == nullptr)
+	{
+		TryStreamWarehouse(World);
+		if (bStreamSucceeded)
+		{
+			// Shell may still be mid-swap on the server when ArenaMap replicates — retry backdrop.
+			ApplyShellBackdrop(World);
+			TWeakObjectPtr<UPFWarehouseStreamSubsystem> WeakThis(this);
+			TWeakObjectPtr<UWorld> WeakWorld(&World);
+			World.GetTimerManager().SetTimer(BackdropRetryHandle,
+				FTimerDelegate::CreateLambda([WeakThis, WeakWorld]()
+				{
+					if (WeakThis.IsValid() && WeakWorld.IsValid())
+					{
+						WeakThis->ApplyShellBackdrop(*WeakWorld.Get());
+					}
+				}),
+				0.25f, /*bLoop=*/true);
+			FTimerHandle StopHandle;
+			World.GetTimerManager().SetTimer(StopHandle,
+				FTimerDelegate::CreateLambda([WeakThis, WeakWorld]()
+				{
+					if (WeakThis.IsValid() && WeakWorld.IsValid())
+					{
+						WeakWorld->GetTimerManager().ClearTimer(WeakThis->BackdropRetryHandle);
+					}
+				}),
+				3.f, false);
+		}
+	}
+}
+
+void UPFWarehouseStreamSubsystem::UnloadWarehouse(UWorld& World)
+{
+	World.GetTimerManager().ClearTimer(BackdropRetryHandle);
+	if (StreamedWarehouse)
+	{
+		StreamedWarehouse->SetShouldBeVisible(false);
+		StreamedWarehouse->SetShouldBeLoaded(false);
+		StreamedWarehouse = nullptr;
+		UE_LOG(CombatForgeLog, Log, TEXT("WarehouseStream: unloaded environment stream (left Warehouse or cvar off)."));
+	}
+	bStreamSucceeded = false;
+	// Restore shell cubes if a Warehouse shell is still present (map swap may destroy it first).
+	for (TActorIterator<APFArenaShell> It(&World); It; ++It)
+	{
+		if (It->GetMapDef().MapId == EPFArenaMap::Warehouse)
+		{
+			It->SetMapBackdropActive(false);
+		}
+	}
 }
 
 void UPFWarehouseStreamSubsystem::TryStreamWarehouse(UWorld& World)

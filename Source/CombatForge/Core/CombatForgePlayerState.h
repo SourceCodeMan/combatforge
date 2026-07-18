@@ -64,6 +64,11 @@ public:
 	void ServerSetOutWaitingRespawn(float AtServerTime);     // timed respawn countdown for HUD
 	void ServerSetOutForRound();                             // Elimination: out until next round
 	void ServerClearOutState();                              // back in play / round reset
+	void ServerSetAliveInRound(bool bAlive);                 // ForceNetUpdate so clients see elim gates promptly
+	void ServerAddElimination();                            // shooter ++Eliminations
+	void ServerAddTimesEliminated();                        // victim ++TimesEliminated
+	void ServerSetHasVoted(bool bVoted);
+	void ServerResetMatchCombatStats();                     // elims / tags / score / vote for new match
 
 	/** True for the phantom LOCAL player a headless pilot box (game exe + ?listen + -nullrhi)
 	 *  carries: it holds a controller but no human sits behind it. Excluded from match-leader
