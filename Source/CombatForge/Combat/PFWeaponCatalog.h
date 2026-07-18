@@ -58,6 +58,21 @@ struct FPFWeaponDef
 	float  ReburstDelaySec = 0.f;
 	float  MoveSpreadMult = 1.35f;  // multiplies hip for SpreadHipMoving in ApplyWeaponLoadout
 	uint8  UnlockRank = 1;
+
+	// ---- Third-person RAISED (fire/ADS) pose correction — what OTHER players see while this pawn shoots ----
+	// The raised-pose world-rotation is (Aim.Pitch, Aim.Yaw + TPRaisedYawOffset, TPRaisedRoll). The defaults
+	// (-90 / 0) are SM_Rifle's +Y-barrel axis; a mesh whose barrel points down a different local axis (the
+	// pistols render UPSIDE DOWN while firing) overrides these. Pure per-weapon; tune in-editor if the guess
+	// is off (only two numbers). Hand-carry (running/idle) pose stays the shared WeaponRelative* — it reads
+	// correctly across meshes today.
+	float  TPRaisedYawOffset = -90.f;
+	float  TPRaisedRoll      = 0.f;
+
+	// ---- Optic / scope ADS FOV. 0 = use the character's default ADSFOV (58). A scoped weapon (sniper) sets a
+	// much smaller value for a strong magnified sight picture. NOTE: this is the ZOOM half of a scope. The
+	// "look through the scope, not the whole screen" MASK (black surround + reticle) is a HUD overlay — see
+	// docs note; the FOV here is inert-safe on its own (snipers just zoom harder than an SMG ADS). ----
+	float  ScopedADSFOV = 0.f;
 };
 
 /** A player's chosen weapon: category + index into that category. */

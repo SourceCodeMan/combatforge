@@ -5,6 +5,7 @@
 #include "CombatForge.h"
 #include "AI/PFSquadSubsystem.h"
 #include "Building/PFArenaShell.h"
+#include "Building/PFBuildPieceActor.h"   // bots open closed doors when a path stalls
 #include "Combat/PFSmokeSubsystem.h"
 #include "Player/CombatForgeCharacter.h"
 #include "Core/CombatForgeGameState.h"
@@ -642,6 +643,39 @@ void APFBotController::Tick(float DeltaSeconds)
 		JumpCooldown -= DeltaSeconds;
 		const float Speed2D = Bot->GetVelocity().Size2D();
 		JumpStallTimer = (Speed2D < 60.f) ? (JumpStallTimer + DeltaSeconds) : 0.f;
+
+		// OPEN DOORS (Tom 2026-07-18): a closed player-built door is a hard navmesh obstacle, so bots used to
+		// stall against one and route the long way (or fail). When stalled, open any closed door within reach.
+		// The bot Tick runs on the host (authority), so we can call the door API directly; AuthorityTryToggleDoor
+		// re-validates range + a one-way door's front face, so a wrong-side approach simply no-ops and the bot
+		// routes on. Throttled, and only on a stall, so it's cheap.
+		DoorTryCooldown -= DeltaSeconds;
+		if (DoorTryCooldown <= 0.f && JumpStallTimer > 0.3f)
+		{
+			DoorTryCooldown = 0.5f;
+			if (UWorld* DW = GetWorld())
+			{
+				const float DoorRangeSq = FMath::Square(APFBuildPieceActor::DoorInteractRangeUU);
+				for (TActorIterator<APFBuildPieceActor> It(DW); It; ++It)
+				{
+					APFBuildPieceActor* Piece = *It;
+					if (Piece == nullptr || Piece->IsOpen())
+					{
+						continue;
+					}
+					const EPFPieceType PT = Piece->GetPieceType();
+					if (PT != EPFPieceType::WallDoor && PT != EPFPieceType::WallDoorOneWay)
+					{
+						continue;
+					}
+					if (FVector::DistSquared(Piece->GetDoorInteractLocation(), BotLoc) <= DoorRangeSq)
+					{
+						Piece->AuthorityTryToggleDoor(Bot);   // opens if the face/range check passes; harmless no-op otherwise
+					}
+				}
+			}
+		}
+
 		if (JumpCooldown <= 0.f && JumpStallTimer > 0.4f)
 		{
 			if (UWorld* JW = GetWorld())

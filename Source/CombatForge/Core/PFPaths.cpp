@@ -5,6 +5,8 @@
 #include "CombatForge.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Misc/Paths.h"
 
 const FString& FPFPaths::ArenaDir()
@@ -14,8 +16,23 @@ const FString& FPFPaths::ArenaDir()
 	// defeat the migrate-only-if-empty check).
 	static const FString Dir = []() -> FString
 	{
-		const FString NewDir = FPaths::ConvertRelativePathToFull(
-			FString(FPlatformProcess::UserSettingsDir()) / TEXT("CombatForge") / TEXT("Arenas"));
+		// Save location, in priority order:
+		//   1. -ArenaDir=<abs path> command line  (DEDICATED SERVER override)
+		//   2. UserSettingsDir()/CombatForge/Arenas  (per-user, the desktop default)
+		// The override exists for the Linux VPS: UserSettingsDir() resolves under $HOME/.config there, which a
+		// redeploy can wipe if it resets $HOME. Passing -ArenaDir=/opt/combatforge-data/Arenas (a dir OUTSIDE the
+		// extracted build tree) guarantees built maps survive every server binary update (Tom 2026-07-18, #9).
+		FString OverrideDir;
+		FString BaseDir;
+		if (FParse::Value(FCommandLine::Get(), TEXT("ArenaDir="), OverrideDir) && !OverrideDir.TrimStartAndEnd().IsEmpty())
+		{
+			BaseDir = OverrideDir.TrimStartAndEnd();
+		}
+		else
+		{
+			BaseDir = FString(FPlatformProcess::UserSettingsDir()) / TEXT("CombatForge") / TEXT("Arenas");
+		}
+		const FString NewDir = FPaths::ConvertRelativePathToFull(BaseDir);
 		IFileManager& FM = IFileManager::Get();
 		FM.MakeDirectory(*NewDir, /*Tree=*/true);
 
@@ -46,4 +63,10 @@ const FString& FPFPaths::ArenaDir()
 		return NewDir;
 	}();
 	return Dir;
+}
+
+FString FPFPaths::ServerDataDir()
+{
+	// Parent of the (persistent, possibly -ArenaDir-overridden) arena dir. Created lazily by callers as needed.
+	return FPaths::GetPath(ArenaDir());
 }

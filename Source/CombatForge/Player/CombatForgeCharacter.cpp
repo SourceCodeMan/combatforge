@@ -635,6 +635,12 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 	}
 	UpdateWeaponHoldPose();
 
+	// Server-only: police completely-idle remote players (AFK kick).
+	if (HasAuthority())
+	{
+		TickServerAfk(DeltaSeconds);
+	}
+
 	if (IsLocallyControlled())
 	{
 		// Slide/sprint state can change without new key events; keep the CMC
@@ -1602,6 +1608,9 @@ void ACombatForgeCharacter::OnMeleePressed()
 	}
 	LastMeleeTime = Now;
 	ServerMelee();
+	// PUNCH ANIMATION HOOK (Tom will supply a montage later): when a punch/jab montage asset exists, play it
+	// here locally (and Multicast from ServerMelee for the 3P view). Nothing to play yet, so the punch is
+	// currently animation-less but fully functional (it still tags on the server sweep below).
 }
 
 void ACombatForgeCharacter::ServerMelee_Implementation()
@@ -1668,6 +1677,68 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 	if (UPFCombatAudio* Audio = GetCombatAudio())
 	{
 		Audio->PlayImpactAt(Hit.ImpactPoint);   // contact "thwack" (host-side; elim feedback covers clients)
+	}
+}
+
+void ACombatForgeCharacter::TickServerAfk(float DeltaSeconds)
+{
+	// Authority-only; called from Tick under HasAuthority().
+	AController* C = GetController();
+	APlayerController* PC = Cast<APlayerController>(C);
+	// Only police REMOTE humans: bots are AIControllers (Cast<APlayerController> fails), and the listen-server
+	// host / a standalone player are local controllers (never kick the person running the server).
+	if (PC == nullptr || PC->IsLocalController())
+	{
+		return;
+	}
+	// Don't accrue idle time while eliminated / awaiting respawn — reseed the baseline on the next live poll.
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
+	{
+		ServerLastActiveTime = -1.f;
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.f;
+
+	// Poll ~1 Hz — cheap, and the 3-minute window doesn't need sub-second resolution.
+	ServerAfkPollAccum += DeltaSeconds;
+	if (ServerAfkPollAccum < 1.f)
+	{
+		return;
+	}
+	ServerAfkPollAccum = 0.f;
+
+	const FVector Loc = GetActorLocation();
+	const FRotator Aim = PC->GetControlRotation();   // remote client's view rotation, replicated via ServerMove
+
+	if (ServerLastActiveTime < 0.f)
+	{
+		// First poll since (re)spawn — seed the baseline and treat as active.
+		ServerLastActiveTime = Now;
+		ServerAfkLastLoc = Loc;
+		ServerAfkLastAim = Aim;
+		return;
+	}
+
+	const bool bMoved = FVector::DistSquared(Loc, ServerAfkLastLoc) > (8.f * 8.f);
+	const float AimDelta = FMath::Abs(FRotator::NormalizeAxis(Aim.Yaw - ServerAfkLastAim.Yaw))
+	                     + FMath::Abs(FRotator::NormalizeAxis(Aim.Pitch - ServerAfkLastAim.Pitch));
+	if (bMoved || AimDelta > 1.0f)
+	{
+		ServerLastActiveTime = Now;
+		ServerAfkLastLoc = Loc;
+		ServerAfkLastAim = Aim;
+		return;
+	}
+
+	if (Now - ServerLastActiveTime >= AfkKickSeconds)
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("AFK kick: %s idle %.0fs — returned to main menu"),
+			*GetNameSafe(PC->PlayerState), AfkKickSeconds);
+		PC->ClientReturnToMainMenuWithTextReason(
+			NSLOCTEXT("CombatForge", "AfkKick", "You were idle for 3 minutes and were returned to the menu."));
+		ServerLastActiveTime = Now;   // don't re-fire while the client travel is in flight
 	}
 }
 
@@ -2225,6 +2296,18 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 		}
 		Mount(CharSlotComps[s], M);
 	}
+
+	// Hide the bare-legs skin (BaseComps index 1 = SKM_Legs) whenever a Pants garment is worn, so the naked
+	// skin can't poke through the pants ("privates showing", Tom 2026-07-18). Pants = slot index 6 (GSlots).
+	// When no pants are selected the bare legs stay visible so the body is complete.
+	constexpr int32 PantsSlotIndex = 6;
+	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PantsSlotIndex)
+		&& ActiveCharConfig.Slots[PantsSlotIndex] >= 0;
+	if (CharBaseComps.IsValidIndex(1) && CharBaseComps[1] != nullptr)
+	{
+		CharBaseComps[1]->SetVisibility(!bPantsWorn);
+		CharBaseComps[1]->SetHiddenInGame(bPantsWorn);
+	}
 }
 
 void ACombatForgeCharacter::ReapplyCharacterConfig()
@@ -2369,10 +2452,36 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	}
 	// Per-weapon ADS-in (out stays the character's ADSOutTime). Both sides read kit-derived Def.
 	ADSInTime = Def.ADSTimeSec;
+	// Per-weapon ADS magnification (F1 scope zoom, Tom 2026-07-18). Snipers (category 4) zoom much harder than a
+	// normal ADS; an explicit Def.ScopedADSFOV wins. Default 58 for everything else. (The scope MASK overlay
+	// that makes it "in the scope, not whole screen" is a separate HUD piece — documented follow-up.)
+	if (Def.ScopedADSFOV > 0.f)
+	{
+		ADSFOV = Def.ScopedADSFOV;
+	}
+	else if (ActiveWeaponConfig.Category == 4)
+	{
+		ADSFOV = 28.f;   // strong sniper magnification baseline (tune per-scope once the overlay lands)
+	}
+	else
+	{
+		ADSFOV = 58.f;   // standard iron-sight magnification
+	}
 	// Prediction-safe move mult — only from replicated kit + which slot is drawn.
 	if (UPFCharacterMovementComponent* CMC = GetPFMovement())
 	{
 		CMC->CachedWeaponMoveSpeedMult = Def.MoveSpeedMult;
+	}
+
+	// TP RAISED (fire/ADS) rotation is per-weapon (Tom 2026-07-18): the default (-90 / 0) is SM_Rifle's
+	// +Y-barrel axis; pistols/revolvers render UPSIDE DOWN with it (different mesh barrel axis), so category 2
+	// flips 180° about the barrel unless the catalog row explicitly overrides TPRaisedRoll. Best-guess — the
+	// pistol mesh axis is unverified in-editor; if a pistol still looks off, adjust TPRaisedYawOffset/Roll.
+	CachedTPRaisedYaw  = Def.TPRaisedYawOffset;
+	CachedTPRaisedRoll = Def.TPRaisedRoll;
+	if (ActiveWeaponConfig.Category == 2 && FMath::IsNearlyZero(Def.TPRaisedRoll))
+	{
+		CachedTPRaisedRoll = 180.f;
 	}
 
 	// TP hand gun + back-slung stowed gun.
@@ -3444,8 +3553,9 @@ void ACombatForgeCharacter::ApplyRaisedWeaponPose()
 		}
 	}
 	WeaponMeshComp->SetWorldLocation(Origin);
-	// SM_Rifle / olive: local +Y is barrel-forward → yaw -90 into aim +X.
-	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
+	// Per-weapon barrel-axis correction (was hardcoded Aim.Yaw-90 / roll 0 for SM_Rifle's +Y barrel, which
+	// flipped pistols upside-down). CachedTPRaisedYaw/Roll come from the equipped Def in ApplyWeaponLoadout.
+	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw + CachedTPRaisedYaw, CachedTPRaisedRoll));
 	WeaponMeshComp->SetWorldScale3D(WeaponRelativeScale);
 }
 

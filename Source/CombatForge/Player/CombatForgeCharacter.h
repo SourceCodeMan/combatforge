@@ -425,6 +425,10 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Weapon") float WeaponRaiseHoldOnShot = 0.45f;
 	// Raised pose: mesh origin relative to eye (forward / right / down along aim basis).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector WeaponRaisedFromEye = FVector(28.f, 14.f, -8.f);
+	// Per-weapon barrel-axis correction for the raised (fire/ADS) TP pose, cached from the equipped Def in
+	// ApplyWeaponLoadout. Default = SM_Rifle (+Y barrel). Pistols override so they don't render upside-down.
+	float CachedTPRaisedYaw  = -90.f;
+	float CachedTPRaisedRoll = 0.f;
 	// FP viewmodel: hip-ish rest vs ADS. AdsLoc puts the TOP-SIGHT line on the camera axis: Y=-5.5 cancels the
 	// rifle mesh's built-in +5.5 Y; Z lowered to -1.5 so the camera looks down the TOP sight, not the bore (the
 	// iron sight sits above the barrel, so the whole gun drops that much). X~15 keeps the aperture in focus.
@@ -528,6 +532,17 @@ private:
 	static constexpr float MeleeCooldown = 0.8f;   // seconds between swings
 	static constexpr float MeleeRange    = 200.f;  // reach from the camera (uu)
 	static constexpr float MeleeRadius   = 34.f;   // sweep radius so a near-miss still tags
+
+	// ---- AFK idle-kick (server-authoritative; anti-farm) ----
+	// Poll the pawn's location + view rotation on the server; a REMOTE player who moves neither for
+	// AfkKickSeconds is returned to their main menu (so they can't hold a slot / accrue XP while idle).
+	// Never applies to bots (AIController) or the listen-server host / standalone (local controller).
+	void TickServerAfk(float DeltaSeconds);
+	float    ServerLastActiveTime = -1.f;   // world-seconds of last detected activity (-1 = needs reseed on (re)spawn)
+	float    ServerAfkPollAccum   = 0.f;    // throttles the poll to ~1 Hz
+	FVector  ServerAfkLastLoc     = FVector::ZeroVector;
+	FRotator ServerAfkLastAim     = FRotator::ZeroRotator;
+	static constexpr float AfkKickSeconds = 180.f;   // 3 full minutes of complete idle
 
 	// ---- FOV arbiter state ----
 	float ADSAlpha = 0.f;

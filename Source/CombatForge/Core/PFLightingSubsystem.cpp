@@ -109,13 +109,16 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 		if (UExponentialHeightFogComponent* FogComp = Fog->GetComponent())
 		{
 			// Soft distance only — start farther than original 600 so near play stays clear.
-			FogComp->SetFogDensity(0.008f);
+			// Clarity pass 2026-07-18 (Tom: "less blurry/cloudy, but I like it overall"): the volumetric
+			// haze was the main "cloudy" read, so density 0.008->0.005 and max-opacity 0.28->0.14 — halves
+			// the soup while KEEPING the god-ray shafts (which is why volumetric stays ON). Also cheaper GPU.
+			FogComp->SetFogDensity(0.005f);
 			FogComp->SetFogHeightFalloff(0.14f);
 			FogComp->SetFogInscatteringColor(FLinearColor(0.45f, 0.48f, 0.52f));
-			FogComp->SetFogMaxOpacity(0.28f);
+			FogComp->SetFogMaxOpacity(0.14f);
 			FogComp->SetStartDistance(1000.f);
 			// Volumetric ON so the sun through the roof skylights throws visible light shafts (god rays) —
-			// the payoff that sells the openings. Density stays low (0.008) so it's shafts, not soup.
+			// the payoff that sells the openings. Density kept low so it's shafts, not soup.
 			FogComp->SetVolumetricFog(true);
 		}
 	}
@@ -140,7 +143,8 @@ void UPFLightingSubsystem::SpawnLightingRig(UWorld& World)
 
 		// Clean industrial grade (original knobs + mild vignette/bloom).
 		PP.bOverride_BloomIntensity = true;
-		PP.BloomIntensity = 0.28f;
+		// Clarity pass 2026-07-18: bloom 0.28 -> 0.15 — glow on bright concrete read as soft/hazy.
+		PP.BloomIntensity = 0.15f;
 		PP.bOverride_BloomThreshold = true;
 		PP.BloomThreshold = 1.0f;
 		// Vignette darkens screen edges — cut hard (0.28 -> 0.10) so the periphery isn't crushed.

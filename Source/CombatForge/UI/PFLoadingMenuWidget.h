@@ -210,6 +210,7 @@ private:
 	UFUNCTION() void OnEnterClicked();
 	UFUNCTION() void OnDonateClicked();    // opens buymeacoffee.com/tomchapman in the system browser
 	UFUNCTION() void OnWebsiteClicked();   // opens playcombatforge.com
+	UFUNCTION() void OnStoreClicked();     // opens playcombatforge.com/store (checkout is web-side by design)
 	UFUNCTION() void OnDiscordClicked();   // opens the Discord invite (bug reports + community)
 	UFUNCTION() void OnQuitDesktopClicked();
 	UFUNCTION() void OnModeClicked();
@@ -229,6 +230,7 @@ private:
 	UFUNCTION() void OnHostLanClicked();   // relaunch this map as a LISTEN server (LAN/VPN friends can join)
 	UFUNCTION() void OnJoinLanClicked();   // connect to the host IP typed in the join box
 	UFUNCTION() void OnStopHostingClicked();   // back to standalone (drops joined clients; frees hosting)
+	UFUNCTION() void OnLeaveServerClicked();   // NM_Client: disconnect from a remote server → standalone boot menu
 
 	// ---- ONLINE (combatforge-api: account + server browser + quick play + match codes) ----
 	UFUNCTION() void OnLoginClicked();       // logged out: device-link flow; logged in: sign out
@@ -282,6 +284,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> DonateLabel;
 	UPROPERTY() TObjectPtr<UButton> WebsiteButton;
 	UPROPERTY() TObjectPtr<UTextBlock> WebsiteLabel;
+	UPROPERTY() TObjectPtr<UButton> StoreButton;
+	UPROPERTY() TObjectPtr<UTextBlock> StoreLabel;
 	UPROPERTY() TObjectPtr<UButton> DiscordButton;
 	UPROPERTY() TObjectPtr<UTextBlock> DiscordLabel;
 	UPROPERTY() TObjectPtr<UButton> QuitDesktopButton;

@@ -725,7 +725,6 @@ void UPFLoadingMenuWidget::RefreshWeaponLabels()
 void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 {
 	const int32 CatCount = PFWeapon::CategoryCount();
-	const FPFWeaponConfig Prev = WeaponConfig;
 	if (Kind == 0)
 	{
 		WeaponConfig.Category = (WeaponConfig.Category + Dir + CatCount) % CatCount;
@@ -737,22 +736,31 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 		WeaponConfig.Index = (WeaponConfig.Index + Dir + WpnCount) % WpnCount;
 	}
 
-	// Offline / empty unlocks = fully ungated. When locked: allow browsing the name+rank, but refuse
-	// to save/equip and snap the equipped kit back (weapon-implementation-spec Stage 5).
+	// BROWSING IS ALWAYS FREE (Tom 2026-07-18): the cursor moves through every category + weapon so the
+	// whole arsenal and its unlock ranks are visible. The old code REVERTED the whole step when a category's
+	// index-0 weapon was rank-locked, which made that entire category unreachable ("can't scroll through all
+	// categories" + "weapon not attached"). Labels + studio preview always reflect the browsed gun.
+	RefreshWeaponLabels();
+	EnsureCharPreview();
+	if (CharPreviewActor != nullptr)
+	{
+		CharPreviewActor->ApplyWeapon(WeaponConfig);   // show the browsed gun (even if locked — aspirational)
+		if (ActiveMenuTab == 2 || ActiveMenuTab == 3)
+		{
+			CharPreviewActor->SetPreviewActive(true);
+		}
+	}
+
+	// EQUIP only when unlocked (offline / LAN / empty-unlocks = fully ungated). A locked pick is browsable
+	// but never saved/applied — the persisted, spawned loadout stays at the last unlocked choice.
 	if (UPFBackendSubsystem* Backend = GetBackend())
 	{
 		const FString Id = PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index);
 		if (!Backend->IsWeaponUnlocked(Id))
 		{
-			const FString LockedName = PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index);
 			const uint8 Rank = PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index);
-			WeaponConfig = Prev;
-			RefreshWeaponLabels();
-			if (WeaponValueText != nullptr)
-			{
-				WeaponValueText->SetText(FText::FromString(FString::Printf(
-					TEXT("%s  🔒 Rank %u — not equipped"), *LockedName, Rank)));
-			}
+			SetStatus(FString::Printf(TEXT("%s unlocks at Rank %u — browse freely, equip once unlocked."),
+				*PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index), Rank));
 			return;
 		}
 	}
@@ -762,17 +770,6 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 	{
 		Char->ReapplyWeaponLoadout();
 	}
-	// Menu studio: show the selected gun in the character's hand (same model as the CHARACTER tab).
-	EnsureCharPreview();
-	if (CharPreviewActor != nullptr)
-	{
-		CharPreviewActor->ApplyWeapon(WeaponConfig);
-		if (ActiveMenuTab == 2 || ActiveMenuTab == 3)
-		{
-			CharPreviewActor->SetPreviewActive(true);
-		}
-	}
-	RefreshWeaponLabels();
 }
 
 void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
@@ -780,7 +777,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
 	// 13px + wrap + Fill slot: the old default-size, centered, non-wrapping line overran the
 	// HOST LAN GAME column on the right (Tom 2026-07-15).
-	Sub->SetText(FText::FromString(TEXT("Your five classes — clothing and weapon per slot. Saved to this PC, applied on spawn.")));
+	Sub->SetText(FText::FromString(TEXT("Your soldier classes — clothing + weapon per slot. Class 1 is free; a free account unlocks all five. Saved to this PC, applied on spawn.")));
 	Sub->SetFont(PFLoadFont(13, false));
 	Sub->SetAutoWrapText(true);
 	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
@@ -973,6 +970,19 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 	if (SaveSlot < 0 || SaveSlot >= PFChar::SaveSlotCount())
 	{
 		return;
+	}
+	// ACCOUNT GATE (Tom 2026-07-18): slot 0 is the free single soldier everyone gets; the other four classes
+	// require a (free) logged-in account. This is deliberately enforced even offline — the whole point is to
+	// nudge account creation (weapon rank-locks stay ungated offline; classes do NOT). A logged-out click on a
+	// locked class falls back to the free class 0 with a nudge.
+	if (SaveSlot > 0)
+	{
+		UPFBackendSubsystem* Backend = GetBackend();
+		if (Backend != nullptr && !Backend->IsLoggedIn())
+		{
+			SetStatus(TEXT("Classes 2-5 need a free account — log in on the ONLINE panel to unlock all five soldiers."));
+			SaveSlot = 0;
+		}
 	}
 	ActiveSaveSlot = SaveSlot;
 	PFChar::SetActiveSaveSlot(SaveSlot);
@@ -1632,6 +1642,25 @@ void UPFLoadingMenuWidget::BuildTree()
 					V->SetHorizontalAlignment(HAlign_Fill);
 				}
 			}
+			else   // NM_Client: connected to someone else's server — offer a clean way OFF it (Tom 2026-07-18).
+			{
+				// Disconnect returns to a private standalone session (the boot menu), so the player can then
+				// host or play locally. The mechanism already exists (PC->QuitToMenu() runs "disconnect" for a
+				// client) — this just surfaces the button, which the client branch never had.
+				UButton* LeaveBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("LeaveServerBtn"));
+				LeaveBtn->SetBackgroundColor(FLinearColor(0.42f, 0.18f, 0.16f, 1.f));
+				LeaveBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnLeaveServerClicked);
+				UTextBlock* LeaveLab = WidgetTree->ConstructWidget<UTextBlock>();
+				LeaveLab->SetText(FText::FromString(TEXT("DISCONNECT FROM SERVER")));
+				LeaveLab->SetFont(PFLoadFont(12, true));
+				LeaveLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				LeaveLab->SetJustification(ETextJustify::Center);
+				LeaveBtn->AddChild(LeaveLab);
+				if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(LeaveBtn))
+				{
+					V->SetHorizontalAlignment(HAlign_Fill);
+				}
+			}
 		}
 		if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(MpBox))
 		{
@@ -1832,12 +1861,20 @@ void UPFLoadingMenuWidget::BuildTree()
 		FLinearColor(0.35f, 0.40f, 0.95f, 0.95f), FLinearColor(0.95f, 0.96f, 1.f), TEXT("DiscordButton"));   // Discord blurple
 	AddLinkButton(DonBtn, DonateLabel, TEXT("  BUY ME A COFFEE  "),
 		FLinearColor(1.f, 0.72f, 0.12f, 0.95f), FLinearColor(0.12f, 0.10f, 0.06f), TEXT("DonateButton"));   // BMC warm yellow
+	// STORE (Tom 2026-07-18: "I don't see a store in the menu"). Checkout is by design on the WEBSITE
+	// (merchant of record; no card entry in a kids-audience client — store.ts), so this surfaces it as a
+	// link. A fuller in-game showcase panel (GET /v1/store: packs + unlock list + owned) is a documented follow-up.
+	UButton* StoreBtn = nullptr;
+	AddLinkButton(StoreBtn, StoreLabel, TEXT("  STORE  "),
+		FLinearColor(0.18f, 0.34f, 0.22f, 0.95f), FLinearColor(0.85f, 1.f, 0.90f), TEXT("StoreButton"));   // store green
 	WebsiteButton = WebBtn;
 	DiscordButton = DiscBtn;
 	DonateButton = DonBtn;
+	StoreButton = StoreBtn;
 	WebsiteButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnWebsiteClicked);
 	DiscordButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnDiscordClicked);
 	DonateButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnDonateClicked);
+	StoreButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnStoreClicked);
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(LinksRow))
 	{
 		S->SetAnchors(FAnchors(0.5f, 1.f, 0.5f, 1.f));
@@ -2526,6 +2563,21 @@ void UPFLoadingMenuWidget::OnStopHostingClicked()
 	}
 }
 
+void UPFLoadingMenuWidget::OnLeaveServerClicked()
+{
+	// Client on a remote server: cleanly disconnect back to a standalone boot menu (then they can host/play
+	// local). QuitToMenu() already does the right thing per net mode (runs "disconnect" for NM_Client).
+	if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(GetOwningPlayer()))
+	{
+		UE_LOG(CombatForgeLog, Log, TEXT("Menu: disconnect from server — returning to standalone"));
+		PC->QuitToMenu();
+	}
+	else if (APlayerController* BasePC = GetOwningPlayer())
+	{
+		BasePC->ConsoleCommand(TEXT("disconnect"));
+	}
+}
+
 void UPFLoadingMenuWidget::OnJoinLanClicked()
 {
 	FString Ip = JoinIpBox ? JoinIpBox->GetText().ToString().TrimStartAndEnd() : FString();
@@ -3058,6 +3110,14 @@ void UPFLoadingMenuWidget::OnWebsiteClicked()
 {
 	FPlatformProcess::LaunchURL(TEXT("https://playcombatforge.com/"), nullptr, nullptr);
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened website (playcombatforge.com)"));
+}
+
+void UPFLoadingMenuWidget::OnStoreClicked()
+{
+	// Store checkout lives on the website (merchant of record). Opens the system browser — no card entry
+	// or purchase flow inside the kids-audience client, by design (store.ts).
+	FPlatformProcess::LaunchURL(TEXT("https://playcombatforge.com/store"), nullptr, nullptr);
+	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened store (playcombatforge.com/store)"));
 }
 
 void UPFLoadingMenuWidget::OnDiscordClicked()

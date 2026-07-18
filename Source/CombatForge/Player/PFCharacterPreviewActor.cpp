@@ -216,6 +216,15 @@ void APFCharacterPreviewActor::ApplyConfig(const FPFCharacterConfig& Config)
 		USkeletalMesh* M = (Sel >= 0) ? PFChar::LoadPart(s, Sel) : nullptr;
 		Mount(SlotComps[s], M);
 	}
+	// Hide the bare-legs skin (BaseComps index 1 = SKM_Legs) when a Pants garment is worn, mirroring the pawn
+	// (ACombatForgeCharacter::ApplyCharacterConfig) so preview + in-game match — stops the skin poking through
+	// the pants in the class preview ("privates showing", Tom 2026-07-18). Pants = slot index 6.
+	constexpr int32 PantsSlotIndex = 6;
+	const bool bPantsWorn = Config.Slots.IsValidIndex(PantsSlotIndex) && Config.Slots[PantsSlotIndex] >= 0;
+	if (BaseComps.IsValidIndex(1) && BaseComps[1] != nullptr)
+	{
+		BaseComps[1]->SetVisibility(!bPantsWorn);
+	}
 	// Keep the current gun mounted after clothing refresh (slot swap rebuilds leader poses).
 	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr)
 	{

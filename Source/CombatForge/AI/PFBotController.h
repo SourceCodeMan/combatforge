@@ -189,6 +189,8 @@ private:
 	// ---- Jump-over-low-barriers: when path-following stalls against a jumpable wall, hop it. ----
 	float JumpStallTimer = 0.f;
 	float JumpCooldown = 0.f;
+	// Throttle for the "open a closed door when stalled" check (see Tick).
+	float DoorTryCooldown = 0.f;
 
 	// ---- Tactical reposition state: the current chosen firing position + its re-evaluation timer. ----
 	FVector TacticalGoal = FVector::ZeroVector;
