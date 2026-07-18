@@ -5,9 +5,15 @@ everything here is additive and Mac-guarded.
 
 ## TL;DR — what works now
 
-**The CombatForge C++ compiles and links on macOS / Apple Silicon.** The monolithic **game target**
-builds a valid `Mach-O arm64` executable (`Binaries/Mac/CombatForge`, ~390 MB) under Apple clang 21 with
-UE's `-Werror`, with **zero code errors** — only one non-fatal deprecation warning left (see below).
+**Both targets build on macOS / Apple Silicon, with no engine modifications.**
+
+| Target | Command | Result |
+|---|---|---|
+| Game / client (Monolithic) | `Build.sh CombatForge Mac Development` | `Binaries/Mac/CombatForge` — Mach-O arm64 (~390 MB) |
+| Editor (Modular) | `Build.sh CombatForgeEditor Mac Development` | `Binaries/Mac/UnrealEditor-CombatForge.dylib` — arm64. **This is what opening `CombatForge.uproject` needs.** |
+
+Compiled under Apple clang 21 with UE's `-Werror`: **zero code errors**, one non-fatal deprecation
+warning (see below).
 
 Two genuinely Mac-only bugs were found and fixed (both invisible to MSVC on Windows):
 
@@ -19,7 +25,7 @@ Two genuinely Mac-only bugs were found and fixed (both invisible to MSVC on Wind
    `/*` (slash-star from the glob) reads as a nested block-comment opener → `error: '/*' within block
    comment [-Werror,-Wcomment]`. Reworded to `Saved/Arenas *.json`.
 
-## Prerequisites on the Mac (all satisfied as of 2026-07-17)
+## Prerequisites on the Mac (all satisfied as of 2026-07-18)
 
 - **Xcode 26.6** (Apple clang 21) at `/Applications/Xcode.app`, selected via `xcode-select`.
 - **UE 5.6** (Launcher binary) at `/Users/Shared/Epic Games/UE_5.6`.
@@ -30,53 +36,83 @@ Two genuinely Mac-only bugs were found and fixed (both invisible to MSVC on Wind
 
 ## The SDK-version gate (Xcode 26.6 is newer than UE 5.6 allows)
 
-UBT rejects the build: `Found Sdk Version=26.6, MinRequired=15.2.0, MaxRequired=16.9.0` →
+UBT rejects Mac builds outright: `Found Sdk Version=26.6, MinRequired=15.2.0, MaxRequired=16.9.0` →
 `Platform Mac is not a valid platform to build`. The cap lives in the engine's
-`Engine/Config/Apple/Apple_SDK.json` (`MaxVersion`). Two ways to clear it:
+`Engine/Config/Apple/Apple_SDK.json` (`MaxVersion`). **Both fixes below are in-repo — the engine is
+not modified.**
 
-### A. In-repo (committed) — unblocks the GAME target only
+### 1. `Config/Mac/Mac_SDK.json` — clears the version gate
 
-`Config/Mac/Mac_SDK.json` = `{ "MainVersion": "26.6" }`.
+```json
+{ "MainVersion": "26.6" }
+```
 
 UBT reads a project-local `Config/<Platform>/<Platform>_SDK.json` and honors **only** its `MainVersion`.
 When `MainVersion` equals the installed SDK version, `UEBuildPlatformSDK.IsVersionValidInternal`
-short-circuits (`IntVersion == GetMainVersion()` → valid) and never checks the max. This works for the
-**game target** because it's **Monolithic** (`AllowsPerProjectSDKVersion()` is true for
-Monolithic / Unique-env targets). It does **not** work for the **editor** target — that's a modular
-Shared build environment, which forbids per-project SDK overrides (`RulesError`).
+short-circuits (`IntVersion == GetMainVersion()` → valid) and never checks the max.
 
-> If you bump Xcode again, update `MainVersion` in this file to the new version string
-> (the value UBT prints as `Found Sdk Version=…`).
+> **When Xcode updates, bump `MainVersion` here** to the new version string — the value UBT prints as
+> `Found Sdk Version=…`.
 
-### B. Engine edit — universal (editor + Xcode schemes + clean `.app` finalize)
+### 2. `bAllowSDKOverrideModulesWithSharedEnvironment` — lets the EDITOR accept that override
 
-One line in `/Users/Shared/Epic Games/UE_5.6/Engine/Config/Apple/Apple_SDK.json`:
-`"MaxVersion": "16.9.0"` → `"26.9.0"`. A backup was made next to it (`*.combatforge-backup`).
-This is **outside the repo** (shared engine install) and re-applies after any engine hotfix/reinstall,
-so it was left for a human to apply. It removes the per-project override friction entirely (all targets
-see Mac as valid, no cross-target conflict).
+Fix 1 alone is enough for the **game** target (Monolithic → `AllowsPerProjectSDKVersion()` is true),
+but the **editor** is a Modular target on a **Shared build environment**, where UBT rejects per-project
+SDK overrides:
+
+```
+Target CombatForgeEditor is being built with a overridden Mac SDK version to '26.6',
+but this target is not allowed - likely due to a modular build using a Shared BuildEnvironment.
+```
+
+That `RulesError` is exactly what blocks double-clicking `CombatForge.uproject` on a Mac. The fix is a
+Mac-guarded opt-in in `Source/CombatForgeEditor.Target.cs`:
+
+```csharp
+if (Target.Platform == UnrealTargetPlatform.Mac)
+{
+    bAllowSDKOverrideModulesWithSharedEnvironment = true;
+}
+```
+
+Safe here because we aren't switching toolchains — clang is the same either way; we're only bypassing a
+version-**range** check.
+
+> **Gotcha:** the engine's own error text suggests `bAreTargetSDKVersionsRelevantOverride = false`.
+> That does **not** work for this case — `TargetRules.IsSDKVersionRelevant()` returns `true`
+> unconditionally when the target's platform *is* the SDK's platform, so the flag is never consulted.
+
+### Optional: the engine-side alternative
+
+One line in `/Users/Shared/Epic Games/UE_5.6/Engine/Config/Apple/Apple_SDK.json`
+(`"MaxVersion": "16.9.0"` → `"26.9.0"`) would clear the gate globally and make fixes 1–2 unnecessary.
+A backup was made next to it (`*.combatforge-backup`). **Not applied** — it lives outside the repo, is
+lost on every engine hotfix/reinstall, and the in-repo fixes make it unnecessary for building. It is
+still the cleanest way to make **full Xcode project-file generation** work (see below).
 
 ## Build commands
 
 ```bash
 UE="/Users/Shared/Epic Games/UE_5.6"
-# GAME/client target — works today with the in-repo Mac_SDK.json:
-"$UE/Engine/Build/BatchFiles/Mac/Build.sh" CombatForge Mac Development -project="$PWD/CombatForge.uproject"
-# EDITOR target — needs the engine edit (B) above first:
+# Editor — required to open CombatForge.uproject:
 "$UE/Engine/Build/BatchFiles/Mac/Build.sh" CombatForgeEditor Mac Development -project="$PWD/CombatForge.uproject"
+# Game/client target:
+"$UE/Engine/Build/BatchFiles/Mac/Build.sh" CombatForge Mac Development -project="$PWD/CombatForge.uproject"
 ```
 
-### Known caveat — "Modern Xcode" `.app` finalization
-With approach A, `Build.sh CombatForge` **compiles and links the binary successfully** but exits non-zero
-on the final step ("Modern Xcode" wraps the binary into a `.app` via `xcodebuild` and can't find a
-generated scheme — `does not contain a scheme named "CombatForge"`). The raw `Binaries/Mac/CombatForge`
-executable is complete and runnable (`-game` / listen server). A clean `.app` finalize + Xcode project
-generation want approach **B** (project generation with the override hits the same cross-target conflict).
-Packaging via `Scripts/Package-Mac.command` (BuildCookRun) stages its own `.app` and is the distribution path.
+### Known caveats
+- **Game target `.app` finalize.** `Build.sh CombatForge` compiles and links the binary successfully but
+  exits non-zero on the last step — "Modern Xcode" wraps the binary into a `.app` via `xcodebuild` and
+  can't find a generated scheme (`does not contain a scheme named "CombatForge"`). The raw
+  `Binaries/Mac/CombatForge` executable is complete and runnable. The editor target is unaffected.
+- **Full Xcode project generation** (`GenerateProjectFiles.sh`) fails with a cross-target conflict:
+  engine program targets (e.g. `IoStoreOnDemandTests`) don't carry the project's SDK override, and UBT
+  errors on the mismatch. Only needed for the Xcode IDE workflow; the engine-side alternative above fixes it.
 
 ## Remaining / verify-in-person
 
-- **Editor on Mac** — apply engine edit (B), then build `CombatForgeEditor`, open, let shaders compile.
+- **Open the project** — double-click `CombatForge.uproject` (or `Open-CombatForge-5.6.command`).
+  First open compiles Metal shaders and will take a while.
 - **Metal SM6** — in the Mac editor: Project Settings → Platforms → Mac → Targeted RHIs → **Metal SM6**
   (needed for Nanite on the warehouse/Bandit geometry; VT is fine on SM5).
 - **Package** — `Scripts/Package-Mac.command` (unsigned `.app`; Gatekeeper right-click-Open first run).
