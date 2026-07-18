@@ -206,13 +206,42 @@ namespace PFChar
 		return kSaveSlots;
 	}
 
+	// Prefs section: project was renamed PaintForge → CombatForge. Older installs still have class data under
+	// [PaintForge]; new code only wrote weapons under [CombatForge], so clothing looked "never saved".
+	// Readers try CombatForge first, then PaintForge; writers always land in CombatForge.
+	static const TCHAR* PrefSectionPrimary = TEXT("CombatForge");
+	static const TCHAR* PrefSectionLegacy  = TEXT("PaintForge");
+
+	static bool ReadIntEither(const TCHAR* Key, int32& Out)
+	{
+		if (GConfig == nullptr)
+		{
+			return false;
+		}
+		if (GConfig->GetInt(PrefSectionPrimary, Key, Out, GGameUserSettingsIni))
+		{
+			return true;
+		}
+		return GConfig->GetInt(PrefSectionLegacy, Key, Out, GGameUserSettingsIni);
+	}
+
+	static bool ReadBoolEither(const TCHAR* Key, bool& Out)
+	{
+		if (GConfig == nullptr)
+		{
+			return false;
+		}
+		if (GConfig->GetBool(PrefSectionPrimary, Key, Out, GGameUserSettingsIni))
+		{
+			return true;
+		}
+		return GConfig->GetBool(PrefSectionLegacy, Key, Out, GGameUserSettingsIni);
+	}
+
 	int32 GetActiveSaveSlot()
 	{
 		int32 Active = 0;
-		if (GConfig != nullptr)
-		{
-			GConfig->GetInt(TEXT("CombatForge"), TEXT("CharActiveSlot"), Active, GGameUserSettingsIni);
-		}
+		ReadIntEither(TEXT("CharActiveSlot"), Active);
 		return ClampSaveSlot(Active);
 	}
 
@@ -222,10 +251,9 @@ namespace PFChar
 		{
 			return;
 		}
-		// NO Flush here: the dead-scroll class wheel calls this per notch, and a synchronous ini write per
-		// notch hitches the respawn screen on slow disks. Every reader goes through the in-memory GConfig
-		// cache; durability comes from SaveConfig's flush (menu saves) and the engine's shutdown flush.
-		GConfig->SetInt(TEXT("CombatForge"), TEXT("CharActiveSlot"), ClampSaveSlot(SaveSlot), GGameUserSettingsIni);
+		// Flush so a menu slot switch survives a quick process kill (class setup was "never saved").
+		GConfig->SetInt(PrefSectionPrimary, TEXT("CharActiveSlot"), ClampSaveSlot(SaveSlot), GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 
 	void SaveConfig(int32 SaveSlot, const FPFCharacterConfig& Config)
@@ -235,13 +263,15 @@ namespace PFChar
 			return;
 		}
 		const int32 S = ClampSaveSlot(SaveSlot);
-		GConfig->SetBool(TEXT("CombatForge"), *FString::Printf(TEXT("CharSaved%d"), S), true, GGameUserSettingsIni);
+		GConfig->SetBool(PrefSectionPrimary, *FString::Printf(TEXT("CharSaved%d"), S), true, GGameUserSettingsIni);
 		for (int32 i = 0; i < GSlotCount; ++i)
 		{
 			const int32 Sel = Config.Slots.IsValidIndex(i) ? Config.Slots[i] : -1;
 			const FString Key = FString::Printf(TEXT("CharS%d_%s"), S, GSlots[i].Id);
-			GConfig->SetInt(TEXT("CombatForge"), *Key, Sel, GGameUserSettingsIni);
+			GConfig->SetInt(PrefSectionPrimary, *Key, Sel, GGameUserSettingsIni);
 		}
+		// Mirror active slot so LoadConfig() without an explicit slot stays coherent.
+		GConfig->SetInt(PrefSectionPrimary, TEXT("CharActiveSlot"), S, GGameUserSettingsIni);
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 
@@ -250,10 +280,20 @@ namespace PFChar
 		EnsureBuilt();
 		const int32 S = ClampSaveSlot(SaveSlot);
 		bool bSaved = false;
-		if (GConfig != nullptr)
+		const FString SavedKey = FString::Printf(TEXT("CharSaved%d"), S);
+		ReadBoolEither(*SavedKey, bSaved);
+
+		// One-time migrate: pre-slot PaintForge single outfit (CharConfigSaved + CharSlot_*) → class slot 0.
+		if (!bSaved && S == 0 && GConfig != nullptr)
 		{
-			GConfig->GetBool(TEXT("CombatForge"), *FString::Printf(TEXT("CharSaved%d"), S), bSaved, GGameUserSettingsIni);
+			bool bLegacySingle = false;
+			if (GConfig->GetBool(PrefSectionLegacy, TEXT("CharConfigSaved"), bLegacySingle, GGameUserSettingsIni)
+				&& bLegacySingle)
+			{
+				bSaved = true;   // fall through and read CharSlot_* below as CharS0
+			}
 		}
+
 		if (!bSaved)
 		{
 			return DefaultConfig();
@@ -263,12 +303,25 @@ namespace PFChar
 		for (int32 i = 0; i < GSlotCount; ++i)
 		{
 			int32 Sel = -1;
-			const FString Key = FString::Printf(TEXT("CharS%d_%s"), S, GSlots[i].Id);
-			if (GConfig != nullptr)
+			const FString PerSlotKey = FString::Printf(TEXT("CharS%d_%s"), S, GSlots[i].Id);
+			if (!ReadIntEither(*PerSlotKey, Sel) && S == 0)
 			{
-				GConfig->GetInt(TEXT("CombatForge"), *Key, Sel, GGameUserSettingsIni);
+				// Legacy single-outfit keys (CharSlot_Head, …) only seed class 0.
+				const FString LegacyKey = FString::Printf(TEXT("CharSlot_%s"), GSlots[i].Id);
+				ReadIntEither(*LegacyKey, Sel);
 			}
 			C.Slots[i] = (Sel >= 0 && Sel < GSlotPartsCache[i].Num()) ? Sel : -1;   // clamp to enumerated
+		}
+
+		// Promote any legacy-only read into the CombatForge section so the next boot is a clean load.
+		if (GConfig != nullptr)
+		{
+			bool bPrimarySaved = false;
+			GConfig->GetBool(PrefSectionPrimary, *SavedKey, bPrimarySaved, GGameUserSettingsIni);
+			if (!bPrimarySaved)
+			{
+				SaveConfig(S, C);
+			}
 		}
 		return C;
 	}

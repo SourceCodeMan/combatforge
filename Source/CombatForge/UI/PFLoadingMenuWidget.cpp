@@ -765,7 +765,9 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 		}
 	}
 
-	PFWeapon::SaveConfig(WeaponConfig);
+	// Explicit active class slot (same slot the clothing steppers use) so a desynced
+	// GetActiveSaveSlot() cannot write the gun to the wrong class.
+	PFWeapon::SaveConfig(ActiveSaveSlot, WeaponConfig);
 	if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()))
 	{
 		Char->ReapplyWeaponLoadout();
@@ -984,6 +986,19 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 			SaveSlot = 0;
 		}
 	}
+
+	// ALWAYS persist the class we're leaving before loading the next one. Auto-save on each stepper click
+	// is not enough: a half-edited in-memory CharConfig / WeaponConfig was discarded on slot switch
+	// ("I set the class then clicked another and my changes were gone").
+	if (ActiveSaveSlot >= 0 && ActiveSaveSlot < PFChar::SaveSlotCount())
+	{
+		if (CharConfig.Slots.Num() == PFChar::SlotCount())
+		{
+			PFChar::SaveConfig(ActiveSaveSlot, CharConfig);
+		}
+		PFWeapon::SaveConfig(ActiveSaveSlot, WeaponConfig);
+	}
+
 	ActiveSaveSlot = SaveSlot;
 	PFChar::SetActiveSaveSlot(SaveSlot);
 	CharConfig = PFChar::LoadConfig(SaveSlot);
@@ -1084,7 +1099,8 @@ void UPFLoadingMenuWidget::NotifyCharSlotStep(int32 SlotIdx, int32 Dir)
 	if (Cur < -1)      { Cur = N - 1; }   // wrap below None -> last part
 	else if (Cur >= N) { Cur = -1; }      // wrap past last -> None
 	CharConfig.Slots[SlotIdx] = Cur;
-	PFChar::SaveConfig(CharConfig);
+	// Explicit slot — never trust a divergent GetActiveSaveSlot() while the menu is open.
+	PFChar::SaveConfig(ActiveSaveSlot, CharConfig);
 	// Live-update the already-spawned local pawn (it mounted before this edit, so it won't re-load on its own).
 	if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()))
 	{

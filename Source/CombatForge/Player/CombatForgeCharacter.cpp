@@ -41,6 +41,7 @@
 #include "EnhancedInputComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"   // melee fallback: OverlapMultiByObjectType
 #include "EngineUtils.h"
 #include "UObject/UObjectIterator.h"   // pf.ArmedAnims live-toggle sink
 #include "GameFramework/CharacterMovementComponent.h"
@@ -1602,17 +1603,45 @@ void ACombatForgeCharacter::OnMeleePressed()
 	{
 		return;
 	}
-	// Local cooldown gate so a mashed key doesn't spam Server RPCs; the server re-validates authoritatively.
-	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-	if (Now - LastMeleeTime < MeleeCooldown)
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
 	{
 		return;
 	}
-	LastMeleeTime = Now;
+	// Local cooldown only — do NOT write LastMeleeTimeServer here. On a listen host,
+	// ServerMelee_Implementation runs on this same object; writing the shared timer first
+	// made the server always see "still on cooldown" and never apply damage (Tom: punch did nothing).
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (Now - LastMeleeTimeClient < MeleeCooldown)
+	{
+		return;
+	}
+	LastMeleeTimeClient = Now;
+	PlayMeleeSwingLocal();   // instant local feedback; Multicast covers remotes from the server
 	ServerMelee();
-	// PUNCH ANIMATION HOOK (Tom will supply a montage later): when a punch/jab montage asset exists, play it
-	// here locally (and Multicast from ServerMelee for the 3P view). Nothing to play yet, so the punch is
-	// currently animation-less but fully functional (it still tags on the server sweep below).
+}
+
+void ACombatForgeCharacter::PlayMeleeSwingLocal()
+{
+	MeleeSwingAnimRemain = MeleeSwingAnimSec;
+	// Raise the TP gun briefly so remotes see a "jab" motion even without a punch montage.
+	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, MeleeSwingAnimSec);
+	// Small FP viewmodel kick (procedural punch until a montage ships).
+	RecoilOffset += FVector(6.f, 0.f, -4.f);
+	RecoilPitch  += 8.f;
+	if (UPFCombatAudio* Audio = GetCombatAudio())
+	{
+		// Whoosh / contact-ready cue at the pawn (impact plays on hit).
+		Audio->PlayImpactAt(GetActorLocation() + FVector(0.f, 0.f, 40.f));
+	}
+}
+
+void ACombatForgeCharacter::MulticastMeleeSwing_Implementation()
+{
+	// Owning client already played in OnMeleePressed; remotes + simulated proxies need this.
+	if (!IsLocallyControlled())
+	{
+		PlayMeleeSwingLocal();
+	}
 }
 
 void ACombatForgeCharacter::ServerMelee_Implementation()
@@ -1624,33 +1653,70 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 	}
 	// Authoritative cooldown (small RTT tolerance) + no meleeing while eliminated.
 	const double Now = World->GetTimeSeconds();
-	if (Now - LastMeleeTime < MeleeCooldown * 0.9)
+	if (Now - LastMeleeTimeServer < MeleeCooldown * 0.85)
 	{
 		return;
 	}
-	LastMeleeTime = Now;
 	if (HealthComponent != nullptr && HealthComponent->bEliminated)
 	{
 		return;
 	}
+	LastMeleeTimeServer = Now;
+	MulticastMeleeSwing();   // remotes see the swing even on a miss
 
 	ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
 	const uint8 MyTeam = MyPS ? MyPS->TeamId : 255;
 
-	// Short forward reach from the eye line; first blocking pawn wins (a wall in between blocks the tag).
+	// Short forward reach from the eye line. Prefer pawn channel; also try a multi-sweep over
+	// overlapping capsules so a bot standing slightly off-center still gets tagged.
 	FVector EyeLoc; FRotator EyeRot;
 	GetActorEyesViewPoint(EyeLoc, EyeRot);
 	const FVector End = EyeLoc + EyeRot.Vector() * MeleeRange;
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(PFMelee), /*bTraceComplex=*/false, this);
 	FHitResult Hit;
-	const bool bHit = World->SweepSingleByChannel(Hit, EyeLoc, End, FQuat::Identity, ECC_Pawn,
-		FCollisionShape::MakeSphere(MeleeRadius), Params);
-	if (!bHit)
+	ACombatForgeCharacter* Victim = nullptr;
+	FVector ImpactPoint = FVector::ZeroVector;
+	FVector ImpactNormal = FVector::ForwardVector;
+
+	if (World->SweepSingleByChannel(Hit, EyeLoc, End, FQuat::Identity, ECC_Pawn,
+		FCollisionShape::MakeSphere(MeleeRadius), Params))
 	{
-		return;
+		Victim = Cast<ACombatForgeCharacter>(Hit.GetActor());
+		ImpactPoint = Hit.ImpactPoint;
+		ImpactNormal = Hit.ImpactNormal;
 	}
-	ACombatForgeCharacter* Victim = Cast<ACombatForgeCharacter>(Hit.GetActor());
+
+	// Fallback: sphere-overlap scan (some pawns ignore ECC_Pawn traces if capsule responses changed).
+	// Cheap — only runs when the channel sweep missed a CombatForge pawn.
+	if (Victim == nullptr)
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionObjectQueryParams ObjParams;
+		ObjParams.AddObjectTypesToQuery(ECC_Pawn);
+		const FVector Mid = EyeLoc + EyeRot.Vector() * (MeleeRange * 0.5f);
+		if (World->OverlapMultiByObjectType(Overlaps, Mid, FQuat::Identity, ObjParams,
+			FCollisionShape::MakeSphere(MeleeRange * 0.55f), Params))
+		{
+			float BestDistSq = TNumericLimits<float>::Max();
+			for (const FOverlapResult& O : Overlaps)
+			{
+				ACombatForgeCharacter* Cand = Cast<ACombatForgeCharacter>(O.GetActor());
+				if (Cand == nullptr || Cand == this)
+				{
+					continue;
+				}
+				const float Dsq = FVector::DistSquared(Cand->GetActorLocation(), EyeLoc);
+				if (Dsq < BestDistSq && Dsq <= FMath::Square(MeleeRange + MeleeRadius))
+				{
+					BestDistSq = Dsq;
+					Victim = Cand;
+					ImpactPoint = Cand->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+					ImpactNormal = (EyeLoc - ImpactPoint).GetSafeNormal();
+				}
+			}
+		}
+	}
 	if (Victim == nullptr || Victim == this)
 	{
 		return;
@@ -1670,15 +1736,15 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 	FPFPaintHitInfo MeleeHit;
 	MeleeHit.ShooterPS   = MyPS;
 	MeleeHit.ShooterTeam = MyTeam;
-	MeleeHit.ImpactPoint = Hit.ImpactPoint;
-	MeleeHit.ImpactNormal= Hit.ImpactNormal;
+	MeleeHit.ImpactPoint = ImpactPoint;
+	MeleeHit.ImpactNormal= ImpactNormal;
 	MeleeHit.Region      = EPFBodyRegion::Chest;
 	MeleeHit.ServerTime  = static_cast<float>(Now);
 	VictimHealth->ApplyPaintHit(MeleeHit, /*bForceEliminate=*/true);
 
 	if (UPFCombatAudio* Audio = GetCombatAudio())
 	{
-		Audio->PlayImpactAt(Hit.ImpactPoint);   // contact "thwack" (host-side; elim feedback covers clients)
+		Audio->PlayImpactAt(ImpactPoint);   // contact "thwack" (host-side; elim feedback covers clients)
 	}
 }
 
@@ -2300,13 +2366,13 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 	}
 
 	// ---- Modular skin: stop the one-piece body's legs rendering under the trousers ----
-	// SKM_Body (the leader) already contains torso+arms+LEGS, so the previous attempt (hiding only the SKM_Legs
-	// follower) removed a DUPLICATE layer while the body's own legs kept poking through at the inner thigh.
-	// Now the visible skin is the modular set and the leader is just the skeleton/anim carrier.
-	// Safety: only stop rendering the leader if the replacement torso+arms actually loaded — otherwise we'd have
-	// an invisible character. If anything is missing we fall back to exactly the old behaviour.
+	// SKM_Body (the leader) is a ONE-PIECE naked body (torso+arms+LEGS). Hiding only SKM_Legs left the
+	// body's own legs poking through the inner thigh. Visible skin = modular set; leader = skeleton/anim only.
+	// Require torso + arms + head so we never hide the leader into an invisible character.
 	const bool bModularSkinReady =
-		CharBaseComps.IsValidIndex(PFChar::kBaseTorso) && CharBaseComps[PFChar::kBaseTorso] != nullptr
+		CharBaseComps.IsValidIndex(PFChar::kBaseHead) && CharBaseComps[PFChar::kBaseHead] != nullptr
+		&& CharBaseComps[PFChar::kBaseHead]->GetSkeletalMeshAsset() != nullptr
+		&& CharBaseComps.IsValidIndex(PFChar::kBaseTorso) && CharBaseComps[PFChar::kBaseTorso] != nullptr
 		&& CharBaseComps[PFChar::kBaseTorso]->GetSkeletalMeshAsset() != nullptr
 		&& CharBaseComps.IsValidIndex(PFChar::kBaseArms) && CharBaseComps[PFChar::kBaseArms] != nullptr
 		&& CharBaseComps[PFChar::kBaseArms]->GetSkeletalMeshAsset() != nullptr;
@@ -2317,17 +2383,27 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 		Leader->VisibilityBasedAnimTickOption = bModularSkinReady
 			? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones
 			: EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+		// Both visibility flags — SetVisibility alone was not enough on some paths (shadows / ISM).
 		Leader->SetVisibility(!bModularSkinReady, /*bPropagateToChildren=*/false);
+		Leader->SetHiddenInGame(bModularSkinReady, /*bPropagateToChildren=*/false);
+		if (bModularSkinReady)
+		{
+			Leader->SetCastShadow(false);   // no naked-body shadow under the clothes
+		}
 	}
 
-	// Drop the bare legs when a Pants garment covers them ("privates showing", Tom 2026-07-18).
-	// Pants = GSlots index 6; jeans genuinely live there (Hips_Module holds only bags/holsters).
+	// Drop bare LEG skin whenever a Pants garment is worn (privates / thighs printing through jeans).
+	// Pants = GSlots index 6. If modular legs failed to load we still hide nothing extra on the leader
+	// (leader is already fully hidden when modular skin is ready).
 	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
 		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
-	if (bModularSkinReady && CharBaseComps.IsValidIndex(PFChar::kBaseLegs) && CharBaseComps[PFChar::kBaseLegs] != nullptr)
+	if (CharBaseComps.IsValidIndex(PFChar::kBaseLegs) && CharBaseComps[PFChar::kBaseLegs] != nullptr)
 	{
-		CharBaseComps[PFChar::kBaseLegs]->SetVisibility(!bPantsWorn);
-		CharBaseComps[PFChar::kBaseLegs]->SetHiddenInGame(bPantsWorn);
+		const bool bShowLegs = bModularSkinReady && !bPantsWorn
+			&& CharBaseComps[PFChar::kBaseLegs]->GetSkeletalMeshAsset() != nullptr;
+		CharBaseComps[PFChar::kBaseLegs]->SetVisibility(bShowLegs);
+		CharBaseComps[PFChar::kBaseLegs]->SetHiddenInGame(!bShowLegs);
+		CharBaseComps[PFChar::kBaseLegs]->SetCastShadow(bShowLegs);
 	}
 }
 
@@ -2473,16 +2549,17 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	}
 	// Per-weapon ADS-in (out stays the character's ADSOutTime). Both sides read kit-derived Def.
 	ADSInTime = Def.ADSTimeSec;
-	// Per-weapon ADS magnification (F1 scope zoom, Tom 2026-07-18). Snipers (category 4) zoom much harder than a
-	// normal ADS; an explicit Def.ScopedADSFOV wins. Default 58 for everything else. (The scope MASK overlay
-	// that makes it "in the scope, not whole screen" is a separate HUD piece — documented follow-up.)
+	// CoD-style WHOLE-SCREEN zoom while ADS, only for weapons that have a scope/sight on the gun.
+	// Category 4 = Sniper (every catalog sniper ships with an optic mesh). Explicit Def.ScopedADSFOV
+	// wins when set; otherwise snipers get a hard ~5x FOV pull (BaseFOV 105 → ~18). Other categories
+	// keep a mild iron-sight zoom. Scope MASK (black ring + reticle) is a separate HUD piece.
 	if (Def.ScopedADSFOV > 0.f)
 	{
 		ADSFOV = Def.ScopedADSFOV;
 	}
 	else if (ActiveWeaponConfig.Category == 4)
 	{
-		ADSFOV = 28.f;   // strong sniper magnification baseline (tune per-scope once the overlay lands)
+		ADSFOV = 18.f;   // CoD-style sniper magnification (whole-screen zoom)
 	}
 	else
 	{
@@ -3149,11 +3226,10 @@ void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMateria
 	}
 
 	USkeletalMeshComponent* Body = GetMesh();
-	// Spine / backpack bones — first hit wins (Manny + Bandit-compatible names).
+	// Mid/lower spine for a backpack sling — NEVER neck/head, and never ik_hand_gun (chest/hip holster).
 	static const FName BackBones[] = {
-		TEXT("spine_03"), TEXT("Spine_03"), TEXT("spine_02"), TEXT("Spine_02"),
-		TEXT("spine_01"), TEXT("Spine_01"), TEXT("spine_01_socket"),
-		TEXT("backpack"), TEXT("Backpack"), TEXT("ik_hand_gun"),
+		TEXT("spine_02"), TEXT("Spine_02"), TEXT("spine_01"), TEXT("Spine_01"),
+		TEXT("spine_03"), TEXT("Spine_03"), TEXT("backpack"), TEXT("Backpack"),
 	};
 	FName Bone = BackWeaponAttachBone;
 	auto Exists = [Body](FName N) -> bool
@@ -3583,27 +3659,18 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 	// and auth balls spawned from that tip. FP viewmodel (camera) stays separate for the owner.
 	ApplyHandWeaponPose();
 
-	// While aiming/shooting, POINT the hand-held gun along the aim instead of the hip-carry angle. Without
-	// this, bots + remote players visibly fired from a barrel aimed at the ground ("shooting from their
-	// ankles") once the muzzle started sampling the real barrel tip. The gun STAYS attached to the hand —
-	// the muzzle-origin gate depends on that — it's only re-oriented in place + lifted a touch so the
-	// barrel clears the thigh. (SM_Rifle family: local +Y is barrel-forward → yaw -90 onto the aim.)
+	// While aiming/shooting, POINT the hand-held gun along the aim. Gun STAYS attached to hand_r (muzzle
+	// sampling depends on that). We re-orient in place and apply a SMALL lift so the barrel clears the
+	// thigh — never a large world-Z teleport (that was the "gun on neck/armpit" bug with the dual sling).
 	if (ShouldRaiseWeapon())
 	{
 		const FRotator Aim = GetBaseAimRotation();
-		// PER-WEAPON barrel-axis correction. This used to hardcode (Aim.Yaw - 90, roll 0) for SM_Rifle's
-		// +Y-barrel convention, which rendered pistols/revolvers UPSIDE DOWN while firing (Tom 2026-07-18).
-		// CachedTPRaisedYaw/Roll come from the equipped Def in ApplyWeaponLoadout (default -90 / 0 = rifle).
+		// PER-WEAPON barrel-axis correction (default -90 / 0 = SM_Rifle +Y barrel; pistols flip roll).
 		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw + CachedTPRaisedYaw, CachedTPRaisedRoll));
 
-		// SHOULDER LIFT. With pf.ArmedAnims (default 1) everyone idles in MF_Rifle_Idle_ADS — hands already at
-		// shoulder/cheek — so lifting again planted the rifle at the EYE line (the "gun out of the forehead"
-		// bug). But when the armed idle ISN'T active the arms hang down, and the old flat +10uu left the gun
-		// sitting at the HIP while firing (Tom 2026-07-18: "rifle at hip while firing").
-		// Fix: lift ADAPTIVELY toward a shoulder line derived from the eye, never downward, and hard-clamped so
-		// it can never reach the head again regardless of what the animation is doing.
+		// Modest lift only when unarmed hang pose leaves the hand low. Hard-clamped — cannot reach head.
 		const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
-		if (!bArmedIdleActive)
+		if (!bArmedIdleActive && WeaponMaxShoulderLiftUU > 0.f)
 		{
 			const float TargetZ = GetEyeWorldLocation().Z - WeaponShoulderDropFromEyeUU;
 			const float CurrentZ = WeaponMeshComp->GetComponentLocation().Z;

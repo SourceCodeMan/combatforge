@@ -732,9 +732,26 @@ void APFBotController::MoveToGoal(const FVector& RawGoal, AActor* FallbackActor)
 	FAIMoveRequest Req;
 	if (!bGoalOnMesh && FallbackActor != nullptr)
 	{
-		// No mesh near the desired heading (e.g. facing straight into a wall). Path to the enemy instead — a
-		// pawn is always on the mesh — so the bot advances toward the fight rather than standing still.
-		Req.SetGoalActor(FallbackActor);
+		// No mesh near the desired heading (e.g. facing straight into a wall). Path toward the enemy, but
+		// NEVER use SetGoalActor on a live pawn — PathFollowing will try to reach the capsule center and
+		// the overlap depenetration is what launches bots into the air. Aim at a point standoff away.
+		const FVector BotHere = GetPawn() ? GetPawn()->GetActorLocation() : Goal;
+		const FVector EnemyHere = FallbackActor->GetActorLocation();
+		FVector Away = (BotHere - EnemyHere).GetSafeNormal2D();
+		if (Away.IsNearlyZero())
+		{
+			Away = FVector(1.f, 0.f, 0.f);
+		}
+		FVector Standoff = EnemyHere + Away * FMath::Max(BotBodyClearanceUU, MoveAcceptUU);
+		if (Nav != nullptr)
+		{
+			FNavLocation Proj;
+			if (Nav->ProjectPointToNavigation(Standoff, Proj, FVector(600.f, 600.f, 500.f)))
+			{
+				Standoff = Proj.Location;
+			}
+		}
+		Req.SetGoalLocation(Standoff);
 	}
 	else
 	{

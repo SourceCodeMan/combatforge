@@ -116,13 +116,13 @@ protected:
 	// and the RecastNavMesh routes it there, so it walks AROUND the player-built fort instead of into it.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float ObjectiveHoldRadiusUU = 220.f; // within this of the point/flag = "on it" (hold + strafe)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float GoalProjectUU = 700.f;  // how far ahead the tactical heading is projected into a move goal
-	// 70 was SMALLER than two capsule radii (2 x 34) plus path-follow overshoot, so a bot chasing a pawn goal kept
-	// leaning into it at full acceleration and the overlap resolved as a vertical teleport ("launch to the roof").
-	// 150 stops the follower outside body contact. Lower this if bots ever stop short of an objective.
-	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float MoveAcceptUU = 150.f;   // "arrived" tolerance for a MoveTo request
+	// Acceptance radius for MoveTo. Must stay ABOVE two capsule radii (2x34=68) plus path-follow overshoot,
+	// or a bot chasing a pawn goal leans into it at full acceleration and the overlap resolves as a vertical
+	// teleport ("launch to the roof"). 200 keeps a clear body gap. Lower only if bots stop short of objectives.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float MoveAcceptUU = 200.f;   // "arrived" tolerance for a MoveTo request
 	// Minimum gap a scored firing position must keep from the enemy pawn — candidates closer are rejected outright
 	// so no bot is ever told to stand inside another capsule (see the hard reject in ChooseTacticalPosition).
-	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float BotBodyClearanceUU = 150.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Tactics") float BotBodyClearanceUU = 220.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float RepathInterval = 0.35f; // min seconds between re-issued moves (re-pathing every tick thrashes PathFollowing)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Bot") float RepathMoveThreshUU = 150.f; // re-path early only when the goal jumped at least this far
 

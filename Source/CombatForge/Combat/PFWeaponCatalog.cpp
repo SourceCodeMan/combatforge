@@ -79,6 +79,12 @@ namespace PFWeapon
 			D.ReburstDelaySec = ReburstDelaySec;
 			D.MoveSpreadMult = MoveSpreadMult;
 			D.UnlockRank = UnlockRank;
+			// Sniper WeaponIds (snp_*) get CoD whole-screen ADS zoom by default; catalog rows can still
+			// override via a direct D.ScopedADSFOV assignment after MakeW if needed.
+			if (WeaponId != nullptr && FCString::Strncmp(WeaponId, TEXT("snp_"), 4) == 0)
+			{
+				D.ScopedADSFOV = 18.f;
+			}
 			return D;
 		}
 

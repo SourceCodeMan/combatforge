@@ -241,7 +241,9 @@ void APFCharacterPreviewActor::ApplyConfig(const FPFCharacterConfig& Config)
 	// SKM_Body contains torso+arms+LEGS, so it must stop RENDERING (it stays as the skeleton/anim carrier) or its
 	// own legs keep poking through the trousers no matter which follower we hide.
 	const bool bModularSkinReady =
-		BaseComps.IsValidIndex(PFChar::kBaseTorso) && BaseComps[PFChar::kBaseTorso] != nullptr
+		BaseComps.IsValidIndex(PFChar::kBaseHead) && BaseComps[PFChar::kBaseHead] != nullptr
+		&& BaseComps[PFChar::kBaseHead]->GetSkeletalMeshAsset() != nullptr
+		&& BaseComps.IsValidIndex(PFChar::kBaseTorso) && BaseComps[PFChar::kBaseTorso] != nullptr
 		&& BaseComps[PFChar::kBaseTorso]->GetSkeletalMeshAsset() != nullptr
 		&& BaseComps.IsValidIndex(PFChar::kBaseArms) && BaseComps[PFChar::kBaseArms] != nullptr
 		&& BaseComps[PFChar::kBaseArms]->GetSkeletalMeshAsset() != nullptr;
@@ -252,11 +254,15 @@ void APFCharacterPreviewActor::ApplyConfig(const FPFCharacterConfig& Config)
 			? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones
 			: EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 		BaseMesh->SetVisibility(!bModularSkinReady, /*bPropagateToChildren=*/false);
+		BaseMesh->SetHiddenInGame(bModularSkinReady, /*bPropagateToChildren=*/false);
 	}
 	const bool bPantsWorn = Config.Slots.IsValidIndex(PFChar::kSlotPants) && Config.Slots[PFChar::kSlotPants] >= 0;
-	if (bModularSkinReady && BaseComps.IsValidIndex(PFChar::kBaseLegs) && BaseComps[PFChar::kBaseLegs] != nullptr)
+	if (BaseComps.IsValidIndex(PFChar::kBaseLegs) && BaseComps[PFChar::kBaseLegs] != nullptr)
 	{
-		BaseComps[PFChar::kBaseLegs]->SetVisibility(!bPantsWorn);
+		const bool bShowLegs = bModularSkinReady && !bPantsWorn
+			&& BaseComps[PFChar::kBaseLegs]->GetSkeletalMeshAsset() != nullptr;
+		BaseComps[PFChar::kBaseLegs]->SetVisibility(bShowLegs);
+		BaseComps[PFChar::kBaseLegs]->SetHiddenInGame(!bShowLegs);
 	}
 	// Keep the current gun mounted after clothing refresh (slot swap rebuilds leader poses).
 	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr)
@@ -303,13 +309,14 @@ void APFCharacterPreviewActor::AttachPreviewWeapon()
 	{
 		return;
 	}
-	// Same hand-socket priority list the live pawn uses (hand_r / weapon sockets).
+	// HAND first (same priority as the live pawn). weapon_r / holster sockets come last — on many packs
+	// they sit on the hip and left the preview gun glued to the armpit/hip while the idle pose looked empty-handed.
 	if (CachedWeaponBone.IsNone())
 	{
 		static const FName Candidates[] = {
-			TEXT("hand_rSocket"), TEXT("weapon_r"), TEXT("WeaponPoint"),
-			TEXT("hand_r"), TEXT("Hand_R"), TEXT("RightHand"),
-			TEXT("ik_hand_gun"), TEXT("ik_hand_r"), TEXT("HandR"),
+			TEXT("hand_r"), TEXT("Hand_R"), TEXT("hand_rSocket"), TEXT("RightHand"),
+			TEXT("ik_hand_r"), TEXT("HandR"),
+			TEXT("weapon_r"), TEXT("WeaponPoint"), TEXT("ik_hand_gun"),
 		};
 		for (const FName& N : Candidates)
 		{

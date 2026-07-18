@@ -45,6 +45,10 @@ void UCombatForgeGameInstance::Init()
 	// never open Options still get the cap; the Options FPS-limit row edits the same pref.
 	if (GEngine != nullptr)
 	{
+		// Screen debug text OFF by default (Tom: cluttered playtest). Re-enable with console
+		// `EnableAllScreenMessages` or `GEngine->bEnableOnScreenDebugMessages = true`.
+		GEngine->bEnableOnScreenDebugMessages = false;
+
 		if (UGameUserSettings* S = GEngine->GetGameUserSettings())
 		{
 			S->SetFrameRateLimit(FPFUserPrefs::FrameRateLimitForIndex(FPFUserPrefs::GetFrameRateLimitIndex()));

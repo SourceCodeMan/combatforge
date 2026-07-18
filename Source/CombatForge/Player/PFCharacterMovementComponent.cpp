@@ -27,6 +27,14 @@ UPFCharacterMovementComponent::UPFCharacterMovementComponent()
 	AirControl = 0.9f;
 	PerchRadiusThreshold = 15.f;
 
+	// Capsule depenetration ceilings (engine defaults 100/500). Even with GetPenetrationAdjustment
+	// zeroing pawn-vs-pawn Z, a large MaxDepenetration budget still lets geometry MTD fling a
+	// jammed bot skyward when path-follow drives them into a wall corner. Keep nudges tiny.
+	MaxDepenetrationWithGeometry = 40.f;
+	MaxDepenetrationWithGeometryAsProxy = 40.f;
+	MaxDepenetrationWithPawn = 10.f;
+	MaxDepenetrationWithPawnAsProxy = 10.f;
+
 	NavAgentProps.bCanCrouch = true;
 	SetCrouchedHalfHeight(58.f);
 	bCanWalkOffLedgesWhenCrouching = true;
@@ -213,22 +221,34 @@ FVector UPFCharacterMovementComponent::GetPenetrationAdjustment(const FHitResult
 {
 	FVector Adjust = Super::GetPenetrationAdjustment(Hit);
 
-	// "Bots randomly launch to the roof" (Tom, recurring — task #51's fix was in the BUILD-phase piece-placement
-	// ejector, which cannot even run during a combat round, so it never touched this).
+	// "Bots randomly launch to the roof" (Tom, recurring). Overlapping capsules resolve via a NON-SWEPT teleport
+	// along the minimum-translation direction every sub-step. Bots get driven into each other / wall corners;
+	// once horizontal escape is blocked the MTD flips VERTICAL and the pawn rockets skyward (Velocity never
+	// written → looks like an instant launch, not a jump). Players don't hit this because they aren't AI-commanded
+	// into other capsules.
 	//
-	// Overlapping capsules are resolved by a NON-SWEPT teleport along the minimum-translation direction, re-applied
-	// every sub-step (up to 100uu vs a pawn / 500uu vs geometry by default). Bots are algorithmically driven into
-	// each other, so once horizontal escape is blocked the MTD flips VERTICAL and the pawn is teleported skyward at
-	// thousands of uu/s. Velocity is never written, which is exactly why it looks like an instant launch rather than
-	// a jump arc — and why only bots ever showed it (players are never commanded to stand inside another pawn).
-	//
-	// A pawn-vs-pawn overlap must NEVER resolve upward: push them apart horizontally instead.
-	if (Cast<APawn>(Hit.GetActor()) != nullptr)
+	// Hard rules:
+	//  1) Pawn-vs-pawn: NEVER resolve on Z — horizontal separation only.
+	//  2) Geometry: clamp Z tightly so a corner jam cannot become a roof-launch.
+	//  3) Absolute magnitude clamp so a single sub-step can't teleport hundreds of uu.
+	const bool bVsPawn = (Cast<APawn>(Hit.GetActor()) != nullptr)
+		|| (Hit.Component.IsValid() && Hit.Component->GetCollisionObjectType() == ECC_Pawn);
+	if (bVsPawn)
 	{
 		Adjust.Z = 0.f;
+		// Prefer pure horizontal push (drop any residual vertical from Super).
+		Adjust = FVector(Adjust.X, Adjust.Y, 0.f);
 	}
-	// Everything else (geometry): allow a small vertical nudge to un-stick, but never a fling.
-	Adjust.Z = FMath::Clamp(Adjust.Z, -40.f, 40.f);
+	else
+	{
+		Adjust.Z = FMath::Clamp(Adjust.Z, -12.f, 12.f);
+	}
+	// Absolute per-step cap (on top of MaxDepenetration* properties).
+	const float MaxStep = bVsPawn ? 12.f : 24.f;
+	if (Adjust.SizeSquared() > FMath::Square(MaxStep))
+	{
+		Adjust = Adjust.GetSafeNormal() * MaxStep;
+	}
 	return Adjust;
 }
 
