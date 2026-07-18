@@ -64,7 +64,9 @@ protected:
 
 	void RebuildGeometry();
 	void ApplyOpenState();
-	void ApplyCollisionPreset(UPrimitiveComponent* Comp, bool bBlock);
+	// bAffectNav=false keeps the component physically blocking but nav-transparent — used for the normal
+	// door leaf so the runtime navmesh threads through the doorway (bots path in, stall on it, open it).
+	void ApplyCollisionPreset(UPrimitiveComponent* Comp, bool bBlock, bool bAffectNav = true);
 	void EnsureGeometryBuilt();
 
 	UStaticMeshComponent* AddCubePart(const FName& Name, const FVector& WorldCenter,
@@ -81,6 +83,9 @@ protected:
 	/** Server: count down open doors and close them after DoorOpenSeconds. */
 	void TickDoorAutoClose(float DeltaSeconds);
 	void AuthorityCloseDoor();
+
+	/** Normal doors are nav-transparent (bots path through + open); one-way doors keep carving nav. */
+	bool DoorLeafAffectsNav() const;
 
 	/** Front outward normal of the wall edge (+Y for N, +X for E). */
 	FVector WallFrontNormal() const;
@@ -111,6 +116,10 @@ protected:
 	float DoorYawAlpha = 0.f;     // 0 closed .. 1 open (visual)
 	float DoorOpenRemaining = 0.f; // server auto-close countdown while open
 	float TrapOpenRemaining = 0.f;
+	/** Server-only, transient: a one-way door is swinging CLOSED and should seal once the swing finishes.
+	 *  Deferring the seal (vs arming it the instant close begins) is what lets the leaf animate shut
+	 *  before the flush wall plate takes over — Tom: "it needs to close before it turns to wall." */
+	bool bOneWaySealPending = false;
 
 	UPROPERTY() TObjectPtr<UStaticMesh> CubeMesh;
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> FrameMID;

@@ -102,6 +102,8 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	/** Bots roll their random weapon here: BeginPlay runs pre-possession, so IsBotControlled() was false then. */
+	virtual void PossessedBy(AController* NewController) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void PawnClientRestart() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -462,6 +464,10 @@ private:
 
 	FVector ViewModelHomeLoc = FVector::ZeroVector;   // resting local location of ViewModelRoot
 	FVector MuzzleLocalFP = FVector::ZeroVector;      // barrel tip in ViewModelRoot space
+	/** Use the authored MuzzleLocalFP instead of the mesh-bounds auto-tip. Set for guns whose bounds fool the
+	 *  geometry heuristic (the minigun: a fat multi-barrel cluster whose auto-tip lands at a bounds corner
+	 *  → tracer from the top-right of the screen). Lets pf.WeaponFP muzzle tuning actually take effect too. */
+	bool bMuzzleFromAuthoredFP = false;
 	bool bWeaponDragging = false;                     // middle-mouse pose drag active (pf.WeaponDrag)
 
 	// Procedural reload dip — FP viewmodel lowers + tilts while reloading (no skeletal reload anim).

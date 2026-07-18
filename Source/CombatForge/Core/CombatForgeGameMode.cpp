@@ -603,6 +603,16 @@ void ACombatForgeGameMode::RestartPlayer(AController* NewPlayer)
 		return;
 	}
 
+	// The headless box runs the server with ?listen, so it has its OWN local player controller ("CombatForge
+	// Server"). It has no human at a screen and no AI, so if it spawns a pawn that pawn just stands there with
+	// the default two-gun loadout, cluttering the arena (Tom's "phantom bot that never plays"). Give it no pawn.
+	// This only matches the non-rendering server phantom — a real listen HOST (a human playing) renders, so
+	// IsHeadlessServerPhantom() is false for them and they still spawn normally.
+	if (PS->IsHeadlessServerPhantom())
+	{
+		return;
+	}
+
 	RestartPlayerAtTransform(NewPlayer, GetSpawnTransform(PS));
 
 	if (ACombatForgeCharacter* Pawn = Cast<ACombatForgeCharacter>(NewPlayer->GetPawn()))

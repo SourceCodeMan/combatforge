@@ -628,6 +628,22 @@ void ACombatForgeCharacter::BeginPlay()
 	}
 }
 
+void ACombatForgeCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);   // attaches Controller + PlayerState (bIsABot is now readable)
+
+	// BOTS: roll the random weapon HERE, not in BeginPlay. A bot pawn is spawned UNPOSSESSED, so BeginPlay's
+	// ApplyWeaponLoadout() ran before this: IsBotControlled() was false (no controller/PlayerState yet), the
+	// random-roll guard at ApplyWeaponLoadout() was skipped, and the bot fell through to PFWeapon::LoadConfig()
+	// — the HOST'S saved gun. Hence "all bots use whatever gun the player has." Now the AI controller + the
+	// bot PlayerState (bIsABot set in GameMode::AddBot) are attached, so IsBotControlled() is true and the kit
+	// is still empty; re-apply so the roll fires. Server-authoritative; KitRep replicates to dress every client.
+	if (HasAuthority() && IsBotControlled() && !HasValidKit())
+	{
+		ApplyWeaponLoadout();
+	}
+}
+
 void ACombatForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (PFMovement != nullptr)
@@ -2667,6 +2683,10 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	MuzzleLocalFP = UseMuzzle;
 	ViewModelAdsLoc = UseAdsLoc;
 	ViewModelAdsRot = UseAdsRot;
+	// Minigun: its fat multi-barrel bounds fool the mesh-tip heuristic in ResolveGunMuzzleWorld (the tip lands
+	// at a bounds CORNER → tracer from the top-right of the screen). Route it through the authored MuzzleFP
+	// instead. Only this gun — slim rifles/SMGs/snipers auto-tip correctly and stay on that path.
+	bMuzzleFromAuthoredFP = (Def.WeaponId != nullptr && FCString::Strcmp(Def.WeaponId, TEXT("lmg_minigun")) == 0);
 
 	if (WeaponComponent != nullptr)
 	{
@@ -4184,6 +4204,11 @@ FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 	// Owning-client cosmetic tracers: FP viewmodel gun mesh barrel (any catalog weapon).
 	if (bCosmetic)
 	{
+		// Guns whose bounds fool the auto-tip (minigun) use the authored ViewModelRoot-space muzzle instead.
+		if (bMuzzleFromAuthoredFP && ViewModelRoot != nullptr && !MuzzleLocalFP.IsNearlyZero())
+		{
+			return ViewModelRoot->GetComponentTransform().TransformPosition(MuzzleLocalFP);
+		}
 		if (RifleFPMesh != nullptr && RifleFPMesh->GetStaticMesh() != nullptr && RifleFPMesh->IsVisible())
 		{
 			// Mesh-local auto tip → world via the FP component (pose/scale already applied).

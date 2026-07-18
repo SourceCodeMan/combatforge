@@ -152,7 +152,7 @@ void APFBuildPieceActor::EnsureGeometryBuilt()
 	ApplyOpenState();
 }
 
-void APFBuildPieceActor::ApplyCollisionPreset(UPrimitiveComponent* Comp, bool bBlock)
+void APFBuildPieceActor::ApplyCollisionPreset(UPrimitiveComponent* Comp, bool bBlock, bool bAffectNav)
 {
 	if (!Comp)
 	{
@@ -172,7 +172,18 @@ void APFBuildPieceActor::ApplyCollisionPreset(UPrimitiveComponent* Comp, bool bB
 	Comp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 	Comp->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
 	Comp->SetCollisionResponseToChannel(PF_ECC_BuildTrace, ECR_Block);
-	Comp->SetCanEverAffectNavigation(true);
+	Comp->SetCanEverAffectNavigation(bAffectNav);
+}
+
+// A NORMAL door leaf must NOT carve the navmesh: if it does, the closed door is a nav obstacle, the
+// pathfinder routes bots AROUND it, and they never approach/stall/open it (Tom: "make bots open doors").
+// Nav-transparent + still-blocking means the runtime navmesh threads through the ~140uu doorway, bots path
+// in, their capsule stalls on the physical leaf, and the stall→AuthorityTryToggleDoor loop fires.
+// A one-way door KEEPS carving nav (bAffectNav stays true) so the pathfinder still routes around it —
+// that preserves the one-way trick (a bot can't be routed the wrong way through it and get stuck).
+bool APFBuildPieceActor::DoorLeafAffectsNav() const
+{
+	return PieceType != EPFPieceType::WallDoor;
 }
 
 UStaticMeshComponent* APFBuildPieceActor::AddCubePart(const FName& Name, const FVector& WorldCenter,
@@ -369,7 +380,7 @@ void APFBuildPieceActor::BuildDoorLeaf()
 	DoorLeaf->SetWorldScale3D(Scale);
 	DoorLeaf->SetWorldLocation(DoorLeafClosedCenter());
 	DoorLeaf->SetWorldRotation(DoorLeafClosedRotation());
-	ApplyCollisionPreset(DoorLeaf, true);
+	ApplyCollisionPreset(DoorLeaf, true, DoorLeafAffectsNav());
 	SolidParts.Add(DoorLeaf);
 }
 
@@ -462,18 +473,14 @@ void APFBuildPieceActor::ApplyOpenState()
 	if (bDoorType && DoorLeaf)
 	{
 		// Collision off while open so pawns pass; sealed-closed uses the flush plate instead of the leaf.
-		ApplyCollisionPreset(DoorLeaf, !bOpen && !bShowOneWaySeal);
+		// Normal doors stay nav-transparent (bots path through + open); one-way keeps carving nav.
+		ApplyCollisionPreset(DoorLeaf, !bOpen && !bShowOneWaySeal, DoorLeafAffectsNav());
 		DoorLeaf->SetVisibility(!bShowOneWaySeal);
-		if (bOpen)
-		{
-			DoorLeaf->SetWorldRotation(DoorLeafOpenRotation());
-			DoorYawAlpha = 1.f;
-		}
-		else
-		{
-			DoorLeaf->SetWorldRotation(DoorLeafClosedRotation());
-			DoorYawAlpha = 0.f;
-		}
+		// DoorYawAlpha / rotation are NOT set here — TickDoorAnim interpolates the alpha toward the bOpen
+		// target every frame and drives the rotation from it, so the leaf visibly SWINGS open and shut.
+		// The old code hard-snapped alpha to 0/1 here, giving the interp zero travel: the door teleported
+		// between states, and on a one-way that read as "snaps straight back to a wall". BuildDoorLeaf sets
+		// the initial closed rotation, so a freshly spawned closed door still looks right before the first tick.
 	}
 
 	if (PieceType == EPFPieceType::WallDoorOneWay && OneWaySealPlate)
@@ -553,13 +560,16 @@ void APFBuildPieceActor::AuthorityCloseDoor()
 	}
 	bOpen = false;
 	DoorOpenRemaining = 0.f;
-	// First close after an open arms the flush seal (trick door → wall when closed thereafter).
-	if (PieceType == EPFPieceType::WallDoorOneWay)
+	// One-way trick door: the seal (leaf → flush wall) is DEFERRED until the close swing finishes, so the
+	// leaf visibly swings shut first. Just flag it here; TickDoorAnim solidifies it at the end of the swing.
+	// (The old code set bOneWaySealed=true on this same frame, which hid the leaf and popped the wall in
+	// instantly — Tom: "it just turns back to the wall. it needs to close before it turns to wall.")
+	if (PieceType == EPFPieceType::WallDoorOneWay && !bOneWaySealed)
 	{
-		bOneWaySealed = true;
+		bOneWaySealPending = true;
 	}
-	ApplyOpenState();
-	ForceNetUpdate();
+	ApplyOpenState();      // bOpen just went false → leaf stays visible + solid and TickDoorAnim swings it shut
+	ForceNetUpdate();      // replicate bOpen so clients start their own close swing
 }
 
 void APFBuildPieceActor::Tick(float DeltaSeconds)
@@ -608,6 +618,18 @@ void APFBuildPieceActor::TickDoorAnim(float DeltaSeconds)
 	DoorLeaf->SetWorldRotation(FMath::Lerp(Closed, Opened, DoorYawAlpha));
 	// Keep hinge near closed center (simple swing about center — good enough for graybox).
 	DoorLeaf->SetWorldLocation(DoorLeafClosedCenter());
+
+	// One-way seal completion: once the close swing has fully landed, solidify into the flush wall plate.
+	// Server drives the state change; bOneWaySealed replicates (OnRep_OneWaySealed → ApplyOpenState) so each
+	// client swaps to the wall plate only after its own leaf finished swinging shut.
+	if (bOneWaySealPending && HasAuthority() && !bOpen && DoorYawAlpha <= 0.02f)
+	{
+		bOneWaySealPending = false;
+		bOneWaySealed = true;
+		ApplyOpenState();   // hide the (now-closed) leaf, raise the flush seal plate
+		ForceNetUpdate();
+		UE_LOG(CombatForgeLog, Verbose, TEXT("Door piece %u one-way sealed after close swing"), PieceId);
+	}
 }
 
 void APFBuildPieceActor::TickTrap(float DeltaSeconds)

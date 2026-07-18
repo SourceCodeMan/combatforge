@@ -216,7 +216,13 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 	for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
 	{
 		const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
-		if (PFBuildPieceVisuals::UsesNativeMaterials(Type))
+		// NEVER texture a prop with a structural surface. UsesNativeMaterials is false for a prop only WHILE it's
+		// on its engine-shape fallback (mesh not yet loaded) — and this loop would then paint that fallback cone/
+		// cylinder/cube with the FloorConcrete MID (RoleForPieceType has no prop case → default FloorConcrete).
+		// That's the "cones wearing the ceiling/floor tile" Tom saw. A fallback prop must keep the neutral engine
+		// BasicShapeMaterial gray the ctor set (PFBuildGrid ctor SetMaterial), and a loaded prop keeps its native
+		// warehouse material (EmptyOverrideMaterials in the swap loop above). So skip props here unconditionally.
+		if (PFIsProp(Type) || PFBuildPieceVisuals::UsesNativeMaterials(Type))
 		{
 			continue;
 		}
