@@ -8,15 +8,13 @@
 #include "Core/PFUserPrefs.h"
 #include "Player/CombatForgeCharacter.h"
 
-#include "Engine/Engine.h"
+#include "Components/AudioComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
-#include "FileMediaSource.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
-#include "MediaPlayer.h"
-#include "MediaSoundComponent.h"
-#include "Misc/Paths.h"
+#include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 
 void UPFMusicSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -32,32 +30,32 @@ void UPFMusicSubsystem::Deinitialize()
 		MusicAnchor->Destroy();
 		MusicAnchor = nullptr;
 	}
-	MediaSound = nullptr;
-	MediaPlayer = nullptr;
-	MediaSource = nullptr;
+	MusicComp = nullptr;
 	Super::Deinitialize();
 }
 
 float UPFMusicSubsystem::ResolveVolume() const
 {
-	// Music rides the Ambient slider so one control covers bed + tracks.
+	// Music rides the Ambient slider so one control covers bed + tracks. Slight headroom so SFX stay on top.
 	const float Ambient = FPFUserPrefs::GetAmbientVolume();
-	// Slight headroom so SFX stay on top of the bed.
 	return FMath::Clamp(Ambient * 0.85f, 0.f, 1.f);
 }
 
-FString UPFMusicSubsystem::TrackFilePath(EPFMusicTrack Track) const
+USoundBase* UPFMusicSubsystem::TrackSound(EPFMusicTrack Track)
 {
-	const TCHAR* File = nullptr;
+	// Imported SoundWave assets (NOT the loose .mp3, which no media player can open). Soft-loaded by path and
+	// cached. The /Game/Audio dir is force-cooked (DirectoriesToAlwaysCook) since this is a code-string load.
 	switch (Track)
 	{
-	case EPFMusicTrack::Build:  File = TEXT("PF_Music_Build.mp3"); break;
-	case EPFMusicTrack::Combat: File = TEXT("PF_Music_Combat.mp3"); break;
-	default: return FString();
+	case EPFMusicTrack::Build:
+		if (!BuildMusic)  { BuildMusic  = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/Music/PF_Music_Build.PF_Music_Build")); }
+		return BuildMusic;
+	case EPFMusicTrack::Combat:
+		if (!CombatMusic) { CombatMusic = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/Music/PF_Music_Combat.PF_Music_Combat")); }
+		return CombatMusic;
+	default:
+		return nullptr;
 	}
-	// Content/Audio/Music — shipped next to the project (no .uasset import required).
-	return FPaths::ConvertRelativePathToFull(
-		FPaths::ProjectContentDir() / TEXT("Audio") / TEXT("Music") / File);
 }
 
 void UPFMusicSubsystem::EnsurePlayer()
@@ -68,16 +66,6 @@ void UPFMusicSubsystem::EnsurePlayer()
 		return;
 	}
 
-	if (!MediaPlayer)
-	{
-		MediaPlayer = NewObject<UMediaPlayer>(this, TEXT("PFMusicPlayer"));
-		MediaPlayer->SetLooping(true);
-		MediaPlayer->PlayOnOpen = true;
-	}
-	if (!MediaSource)
-	{
-		MediaSource = NewObject<UFileMediaSource>(this, TEXT("PFMusicSource"));
-	}
 	if (!IsValid(MusicAnchor) || MusicAnchor->GetWorld() != World)
 	{
 		if (IsValid(MusicAnchor))
@@ -94,16 +82,16 @@ void UPFMusicSubsystem::EnsurePlayer()
 			MusicAnchor->SetActorHiddenInGame(true);
 			MusicAnchor->SetReplicates(false);
 		}
-		MediaSound = nullptr;   // re-create on new anchor
+		MusicComp = nullptr;   // recreate on the new anchor
 	}
-	if (MusicAnchor && !MediaSound)
+
+	if (MusicAnchor && !MusicComp)
 	{
-		MediaSound = NewObject<UMediaSoundComponent>(MusicAnchor, TEXT("PFMusicSound"));
-		MediaSound->bAutoActivate = true;
-		MediaSound->SetMediaPlayer(MediaPlayer);
-		MediaSound->RegisterComponent();
-		MediaSound->bIsUISound = true;
-		MediaSound->bAllowSpatialization = false;
+		MusicComp = NewObject<UAudioComponent>(MusicAnchor, TEXT("PFMusicComp"));
+		MusicComp->bAutoActivate = false;
+		MusicComp->bIsUISound = true;             // survives gameplay pause + plays in menus
+		MusicComp->bAllowSpatialization = false;  // 2D bed
+		MusicComp->RegisterComponent();
 	}
 }
 
@@ -114,26 +102,32 @@ void UPFMusicSubsystem::PlayTrack(EPFMusicTrack Track)
 		StopMusic();
 		return;
 	}
-	if (Track == ActiveTrack && MediaPlayer && MediaPlayer->IsPlaying())
+	if (Track == ActiveTrack && MusicComp && MusicComp->IsPlaying())
 	{
 		ApplyVolumeFromPrefs();
 		return;
 	}
 
-	const FString Path = TrackFilePath(Track);
-	if (Path.IsEmpty() || !FPaths::FileExists(Path))
+	USoundBase* Sound = TrackSound(Track);
+	if (!Sound)
 	{
 		UE_LOG(CombatForgeLog, Warning,
-			TEXT("Music: missing track file for %d (%s) — place MP3s in Content/Audio/Music/"),
-			static_cast<int32>(Track), *Path);
+			TEXT("Music: SoundWave asset missing for track %d — expected /Game/Audio/Music/PF_Music_* (cooked?)"),
+			static_cast<int32>(Track));
 		StopMusic();
 		return;
 	}
 
 	EnsurePlayer();
-	if (!MediaPlayer || !MediaSource || !MediaSound)
+	if (!MusicComp)
 	{
 		return;
+	}
+
+	// Loop the bed. The wave's own loop flag is the seamless path; harmless if the asset already loops.
+	if (USoundWave* Wave = Cast<USoundWave>(Sound))
+	{
+		Wave->bLooping = true;
 	}
 
 	ActiveTrack = Track;
@@ -151,24 +145,18 @@ void UPFMusicSubsystem::PlayTrack(EPFMusicTrack Track)
 			}
 		}
 	}
-	MediaSource->SetFilePath(Path);
-	MediaPlayer->Close();
-	if (!MediaPlayer->OpenSource(MediaSource))
-	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("Music: OpenSource failed for %s"), *Path);
-		ActiveTrack = EPFMusicTrack::None;
-		return;
-	}
-	ApplyVolumeFromPrefs();
-	MediaPlayer->Play();
-	UE_LOG(CombatForgeLog, Log, TEXT("Music: playing %s (vol %.2f)"), *FPaths::GetCleanFilename(Path), ResolveVolume());
+
+	MusicComp->SetSound(Sound);
+	MusicComp->SetVolumeMultiplier(ResolveVolume());
+	MusicComp->Play();
+	UE_LOG(CombatForgeLog, Log, TEXT("Music: playing %s (vol %.2f)"), *Sound->GetName(), ResolveVolume());
 }
 
 void UPFMusicSubsystem::StopMusic()
 {
-	if (MediaPlayer)
+	if (MusicComp)
 	{
-		MediaPlayer->Close();
+		MusicComp->Stop();
 	}
 	const bool bWasPlaying = (ActiveTrack != EPFMusicTrack::None);
 	ActiveTrack = EPFMusicTrack::None;
@@ -193,25 +181,10 @@ void UPFMusicSubsystem::StopMusic()
 
 void UPFMusicSubsystem::ApplyVolumeFromPrefs()
 {
-	const float Vol = ResolveVolume();
-	if (MediaSound)
+	// Volume 0 just mutes (no stop/restart — avoids a jarring music restart when the slider crosses zero).
+	if (MusicComp && ActiveTrack != EPFMusicTrack::None)
 	{
-		MediaSound->SetVolumeMultiplier(Vol);
-	}
-	// Mute by pausing when volume is zero (saves decode work).
-	if (MediaPlayer && ActiveTrack != EPFMusicTrack::None)
-	{
-		if (Vol <= 0.001f)
-		{
-			if (MediaPlayer->IsPlaying())
-			{
-				MediaPlayer->Pause();
-			}
-		}
-		else if (!MediaPlayer->IsPlaying() && MediaPlayer->IsReady())
-		{
-			MediaPlayer->Play();
-		}
+		MusicComp->SetVolumeMultiplier(ResolveVolume());
 	}
 }
 

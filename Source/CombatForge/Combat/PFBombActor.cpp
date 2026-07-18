@@ -263,32 +263,64 @@ void APFBombActor::Tick(float DeltaSeconds)
 	}
 
 	// Server: accumulate the continuous hold-F defuse, re-validating everything every frame.
+	// ANYONE except the planter may defuse (review wf_e923820a): a team gate broke FFA entirely (roster
+	// TeamIds > 1) and left a griefer's OWN team with zero counterplay against a bomb on their own fort.
+	bool bActivelyDefusing = false;
 	if (bDefuserHeld)
 	{
-		bool bValid = false;
 		if (ACombatForgeCharacter* Defuser = Cast<ACombatForgeCharacter>(DefuserWeak.Get()))
 		{
 			const UPFHealthComponent* Health = Defuser->GetHealth();
 			const ACombatForgePlayerState* PS = Defuser->GetPlayerState<ACombatForgePlayerState>();
-			// ANYONE except the planter may defuse (review wf_e923820a): a team gate broke FFA entirely
-			// (roster TeamIds > 1) and left a griefer's OWN team with zero counterplay against a bomb on
-			// their own fort. The planter alone can never defuse their own bomb.
-			bValid = (Health == nullptr || !Health->bEliminated)
+			bActivelyDefusing = (Health == nullptr || !Health->bEliminated)
 				&& PS != nullptr && PS != PlanterPS.Get()
 				&& FVector::DistSquared(Defuser->GetActorLocation(), GetActorLocation())
 					<= FMath::Square(DefuseRangeUU);
 		}
-		if (bValid)
+	}
+
+	const ACombatForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
+
+	if (bActivelyDefusing)
+	{
+		// PAUSE the fuse the instant a defuse actually starts (Tom): the bomb can't tick down while it's being
+		// defused, so a defuser can never blow themselves up mid-defuse.
+		if (!bFusePaused)
 		{
-			DefuseAccumSeconds += DeltaSeconds;
-			if (DefuseAccumSeconds >= DefuseHoldSeconds)
-			{
-				ServerDefused();
-			}
+			bFusePaused = true;
+			FusePausedRemaining = FMath::Max(0.f, GetWorldTimerManager().GetTimerRemaining(FuseTimer));
+			GetWorldTimerManager().ClearTimer(FuseTimer);
+			ForceNetUpdate();
 		}
-		else if (DefuseAccumSeconds > 0.f)
+		// Hold the replicated detonate time constant so the floating countdown freezes with the fuse.
+		if (GS)
 		{
-			DefuseAccumSeconds = 0.f;   // stepped away / died — progress resets
+			DetonateServerTime = GS->GetServerWorldTimeSeconds() + FusePausedRemaining;
+		}
+		DefuseAccumSeconds += DeltaSeconds;
+		if (DefuseAccumSeconds >= DefuseHoldSeconds)
+		{
+			ServerDefused();
+		}
+	}
+	else
+	{
+		// Defuse stopped (released / stepped away / died): resume the fuse from EXACTLY where it froze, and
+		// reset any partial defuse progress (continuous hold required).
+		if (bFusePaused)
+		{
+			bFusePaused = false;
+			const float Remain = FMath::Max(0.1f, FusePausedRemaining);
+			if (GS)
+			{
+				DetonateServerTime = GS->GetServerWorldTimeSeconds() + Remain;
+			}
+			GetWorldTimerManager().SetTimer(FuseTimer, this, &APFBombActor::ServerDetonate, Remain, false);
+			ForceNetUpdate();
+		}
+		if (DefuseAccumSeconds > 0.f)
+		{
+			DefuseAccumSeconds = 0.f;
 			ForceNetUpdate();
 		}
 	}

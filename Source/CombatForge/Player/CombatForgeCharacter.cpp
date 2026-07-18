@@ -2497,9 +2497,30 @@ void ACombatForgeCharacter::PushLocalKit()
 
 	KitRep = Kit;   // listen host: this IS the replicated copy; pure client: local preview until the RPC lands
 	ApplyKit();
+
+	// Also push the player's ACCOUNT display name so scoreboards/nameplates/after-action show their real name
+	// instead of an engine default (which read as the host's name). The name lives only on the owning client
+	// (from its login profile) — the server can't read it any other way.
+	FString MyName;
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (UPFBackendSubsystem* Backend = GI->GetSubsystem<UPFBackendSubsystem>())
+			{
+				MyName = Backend->GetProfile().DisplayName;
+			}
+		}
+	}
+
 	if (!HasAuthority())
 	{
 		ServerSetKit(Kit);
+		if (!MyName.IsEmpty()) { ServerSetPlayerName(MyName); }
+	}
+	else if (!MyName.IsEmpty())
+	{
+		if (APlayerState* PS = GetPlayerState()) { PS->SetPlayerName(MyName); }   // listen host: set directly
 	}
 }
 
@@ -2514,6 +2535,18 @@ void ACombatForgeCharacter::ServerRequestResetToSpawn_Implementation()
 	if (ACombatForgeGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ACombatForgeGameMode>() : nullptr)
 	{
 		GM->RequestResetToSpawn(this);
+	}
+}
+
+void ACombatForgeCharacter::ServerSetPlayerName_Implementation(const FString& Name)
+{
+	if (APlayerState* PS = GetPlayerState())
+	{
+		const FString Clean = Name.TrimStartAndEnd().Left(24);   // backend already validated the name; clamp length
+		if (!Clean.IsEmpty())
+		{
+			PS->SetPlayerName(Clean);
+		}
 	}
 }
 

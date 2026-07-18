@@ -303,6 +303,9 @@ private:
 	UFUNCTION() void OnRep_Kit();
 	/** Server RPC backing RequestResetToSpawn(): owning client → server teleport-to-spawn (heal + refill). */
 	UFUNCTION(Server, Reliable) void ServerRequestResetToSpawn();
+	/** Owning client → server: set this player's in-game name to their account display name (login profile).
+	 *  Without it the PlayerState keeps an engine default and everyone shows the wrong / host name. */
+	UFUNCTION(Server, Reliable) void ServerSetPlayerName(const FString& Name);
 	void ApplyKit();          // apply KitRep → ActiveCharConfig/ActiveWeaponConfig → visuals + weapon stats
 	bool HasValidKit() const { return KitRep.CharParts.Num() > 0; }
 

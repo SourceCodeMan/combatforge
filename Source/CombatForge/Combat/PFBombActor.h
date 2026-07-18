@@ -126,6 +126,11 @@ protected:
 	TWeakObjectPtr<APawn> DefuserWeak;
 	bool bDefuserHeld = false;
 	FTimerHandle FuseTimer;
+	// Fuse pause while someone is ACTIVELY defusing (server-only): the countdown freezes so a defuser can't
+	// blow up mid-defuse (bomb 3s left + 8s defuse used to detonate at defuse-5s). Not replicated — the frozen
+	// HUD rides the replicated DetonateServerTime, which we hold constant during the pause.
+	bool  bFusePaused = false;
+	float FusePausedRemaining = 0.f;
 
 	// Deferred BB spray (server): avoid SpawnActor×1000 on the detonation frame.
 	FVector BurstCenter = FVector::ZeroVector;

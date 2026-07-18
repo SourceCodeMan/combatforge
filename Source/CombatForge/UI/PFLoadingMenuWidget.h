@@ -253,6 +253,7 @@ private:
 	UPROPERTY() TObjectPtr<UImage> Backdrop;
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> SubtitleText;
+	UPROPERTY() TObjectPtr<UTextBlock> VersionText;   // bottom-right client/server build sync readout
 	UPROPERTY() TObjectPtr<UButton> QuickStartButton;
 	UPROPERTY() TObjectPtr<UButton> HostLanButton;
 	UPROPERTY() TObjectPtr<class UEditableTextBox> JoinIpBox;

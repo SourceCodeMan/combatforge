@@ -697,18 +697,16 @@ void UPFBackendSubsystem::SendHeartbeat()
 			return;
 		}
 	}
-	// Re-resolve after map reload (`open L_Graybox` recreates the GameState).
-	if (!GS)
+	// ALWAYS re-resolve the current GameState (not just when null): a map reload swaps it, and a stale-but-
+	// valid pointer would keep counting the OLD (empty) PlayerArray — the "0/12 with players connected" bug.
+	if (const UGameInstance* GI = GetGameInstance())
 	{
-		if (const UGameInstance* GI = GetGameInstance())
+		if (const UWorld* World = GI->GetWorld())
 		{
-			if (const UWorld* World = GI->GetWorld())
-			{
-				FleetGS = World->GetGameState<ACombatForgeGameState>();
-				GS = FleetGS.Get();
-			}
+			FleetGS = World->GetGameState<ACombatForgeGameState>();
 		}
 	}
+	GS = FleetGS.Get();
 	int32 Humans = 0;
 	FString PhaseStr, MapStr, ModeStr, FormatStr;
 	if (GS)

@@ -7,15 +7,18 @@
 #include "Core/CombatForgeTypes.h"
 #include "PFMusicSubsystem.generated.h"
 
-class UMediaPlayer;
-class UMediaSoundComponent;
-class UFileMediaSource;
+class USoundBase;
+class UAudioComponent;
 class AActor;
 
 /**
- * Local-only phase music (Build vs Combat). Plays friend-made Suno tracks from
- * Content/Audio/Music/*.mp3 via Media Framework so no editor import is required.
- * Volume follows AmbientVolume pref. Silent no-op on dedicated server.
+ * Local-only phase music (Build vs Combat). Plays the imported SoundWave assets
+ * (Content/Audio/Music/PF_Music_*) through the normal audio engine.
+ *
+ * NOT Media Framework: a loose .mp3 can't play — no enabled media player supports the extension
+ * ("WmfMedia: URI scheme or file extension not supported"), and WmfMedia has no packaged runtime binary
+ * on the Launcher engine anyway. SoundWave assets cook + play everywhere with zero plugin dependency.
+ * Volume follows the AmbientVolume pref. Silent no-op on dedicated server.
  */
 UCLASS()
 class COMBATFORGE_API UPFMusicSubsystem : public UGameInstanceSubsystem
@@ -42,14 +45,15 @@ private:
 
 	void EnsurePlayer();
 	void PlayTrack(EPFMusicTrack Track);
-	FString TrackFilePath(EPFMusicTrack Track) const;
+	USoundBase* TrackSound(EPFMusicTrack Track);   // soft-loads + caches the SoundWave asset
 	float ResolveVolume() const;
 
-	UPROPERTY() TObjectPtr<UMediaPlayer> MediaPlayer;
-	UPROPERTY() TObjectPtr<UFileMediaSource> MediaSource;
-	UPROPERTY() TObjectPtr<UMediaSoundComponent> MediaSound;
-	/** Transient holder so MediaSoundComponent has a world context. */
+	/** 2D looping music component on the hidden anchor (UI sound so it survives pause / menus). */
+	UPROPERTY() TObjectPtr<UAudioComponent> MusicComp;
+	/** Transient holder so the AudioComponent has a world context. */
 	UPROPERTY() TObjectPtr<AActor> MusicAnchor;
+	UPROPERTY() TObjectPtr<USoundBase> BuildMusic;
+	UPROPERTY() TObjectPtr<USoundBase> CombatMusic;
 
 	EPFMusicTrack ActiveTrack = EPFMusicTrack::None;
 };

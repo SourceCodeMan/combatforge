@@ -1498,6 +1498,9 @@ void UPFLoadingMenuWidget::BuildTree()
 				V->SetHorizontalAlignment(HAlign_Fill);
 				V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 			}
+			// Hidden for now — join-by-code has no clear use yet (no private-match host flow). Re-enable
+			// the field + GO button when there's a reason to type a code.
+			CodeRow->SetVisibility(ESlateVisibility::Collapsed);
 
 			// Collapsible server-browser rows (SERVERS toggles; rows fill from GET /v1/servers).
 			ServerRowsBox = WidgetTree->ConstructWidget<UVerticalBox>();
@@ -1518,8 +1521,10 @@ void UPFLoadingMenuWidget::BuildTree()
 				default: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow5Clicked); break;
 				}
 				UTextBlock* RowLab = WidgetTree->ConstructWidget<UTextBlock>();
-				RowLab->SetFont(PFLoadFont(12, false));
+				RowLab->SetFont(PFLoadFont(11, false));
 				RowLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.87f, 0.92f)));
+				RowLab->SetAutoWrapText(true);                    // long name/map/mode wraps instead of overrunning
+				RowLab->SetJustification(ETextJustify::Center);
 				Row->AddChild(RowLab);
 				Row->SetVisibility(ESlateVisibility::Collapsed);
 				if (UVerticalBoxSlot* V = ServerRowsBox->AddChildToVerticalBox(Row))
@@ -1838,6 +1843,22 @@ void UPFLoadingMenuWidget::BuildTree()
 		S->SetAnchors(FAnchors(0.5f, 1.f, 0.5f, 1.f));
 		S->SetAlignment(FVector2D(0.5f, 1.f));
 		S->SetPosition(FVector2D(0.f, -18.f));
+		S->SetAutoSize(true);
+		S->SetZOrder(2);
+	}
+
+	// Version readout pinned bottom-right: client build vs. the server you're viewing, so a player can tell at
+	// a glance whether they're in sync (a mismatched build can't join — the directory gates on NetProtocol).
+	VersionText = WidgetTree->ConstructWidget<UTextBlock>();
+	VersionText->SetText(FText::FromString(FString::Printf(TEXT("Client v%d"), PFBuild::NetProtocol)));
+	VersionText->SetFont(PFLoadFont(11, false));
+	VersionText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
+	VersionText->SetJustification(ETextJustify::Right);
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(VersionText))
+	{
+		S->SetAnchors(FAnchors(1.f, 1.f, 1.f, 1.f));
+		S->SetAlignment(FVector2D(1.f, 1.f));
+		S->SetPosition(FVector2D(-14.f, -12.f));
 		S->SetAutoSize(true);
 		S->SetZOrder(2);
 	}
@@ -2711,6 +2732,19 @@ void UPFLoadingMenuWidget::RebuildServerRows()
 		{
 			Row->SetVisibility(ESlateVisibility::Collapsed);
 		}
+	}
+
+	// Bottom-right version sync readout: our build vs. the top listed server's build.
+	if (VersionText)
+	{
+		FString V = FString::Printf(TEXT("Client v%d"), PFBuild::NetProtocol);
+		if (BrowserRows.Num() > 0)
+		{
+			const int32 SrvProto = BrowserRows[0].NetProtocol;
+			V += FString::Printf(TEXT("    Server v%d  %s"), SrvProto,
+				SrvProto == PFBuild::NetProtocol ? TEXT("(in sync)") : TEXT("(UPDATE NEEDED)"));
+		}
+		VersionText->SetText(FText::FromString(V));
 	}
 }
 

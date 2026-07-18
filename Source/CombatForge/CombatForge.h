@@ -23,7 +23,8 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 6;   // alpha.6 — reset-to-spawn RPC (Options) + WmfMedia music + preview-aspect fix
+	constexpr int32 NetProtocol = 7;   // alpha.7 — ServerSetPlayerName RPC (account name in game) + forces all
+	                                   // clients onto matching content (fixes old-build black-checker props)
 }
 
 /**
