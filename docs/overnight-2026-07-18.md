@@ -141,4 +141,76 @@ returned to the main menu. Never kicks bots, the host, or standalone.
   networked behavior; the version gate must step so mixed 7/8 clients don't mis-render or mis-count XP).
 - Re-copy `ServerKey.txt` to the box isn't needed if you pass `-PFServerKey` (the launcher does).
 
+---
+
+# ROUND 2 (2026-07-18, after Tom's screenshots) — why the first pass didn't land
+
+Tom reported the fixes above did NOT work. He was right. Root causes below are **proven from source**, and
+several of them are traps that will bite the next person too — read this before touching these areas.
+
+### ⚠️ Trap 1: `ApplyRaisedWeaponPose()` was DEAD CODE
+The pistol-rotation fix was put into `ApplyRaisedWeaponPose()`. **Nothing calls it** — only a declaration, a
+definition, and a comment saying "do NOT call this here". The live third-person weapon pose is an inline block
+inside `UpdateWeaponHoldPose()`. The dead function has been **deleted** so it can't absorb another fix.
+→ **There is exactly ONE live TP weapon-pose path: `ACombatForgeCharacter::UpdateWeaponHoldPose()`.**
+
+### ⚠️ Trap 2: there are TWO rebind tables
+Adding an action to `UPFInputConfig::BuildRebindRegistry` does **not** make it appear in Options. The UI builds
+its rows from a separate hardcoded `GRebindDefs[]` in `PFOptionsWidget.cpp` + `NumRebinds` in the header +
+a `switch(i)` needing one `OnRebindN` UFUNCTION per row. **All four must be updated together** (a `static_assert`
+catches the table/count mismatch, but not a missing registry entry).
+
+### Rifle at hip while firing
+`pf.ArmedAnims` ships at **0**, so the arms hang down and the gun (attached to the hand) sits at hip height. The
+lift had been cut 30→10uu to cure the forehead bug. Replaced with an adaptive lift toward `eye Z − 22`, clamped
+to 42uu, never negative — raises to a shoulder line but can never reach the head.
+
+### Stretched torso in the class preview (PROVEN)
+The preview played `/Game/RifleAnims/.../AS_Rifle_Idle`, authored on a **UE4-mannequin skeleton**. Playing it on
+the Bandit goes through a name-based compatible-skeleton remap that carries source bone **translations** and
+elongates the spine. The pawn never showed it because `pf.ArmedAnims=0` keeps it on native `A_MM_Idle`. The repo
+had already documented this exact stretch (`docs/retarget-rifle-anims.md`) and disabled it for the pawn only.
+Preview now resolves its idle through the **same CVar** (`PickIdleAnim`). Aspect ratios were never the problem —
+RT 600x800, SizeBox 300x400, brush 300x400 all = 0.75. **Permanent fix is still the IK-retarget bake** (the
+`IK_Bandit` / `IK_RifleSrc` / `RTG_Rifle_To_Bandit` assets exist; the `_Bandit` sequences were never exported).
+
+### Bots launched to the roof (recurring; #51's fix never applied)
+**Capsule depenetration.** No code in the project applies +Z (no `LaunchCharacter`/`AddImpulse` anywhere), so the
+engine is doing it: overlapping capsules resolve via a **non-swept teleport** along the minimum-translation axis,
+re-applied every sub-step (100uu vs pawn / 500uu vs geometry by default). Bots scored the enemy's **own capsule**
+as a firing position (LOS = +3/−2.5 swing vs a −0.75 crowding nudge), then pressed in at `MaxAcceleration 4096`
+with `MoveAcceptUU 70` < two capsule radii. Blocked horizontally → MTD flips vertical → rocket. Velocity is never
+written, which is why it reads as an instant launch, not an arc. Falling >`FallLethalHeightUU 900` then kills
+them → the observed respawn. Bots only, because only bots are *commanded* to stand inside another pawn.
+**#51 was fixed in `EjectOverlappedPawns`, reachable only from build-phase piece placement — it cannot execute
+during a combat round.** Fixes: `GetPenetrationAdjustment` override zeroes Z for pawn-vs-pawn and clamps ±40
+otherwise; the enemy-location candidate is deleted; candidates within `BotBodyClearanceUU 150` are hard-rejected;
+`MoveAcceptUU` 70→150. (If bots ever stop short of an objective, `MoveAcceptUU` is the knob.)
+
+### Skin through the pants (PROVEN — the first fix targeted the wrong mesh)
+`SKM_Body` is a **ONE-PIECE naked body that already contains legs** (material `M_Body_Full`;
+`PA_Body_PhysicsAsset` has thigh/calf/foot bodies, unlike torso-only `PA_Torso`; 3.0MB vs SKM_Torso 682KB).
+`SKM_Legs` is the **alternative modular piece**, not a completion part — so hiding it removed a duplicate layer
+while the body's own legs kept poking through. The Pants slot index (6) was CORRECT; `Hips_Module` holds only
+bags/holsters. Fix: render the **modular skin set** (Head/Torso/Arms/Legs) and demote `SKM_Body` to
+skeleton/anim/bounds carrier (not rendered), so the leg region can be hidden under trousers.
+**Do NOT use `HideBoneByName`** — followers inherit the leader's bone visibility, so hiding thigh bones would
+collapse the trousers along with the skin.
+⚠️ Guarded: if the torso/arms meshes fail to load it falls back to rendering `SKM_Body` as before, and the leader
+is forced to `AlwaysTickPoseAndRefreshBones` while hidden or every follower would freeze. **Needs a human eye on
+neck/wrist/waist seams** — that is the one thing that can't be verified without rendering.
+
+### F1–F4 "weird colors" — NOT a code bug
+F1–F4 are build pieces and F5 the delete tool, but in **PIE the editor's own viewmode shortcuts intercept them**
+(wireframe/unlit/detail-lighting). Those bindings do not exist in a packaged build. Verify in the packaged exe.
+
+### Scope zoom — still OUTSTANDING
+Per-weapon `ScopedADSFOV` exists and snipers use FOV 28, but it only triggers for **category 4 (Sniper)**, so a
+scoped rifle feels unchanged — and there is no scope MASK, so it's whole-screen zoom, which is explicitly what
+Tom did NOT want. The pack DOES ship the right assets:
+`/Game/MarketplaceBlockout/Modern/Weapons/Assets/Scopes/0{1,2,3}/Textures/T_Modern_Weapons_Scope_0N_Fade_Mask`
+(black circular surround) and `..._Crosshair_Mask` (reticle), plus scope meshes/materials. `/Game/MarketplaceBlockout`
+is already force-cooked. **Next step: full-screen Fade_Mask + Crosshair_Mask overlay shown while ADS with a scoped
+weapon, driven per-weapon rather than by category.**
+
 ## Files touched (game): Config/DefaultEngine.ini, DefaultGame(n/c), Core/{PFPaths,PFUserPrefs,PFLightingSubsystem,CombatForgeGameMode}, Player/{CombatForgeCharacter,PFCharacterPreviewActor}, Combat/PFWeaponCatalog, Online/PFBackendSubsystem, UI/PFLoadingMenuWidget, Input/PFInputConfig, AI/PFBotController, Deploy/pilot/Start-Server-OnBox.ps1. Backend: combatforge-api/src/{casual.ts,index.ts}. Site: combatforge-site/public/index.html. Docs: attachments-plan.md, this file.

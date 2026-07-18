@@ -838,6 +838,15 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 		{
 			return;   // can't shoot from out here
 		}
+		// HARD REJECT body-contact spots. The LOS term below is worth a 5.5-point swing, which used to dwarf the
+		// old -0.75 "don't stand inside them" nudge — so whenever nearby cover lacked LOS, the WINNING firing
+		// position was effectively the enemy's own capsule. Bots then pressed into each other at full acceleration,
+		// and the resulting capsule overlap got resolved by a vertical depenetration teleport = the "bots launch to
+		// the roof" bug. Two capsule radii is 68uu; 150 keeps a real body gap even with path-follow overshoot.
+		if (Dist < BotBodyClearanceUU)
+		{
+			return;
+		}
 
 		float Score = 0.f;
 
@@ -920,7 +929,10 @@ FVector APFBotController::ChooseTacticalPosition(const ACombatForgeCharacter* Ta
 	// level) so ProjectPointToNavigation lands them on the enemy's floor; MoveToGoal then paths UP the ramp
 	// that connects the levels (and the knee/head jump code carries a lip). These go through the same scorer,
 	// so cover/flank/spread still apply — they're just reachable options the bot never had before.
-	Evaluate(EnemyLoc);
+	// NOTE: the enemy's OWN location used to be evaluated here as a candidate standing spot. It is deliberately
+	// gone — it asked bots to walk inside another pawn's capsule, which is what produced the vertical
+	// depenetration "launch to the roof". The ring below (ReposSampleNearUU = 350uu) still seeds the enemy's
+	// ELEVATION, which is all vertical pursuit actually needed.
 	for (int32 i = 0; i < 8; ++i)
 	{
 		const FVector Dir = FRotator(0.f, i * 45.f, 0.f).Vector();

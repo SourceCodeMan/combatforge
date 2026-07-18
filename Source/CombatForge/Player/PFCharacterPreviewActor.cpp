@@ -14,6 +14,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Animation/AnimSequence.h"
+#include "HAL/IConsoleManager.h"   // PickIdleAnim reads pf.ArmedAnims (same CVar the pawn uses)
 #include "UObject/ConstructorHelpers.h"
 
 APFCharacterPreviewActor::APFCharacterPreviewActor()
@@ -37,20 +38,15 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> BodyFinder(
 		TEXT("/Game/Bandits/Mesh/Body/SKM_Body.SKM_Body"));
 	if (BodyFinder.Succeeded()) { BodyMeshAsset = BodyFinder.Object; }
-	// Prefer two-hand RIFLE idle so both hands pose for a gun (unarmed A_MM_Idle leaves the left
-	// arm hanging and the weapon looks casually pointed down). Soft-fallback if the pack is missing.
+	// Load BOTH idles; the choice happens at play time in PickIdleAnim (see the header note). The rifle idle
+	// looks nicer (both hands on the gun) but is authored on a UE4-MANNEQUIN skeleton — running it on the
+	// Bandit via the compatible-skeleton remap STRETCHES the torso/legs, which was the "stretched preview".
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleIdleFinder(
 		TEXT("/Game/RifleAnims/Animations/BlendSpaces/Standing_IdleWalkJogRun/AS_Rifle_Idle.AS_Rifle_Idle"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> UnarmedIdleFinder(
 		TEXT("/Game/Bandits/Demo/Animations/A_MM_Idle.A_MM_Idle"));
-	if (RifleIdleFinder.Succeeded())
-	{
-		IdleAnimAsset = RifleIdleFinder.Object;
-	}
-	else if (UnarmedIdleFinder.Succeeded())
-	{
-		IdleAnimAsset = UnarmedIdleFinder.Object;
-	}
+	if (RifleIdleFinder.Succeeded())   { RifleIdleAnimAsset   = RifleIdleFinder.Object; }
+	if (UnarmedIdleFinder.Succeeded()) { UnarmedIdleAnimAsset = UnarmedIdleFinder.Object; }
 
 	auto MakePart = [this](const FString& CompName) -> USkeletalMeshComponent*
 	{
@@ -63,7 +59,9 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 		}
 		return C;
 	};
-	for (int32 i = 0; i < 2; ++i)
+	// 4 modular skin comps (head/torso/arms/legs) — matches the pawn so the preview can hide the LEG region
+	// under trousers. SKM_Body is a one-piece naked body used only as the skeleton/anim carrier.
+	for (int32 i = 0; i < PFChar::kBasePartCount; ++i)
 	{
 		if (USkeletalMeshComponent* C = MakePart(FString::Printf(TEXT("PreviewBase%d"), i))) { BaseComps.Add(C); }
 	}
@@ -146,6 +144,25 @@ void APFCharacterPreviewActor::BeginPlay()
 	ApplyWeapon(PFWeapon::LoadConfig());
 }
 
+UAnimSequence* APFCharacterPreviewActor::PickIdleAnim() const
+{
+	// Mirror the PAWN's rule exactly (ACombatForgeCharacter::RefreshBanditAnimSet): use the rifle-hold idle ONLY
+	// when pf.ArmedAnims is on. That CVar ships at 0 precisely because the rifle packs are on a foreign
+	// (UE4-mannequin) skeleton and the runtime name-based remap elongates the Bandit's torso/legs. Reading the
+	// same CVar here keeps the menu preview and the in-world character in lockstep forever — including after the
+	// IK-retarget bake lands and the CVar flips to 1 (docs/retarget-rifle-anims.md).
+	bool bArmed = false;
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("pf.ArmedAnims")))
+	{
+		bArmed = CVar->GetInt() != 0;
+	}
+	if (bArmed && RifleIdleAnimAsset != nullptr)
+	{
+		return RifleIdleAnimAsset;
+	}
+	return (UnarmedIdleAnimAsset != nullptr) ? UnarmedIdleAnimAsset.Get() : RifleIdleAnimAsset.Get();
+}
+
 void APFCharacterPreviewActor::EnsureRenderTarget()
 {
 	if (RenderTarget != nullptr)
@@ -176,6 +193,10 @@ void APFCharacterPreviewActor::ApplyConfig(const FPFCharacterConfig& Config)
 	{
 		BaseMesh->SetSkeletalMeshAsset(BodyMeshAsset);
 		BaseMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		// Resolve the idle HERE (not in the ctor) so it tracks pf.ArmedAnims like the pawn does — this is the
+		// fix for the stretched-torso preview: the default (CVar 0) now plays the Bandit-native A_MM_Idle
+		// instead of the foreign-skeleton rifle idle that the remap elongates.
+		IdleAnimAsset = PickIdleAnim();
 		if (IdleAnimAsset != nullptr)
 		{
 			BaseMesh->PlayAnimation(IdleAnimAsset, /*bLooping=*/true);
@@ -216,14 +237,26 @@ void APFCharacterPreviewActor::ApplyConfig(const FPFCharacterConfig& Config)
 		USkeletalMesh* M = (Sel >= 0) ? PFChar::LoadPart(s, Sel) : nullptr;
 		Mount(SlotComps[s], M);
 	}
-	// Hide the bare-legs skin (BaseComps index 1 = SKM_Legs) when a Pants garment is worn, mirroring the pawn
-	// (ACombatForgeCharacter::ApplyCharacterConfig) so preview + in-game match — stops the skin poking through
-	// the pants in the class preview ("privates showing", Tom 2026-07-18). Pants = slot index 6.
-	constexpr int32 PantsSlotIndex = 6;
-	const bool bPantsWorn = Config.Slots.IsValidIndex(PantsSlotIndex) && Config.Slots[PantsSlotIndex] >= 0;
-	if (BaseComps.IsValidIndex(1) && BaseComps[1] != nullptr)
+	// Modular skin, mirroring ACombatForgeCharacter::ApplyCharacterConfig so preview and in-world never diverge.
+	// SKM_Body contains torso+arms+LEGS, so it must stop RENDERING (it stays as the skeleton/anim carrier) or its
+	// own legs keep poking through the trousers no matter which follower we hide.
+	const bool bModularSkinReady =
+		BaseComps.IsValidIndex(PFChar::kBaseTorso) && BaseComps[PFChar::kBaseTorso] != nullptr
+		&& BaseComps[PFChar::kBaseTorso]->GetSkeletalMeshAsset() != nullptr
+		&& BaseComps.IsValidIndex(PFChar::kBaseArms) && BaseComps[PFChar::kBaseArms] != nullptr
+		&& BaseComps[PFChar::kBaseArms]->GetSkeletalMeshAsset() != nullptr;
+	if (BaseMesh != nullptr)
 	{
-		BaseComps[1]->SetVisibility(!bPantsWorn);
+		// Keep evaluating bones while invisible or every follower would freeze mid-pose.
+		BaseMesh->VisibilityBasedAnimTickOption = bModularSkinReady
+			? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones
+			: EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+		BaseMesh->SetVisibility(!bModularSkinReady, /*bPropagateToChildren=*/false);
+	}
+	const bool bPantsWorn = Config.Slots.IsValidIndex(PFChar::kSlotPants) && Config.Slots[PFChar::kSlotPants] >= 0;
+	if (bModularSkinReady && BaseComps.IsValidIndex(PFChar::kBaseLegs) && BaseComps[PFChar::kBaseLegs] != nullptr)
+	{
+		BaseComps[PFChar::kBaseLegs]->SetVisibility(!bPantsWorn);
 	}
 	// Keep the current gun mounted after clothing refresh (slot swap rebuilds leader poses).
 	if (WeaponMeshComp != nullptr && WeaponMeshComp->GetStaticMesh() != nullptr)

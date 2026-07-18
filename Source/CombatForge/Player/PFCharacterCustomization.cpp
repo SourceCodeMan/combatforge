@@ -91,9 +91,16 @@ namespace
 
 			Total += GSlotPartsCache[i].Num();
 		}
-		// Base skin parts that complete the naked SKM_Body base (head + legs).
-		GBasePartsCache.Add(FSoftObjectPath(TEXT("/Game/Bandits/Mesh/Body/SKM_Head.SKM_Head")));
-		GBasePartsCache.Add(FSoftObjectPath(TEXT("/Game/Bandits/Mesh/Body/SKM_Legs.SKM_Legs")));
+		// Visible base SKIN as a MODULAR set (head + torso + arms + legs). SKM_Body is a ONE-PIECE naked body
+		// (torso + arms + LEGS — material M_Body_Full, PA_Body_PhysicsAsset has thigh/calf/foot bodies) and is
+		// now only the skeleton/anim/bounds carrier, never rendered. Splitting the skin is what lets the LEG
+		// region be hidden under trousers; previously SKM_Body's own legs kept rendering under the jeans and
+		// poked through at the inner thigh no matter what we hid (Tom 2026-07-18).
+		// Order MUST match PFChar::kBaseHead/kBaseTorso/kBaseArms/kBaseLegs.
+		GBasePartsCache.Add(FSoftObjectPath(TEXT("/Game/Bandits/Mesh/Body/SKM_Head.SKM_Head")));       // kBaseHead
+		GBasePartsCache.Add(FSoftObjectPath(TEXT("/Game/Bandits/Mesh/Body/SKM_Torso.SKM_Torso")));     // kBaseTorso
+		GBasePartsCache.Add(FSoftObjectPath(TEXT("/Game/Bandits/Mesh/Arms/Arms/SKM_Arms.SKM_Arms")));  // kBaseArms
+		GBasePartsCache.Add(FSoftObjectPath(TEXT("/Game/Bandits/Mesh/Body/SKM_Legs.SKM_Legs")));       // kBaseLegs
 		UE_LOG(CombatForgeLog, Log, TEXT("PFChar: enumerated %d parts across %d slots."), Total, GSlotCount);
 	}
 }

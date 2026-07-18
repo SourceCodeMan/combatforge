@@ -88,6 +88,16 @@ public:
 	virtual bool CanCrouchInCurrentState() const override;            // stay crouched during CMOVE_Slide
 	virtual bool CanAttemptJump() const override;                     // slide-jump keeps horizontal velocity
 	virtual void OnTeleported() override;                             // respawn teleport aborts a mantle
+	/**
+	 * Depenetration guard — the fix for "bots randomly rocket to the roof".
+	 * When two capsules overlap, the engine resolves it with a NON-SWEPT teleport along the minimum-translation
+	 * axis, up to MaxDepenetrationWithPawn (100uu) / WithGeometry (500uu) EVERY sub-step. Bots get driven into
+	 * each other (they score the enemy's own spot as a firing position), so once horizontal escape is blocked the
+	 * MTD flips vertical and the pawn is teleported skyward at thousands of uu/s — with Velocity never set, which
+	 * is why it reads as an instant launch, not an arc. It only ever hit bots because only bots are commanded to
+	 * stand inside another pawn. Falling back past FallLethalHeightUU then kills them -> the observed respawn.
+	 */
+	virtual FVector GetPenetrationAdjustment(const FHitResult& Hit) const override;
 
 protected:
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;

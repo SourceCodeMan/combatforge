@@ -209,6 +209,29 @@ void UPFCharacterMovementComponent::OnTeleported()
 	}
 }
 
+FVector UPFCharacterMovementComponent::GetPenetrationAdjustment(const FHitResult& Hit) const
+{
+	FVector Adjust = Super::GetPenetrationAdjustment(Hit);
+
+	// "Bots randomly launch to the roof" (Tom, recurring — task #51's fix was in the BUILD-phase piece-placement
+	// ejector, which cannot even run during a combat round, so it never touched this).
+	//
+	// Overlapping capsules are resolved by a NON-SWEPT teleport along the minimum-translation direction, re-applied
+	// every sub-step (up to 100uu vs a pawn / 500uu vs geometry by default). Bots are algorithmically driven into
+	// each other, so once horizontal escape is blocked the MTD flips VERTICAL and the pawn is teleported skyward at
+	// thousands of uu/s. Velocity is never written, which is exactly why it looks like an instant launch rather than
+	// a jump arc — and why only bots ever showed it (players are never commanded to stand inside another pawn).
+	//
+	// A pawn-vs-pawn overlap must NEVER resolve upward: push them apart horizontally instead.
+	if (Cast<APawn>(Hit.GetActor()) != nullptr)
+	{
+		Adjust.Z = 0.f;
+	}
+	// Everything else (geometry): allow a small vertical nudge to un-stick, but never a fling.
+	Adjust.Z = FMath::Clamp(Adjust.Z, -40.f, 40.f);
+	return Adjust;
+}
+
 // ---------------------------------------------------------------------------
 // Slide entry / exit
 // ---------------------------------------------------------------------------

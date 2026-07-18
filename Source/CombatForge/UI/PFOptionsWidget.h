@@ -47,6 +47,7 @@ protected:
 	UFUNCTION() void OnRebind4();
 	UFUNCTION() void OnRebind5();
 	UFUNCTION() void OnRebind6();
+	UFUNCTION() void OnRebind7();
 	UFUNCTION() void OnResetBinds();
 
 	UFUNCTION() void OnTabVideo();
@@ -96,7 +97,7 @@ private:
 	void BeginListen(int32 Index);
 	void RefreshRebindLabels();
 	void ApplyKeyBinds();
-	static constexpr int32 NumRebinds = 7;
+	static constexpr int32 NumRebinds = 8;   // 8th = Punch (must match GRebindDefs in the .cpp — static_assert enforces it)
 	void ApplyMasterVolume(float Linear01);
 	void ApplySfxVolume(float Linear01);
 	void ApplyBrightnessContrast(float EV, float Contrast);   // → PFLightingSubsystem::SetUserGrade

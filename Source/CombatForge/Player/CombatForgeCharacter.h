@@ -202,8 +202,8 @@ protected:
 	/** Snap to resolved hand bone with grip offsets (idle carry). */
 	void ApplyHandWeaponPose();
 
-	/** Capsule/eye aim-line pose (shooting) — re-parented off the hand for this window only. */
-	void ApplyRaisedWeaponPose();
+	// (ApplyRaisedWeaponPose was deleted 2026-07-18 — it was never called. UpdateWeaponHoldPose is the ONE
+	//  live third-person weapon-pose path; edit that, not a helper that looks like it does the job.)
 
 	/**
 	 * Quantum (no matching AnimBP): drive idle/walk/run via AnimSingleNodeInstance.
@@ -429,6 +429,11 @@ private:
 	// ApplyWeaponLoadout. Default = SM_Rifle (+Y barrel). Pistols override so they don't render upside-down.
 	float CachedTPRaisedYaw  = -90.f;
 	float CachedTPRaisedRoll = 0.f;
+	// Firing shoulder lift when the ARMED idle isn't driving the arms up (arms hang -> gun sat at the hip).
+	// Lift is toward (eye Z - Drop) and clamped to Max, and never negative, so it can raise the gun to a
+	// shoulder line but can NEVER climb to the head (the old forehead-gun bug). Tune Drop/Max, not the call site.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") float WeaponShoulderDropFromEyeUU = 22.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") float WeaponMaxShoulderLiftUU     = 42.f;
 	// FP viewmodel: hip-ish rest vs ADS. AdsLoc puts the TOP-SIGHT line on the camera axis: Y=-5.5 cancels the
 	// rifle mesh's built-in +5.5 Y; Z lowered to -1.5 so the camera looks down the TOP sight, not the bore (the
 	// iron sight sits above the barrel, so the whole gun drops that much). X~15 keeps the aperture in focus.

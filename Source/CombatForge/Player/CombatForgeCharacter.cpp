@@ -441,7 +441,9 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 		}
 		return C;
 	};
-	for (int32 i = 0; i < 2; ++i)
+	// 4 base SKIN comps (head/torso/arms/legs) — the visible skin is modular so the LEG region can be dropped
+	// under trousers. SKM_Body (the leader) is a one-piece naked body and is only the skeleton/anim carrier.
+	for (int32 i = 0; i < PFChar::kBasePartCount; ++i)
 	{
 		if (USkeletalMeshComponent* C = MakePartComp(FString::Printf(TEXT("CharBase%d"), i)))
 		{
@@ -2297,16 +2299,35 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 		Mount(CharSlotComps[s], M);
 	}
 
-	// Hide the bare-legs skin (BaseComps index 1 = SKM_Legs) whenever a Pants garment is worn, so the naked
-	// skin can't poke through the pants ("privates showing", Tom 2026-07-18). Pants = slot index 6 (GSlots).
-	// When no pants are selected the bare legs stay visible so the body is complete.
-	constexpr int32 PantsSlotIndex = 6;
-	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PantsSlotIndex)
-		&& ActiveCharConfig.Slots[PantsSlotIndex] >= 0;
-	if (CharBaseComps.IsValidIndex(1) && CharBaseComps[1] != nullptr)
+	// ---- Modular skin: stop the one-piece body's legs rendering under the trousers ----
+	// SKM_Body (the leader) already contains torso+arms+LEGS, so the previous attempt (hiding only the SKM_Legs
+	// follower) removed a DUPLICATE layer while the body's own legs kept poking through at the inner thigh.
+	// Now the visible skin is the modular set and the leader is just the skeleton/anim carrier.
+	// Safety: only stop rendering the leader if the replacement torso+arms actually loaded — otherwise we'd have
+	// an invisible character. If anything is missing we fall back to exactly the old behaviour.
+	const bool bModularSkinReady =
+		CharBaseComps.IsValidIndex(PFChar::kBaseTorso) && CharBaseComps[PFChar::kBaseTorso] != nullptr
+		&& CharBaseComps[PFChar::kBaseTorso]->GetSkeletalMeshAsset() != nullptr
+		&& CharBaseComps.IsValidIndex(PFChar::kBaseArms) && CharBaseComps[PFChar::kBaseArms] != nullptr
+		&& CharBaseComps[PFChar::kBaseArms]->GetSkeletalMeshAsset() != nullptr;
+	if (USkeletalMeshComponent* Leader = GetMesh())
 	{
-		CharBaseComps[1]->SetVisibility(!bPantsWorn);
-		CharBaseComps[1]->SetHiddenInGame(bPantsWorn);
+		// A hidden leader would normally stop evaluating its pose (OnlyTickPoseWhenRendered), which would FREEZE
+		// every follower. Force it to keep ticking bones while invisible.
+		Leader->VisibilityBasedAnimTickOption = bModularSkinReady
+			? EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones
+			: EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+		Leader->SetVisibility(!bModularSkinReady, /*bPropagateToChildren=*/false);
+	}
+
+	// Drop the bare legs when a Pants garment covers them ("privates showing", Tom 2026-07-18).
+	// Pants = GSlots index 6; jeans genuinely live there (Hips_Module holds only bags/holsters).
+	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
+		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
+	if (bModularSkinReady && CharBaseComps.IsValidIndex(PFChar::kBaseLegs) && CharBaseComps[PFChar::kBaseLegs] != nullptr)
+	{
+		CharBaseComps[PFChar::kBaseLegs]->SetVisibility(!bPantsWorn);
+		CharBaseComps[PFChar::kBaseLegs]->SetHiddenInGame(bPantsWorn);
 	}
 }
 
@@ -3526,38 +3547,10 @@ FVector ACombatForgeCharacter::GetEyeWorldLocation() const
 	return GetActorLocation() + FVector(0.f, 0.f, 60.f);
 }
 
-void ACombatForgeCharacter::ApplyRaisedWeaponPose()
-{
-	if (WeaponMeshComp == nullptr || WeaponMesh == nullptr)
-	{
-		return;
-	}
-
-	const FRotator Aim = GetBaseAimRotation();
-	const FRotationMatrix AimM(Aim);
-	// Place mesh origin so the barrel sits on the aim line at eye height (not hip).
-	// ADS pulls the TP raise slightly closer for cleaner silhouette.
-	const float Ads = FMath::Clamp(GetADSAlpha(), 0.f, 1.f);
-	const FVector Raised = FMath::Lerp(WeaponRaisedFromEye, FVector(22.f, 10.f, -6.f), Ads);
-	const FVector Origin = GetEyeWorldLocation()
-		+ AimM.GetUnitAxis(EAxis::X) * Raised.X
-		+ AimM.GetUnitAxis(EAxis::Y) * Raised.Y
-		+ AimM.GetUnitAxis(EAxis::Z) * Raised.Z;
-
-	if (USceneComponent* Root = GetRootComponent())
-	{
-		if (WeaponMeshComp->GetAttachParent() != Root)
-		{
-			WeaponMeshComp->AttachToComponent(Root,
-				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		}
-	}
-	WeaponMeshComp->SetWorldLocation(Origin);
-	// Per-weapon barrel-axis correction (was hardcoded Aim.Yaw-90 / roll 0 for SM_Rifle's +Y barrel, which
-	// flipped pistols upside-down). CachedTPRaisedYaw/Roll come from the equipped Def in ApplyWeaponLoadout.
-	WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw + CachedTPRaisedYaw, CachedTPRaisedRoll));
-	WeaponMeshComp->SetWorldScale3D(WeaponRelativeScale);
-}
+// NOTE: the old ApplyRaisedWeaponPose() lived here and was DEAD CODE — nothing ever called it (it re-parented
+// the TP gun to the capsule at eye height, which is the bug that put guns on heads and broke muzzle sampling).
+// It was deleted 2026-07-18 because it silently absorbed a pistol-rotation fix that therefore never ran. The
+// ONE live TP weapon-pose path is UpdateWeaponHoldPose() below — edit that.
 
 void ACombatForgeCharacter::UpdateWeaponHoldPose()
 {
@@ -3598,17 +3591,27 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 	if (ShouldRaiseWeapon())
 	{
 		const FRotator Aim = GetBaseAimRotation();
-		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw - 90.f, 0.f));
-		// Shoulder lift belongs ONLY to the unarmed hip-carry anim set. With pf.ArmedAnims (default 1)
-		// everyone idles in MF_Rifle_Idle_ADS — hands already at shoulder/cheek — so the old
-		// unconditional +30uu stacked a second raise on top and planted the rifle at the EYE line:
-		// that was the "bot guns come out of their forehead" bug (bots hold ADS/fire continuously on
-		// the listen host, so they showed it constantly while remote humans only flashed it per shot).
+		// PER-WEAPON barrel-axis correction. This used to hardcode (Aim.Yaw - 90, roll 0) for SM_Rifle's
+		// +Y-barrel convention, which rendered pistols/revolvers UPSIDE DOWN while firing (Tom 2026-07-18).
+		// CachedTPRaisedYaw/Roll come from the equipped Def in ApplyWeaponLoadout (default -90 / 0 = rifle).
+		WeaponMeshComp->SetWorldRotation(FRotator(Aim.Pitch, Aim.Yaw + CachedTPRaisedYaw, CachedTPRaisedRoll));
+
+		// SHOULDER LIFT. With pf.ArmedAnims (default 1) everyone idles in MF_Rifle_Idle_ADS — hands already at
+		// shoulder/cheek — so lifting again planted the rifle at the EYE line (the "gun out of the forehead"
+		// bug). But when the armed idle ISN'T active the arms hang down, and the old flat +10uu left the gun
+		// sitting at the HIP while firing (Tom 2026-07-18: "rifle at hip while firing").
+		// Fix: lift ADAPTIVELY toward a shoulder line derived from the eye, never downward, and hard-clamped so
+		// it can never reach the head again regardless of what the animation is doing.
 		const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
 		if (!bArmedIdleActive)
 		{
-			// Hip-carry fallback set: small lift so the barrel clears the thigh (was 30 — tuned down).
-			WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, 10.f));
+			const float TargetZ = GetEyeWorldLocation().Z - WeaponShoulderDropFromEyeUU;
+			const float CurrentZ = WeaponMeshComp->GetComponentLocation().Z;
+			const float Lift = FMath::Clamp(TargetZ - CurrentZ, 0.f, WeaponMaxShoulderLiftUU);
+			if (Lift > 0.f)
+			{
+				WeaponMeshComp->AddWorldOffset(FVector(0.f, 0.f, Lift));
+			}
 		}
 	}
 }

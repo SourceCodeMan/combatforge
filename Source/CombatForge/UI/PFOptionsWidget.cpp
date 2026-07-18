@@ -563,6 +563,7 @@ namespace
 		{ TEXT("FireSelect"), TEXT("Fire Mode") },
 		{ TEXT("ThrowFrag"),  TEXT("Throw Frag") },
 		{ TEXT("ThrowSmoke"), TEXT("Throw Smoke") },
+		{ TEXT("Punch"),      TEXT("Punch") },
 	};
 }
 
@@ -601,6 +602,7 @@ void UPFOptionsWidget::BuildKeyBindRows(UVerticalBox* Box)
 		case 4: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind4); break;
 		case 5: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind5); break;
 		case 6: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind6); break;
+		case 7: Btn->OnClicked.AddDynamic(this, &UPFOptionsWidget::OnRebind7); break;
 		default: break;
 		}
 		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(Btn))
@@ -641,6 +643,7 @@ void UPFOptionsWidget::OnRebind3() { BeginListen(3); }
 void UPFOptionsWidget::OnRebind4() { BeginListen(4); }
 void UPFOptionsWidget::OnRebind5() { BeginListen(5); }
 void UPFOptionsWidget::OnRebind6() { BeginListen(6); }
+void UPFOptionsWidget::OnRebind7() { BeginListen(7); }
 
 void UPFOptionsWidget::BeginListen(int32 Index)
 {
