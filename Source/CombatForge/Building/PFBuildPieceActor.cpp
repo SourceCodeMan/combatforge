@@ -544,6 +544,7 @@ void APFBuildPieceActor::AuthorityTryToggleDoor(APawn* User)
 	{
 		bOpen = true;
 		DoorOpenRemaining = DoorOpenSeconds;
+		bOneWaySealPending = false;   // a reopen mid-close-swing cancels the queued seal (next close re-arms it)
 		ApplyOpenState();
 		ForceNetUpdate();
 	}
@@ -561,15 +562,18 @@ void APFBuildPieceActor::AuthorityCloseDoor()
 	bOpen = false;
 	DoorOpenRemaining = 0.f;
 	// One-way trick door: the seal (leaf → flush wall) is DEFERRED until the close swing finishes, so the
-	// leaf visibly swings shut first. Just flag it here; TickDoorAnim solidifies it at the end of the swing.
-	// (The old code set bOneWaySealed=true on this same frame, which hid the leaf and popped the wall in
-	// instantly — Tom: "it just turns back to the wall. it needs to close before it turns to wall.")
-	if (PieceType == EPFPieceType::WallDoorOneWay && !bOneWaySealed)
+	// leaf visibly swings shut first. Applies to EVERY close, including re-closing an already-sealed door
+	// that a front-side player reopened — bShowOneWaySeal keys on bOneWaySealed && !bOpen, so a re-close
+	// with the seal still set would hide the leaf and pop the wall in instantly (the "flashes open then
+	// turns to a wall" report). Drop the seal for the duration of the swing; TickDoorAnim re-arms it at
+	// the end. (The original bug was setting bOneWaySealed=true on this same frame — no swing at all.)
+	if (PieceType == EPFPieceType::WallDoorOneWay)
 	{
+		bOneWaySealed = false;
 		bOneWaySealPending = true;
 	}
 	ApplyOpenState();      // bOpen just went false → leaf stays visible + solid and TickDoorAnim swings it shut
-	ForceNetUpdate();      // replicate bOpen so clients start their own close swing
+	ForceNetUpdate();      // replicate bOpen (and a dropped seal) so clients start their own close swing
 }
 
 void APFBuildPieceActor::Tick(float DeltaSeconds)

@@ -501,7 +501,9 @@ namespace PFWeapon
 				0.f, 0.f, 1.35f, 39),
 			// Minigun: negative BloomPerShot, BloomCap as FLOOR, spin-up 0.6s, no climb.
 			MakeW(TEXT("Minigun"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Miniguns/01/SM_Modern_Weapons_Minigun_01.SM_Modern_Weapons_Minigun_01"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.32f, FVector(40.0f, 6.4f, 0.0f),
+				// MuzzleFP Z matches FPLoc Z (the catalog-wide convention) — it was authored at 0 (8.7uu above
+				// the gun), which spawned tracers visibly above the barrel cluster (Tom: "rounds a bit high").
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.32f, FVector(40.0f, 6.4f, -8.7f),
 				FVector(8.0f, -6.39f, 3.86f), FRotator(8.15f, -0.11f, -0.5f),
 				Mode_A, EPFFireMode::Auto,
 				3.0f, 0.5f, 9000.f, 1.5f, 3, 150, 18.0f,

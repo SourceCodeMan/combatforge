@@ -23,7 +23,7 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 9;   // alpha.9 — join-race prop self-heal, bot random guns + doors, phantom pawn, minigun muzzle, 1-way door close
+	constexpr int32 NetProtocol = 10;  // alpha.10 — minigun muzzle height, 1-way door swing-on-every-close, bots ignore 1-way doors
 	                                   // (capsule depenetration) fix, modular skin, per-weapon TP pose, Punch rebind,
 	                                   // sniper zoom, class-save fixes. Content + behaviour changed, so the gate MUST
 	                                   // step or alpha-7 clients still join and silently mis-render.
