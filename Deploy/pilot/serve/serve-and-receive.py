@@ -34,6 +34,30 @@ CHUNK = 1 << 20
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
+    def _deny_inbox_reads(self):
+        """inbox/ is WRITE-ONLY over the tunnel.
+
+        Uploaded server logs contain the fleet ServerKey (UE prints the full command line,
+        including -PFServerKey=..., in every log header). Serving them back over the same
+        unauthenticated public tunnel - with a directory listing, so the timestamped name
+        does not even have to be guessed - would publish the credential that mints XP and
+        registers fleet servers. Read them off the PC's disk instead.
+        """
+        if self.path.startswith("/inbox"):
+            self.send_error(403, "inbox is write-only")
+            return True
+        return False
+
+    def do_GET(self):
+        if self._deny_inbox_reads():
+            return
+        super().do_GET()
+
+    def do_HEAD(self):
+        if self._deny_inbox_reads():
+            return
+        super().do_HEAD()
+
     def do_PUT(self):
         if not self.path.startswith("/inbox/"):
             self.send_error(403, "PUT is only allowed under /inbox/")

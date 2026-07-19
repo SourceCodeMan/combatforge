@@ -25,6 +25,31 @@ $DataDir = Join-Path $env:ProgramData "CombatForge"
 
 function Say($msg, $color = "Gray") { Write-Host $msg -ForegroundColor $color }
 
+# Skipping ServerKey.txt is NOT enough. UE writes the full process command line into the header of
+# every log it opens, and Start-Server-OnBox.ps1 passes the key as -PFServerKey=<key> - so the fleet
+# credential is sitting in the body of server.log itself. That key mints XP via signed match reports
+# and registers servers in the public directory. Redact it out of the STAGED COPY (never touches the
+# original on disk) before anything is zipped or uploaded.
+function Redact-Secrets([string]$Path) {
+    try {
+        $text = [System.IO.File]::ReadAllText($Path)
+    } catch { return }
+    $orig = $text
+    $patterns = @(
+        '(?i)(-?PFServerKey[=:\s]+)\S+',
+        '(?i)(ServerKey[=:\s"]+)[A-Za-z0-9+/=_-]{8,}',
+        '(?i)(Authorization:\s*Bearer\s+)\S+',
+        '(?i)("?(?:session|access|auth|api)[_-]?token"?\s*[=:]\s*"?)[A-Za-z0-9+/=._-]{8,}',
+        '(?i)(x-server-key[=:\s"]+)\S+'
+    )
+    foreach ($p in $patterns) { $text = [regex]::Replace($text, $p, '${1}[REDACTED]') }
+    if ($text -ne $orig) {
+        [System.IO.File]::WriteAllText($Path, $text)
+        return $true
+    }
+    return $false
+}
+
 Say ""
 Say "=== CombatForge server log export ===" Cyan
 Say ""
@@ -92,6 +117,7 @@ foreach ($src in $Sources) {
 
         if ($f.Length -le $Cap) {
             Copy-Item $f.FullName $dest -Force
+            Redact-Secrets $dest
         } else {
             # Tail-trim: keep the LAST $Cap bytes (the interesting end of a long-running server log).
             $fs = [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'ReadWrite')
@@ -104,6 +130,7 @@ foreach ($src in $Sources) {
             [System.IO.File]::WriteAllText($dest, $header)
             $out = [System.IO.File]::Open($dest, 'Append', 'Write')
             try { $out.Write($buf, 0, $read) } finally { $out.Close() }
+            Redact-Secrets $dest
             Say ("  trimmed: " + $f.Name + (" ({0:N1} MB -> {1} MB)" -f ($f.Length / 1MB), $TailMB)) DarkGray
         }
         $Collected++
