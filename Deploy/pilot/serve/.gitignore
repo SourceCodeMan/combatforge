@@ -1,2 +1,10 @@
 inbox/
 *.zip
+__pycache__/
+
+# serve/ holds COPIES of the canonical scripts one level up (Deploy/pilot/*.ps1), staged so the
+# box can curl them off the tunnel. Deliberately NOT tracked: a second tracked copy is free to
+# drift from the canonical one, and a stale copy of Deploy-OnBox.ps1 sitting in an old serve
+# folder is exactly what deployed alpha-8 over alpha-10 on 2026-07-18. One source of truth.
+Deploy-OnBox.ps1
+Start-Server-OnBox.ps1

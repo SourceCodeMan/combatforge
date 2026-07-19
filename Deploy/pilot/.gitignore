@@ -1,0 +1,3 @@
+# Build drops staged here for the box (multi-GB). Never source-controlled - GitHub rejects
+# files this size, and the build is reproducible from the tagged source anyway.
+*.zip
