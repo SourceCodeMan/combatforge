@@ -695,6 +695,9 @@ EPFSurfaceRole RoleForPieceType(EPFPieceType Type)
 		return EPFSurfaceRole::FloorConcrete;
 	case EPFPieceType::Ramp:  return EPFSurfaceRole::MetalRusty;
 	case EPFPieceType::Roof:  return EPFSurfaceRole::MetalRoof;
+	// The Dorito cone wears the CEILING/ROOF panel (Tom 2026-07-20: "it needs to be skinned with a
+	// ceiling tile"). It previously fell through to the concrete default below.
+	case EPFPieceType::PropDorito: return EPFSurfaceRole::MetalRoof;
 	default:                  return EPFSurfaceRole::FloorConcrete;
 	}
 }
@@ -753,6 +756,29 @@ UMaterialInstanceDynamic* CreatePaletteMID(UObject* Outer, EPFSurfaceRole Role)
 
 UMaterialInstanceDynamic* CreateStructuralPaletteMID(UObject* Outer, EPFPieceType Type)
 {
+	// THE WHITE CONE (Tom 2026-07-20: "the cone is back, but it's all white with no skin").
+	//
+	// CreatePaletteMID prefers the Megascans Surface MIs, which are authored against each SOURCE MESH's
+	// own UVs. The Dorito is an /Engine/BasicShapes Cone — a primitive whose UVs those materials were
+	// never made for — so the texture washes out to near-white instead of tiling. This is the same class
+	// of problem the structural pieces hit, and the project already has the answer: the TRIPLANAR master
+	// projects world-space, so it does not care what UVs a mesh has and tiles correctly on any primitive.
+	//
+	// Force that path for the cone, with the ROOF profile = the ceiling panel Tom asked for.
+	if (Type == EPFPieceType::PropDorito)
+	{
+		EnsureLoaded();
+		if (UMaterialInterface* Master = TriplanarFallbackMaster())
+		{
+			if (UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Master, Outer))
+			{
+				ApplyProfileToMID(Mid, GSurfRoof);
+				return Mid;
+			}
+		}
+		// Master missing (shouldn't happen — M_PF_ArenaWall is force-cooked): fall through rather than
+		// return null, so the piece still gets *a* material instead of the engine checker.
+	}
 	return CreatePaletteMID(Outer, RoleForPieceType(Type));
 }
 
