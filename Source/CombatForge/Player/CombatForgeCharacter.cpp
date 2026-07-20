@@ -952,6 +952,9 @@ void ACombatForgeCharacter::OnLookInput(const FInputActionValue& Value)
 
 void ACombatForgeCharacter::OnWeaponDragPressed()
 {
+	// NOTE: after F8 (eject) input no longer routes to this pawn at all, so middle-mouse drag genuinely
+	// cannot work while ejected — that is UE's input routing, not this gate. Ejected tuning is done by TYPING
+	// values (pf.WeaponTP / pf.WeaponFP), which now find the un-possessed body via PFFindWeaponTuneTarget.
 	if (CVarWeaponDrag.GetValueOnGameThread() != 0 && IsLocallyControlled())
 	{
 		bWeaponDragging = true;
@@ -3123,6 +3126,37 @@ void ACombatForgeCharacter::TuneWeaponFP(const FVector& Loc, const FRotator& Rot
 }
 
 // Live-tune the equipped weapon's FP pose without a rebuild. Paste the printed values into PFWeaponCatalog.cpp.
+// EJECTED-SAFE TARGET PICK for the weapon dev commands.
+//
+// Tom's actual tuning workflow (2026-07-20): open the .uproject, PIE, hit F8 to EJECT, turn around and look
+// at his own body, then scroll weapons and drag them into the hand. F8 unpossesses the pawn, so
+// IsLocallyControlled() goes FALSE — and every one of these commands used that to find its target, so after
+// ejecting they silently did nothing. That is why "the drag options we set up before" stopped working: not
+// broken tools, just tools that could no longer see the pawn.
+//
+// Prefer the locally-controlled pawn when there is one (normal play), otherwise fall back to the first
+// character in the world — which after an eject is exactly the body you are standing there looking at.
+static ACombatForgeCharacter* PFFindWeaponTuneTarget(UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return nullptr;
+	}
+	ACombatForgeCharacter* Fallback = nullptr;
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		if (*It == PFFindWeaponTuneTarget(World))
+		{
+			return *It;
+		}
+		if (Fallback == nullptr)
+		{
+			Fallback = *It;
+		}
+	}
+	return Fallback;   // ejected (F8): no pawn is locally controlled — tune the one in front of you
+}
+
 static void PFWeaponFPCmd(const TArray<FString>& Args, UWorld* World)
 {
 	if (World == nullptr || Args.Num() < 7)
@@ -3138,7 +3172,7 @@ static void PFWeaponFPCmd(const TArray<FString>& Args, UWorld* World)
 		: FVector(42.f, 3.5f, -3.5f);
 	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
 	{
-		if (It->IsLocallyControlled())
+		if (*It == PFFindWeaponTuneTarget(World))
 		{
 			It->TuneWeaponFP(Loc, Rot, Scale, Muzzle);
 		}
@@ -3215,7 +3249,7 @@ static void PFWeaponADSCmd(const TArray<FString>& Args, UWorld* World)
 	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
 	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
 	{
-		if (It->IsLocallyControlled())
+		if (*It == PFFindWeaponTuneTarget(World))
 		{
 			It->TuneWeaponADS(Loc, Rot);
 		}
@@ -3244,7 +3278,7 @@ static void PFWeapon2Cmd(const TArray<FString>& Args, UWorld* World)
 	PFWeapon::SaveSecondaryConfig(C);
 	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
 	{
-		if (It->IsLocallyControlled())
+		if (*It == PFFindWeaponTuneTarget(World))
 		{
 			It->ReapplyWeaponLoadout();
 		}
