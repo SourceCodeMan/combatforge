@@ -9,30 +9,6 @@
 #include "Core/CombatForgeTypes.h"
 #include "PFRatingSubsystem.generated.h"
 
-/** One ranked community arena for the pregame map picker (host disk catalog). */
-USTRUCT()
-struct COMBATFORGE_API FPFCommunityMapInfo
-{
-	GENERATED_BODY()
-
-	/** Filename only under Saved/Arenas/ (e.g. arena_20260712_….json). */
-	UPROPERTY() FString FileName;
-	UPROPERTY() FString ArenaId;
-	/** Short human label for UI lists. */
-	UPROPERTY() FString DisplayName;
-	/** Vote score (up=+2, down=−1) + piece-count soft boost. */
-	UPROPERTY() int32 Score = 0;
-	UPROPERTY() int32 PieceCount = 0;
-	UPROPERTY() int32 TeamSize = 0;
-	/** Build-grid rows the map was made on (Warehouse 10, Yard 20). Gates catalog + load per shell. */
-	UPROPERTY() int32 CellsY = PFGrid::CellsY;
-	UPROPERTY() int32 ThumbUp = 0;
-	UPROPERTY() int32 ThumbDown = 0;
-	UPROPERTY() FString CreatedUtc;
-	/** Remix lineage: the arenaId this map was improved FROM (empty for original/from-scratch maps). */
-	UPROPERTY() FString ParentArenaId;
-};
-
 /**
  * Match record lifecycle + vote persistence (contract §3.7, B13, T24).
  *

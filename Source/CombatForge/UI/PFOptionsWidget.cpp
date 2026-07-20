@@ -846,7 +846,7 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 
 	AddHowToLine(Box, TEXT("MAPS & MODES"), 15, true, Head);
 	AddHowToLine(Box, TEXT("MAP: Warehouse (indoor) or The Yard (open-air, double width)."), 13, false, Body);
-	AddHowToLine(Box, TEXT("Creative / Improvement / Play-Only = what happens in Build. Improvement & Play-Only load a community map — hosts can star up to 5 favorites."), 13, false, Body);
+	AddHowToLine(Box, TEXT("Creative / Remix / Play-Only = what happens in Build. Remix & Play-Only load a community map — hosts can star up to 5 favorites."), 13, false, Body);
 	AddHowToLine(Box, TEXT("Elimination · Skirmish · FFA · CTF · Domination · Hardpoint = how you win combat."), 13, false, Body);
 	AddHowToLine(Box, TEXT("4v4 / 6v6 + bots checkbox fill empty slots. Rate the arena after the match — top maps float up the community list."), 13, false, Dim);
 }

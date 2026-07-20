@@ -102,6 +102,17 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 		ClearRecordState();
 	}
 
+	// Empty arenas are not community content — writing them would pollute the Remix catalog with
+	// unusable 0-piece files. Still clear any prior open record so state can't stick across matches.
+	if (FrozenPieces.Num() == 0)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("PFRatingSubsystem: BeginMatchRecord skipped — 0 pieces (match %s). Remix needs builds."),
+			*MatchId);
+		ClearRecordState();
+		return;
+	}
+
 	RecordCreatedUtc = FDateTime::UtcNow();
 	CurrentMatchId   = MatchId;
 	CurrentArenaId   = FPFArenaSerialization::ComputeArenaId(FrozenPieces);
@@ -111,7 +122,7 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 	                                                           ResolveActiveGridCellsY(GetGameInstance()),
 	                                                           ParentArenaId);
 
-	const FString ArenaDir = FPFPaths::ArenaDir();   // stable per-user dir (survives repackaging)
+	const FString ArenaDir = FPFPaths::ArenaDir();   // stable dir (desktop UserSettings / server ProgramData)
 	CurrentFilePath = ArenaDir / FString::Printf(TEXT("arena_%s_%s.json"),
 		*RecordCreatedUtc.ToString(TEXT("%Y%m%d_%H%M%S")),
 		*PFShortMatchHex(MatchId));
@@ -122,8 +133,8 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 	if (WriteRecordToDisk())
 	{
 		const bool bRemix = !CurrentParentArenaId.IsEmpty() && CurrentParentArenaId != CurrentArenaId;
-		UE_LOG(CombatForgeLog, Log,
-			TEXT("PFRatingSubsystem: began match record %s (arenaId %s, %d pieces%s) -> %s"),
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("PFRatingSubsystem: SAVED map %s (arenaId %s, %d pieces%s) -> %s"),
 			*CurrentMatchId, *CurrentArenaId, FrozenPieces.Num(),
 			bRemix ? *FString::Printf(TEXT(", remix of %s"), *CurrentParentArenaId.Left(8)) : TEXT(""),
 			*CurrentFilePath);
@@ -230,7 +241,7 @@ void UPFRatingSubsystem::CommitMatchRecord(const FPFMatchResult& Result)
 
 	if (WriteRecordToDisk())
 	{
-		UE_LOG(CombatForgeLog, Log,
+		UE_LOG(CombatForgeLog, Warning,
 			TEXT("PFRatingSubsystem: committed match record %s (%s, %d votes) -> %s"),
 			*CurrentMatchId, *WinnerString, VotesArray.Num(), *CurrentFilePath);
 	}

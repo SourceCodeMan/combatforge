@@ -5,10 +5,11 @@
 #include "CoreMinimal.h"
 
 /**
- * Stable per-user data directories. Community maps used to live in <install>/Saved/Arenas, which every
- * re-package (or moving/deleting the packaged folder) silently wiped — maps now live in the OS per-user
- * settings dir (%LOCALAPPDATA%/CombatForge on Windows), shared by the editor and packaged builds, so the
- * map pool accumulates across sessions, repackages, and installs.
+ * Stable data directories for community maps + server-side state.
+ *
+ * Desktop (listen host / solo): %LOCALAPPDATA%/CombatForge/Arenas (UserSettingsDir).
+ * Dedicated / -NOHOMEDIR / -nullrhi: %ProgramData%/CombatForge/Arenas (or -ArenaDir= override) —
+ * NEVER the in-install Saved/ tree, which every redeploy wipes.
  */
 struct COMBATFORGE_API FPFPaths
 {

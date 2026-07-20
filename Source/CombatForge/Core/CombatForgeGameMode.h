@@ -90,6 +90,8 @@ public:
 	void HostSetMatchType(EPFMatchType NewType);       // Lobby only: Elimination / FFA / Skirmish / …
 	void HostSetArenaMap(EPFArenaMap NewMap);          // Lobby only: respawn the shell as the map's class
 	void HostSetCommunityMap(const FString& FileName, const FString& Label); // Lobby: Improvement/PlayOnly
+	/** Rebuild GS->CommunityMapCatalog from host ArenaDir (seeds + saved matches) for the active shell. */
+	void RefreshCommunityMapCatalog();
 
 	// Objective actors → GameMode (server). Carrier state is stamped on PlayerState.
 	void NotifyFlagTouched(class APFFlagActor* Flag, ACombatForgePlayerState* Toucher);

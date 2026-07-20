@@ -43,6 +43,7 @@ void ACombatForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(ACombatForgeGameState, ArenaMap);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapFile);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapLabel);
+	DOREPLIFETIME(ACombatForgeGameState, CommunityMapCatalog);
 	DOREPLIFETIME(ACombatForgeGameState, TeamScores);
 	DOREPLIFETIME(ACombatForgeGameState, CommunityBasePieces);
 }
@@ -340,6 +341,27 @@ void ACombatForgeGameState::ServerSetSelectedCommunityMap(const FString& FileNam
 	SelectedCommunityMapFile = Clean;
 	SelectedCommunityMapLabel = Label.Left(120);
 	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::ServerSetCommunityMapCatalog(const TArray<FPFCommunityMapInfo>& Maps)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	CommunityMapCatalog = Maps;
+	// Cap wire size — ListTop already clamps to 100, but be defensive.
+	if (CommunityMapCatalog.Num() > 100)
+	{
+		CommunityMapCatalog.SetNum(100);
+	}
+	OnRep_CommunityMapCatalog();   // listen host broadcasts too (§5 R9)
+	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::OnRep_CommunityMapCatalog()
+{
+	OnCommunityMapCatalogChangedEvent.Broadcast();
 }
 
 void ACombatForgeGameState::ServerSetCommunityBasePieces(uint16 Count)

@@ -3468,9 +3468,96 @@ void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMateria
 		BackWeaponMeshComp->AttachToComponent(Body,
 			FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	}
+	BackWeaponMeshComp->SetRelativeScale3D(BackWeaponRelativeScale);
+
+	// THE CROTCH-RIFLE BUG (Tom, alpha-10: "an assault rifle protruding from the crotch, pointed forward").
+	//
+	// The old code set a hand-authored RelativeLocation of (-18, 6, -6) on the spine bone. That was written
+	// as if bone space were actor space (-X = behind). It is not: on mannequin-family skeletons a spine
+	// bone's +X runs UP THE BONE toward the neck, so -18 on X drove the gun ~18cm DOWN the spine, into the
+	// pelvis, and the authored rotation left the barrel pointing forward. Every constant in that triple was
+	// meaningless for this skeleton, and none of them were ever checked in-editor.
+	//
+	// So derive the sling from the SKELETON instead of guessing offsets - the same principle that finally
+	// fixed the hand pose. Build a torso frame from bones we can actually measure, then place the weapon
+	// flat on the back plane:
+	//   Up    = spine -> neck            (torso axis, whatever the bone roll happens to be)
+	//   Right = left clavicle -> right   (lateral axis)
+	//   Back  = Up x Right, flipped if it disagrees with the mesh's own backward direction
+	// The weapon is then seated one half-thickness off the back surface and rolled to hang on a diagonal,
+	// which is how a real sling sits. No magic offsets, and it follows the spine as the torso animates.
+	if (bDeriveBackSlingFromSkeleton && !Bone.IsNone())
+	{
+		auto BoneOrSocket = [Body](std::initializer_list<const TCHAR*> Names, FVector& Out) -> bool
+		{
+			for (const TCHAR* N : Names)
+			{
+				const FName FN(N);
+				if (Body->DoesSocketExist(FN) || Body->GetBoneIndex(FN) != INDEX_NONE)
+				{
+					Out = Body->GetSocketLocation(FN);
+					return true;
+				}
+			}
+			return false;
+		};
+
+		FVector SpineLow, SpineHigh, ClavL, ClavR;
+		const bool bHaveSpine = BoneOrSocket({ TEXT("spine_01"), TEXT("Spine_01"), TEXT("pelvis"), TEXT("Pelvis") }, SpineLow)
+			&& BoneOrSocket({ TEXT("neck_01"), TEXT("Neck_01"), TEXT("spine_03"), TEXT("Spine_03"), TEXT("head") }, SpineHigh);
+		const bool bHaveClav = BoneOrSocket({ TEXT("clavicle_l"), TEXT("Clavicle_L"), TEXT("upperarm_l"), TEXT("UpperArm_L") }, ClavL)
+			&& BoneOrSocket({ TEXT("clavicle_r"), TEXT("Clavicle_R"), TEXT("upperarm_r"), TEXT("UpperArm_R") }, ClavR);
+
+		if (bHaveSpine && bHaveClav)
+		{
+			const FVector Up = (SpineHigh - SpineLow).GetSafeNormal();
+			const FVector Right = (ClavR - ClavL).GetSafeNormal();
+			if (!Up.IsNearlyZero() && !Right.IsNearlyZero())
+			{
+				FVector Back = FVector::CrossProduct(Up, Right).GetSafeNormal();
+				// Cross-product handedness depends on the skeleton's bone roll, so settle it against the
+				// component's own facing rather than assuming: the sling must end up BEHIND the chest.
+				if ((Back | Body->GetForwardVector()) > 0.f)
+				{
+					Back = -Back;
+				}
+
+				// Seat it just off the back surface: half the torso width is a good stand-in for how far
+				// back the spine bone sits from the skin, and half the weapon's thickness clears the mesh.
+				const FBoxSphereBounds WB = BackWeaponMeshComp->GetStaticMesh()->GetBounds();
+				const float TorsoHalfDepth = FMath::Max(6.f, (ClavR - ClavL).Size() * 0.45f);
+				const float WeaponHalfThick = FMath::Min3(WB.BoxExtent.X, WB.BoxExtent.Y, WB.BoxExtent.Z)
+					* BackWeaponRelativeScale.X;
+
+				const FVector Anchor = Body->GetSocketLocation(Bone);
+				const FVector WorldLoc = Anchor + Back * (TorsoHalfDepth + WeaponHalfThick);
+
+				// Lay the weapon flat on the back: its barrel runs along a diagonal in the Up/Right plane
+				// (muzzle down toward the left hip, the usual slung look), and its "up" faces away from
+				// the body so the side profile reads correctly rather than edge-on.
+				const float DiagRad = FMath::DegreesToRadians(BackSlingTiltDeg);
+				const FVector Barrel = (-Up * FMath::Cos(DiagRad) - Right * FMath::Sin(DiagRad)).GetSafeNormal();
+				const bool bBarrelAlongY = (WB.BoxExtent.Y >= WB.BoxExtent.X);
+				const FRotator WorldRot = bBarrelAlongY
+					? FRotationMatrix::MakeFromYZ(Barrel, Back).Rotator()
+					: FRotationMatrix::MakeFromXZ(Barrel, Back).Rotator();
+
+				BackWeaponMeshComp->SetWorldLocation(WorldLoc);
+				BackWeaponMeshComp->SetWorldRotation(WorldRot);
+				BackWeaponMeshComp->SetOwnerNoSee(true);
+				BackWeaponMeshComp->SetCastShadow(true);
+				BackWeaponMeshComp->SetVisibility(true);
+				BackWeaponMeshComp->SetHiddenInGame(false);
+				return;
+			}
+		}
+	}
+
+	// Fallback: the authored relative transform. Only reached when the torso bones are missing (a
+	// non-humanoid or renamed skeleton) - and it is the OLD crotch-placing triple, kept only so an
+	// unknown skeleton still shows something rather than nothing.
 	BackWeaponMeshComp->SetRelativeLocation(BackWeaponRelativeLocation);
 	BackWeaponMeshComp->SetRelativeRotation(BackWeaponRelativeRotation);
-	BackWeaponMeshComp->SetRelativeScale3D(BackWeaponRelativeScale);
 	BackWeaponMeshComp->SetOwnerNoSee(true);
 	BackWeaponMeshComp->SetCastShadow(true);
 	BackWeaponMeshComp->SetVisibility(true);

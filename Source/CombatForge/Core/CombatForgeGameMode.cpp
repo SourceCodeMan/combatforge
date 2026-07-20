@@ -131,6 +131,7 @@ void ACombatForgeGameMode::BeginPlay()
 		GS->ServerSetBuildMode(DefaultBuildMode);       // Creative default; host picks on boot menu
 		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
 		GS->ServerSetArenaMap(DefaultArenaMap);         // Warehouse default; must match SpawnArenaActors' pick
+		RefreshCommunityMapCatalog();                   // seeds + any already-saved maps for Remix picker
 	}
 
 	// Fleet directory: dedicated boxes with a provisioned key register + heartbeat; everyone
@@ -928,6 +929,8 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		// effectively unlimited ammo/grenades (ServerRefillFromPickup no-ops when already full). Cleared on
 		// any phase transition, and the real match wipes loadouts fresh anyway (RespawnCombatant).
 		GetWorldTimerManager().SetTimer(LobbyTopUpHandle, this, &ACombatForgeGameMode::TopUpLobbyLoadouts, 2.f, true);
+		// Maps saved during the match just finished must appear in Remix for the next one.
+		RefreshCommunityMapCatalog();
 		break;
 	}
 
@@ -1078,8 +1081,11 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 				GetTeamCounts(TeamA, TeamB);
 				// PendingParentArenaId is non-empty only for a Remix of a loaded community map; BeginMatchRecord
 				// drops it when the frozen layout hashes identically (nothing changed ⇒ same map, no fork).
+				// Writes the arena JSON immediately so Remix can use it even if the match is force-quit
+				// before Vote/Results (Commit only appends votes/result).
 				Rating->BeginMatchRecord(GS->MatchId, BuildGrid->GetPieces(), FMath::Max(TeamA, TeamB),
 					PendingParentArenaId);
+				RefreshCommunityMapCatalog();   // new map available for next Remix pick
 			}
 		}
 		if (ArenaShell)
@@ -1109,6 +1115,8 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		{
 			Rating->CommitMatchRecord(PendingMatchResult);
 		}
+		// Publish the just-saved map into the replicated catalog (also refreshed on Lobby entry).
+		RefreshCommunityMapCatalog();
 		EmitMatchReport();   // frozen wire format: local archive + fleet POST (progression-plan §1)
 		GetWorldTimerManager().SetTimer(PhaseTimerHandle,
 			FTimerDelegate::CreateUObject(this, &ACombatForgeGameMode::SetPhase, EPFMatchPhase::Lobby),
@@ -1389,6 +1397,8 @@ void ACombatForgeGameMode::HostSetArenaMap(EPFArenaMap NewMap)
 	{
 		GS->ServerSetSelectedCommunityMap(FString(), TEXT("Auto (top ranked)"));
 	}
+	// Rebuild the replicated picker catalog for the new shell's CellsY (Warehouse 10 / Yard 20).
+	RefreshCommunityMapCatalog();
 
 	// Map identity travels as ACTOR CLASS: destroy the old shell and spawn the new map's class —
 	// the actor channel tears down / constructs the ctor-built geometry on every client, so the
@@ -1441,6 +1451,24 @@ void ACombatForgeGameMode::HostSetCommunityMap(const FString& FileName, const FS
 	GS->ServerSetSelectedCommunityMap(FileName, Label);
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: host set community map '%s' (%s)"),
 		FileName.IsEmpty() ? TEXT("auto") : *FileName, *Label);
+}
+
+void ACombatForgeGameMode::RefreshCommunityMapCatalog()
+{
+	ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS || !HasAuthority())
+	{
+		return;
+	}
+	TArray<FPFCommunityMapInfo> Maps;
+	if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
+	{
+		Rating->EnsureSeedArenas();
+		Rating->ListTopCommunityMaps(Maps, 100);
+	}
+	GS->ServerSetCommunityMapCatalog(Maps);
+	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: community map catalog published (%d maps) from %s"),
+		Maps.Num(), *FPFPaths::ArenaDir());
 }
 
 // ---------------------------------------------------------------------------
