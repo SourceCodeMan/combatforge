@@ -2,128 +2,252 @@
 
 **Build the arena. Fight in it. Judge it.**
 
-CombatForge is a multiplayer first-person paintball shooter for Windows, built on Unreal Engine 5.6.
+CombatForge is a multiplayer first-person **airsoft** shooter for Windows, built on Unreal Engine 5.6.
+Nothing is lethal: you tag people and they're *out*, then they respawn. It's built to be played by
+kids and adults in the same lobby.
+
 Every match is three games in one:
 
-1. **Build** (Fortnite-style): each team gets 3 minutes and a per-player piece budget to build its
-   own half of the arena on a snap grid — walls, floors, ramps, and classic speedball bunkers
-   (cans, doritos, snakes). The enemy half is fully visible while you build, so counter-building
-   mind games start immediately.
-2. **Fight** (CoD-feel paintball): round-based elimination — first team to 4 round wins, no
-   in-round respawn, teams swap halves every round so asymmetric arenas stay fair. Sprint, slide,
-   snappy ADS, true-projectile paintballs with drop, 3 hits and you're out (mask hits count
-   double).
-3. **Vote**: the match ends with every player passing judgment on the arena — thumbs up/down plus
-   liked/disliked category chips (layout, cover, verticality, flow, balance, sightlines,
-   creativity, pacing). Every verdict is persisted as a backend-ready JSON record, keyed by a
-   content-derived arena fingerprint, so great arenas (and great *halves*) can someday be
-   aggregated, rated, and recombined into a community pool.
+1. **Build** — teams get 3 minutes and a piece budget to build their half of the arena on a snap
+   grid: walls, floors, ramps, ceilings, doors, one-way doors, windows, trap floors, and cover props
+   (barrels, crates, box stacks). The enemy half is visible while you build, so counter-building mind
+   games start immediately.
+2. **Fight** — CoD-feel gunplay in the arena you just made. Sprint, slide, mantle, ADS, true
+   projectiles with drop, a 36-weapon catalog, melee tag, smoke and frag, and a plantable breach
+   charge for when someone walls themselves in.
+3. **Vote** — everyone judges the arena. Thumbs up/down plus category chips (layout, cover,
+   verticality, flow, balance, sightlines, creativity, pacing), persisted against a content-derived
+   fingerprint so good arenas can be found, replayed, and remixed.
 
 The arena **is** the content. Players make the map; CombatForge's job is to make that fast, fair,
 and rateable.
 
-## v1 graybox — what this repo is
+> **Status: shipping alpha.** Live on itch.io, with accounts, progression, and a dedicated server.
+> This is no longer the graybox milestone the first version of this README described.
 
-This is the v1 **graybox** milestone: the complete match loop with zero editor-authored assets.
+---
 
-- **C++-first, zero assets:** every mesh is an engine BasicShape with a runtime material instance;
-  all UI is C++ UMG; all input is natively-constructed Enhanced Input. The `Content/` folder ships
-  empty except for one editor-created empty level container (see below).
-- **Server-authoritative multiplayer from day 1:** listen server, connect by IP. Building,
-  shooting, phases, votes — everything is validated on the server; clients predict for feel.
-- **The five phases:** `Lobby → Build → Combat → Vote → Results`, one persistent level, no map
-  travel. Lobby includes a warm-up pen with target dummies so the marker is testable before it
-  matters.
-- **Fake-and-verify shooting:** instant client-side cosmetic projectiles plus server-authoritative
-  projectiles sharing a deterministic spread seed; hitmarkers only on server confirm.
-- **Persistence:** one JSON file per match in `Saved/Arenas/` — the frozen arena layout, SHA1
-  fingerprints (whole arena + per-half), the match result, and every player's anonymized vote.
+## Where it runs
 
-## LAN / VPN playtest (friends on the network)
+| Surface | What it is |
+|---|---|
+| **itch.io** | `thathorseslayer/combatforge`, channel `windows-alpha`. Pushed with `butler`. |
+| **Dedicated server** | A Vultr Windows box, port 7777, registered in the public server directory. |
+| **Backend** | `api.playcombatforge.com` — Cloudflare Worker + D1. Accounts, progression, unlocks, server directory, match reports. Separate repo: `combatforge-api`. |
+| **Brand** | [playcombatforge.com](https://playcombatforge.com) · [Discord](https://discord.gg/f7U2xXxAxc) · bug reports at `report.playcombatforge.com` |
 
-Connect-by-IP (no EOS yet). Use **current `main`**.
+### The version gate — read this before shipping anything
 
-- Operator checklist: [`docs/playtest-checklist.md`](docs/playtest-checklist.md)
-- Full host guide: [`Deploy/playtest/README.md`](Deploy/playtest/README.md)
+`PFBuild::NetProtocol` in [`Source/CombatForge/CombatForge.h`](Source/CombatForge/CombatForge.h) is
+folded into the engine's network version. Clients on a different number **cannot join** — by design,
+because a stale client silently mis-renders instead of failing loudly.
+
+**Bump it on every itch push, and push the client and the server together.** They are two halves of
+one release. Shipping one without the other means nobody can play, and the symptom (a server that
+looks fine but rejects everyone) costs an hour to diagnose. It has.
+
+---
+
+## Playing and hosting
+
+**Play:** download from itch, run `CombatForge.exe`. Sign in for progression, or play offline —
+everything except XP and unlocks works logged out.
+
+**Host locally** (LAN / VPN, no backend needed):
 
 ```powershell
-git pull origin main
-.\Deploy\playtest\run-listen.ps1            # host + play on this PC (port 7777)
-.\Deploy\playtest\print-host-ips.ps1        # share LAN/VPN IP with friends
-# friends:  open <ip>:7777
-.\Deploy\playtest\smoke-improvement.ps1     # automated inject smoke (optional)
+.\Deploy\playtest\run-listen.ps1        # host + play on this PC (port 7777)
+.\Deploy\playtest\print-host-ips.ps1    # share the LAN/VPN IP
+.\Deploy\playtest\run-server.ps1        # headless -server -nullrhi instead
 ```
 
-**First kids match:** Lobby TYPE=Skirmish, MODE=Play-Only, FORMAT=4v4, Enter to start.
+**Quick first match:** TYPE=Skirmish, MODE=Play-Only, FORMAT=4v4.
 
-Launcher UE cannot build a true `CombatForgeServer` target; playtest uses the game binary
-as listen or `-server -nullrhi`.
+---
 
-## Getting started (Windows)
+## Match anatomy
 
-The first compile and first run happen on a Windows PC with Visual Studio 2022 and UE 5.6.
+**Build modes** — Creative (build from empty) · Remix (load a community arena and build on top) ·
+Play-Only (skip building).
 
-**Follow [`docs/pc-setup.md`](docs/pc-setup.md) step by step.** It covers engine/VS installation,
-the first build, creating the one required level file (`L_Graybox`), editor settings, and
-2-player listen-server testing in PIE — plus a triage table for common first-compile errors.
+**Match types** — Elimination (round-based, first to N) · Skirmish (team tags to a score) ·
+Free-for-All · Capture the Flag · Domination (hold 3 points) · Hardpoint (rotating point).
 
-Quick version:
+**Maps** — *Warehouse* (6400×4000 indoor CQB) · *The Yard* (6400×8000 open-air, no roof) · plus any
+saved community arena.
 
-1. Install UE 5.6 (Epic Games Launcher) and VS 2022 with the *Game development with C++* and
-   *.NET desktop development* workloads.
-2. Clone this repo to `D:\projects\combatforge`.
-3. Right-click `CombatForge.uproject` → **Generate Visual Studio project files**.
-4. Open `CombatForge.sln`, select **Development Editor | Win64**, build, launch.
-5. First run only: create and save the empty level `/Game/Maps/L_Graybox` (exact clicks in
-   [`docs/pc-setup.md`](docs/pc-setup.md)), then commit it.
+**Getting tagged** — locational, not a single health pool: **3** head hits, **5** chest, **8** limb,
+or **10** anywhere and you're out. Snipers carry a higher per-hit value, so they tag in one.
+
+**Build phase** is 180 s. Combat length depends on the match type.
+
+---
+
+## What's in it
+
+**Weapons** — 36 across six categories (Assault Rifle, SMG, Pistol, Shotgun, Sniper, LMG), each with
+its own fire modes, recoil climb, bloom, ADS time, reload, and unlock rank. Per-weapon first-person
+and ADS poses are hand-tuned and baked into the catalog.
+
+**Two weapon slots** — a primary and a second weapon carried on the back, swapped with the scroll
+wheel. Any category in either slot.
+
+**Classes** — five saved loadout slots, each with its own clothing and both weapons. Built from a
+modular character with ~330 parts across 9 slots.
+
+**Movement** — sprint, slide, crouch (hold or toggle), double-tap-space mantle, and a fall model
+that can tag you out.
+
+**Bots** — navmesh pathfinding over the arena *you just built*, sight cones, hearing, last-known
+position, cover and flanking, squad awareness, objective play, and doors they can open. They roll
+their own weapons rather than mirroring yours.
+
+**Progression** — XP, ranks, and rank-gated weapon unlocks, held server-side. The menu shows locked
+weapons in amber and names what you're actually carrying, so it can never disagree with what spawns.
+
+---
 
 ## Repository layout
 
 ```
-CombatForge.uproject             UE 5.6 project (module: CombatForge, Enhanced Input)
-Config/                         DefaultEngine / DefaultGame / DefaultInput ini
-Content/
-  Maps/                         Ships empty; L_Graybox.umap is created once on the PC (T17)
-Source/
-  CombatForge.Target.cs          Game target
-  CombatForgeEditor.Target.cs    Editor target
-  CombatForge/
-    CombatForge.h/.cpp           Module impl, log category, startup engine-asset checks
-    Core/                       Types header, GameInstance, GameMode, GameState,
-                                PlayerState, PlayerController (phase/round state machine)
-    Player/                     Character (one pawn, both phases), custom movement
-                                component (sprint/slide/ADS prediction), camera shakes
-    Input/                      UPFInputConfig — all input actions/contexts built in C++
-    Combat/                     Weapon component, paintball projectile, health (3-HP paint
-                                model), splat subsystem, audio stubs, target dummy
-    Building/                   Build component, replicated build grid (FastArray + ISMs),
-                                grid math, arena shell, layout serialization/fingerprints
-    Voting/                     UPFRatingSubsystem — match record + vote persistence
-    UI/                         All widgets, pure C++ UMG (HUD, wheel, vote, results, ...)
-docs/
-  pc-setup.md                   Windows first-compile + first-run guide (start here)
-  design/                       Design docs 01–05; 05-code-contract.md is LAW
+CombatForge.uproject          UE 5.6, module: CombatForge
+Config/                       Engine / Game / Input ini — DirectoriesToAlwaysCook lives here
+Content/                      Character, weapon, warehouse and animation packs (LFS)
+Source/CombatForge/
+  CombatForge.h               PFBuild::NetProtocol — the multiplayer version gate
+  Core/                       Types, GameInstance, GameMode, GameState, PlayerController,
+                              PFPaths (persistent data locations)
+  Player/                     CombatForgeCharacter (one pawn, both phases), movement component,
+                              modular character customization, menu preview actor
+  Combat/                     Weapon component + 36-weapon catalog, projectiles, health,
+                              grenades, bomb, ammo barrels, audio, VFX
+  Building/                   Build component, replicated grid (FastArray + ISMs), grid math,
+                              piece visuals, special piece actors (doors/windows/traps), arena shell
+  AI/                         Bot controller — perception, tactics, squad coordination
+  Objectives/                 Flag, control point, objective layout
+  Online/                     PFBackendSubsystem — accounts, directory, progression, fleet reporting
+  Voting/                     Rating subsystem — match records, votes, community map catalog
+  UI/                         Every widget, procedural C++ UMG. No Blueprints anywhere.
+Deploy/
+  playtest/                   Local host + packaging scripts
+  pilot/                      Dedicated-server deploy + log export (see below)
+docs/                         Design docs, plans, runbooks, post-mortems
 ```
 
-## The design docs
+**~47,000 lines of hand-written C++ across 119 files. Zero Blueprints** — all UI, input, and content
+loading is procedural, which is why everything here is greppable and diffable.
 
-Everything in `Source/` implements [`docs/design/05-code-contract.md`](docs/design/05-code-contract.md)
-— the binding contract for class APIs, gameplay numbers, and UE 5.6 correctness rules. The
-supporting docs: [`01-game-design.md`](docs/design/01-game-design.md) (rules),
-[`02-architecture.md`](docs/design/02-architecture.md) (structure/netcode),
-[`03-build-system.md`](docs/design/03-build-system.md) (grid/pieces),
-[`04-combat-feel.md`](docs/design/04-combat-feel.md) (movement/gunplay). Where they conflict, the
-contract wins. Code follows the docs, never the reverse.
+---
 
-## Status
+## Where your data lives
 
-| Area | State |
-|---|---|
-| Design docs 01–05 | Final (locked for the graybox milestone) |
-| Source (six parallel work packages) | Implemented against the contract; first compile pending on the Windows PC |
-| `L_Graybox.umap` | Not yet created — done once during PC setup, then committed |
-| Packaging / installer | Post-first-playable |
+This has bitten us more than once, so it's written down.
 
-Match spec at a glance: 4v4 design target (1v1–6v6 supported) · Build 180 s · rounds 90 s,
-first to 4 of max 7, sudden-death tiebreak · 3 HP, mask ×2 · 12 balls/s, 100-ball hopper,
-infinite reserve · vote 20 s · full match ≈ 12–13 minutes.
+| Data | Location | Why |
+|---|---|---|
+| Community maps | `%LOCALAPPDATA%\CombatForge\Arenas` | Survives every reinstall and redeploy |
+| Your settings, classes, keybinds | `%LOCALAPPDATA%\CombatForge\UserPrefs.ini` | Same reason — see below |
+| Server key, pending XP reports | `%ProgramData%\CombatForge` (or `-ArenaDir`) | Must survive a server redeploy |
+| Login token | `%LOCALAPPDATA%\CombatForge\Auth.json` | Per-user, and **never** inside the package |
+
+**Nothing player-owned may live inside the install folder.** The pre-ship scrub deletes
+`<package>\CombatForge\Saved` on every bake — it has to, because a session token once shipped to
+every alpha download from there. Anything stored in that folder is destroyed on every build, which is
+exactly how player settings used to reset to defaults after each bake.
+
+---
+
+## Shipping a build
+
+```powershell
+# 1. Bump PFBuild::NetProtocol in Source/CombatForge/CombatForge.h
+# 2. Cook + stage + pak (editor must be closed)
+.\Deploy\playtest\package-playtest.ps1
+
+# 3. Push to itch
+butler push "D:\projects\combatforge\Packaged\Playtest\Windows" `
+  thathorseslayer/combatforge:windows-alpha --userversion 0.1.0-alpha.N
+```
+
+**Then deploy the server in the same sitting.** On the PC, serve the build folder:
+
+```powershell
+cd D:\projects\combatforge\Deploy\pilot\serve
+python serve-and-receive.py                     # NOT `python -m http.server` — see below
+cloudflared tunnel --url http://localhost:8000  # second window
+```
+
+On the box:
+
+```powershell
+cd C:\Users\Administrator\Desktop
+curl.exe -L -o Deploy-OnBox.ps1 "<tunnel-url>/Deploy-OnBox.ps1"   # always re-pull it
+.\Deploy-OnBox.ps1
+```
+
+It auto-discovers the zip, protects `ServerKey.txt`, stops the old server, downloads, extracts,
+verifies, and relaunches. Watch for `Found: CombatForge-alphaN.zip`, then
+`Backend: fleet registered (port 7777)`.
+
+**Before shipping, check:** exactly one zip in the serve folder, no `ServerKey.txt` and no
+`GameUserSettings.ini` inside it, and the version tag in the client menu reading
+`Client vN  Server vN (in sync)` afterwards. Every one of those checks exists because its absence
+cost a bad deploy.
+
+### Getting logs off the server
+
+```powershell
+# PC (in Deploy\pilot\serve): python serve-and-receive.py  + cloudflared
+# box:
+.\Export-ServerLogs.ps1
+```
+
+Lands in `Deploy\pilot\serve\inbox\`. Redacts the server key from log bodies — UE writes the full
+command line into every log header — and the inbox is write-only over the tunnel.
+
+`serve-and-receive.py` is a drop-in replacement for `python -m http.server` that also accepts
+uploads. The stock module is download-only, so the box can pull a build but can't send anything back.
+
+---
+
+## Building from source
+
+Windows, Visual Studio 2022, UE 5.6. Full walkthrough:
+[`docs/pc-setup.md`](docs/pc-setup.md).
+
+1. Install UE 5.6 and VS 2022 (*Game development with C++*, *.NET desktop development*).
+2. Clone to `D:\projects\combatforge` — content packs are Git LFS, so `git lfs install` first.
+3. Right-click `CombatForge.uproject` → **Generate Visual Studio project files**.
+4. Open `CombatForge.sln`, **Development Editor | Win64**, build, launch.
+
+Handy console commands: `pf.SetRank <n>` (alpha only — unlock the catalog for testing),
+`pf.WeaponFP` / `pf.WeaponADS` / `pf.WeaponTP` (live pose tuning, prints paste-ready values),
+`pf.ShowMuzzle`, `pf.NavCheck`.
+
+---
+
+## Documentation worth knowing about
+
+- [`docs/design/05-code-contract.md`](docs/design/05-code-contract.md) — class APIs, gameplay
+  numbers, UE 5.6 correctness rules. Where docs conflict, the contract wins.
+- [`docs/design/01-game-design.md`](docs/design/01-game-design.md) · [`02-architecture.md`](docs/design/02-architecture.md) ·
+  [`03-build-system.md`](docs/design/03-build-system.md) · [`04-combat-feel.md`](docs/design/04-combat-feel.md)
+- [`docs/multiplayer-plan.md`](docs/multiplayer-plan.md) — backend, accounts, fleet
+- [`docs/itch-deploy.md`](docs/itch-deploy.md) — butler runbook
+- [`docs/weapon-balance-plan.md`](docs/weapon-balance-plan.md) — the catalog's stat and rank design
+- [`docs/confidence-audit-2026-07-19.md`](docs/confidence-audit-2026-07-19.md) — an honest audit of
+  decisions made under uncertainty, and the known-risk list that came out of it. Read before
+  trusting a constant you find in the code.
+
+## House rules learned the hard way
+
+- **Verify, don't infer.** A bone existing doesn't mean it's animated. A file-size delta doesn't
+  prove a bake worked. A log line saying "migrated 31 prefs" doesn't mean a file was written — check
+  the disk. Most of the expensive bugs here came from treating an inference as an observation.
+- **Derive from data, don't hand-tune constants.** The third-person weapon pose was fixed by reading
+  the hand-to-hand vector out of the animation instead of guessing offsets; the back sling by
+  measuring the torso from its bones. Hand-authored offsets are wrong for every pose but one.
+- **PowerShell scripts must be ASCII-only.** PS 5.1 reads `.ps1` as ANSI without a BOM, so an
+  em-dash becomes mojibake and breaks parsing on the server.
+- **One source of truth per script.** A stale copy of a deploy script in an old folder once shipped a
+  two-version-old build while reporting success at every step.

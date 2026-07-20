@@ -23,8 +23,11 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 11;  // alpha.11 — community map catalog replicates to clients (Remix on dedicated),
-	                                   // map save path hardened for -NOHOMEDIR, PNG no longer required to list maps.
+	constexpr int32 NetProtocol = 12;  // alpha.12 — REAL-RISK audit fixes (AFK kick no longer boots objective
+	                                   // holders, sane bot weapons, terminal prop-retry back-off, pistol roll,
+	                                   // minigun muzzle, honest version readout) + player settings moved out of
+	                                   // the install + second weapon slot + full FPSCAN weapon diagnostic.
+	                                   // 11 was baked repeatedly but never shipped; alpha.10 is what is live.
 }
 
 /**

@@ -2986,15 +2986,43 @@ void UPFLoadingMenuWidget::RebuildServerRows()
 		}
 	}
 
-	// Bottom-right version sync readout: our build vs. the top listed server's build.
+	// Bottom-right version sync readout. This used to compare our build against BrowserRows[0] — an
+	// ARBITRARY server, since the directory decides the ordering — while the row gate above checks every
+	// server independently. During a mixed-fleet window that lied both ways: row 0 current + the rest
+	// stale printed "(in sync)" with every row greyed out, and row 0 stale + the rest current printed
+	// "UPDATE NEEDED" to a player who could join everything. Report the fleet as counts instead, so the
+	// readout always matches what the rows actually do. An empty list has nothing to be in sync WITH, so
+	// it says that rather than falling through silently and reading as agreement.
 	if (VersionText)
 	{
 		FString V = FString::Printf(TEXT("Client v%d"), PFBuild::NetProtocol);
-		if (BrowserRows.Num() > 0)
+		if (bServerListOpen)
 		{
-			const int32 SrvProto = BrowserRows[0].NetProtocol;
-			V += FString::Printf(TEXT("    Server v%d  %s"), SrvProto,
-				SrvProto == PFBuild::NetProtocol ? TEXT("(in sync)") : TEXT("(UPDATE NEEDED)"));
+			int32 Compatible = 0;
+			for (const FPFBackendServerInfo& Row : BrowserRows)
+			{
+				if (Row.NetProtocol == PFBuild::NetProtocol)
+				{
+					++Compatible;
+				}
+			}
+			const int32 Total = BrowserRows.Num();
+			if (Total == 0)
+			{
+				V += TEXT("    no servers listed");
+			}
+			else if (Compatible == Total)
+			{
+				V += (Total == 1) ? TEXT("    in sync with the listed server") : TEXT("    in sync with all servers");
+			}
+			else if (Compatible == 0)
+			{
+				V += FString::Printf(TEXT("    UPDATE NEEDED - 0 of %d servers match your build"), Total);
+			}
+			else
+			{
+				V += FString::Printf(TEXT("    %d of %d servers match your build"), Compatible, Total);
+			}
 		}
 		VersionText->SetText(FText::FromString(V));
 	}
@@ -3017,6 +3045,20 @@ void UPFLoadingMenuWidget::JoinBrowserRow(int32 Index)
 
 void UPFLoadingMenuWidget::JoinBackendServer(const FPFBackendServerInfo& Info)
 {
+	// Quick Play and match-code joins land here WITHOUT the build check the browser rows get (those are
+	// disabled in RebuildServerRows). Without this guard `open` fails the network-version handshake
+	// (PFBuild::NetProtocol is folded into GetLocalNetworkVersionOverride in UCombatForgeGameInstance::Init),
+	// and because nothing in the game binds a NetworkError/TravelError handler the player is left staring at
+	// "Connecting to <name>…" forever with no reason given. Refuse up front and say why.
+	if (Info.NetProtocol != PFBuild::NetProtocol)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("Menu: refusing join to %s - server v%d, client v%d"),
+			*Info.Name, Info.NetProtocol, PFBuild::NetProtocol);
+		SetStatus(FString::Printf(
+			TEXT("%s runs build v%d and you have v%d - grab the latest CombatForge from itch.io to join."),
+			*Info.Name, Info.NetProtocol, PFBuild::NetProtocol));
+		return;
+	}
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		const FString Address = Info.JoinAddress();

@@ -298,6 +298,12 @@ void APFBuildGrid::RefreshPropInstanceTransforms()
 
 void APFBuildGrid::StartPieceVisualsRetry()
 {
+	// bPieceVisualsGaveUp: the retry budget is per-session, not per-piece. IsTimerActive alone let
+	// every AddPieceLocal after give-up start another 30-retry cycle (and re-log "GAVE UP").
+	if (bPieceVisualsGaveUp)
+	{
+		return;
+	}
 	UWorld* W = GetWorld();
 	if (W == nullptr || W->GetTimerManager().IsTimerActive(PieceVisualsRetryHandle))
 	{
@@ -330,6 +336,8 @@ void APFBuildGrid::TickPieceVisualsRetry()
 		}
 		else
 		{
+			// Latch BEFORE logging so this warning can only ever print once per session.
+			bPieceVisualsGaveUp = true;
 			UE_LOG(CombatForgeLog, Warning,
 				TEXT("BuildGrid: piece visuals GAVE UP after %d retries — props stay on fallback shapes (check the cook)"),
 				PieceVisualsRetryCount);

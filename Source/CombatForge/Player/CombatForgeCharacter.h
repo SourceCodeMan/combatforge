@@ -570,10 +570,17 @@ private:
 	// AfkKickSeconds is returned to their main menu (so they can't hold a slot / accrue XP while idle).
 	// Never applies to bots (AIController) or the listen-server host / standalone (local controller).
 	void TickServerAfk(float DeltaSeconds);
+	// Position + aim alone are NOT enough: a player holding a Hardpoint/Domination point stays crouched and
+	// still, and single-shot recoil (~0.17 deg climb) is both under the 1.0 deg aim gate AND fully recovered
+	// between two 1 Hz polls — so a top-scoring point holder was being kicked mid-match. Instead of hooking
+	// every action RPC across four components, fold the server-authoritative counters those actions already
+	// mutate into one fingerprint: any change means the player did something real this second.
+	uint32 ComputeServerActivityFingerprint() const;
 	float    ServerLastActiveTime = -1.f;   // world-seconds of last detected activity (-1 = needs reseed on (re)spawn)
 	float    ServerAfkPollAccum   = 0.f;    // throttles the poll to ~1 Hz
 	FVector  ServerAfkLastLoc     = FVector::ZeroVector;
 	FRotator ServerAfkLastAim     = FRotator::ZeroRotator;
+	uint32   ServerAfkLastFingerprint = 0;  // last polled gameplay-action fingerprint (reseeded with the baseline)
 	static constexpr float AfkKickSeconds = 180.f;   // 3 full minutes of complete idle
 
 	// ---- FOV arbiter state ----
