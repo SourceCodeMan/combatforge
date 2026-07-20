@@ -818,3 +818,43 @@ namespace PFWeapon
 		return LoadSecondaryConfig(PFChar::GetActiveSaveSlot());
 	}
 }
+
+// ---------------------------------------------------------------------------
+// pf.WeaponDump — real measured geometry for every catalog weapon.
+// ---------------------------------------------------------------------------
+// Added 2026-07-20 during the third-person weapon reset. Third-person guns looked roughly half size and
+// nobody could say why, because the FP scale is per-weapon and tuned (0.32-0.50) while the TP scale was a
+// single 0.85 applied to all 36 meshes — one of those is wrong for almost every gun, and arguing about
+// which from screenshots is how the last six attempts went. This prints the actual bounds so the answer is
+// measured instead of asserted. A real rifle is ~70-90cm, i.e. 70-90 uu.
+static void PFWeaponDumpCmd(const TArray<FString>& /*Args*/, UWorld* /*World*/)
+{
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("WPNDUMP  %-22s %-34s %9s %9s %9s %9s"),
+		TEXT("id"), TEXT("mesh"), TEXT("natLen"), TEXT("FPScale"), TEXT("lenFP"), TEXT("lenTP@0.85"));
+	for (int32 Cat = 0; Cat < PFWeapon::CategoryCount(); ++Cat)
+	{
+		for (int32 Idx = 0; Idx < PFWeapon::WeaponCount(Cat); ++Idx)
+		{
+			const FPFWeaponDef& D = PFWeapon::Weapon(Cat, Idx);
+			UStaticMesh* M = PFWeapon::LoadMesh(D);
+			if (M == nullptr)
+			{
+				UE_LOG(CombatForgeLog, Warning, TEXT("WPNDUMP  %-22s MESH FAILED TO LOAD"),
+					D.WeaponId ? D.WeaponId : TEXT("?"));
+				continue;
+			}
+			const FBoxSphereBounds B = M->GetBounds();
+			// Longest axis = barrel length for every gun in this catalog.
+			const float NatLen = FMath::Max3(B.BoxExtent.X, B.BoxExtent.Y, B.BoxExtent.Z) * 2.f;
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("WPNDUMP  %-22s %-34s %9.1f %9.3f %9.1f %9.1f"),
+				D.WeaponId ? D.WeaponId : TEXT("?"), *M->GetName(),
+				NatLen, D.FPScale, NatLen * D.FPScale, NatLen * 0.85f);
+		}
+	}
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponDumpCmd(
+	TEXT("pf.WeaponDump"),
+	TEXT("Print measured bounds for every catalog weapon: natural length and length at FP/TP scale."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponDumpCmd));

@@ -3728,51 +3728,14 @@ void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMateria
 	//   Back  = Up x Right, flipped if it disagrees with the mesh's own backward direction
 	// The weapon is then seated one half-thickness off the back surface and rolled to hang on a diagonal,
 	// which is how a real sling sits. No magic offsets, and it follows the spine as the torso animates.
-	if (bDeriveBackSlingFromSkeleton && !Bone.IsNone())
-	{
-		// ACTOR SPACE, not bone space. Two attempts at this have now been wrong in front of Tom: hand-authored
-		// bone-space constants put the gun in the crotch (a spine bone's +X runs UP the bone, not backward),
-		// and deriving a frame from spine/clavicle bone POSITIONS put it at the neck pointing forward. Bone
-		// axes on this skeleton are simply not what either version assumed.
-		//
-		// The pawn's own actor frame is unambiguous and needs no assumptions: -Forward is behind the character,
-		// +Up is up, +Right is their right. It also yaws with the body for free. Anchor to the spine bone so the
-		// sling still rides the torso as it animates, but place and orient it in actor space.
-		//
-		// The three offsets and the tilt are live-tunable via `pf.BackSling` — see the command at the bottom of
-		// this file. That is the workflow that actually landed the FP weapon poses (pf.WeaponFP / pf.WeaponADS):
-		// Tom drags it into place in-game and pastes the printed line back, instead of me guessing a third time.
-		const FVector Anchor = Body->GetSocketLocation(Bone);
-		const FVector ActorFwd = GetActorForwardVector();
-		const FVector ActorRgt = GetActorRightVector();
-		const FVector ActorUp  = GetActorUpVector();
-
-		const FVector WorldLoc = Anchor
-			- ActorFwd * BackSlingOffset.X      // behind the spine
-			+ ActorRgt * BackSlingOffset.Y      // lateral (0 = centred on the spine)
-			+ ActorUp  * BackSlingOffset.Z;     // negative drops it off the neck toward mid-back
-
-		// Barrel lies in the character's own back plane, tilted off vertical toward the left hip — the usual
-		// slung look. 0 deg = straight down, 90 = horizontal.
-		const float DiagRad = FMath::DegreesToRadians(BackSlingTiltDeg);
-		const FVector Barrel = (-ActorUp * FMath::Cos(DiagRad) - ActorRgt * FMath::Sin(DiagRad)).GetSafeNormal();
-
-		// Which mesh axis IS the barrel: the catalog's guns are modelled along +Y (SM_Rifle family) or +X.
-		const FBoxSphereBounds WB = BackWeaponMeshComp->GetStaticMesh()->GetBounds();
-		const bool bBarrelAlongY = (WB.BoxExtent.Y >= WB.BoxExtent.X);
-		const FVector FlatBack = -ActorFwd;   // gun lies flat against the back
-		const FRotator WorldRot = bBarrelAlongY
-			? FRotationMatrix::MakeFromYZ(Barrel, FlatBack).Rotator()
-			: FRotationMatrix::MakeFromXZ(Barrel, FlatBack).Rotator();
-
-		BackWeaponMeshComp->SetWorldLocation(WorldLoc);
-		BackWeaponMeshComp->SetWorldRotation(WorldRot);
-		BackWeaponMeshComp->SetOwnerNoSee(true);
-		BackWeaponMeshComp->SetCastShadow(true);
-		BackWeaponMeshComp->SetVisibility(true);
-		BackWeaponMeshComp->SetHiddenInGame(false);
-		return;
-	}
+	// NO DERIVED PLACEMENT. Two computed versions of this were wrong in front of Tom — bone-space constants
+	// put the gun in the CROTCH, an actor/bone-frame derivation put it at the NECK pointing forward — and both
+	// used SetWorldLocation/SetWorldRotation, which also defeated live tuning: the values were recomputed on
+	// the next equip, so nothing typed ever moved it. Same failure as the hand pose above.
+	//
+	// Plain relative transform on the spine bone, tuned by hand with pf.BackSling (which now applies to every
+	// pawn in the world, because the sling is owner-hidden and you can only judge it on somebody else).
+	// Paste whatever lands into BackWeaponRelative* in CombatForgeCharacter.h.
 
 	// Fallback: the authored relative transform. Only reached when the torso bones are missing (a
 	// non-humanoid or renamed skeleton) - and it is the OLD crotch-placing triple, kept only so an
@@ -3939,64 +3902,20 @@ void ACombatForgeCharacter::ApplyHandWeaponPose()
 		WeaponMeshComp->SetRelativeRotation(bOnWeaponBone ? FRotator::ZeroRotator : WeaponRelativeRotation);
 		WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
 
-		// ---- Orient the gun from the ANIMATED HANDS (the fix for "gun at the hip / bicep") ----
-		// Every fixed offset we tried was wrong for at least one pose, and ik_hand_gun turned out not to be
-		// animated on this skeleton (it sits at ik_hand_root near the pelvis — the hip gun). But the rifle-hold
-		// animation DOES pose both hands correctly, so the weapon's own line is simply hand_r -> hand_l:
-		// right hand on the grip, left on the foregrip. Deriving the barrel from that needs no tuned numbers and
-		// stays correct for every frame of every clip. Two-handed only; a one-handed pose keeps the fixed offset.
-		if (CVarWeaponAimFromHands.GetValueOnGameThread() != 0 && WeaponMesh != nullptr)
-		{
-			static const FName LeftHandNames[] = { TEXT("hand_l"), TEXT("Hand_L"), TEXT("LeftHand"), TEXT("HandL") };
-			FName LeftHand = NAME_None;
-			for (const FName& N : LeftHandNames)
-			{
-				if (Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE) { LeftHand = N; break; }
-			}
-			if (!LeftHand.IsNone())
-			{
-				const FVector GripLoc  = Body->GetSocketLocation(CachedWeaponAttachBone);
-				const FVector FrontLoc = Body->GetSocketLocation(LeftHand);
-				const FVector Barrel   = (FrontLoc - GripLoc).GetSafeNormal();
-				// Guard: hand_r->hand_l is the WEAPON's line only while the arms are actually posed ON a gun.
-				// Distance alone does NOT establish that (the old Dist>10 test): with pf.ArmedAnims 0 the arms
-				// hang at the sides, hand-to-hand is a ~40cm LATERAL vector that passes the distance test, and
-				// every third-person weapon swung round to point across the body. Also require the line to run
-				// generally where the pawn faces, so the hanging-arm and holstered cases fall through to the
-				// fixed WeaponRelative* offset that was tuned for exactly them.
-				const bool bHandsOnWeapon = FVector::Dist(FrontLoc, GripLoc) > 10.f
-					&& (Barrel | GetActorForwardVector()) > 0.25f;
-				if (!Barrel.IsNearlyZero() && bHandsOnWeapon)
-				{
-					// Which local axis is the barrel? Same bounds test the FP auto-pose uses: the longest
-					// horizontal extent of the mesh IS the barrel (SM_Rifle family is +Y; others are +X).
-					const FBoxSphereBounds B = WeaponMesh->GetBounds();
-					const bool bBarrelAlongY = (B.BoxExtent.Y >= B.BoxExtent.X);
-					// Roll reference: the hand's up keeps the gun from spinning about its own barrel.
-					const FVector HandUp = Body->GetSocketQuaternion(CachedWeaponAttachBone).GetUpVector();
-					FRotator WorldRot = bBarrelAlongY
-						? FRotationMatrix::MakeFromYZ(Barrel, HandUp).Rotator()
-						: FRotationMatrix::MakeFromXZ(Barrel, HandUp).Rotator();
-					// PER-WEAPON roll about the barrel. The hand derivation fixes WHERE the gun points but says
-					// nothing about which way is up for a given mesh, and a pistol whose local up is inverted
-					// relative to SM_Rifle renders GRIP-UP. CachedTPRaisedRoll (180 for pistols, set in
-					// ApplyWeaponLoadout) used to be applied only in the fire-time raise in UpdateWeaponHoldPose,
-					// which is gated behind !bArmedIdleActive and therefore DEAD at the pf.ArmedAnims 1 default —
-					// so the correction never ran and pistols were upside down for every other player. Rotate about
-					// the derived Barrel axis so the barrel direction the animation gives us is preserved exactly.
-					if (!FMath::IsNearlyZero(CachedTPRaisedRoll))
-					{
-						const FQuat BarrelRoll(Barrel, FMath::DegreesToRadians(CachedTPRaisedRoll));
-						WorldRot = (BarrelRoll * WorldRot.Quaternion()).Rotator();
-					}
-					WeaponMeshComp->SetWorldRotation(WorldRot);
-					// Seat the GRIP (rear of the gun) in the right hand rather than the mesh centre, so the
-					// receiver doesn't float forward of the fist.
-					const float BarrelHalf = (bBarrelAlongY ? B.BoxExtent.Y : B.BoxExtent.X) * WeaponRelativeScale.X;
-					WeaponMeshComp->SetWorldLocation(GripLoc + Barrel * (BarrelHalf * 0.35f));
-				}
-			}
-		}
+		// ---- NO DERIVED POSE. THE HAND OFFSET ABOVE IS THE WHOLE ANSWER. ----
+		// A hand_r->hand_l barrel derivation used to run here and overwrite the transform with SetWorldRotation
+		// / SetWorldLocation every tick. It was written to fix "gun at the hip", and it did move the gun — but it
+		// put the MESH CENTRE near the hand instead of the GRIP, so the rifle floated across the chest with an
+		// empty left hand reaching past it, and it silently defeated pf.WeaponTP: any value Tom typed was
+		// recomputed away on the next frame, which is why nothing he tried ever moved anything (2026-07-20).
+		//
+		// Six attempts at computing this pose failed. The two that succeeded in this project — the FP hip and ADS
+		// poses — were both TUNED BY HAND with pf.WeaponFP / pf.WeaponADS and pasted into the catalog. So the
+		// third-person grip is now a plain relative offset on the hand bone, tuned the same way with pf.WeaponTP
+		// (which already applies to every pawn in the world, bots included, so you can eyeball someone while you
+		// adjust). Whatever lands, paste into WeaponRelativeLocation/Rotation/Scale in CombatForgeCharacter.h.
+		//
+		// Do not reintroduce a computed pose here without a way for a human to override it live.
 		return;
 	}
 
@@ -4770,26 +4689,35 @@ static void PFBackSlingCmd(const TArray<FString>& Args, UWorld* World)
 	{
 		return;
 	}
+	// EVERY pawn, not just the local one. The sling is owner-hidden, so the only way to judge it is to look
+	// at somebody else — and the first version of this command tuned the local pawn while Tom watched a remote
+	// one, which is why "the command does not move the gun" (2026-07-20). Same reason pf.WeaponTP is world-wide.
 	ACombatForgeCharacter* Target = nullptr;
-	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	int32 Applied = 0;
+	if (Args.Num() >= 4)
 	{
-		if (It->IsLocallyControlled()) { Target = *It; break; }
+		const FVector Off(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+		const float Tilt = FCString::Atof(*Args[3]);
+		for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+		{
+			It->SetBackSling(Off, Tilt);
+			Target = *It;
+			++Applied;
+		}
 	}
 	if (Target == nullptr)
 	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("pf.BackSling: no locally-controlled pawn"));
-		return;
+		for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It) { Target = *It; break; }
 	}
-	if (Args.Num() >= 4)
+	if (Target == nullptr)
 	{
-		Target->SetBackSling(
-			FVector(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2])),
-			FCString::Atof(*Args[3]));
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.BackSling: no pawns in the world yet"));
+		return;
 	}
 	const FVector O = Target->GetBackSlingOffset();
 	UE_LOG(CombatForgeLog, Warning,
-		TEXT("pf.BackSling  Back=%.1f Side=%.1f Up=%.1f Tilt=%.1f   ->  paste: BackSlingOffset = FVector(%.1ff, %.1ff, %.1ff); BackSlingTiltDeg = %.1ff;"),
-		O.X, O.Y, O.Z, Target->GetBackSlingTilt(), O.X, O.Y, O.Z, Target->GetBackSlingTilt());
+		TEXT("pf.BackSling (%d pawns)  ->  paste: BackWeaponRelativeLocation = FVector(%.1ff, %.1ff, %.1ff); BackWeaponRelativeRotation = FRotator(0.f, 0.f, %.1ff);"),
+		Applied, O.X, O.Y, O.Z, Target->GetBackSlingTilt());
 	if (GEngine != nullptr)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 6.f, FColor::Yellow,
@@ -4805,8 +4733,13 @@ static FAutoConsoleCommandWithWorldAndArgs GPFBackSlingCmd(
 
 void ACombatForgeCharacter::SetBackSling(const FVector& Offset, float TiltDeg)
 {
+	// Writes the PLAIN relative transform AttachWeaponToBack now uses. Args stay in the same
+	// human-readable order (Back / Side / Up / Tilt) so the tuning session does not change, but they land
+	// in BackWeaponRelativeLocation/Rotation — the values you paste into the header.
 	BackSlingOffset = Offset;
 	BackSlingTiltDeg = TiltDeg;
+	BackWeaponRelativeLocation = Offset;
+	BackWeaponRelativeRotation = FRotator(0.f, 0.f, TiltDeg);
 	// Re-run the equip so AttachWeaponToBack recomputes with the new values — no respawn needed, which is
 	// the whole point of tuning it live.
 	ApplyWeaponLoadout();
