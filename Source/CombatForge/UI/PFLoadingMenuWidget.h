@@ -317,6 +317,10 @@ private:
 	/** Second weapon slot (back-slung, scroll-wheel swap). Any category, not pistol-only. */
 	UPROPERTY() TObjectPtr<UTextBlock> Weapon2CatValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> Weapon2ValueText;
+	/** Full-width wrapping "LOCKED - needs Rank N" lines; the stepper cells are too narrow and clip. */
+	UPROPERTY() TObjectPtr<UTextBlock> WeaponLockText;
+	UPROPERTY() TObjectPtr<UTextBlock> Weapon2LockText;
+	void SetLockLine(UTextBlock* Line, bool bLocked, uint8 NeedRank, const FPFWeaponConfig& Equipped);
 	FPFWeaponConfig WeaponConfig;
 	FPFWeaponConfig Weapon2Config;
 	void BuildWeaponPicker(UVerticalBox* Col);

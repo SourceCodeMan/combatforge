@@ -459,16 +459,27 @@ bool UPFBackendSubsystem::IsWeaponUnlocked(const FString& WeaponId) const
 		return true;
 	}
 
-	// ⚠️ ALPHA ONLY — DELETE BEFORE BETA. `pf.SetRank <n>` lets the catalog be exercised without
-	// grinding: anything whose UnlockRank is within the override counts as unlocked, locally.
-	// Client-side only — a fleet server still clamps against the real profile in ServerSetKit.
-	if (DevRankOverride >= 0)
+	// RANK IS AUTHORITATIVE, the id list is only an additive grant. UnlockIds is whatever the backend
+	// happens to have seeded; it does NOT enumerate the rank-1 starters, so keying purely off it showed a
+	// rank-10 player "LOCKED - Rank 1" on the default rifle and pistol (Tom 2026-07-20). If you have the
+	// rank, you have the gun.
+	//
+	// EffectiveRank() folds in the ⚠️ ALPHA-ONLY `pf.SetRank` override (DevRankOverride) — delete that
+	// member and this comment together before beta. Client-side only: a fleet server re-checks the real
+	// profile in ServerSetKit::ClampSlot, so an override cannot carry a locked gun on an official server.
 	{
 		const FString Bare = WeaponId.StartsWith(TEXT("wpn.")) ? WeaponId.RightChop(4) : WeaponId;
 		const FPFWeaponConfig C = PFWeapon::FindById(Bare);
-		if (PFWeapon::IdOf(C.Category, C.Index).Equals(Bare, ESearchCase::IgnoreCase))
+		if (PFWeapon::IdOf(C.Category, C.Index).Equals(Bare, ESearchCase::IgnoreCase)
+			&& static_cast<int32>(PFWeapon::UnlockRankOf(C.Category, C.Index)) <= EffectiveRank())
 		{
-			return static_cast<int32>(PFWeapon::UnlockRankOf(C.Category, C.Index)) <= DevRankOverride;
+			return true;
+		}
+		// An explicit override LOWER than your real rank is a deliberate "show me what a new player sees",
+		// so it must be able to re-lock things the id list would otherwise grant below.
+		if (DevRankOverride >= 0)
+		{
+			return false;
 		}
 	}
 	const FString Prefixed = WeaponId.StartsWith(TEXT("wpn."))

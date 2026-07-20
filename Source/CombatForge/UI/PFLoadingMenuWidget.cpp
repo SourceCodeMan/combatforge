@@ -688,8 +688,26 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 		}
 	};
 
+	// Full-width wrapping line for the lock state — the stepper's value cell is too narrow and clips.
+	auto MakeLockLine = [&](TObjectPtr<UTextBlock>& Out)
+	{
+		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>();
+		T->SetFont(PFLoadFont(11, false));
+		T->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.62f, 0.20f)));
+		T->SetJustification(ETextJustify::Center);
+		T->SetAutoWrapText(true);
+		T->SetVisibility(ESlateVisibility::Collapsed);
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(T))
+		{
+			V->SetPadding(FMargin(24.f, 0.f, 24.f, 4.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+		Out = T;
+	};
+
 	MakeStepRow(TEXT("CATEGORY"), 0, WeaponCatValueText);
 	MakeStepRow(TEXT("WEAPON"), 1, WeaponValueText);
+	MakeLockLine(WeaponLockText);
 
 	// SECOND WEAPON (Tom 2026-07-19: "add to the menu the ability to choose it from all the available guns.
 	// I don't want it to be a pistol only."). Kinds 2/3 mirror 0/1 for the secondary slot. Any category is
@@ -706,6 +724,7 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 	}
 	MakeStepRow(TEXT("CATEGORY"), 2, Weapon2CatValueText);
 	MakeStepRow(TEXT("WEAPON"), 3, Weapon2ValueText);
+	MakeLockLine(Weapon2LockText);
 
 	RefreshWeaponLabels();
 }
@@ -728,25 +747,24 @@ void UPFLoadingMenuWidget::RefreshWeaponLabels()
 		// chosen, and the mismatch only surfaced in game as "the gun I picked isn't there" (Tom
 		// 2026-07-20). Locked entries now go amber, say LOCKED outright, and name what you are ACTUALLY
 		// carrying, so the menu can never disagree with the spawn.
-		FString Label = FString::Printf(TEXT("%s  (%d/%d)"),
+		// The value cell is a fixed-width, CENTRE-justified, ClipToBounds slot between the < > buttons,
+		// so overlong text loses BOTH ends ("ult) (1/10) LOCKED - Rank 1 (carrying: Rifle" — Tom
+		// 2026-07-20, unreadable). Keep this cell to name + position only; the lock detail goes on its
+		// own wrapping line below, where it has the full page width.
+		const FString Label = FString::Printf(TEXT("%s  (%d/%d)"),
 			*PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index),
 			WeaponConfig.Index + 1, WpnCount);
 		bool bLocked = false;
 		if (UPFBackendSubsystem* Backend = GetBackend())
 		{
-			const FString Id = PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index);
-			bLocked = !Backend->IsWeaponUnlocked(Id);
-			if (bLocked)
-			{
-				const FPFWeaponConfig Equipped = PFWeapon::LoadConfig(ActiveSaveSlot);
-				Label += FString::Printf(TEXT("   LOCKED - Rank %u   (carrying: %s)"),
-					PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index),
-					*PFWeapon::WeaponDisplayName(Equipped.Category, Equipped.Index));
-			}
+			bLocked = !Backend->IsWeaponUnlocked(PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index));
 		}
 		WeaponValueText->SetColorAndOpacity(FSlateColor(bLocked
 			? FLinearColor(1.f, 0.62f, 0.20f) : FLinearColor::White));
 		WeaponValueText->SetText(FText::FromString(Label));
+		SetLockLine(WeaponLockText, bLocked,
+			PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index),
+			PFWeapon::LoadConfig(ActiveSaveSlot));
 	}
 
 	// Second weapon slot (same labelling rules, own config).
@@ -759,26 +777,39 @@ void UPFLoadingMenuWidget::RefreshWeaponLabels()
 	}
 	if (Weapon2ValueText != nullptr)
 	{
-		FString Label2 = FString::Printf(TEXT("%s  (%d/%d)"),
+		const FString Label2 = FString::Printf(TEXT("%s  (%d/%d)"),
 			*PFWeapon::WeaponDisplayName(Weapon2Config.Category, Weapon2Config.Index),
 			Weapon2Config.Index + 1, Wpn2Count);
 		bool bLocked2 = false;
 		if (UPFBackendSubsystem* Backend = GetBackend())
 		{
-			const FString Id2 = PFWeapon::IdOf(Weapon2Config.Category, Weapon2Config.Index);
-			bLocked2 = !Backend->IsWeaponUnlocked(Id2);
-			if (bLocked2)
-			{
-				const FPFWeaponConfig Equipped2 = PFWeapon::LoadSecondaryConfig(ActiveSaveSlot);
-				Label2 += FString::Printf(TEXT("   LOCKED - Rank %u   (carrying: %s)"),
-					PFWeapon::UnlockRankOf(Weapon2Config.Category, Weapon2Config.Index),
-					*PFWeapon::WeaponDisplayName(Equipped2.Category, Equipped2.Index));
-			}
+			bLocked2 = !Backend->IsWeaponUnlocked(PFWeapon::IdOf(Weapon2Config.Category, Weapon2Config.Index));
 		}
 		Weapon2ValueText->SetColorAndOpacity(FSlateColor(bLocked2
 			? FLinearColor(1.f, 0.62f, 0.20f) : FLinearColor::White));
 		Weapon2ValueText->SetText(FText::FromString(Label2));
+		SetLockLine(Weapon2LockText, bLocked2,
+			PFWeapon::UnlockRankOf(Weapon2Config.Category, Weapon2Config.Index),
+			PFWeapon::LoadSecondaryConfig(ActiveSaveSlot));
 	}
+}
+
+void UPFLoadingMenuWidget::SetLockLine(UTextBlock* Line, bool bLocked, uint8 NeedRank,
+	const FPFWeaponConfig& Equipped)
+{
+	if (Line == nullptr)
+	{
+		return;
+	}
+	if (!bLocked)
+	{
+		Line->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	Line->SetVisibility(ESlateVisibility::Visible);
+	Line->SetText(FText::FromString(FString::Printf(
+		TEXT("LOCKED - needs Rank %u. Not equipped; you are carrying %s."),
+		NeedRank, *PFWeapon::WeaponDisplayName(Equipped.Category, Equipped.Index))));
 }
 
 void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
