@@ -1078,6 +1078,7 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 			PFChar::SaveConfig(ActiveSaveSlot, CharConfig);
 		}
 		PFWeapon::SaveConfig(ActiveSaveSlot, WeaponConfig);
+		PFWeapon::SaveSecondaryConfig(ActiveSaveSlot, Weapon2Config);   // the second slot is part of the class too
 	}
 
 	ActiveSaveSlot = SaveSlot;
