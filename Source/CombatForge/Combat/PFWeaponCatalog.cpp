@@ -418,11 +418,11 @@ namespace PFWeapon
 				Mode_SB, EPFFireMode::Single,
 				// ClassBurstCount was 1, which made BURST fire exactly one shell — indistinguishable from
 				// SINGLE, so the mode looked broken (Tom 2026-07-20). This is the ONLY burst-capable
-				// shotgun (the other three are Mode_S) and the only weapon in the catalog whose burst
-				// count was below 2; every other burst gun is 3. Two shells per pull: a real double-tap
-				// that reads as a burst without handing 18 pellets (3 x 6) to one trigger pull, which at
-				// HitValue 1 against the 10-hit-out model would out someone instantly at close range.
-				0.9f, 0.15f, 7200.f, 0.30f, 2, 10, 2.8f,
+				// shotgun (the other three are Mode_S) and was the only weapon in the catalog below 2.
+				// 3 to match every other burst weapon (Tom's call). That is 18 pellets per pull at close
+				// range, which against the 10-hit-out model is lethal fast — intended, but the number to
+				// turn down first if the shotgun starts dominating CQB.
+				0.9f, 0.15f, 7200.f, 0.30f, 3, 10, 2.8f,
 				TEXT("sg_04"), 1, 6, 2.6f,
 				0.50f, 2.0f, 1, 8.f,
 				1.00f, 0.25f, 14.f,

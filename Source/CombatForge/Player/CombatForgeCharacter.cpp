@@ -4202,18 +4202,32 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 	// applies to a pawn this machine locally controls. Remote players' copies of this pawn are untouched,
 	// so everyone else still sees the gun in his hands and the sling on his back. bOwnerNoSee stays set
 	// as well — this is belt and braces, not a replacement.
+	// ⚠️ The owner hide MUST use SetVisibility, NOT SetHiddenInGame. GetMuzzleLocation's authoritative
+	// branch gates on `!WeaponMeshComp->bHiddenInGame` before resolving the real barrel tip, and falls
+	// back to a fixed eye offset otherwise. On a LISTEN HOST the shooter is both locally controlled and
+	// authoritative, so hiding this component via bHiddenInGame would have moved every host shot off the
+	// barrel to that fallback — precisely the "shots don't come from the barrel" class of bug this hide
+	// was never meant to touch. SetVisibility stops the draw and leaves bHiddenInGame alone.
 	const bool bHideTPWeaponsForOwner = IsLocallyControlled();
+	if (WeaponMeshComp != nullptr)
+	{
+		WeaponMeshComp->SetVisibility(!bHideTPWeaponsForOwner);
+	}
+	if (BackWeaponMeshComp != nullptr)
+	{
+		BackWeaponMeshComp->SetVisibility(!bHideTPWeaponsForOwner);
+	}
 
 	// TP rifles (hand + back sling): hide in build / elim so builders don't look armed.
 	if (BackWeaponMeshComp != nullptr)
 	{
 		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
-		BackWeaponMeshComp->SetHiddenInGame(bHideForBuild || bElim || bHideTPWeaponsForOwner);
+		BackWeaponMeshComp->SetHiddenInGame(bHideForBuild || bElim);
 	}
 	if (WeaponMeshComp != nullptr)
 	{
 		// Don't fight elimination hide — elim appearance owns that path.
-		if (bHideForBuild || bHideTPWeaponsForOwner)
+		if (bHideForBuild)
 		{
 			WeaponMeshComp->SetHiddenInGame(true);
 		}
