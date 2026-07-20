@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tom Chapman. All rights reserved.
 
 #include "UI/PFOptionsWidget.h"
+#include "Core/PFPaths.h"
 
 #include "CombatForge.h"
 #include "Core/CombatForgePlayerController.h"
@@ -846,7 +847,7 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 
 	AddHowToLine(Box, TEXT("MAPS & MODES"), 15, true, Head);
 	AddHowToLine(Box, TEXT("MAP: Warehouse (indoor) or The Yard (open-air, double width)."), 13, false, Body);
-	AddHowToLine(Box, TEXT("Creative / Improvement / Play-Only = what happens in Build. Improvement & Play-Only load a community map — hosts can star up to 5 favorites."), 13, false, Body);
+	AddHowToLine(Box, TEXT("Creative / Remix / Play-Only = what happens in Build. Remix & Play-Only load a community map — hosts can star up to 5 favorites."), 13, false, Body);
 	AddHowToLine(Box, TEXT("Elimination · Skirmish · FFA · CTF · Domination · Hardpoint = how you win combat."), 13, false, Body);
 	AddHowToLine(Box, TEXT("4v4 / 6v6 + bots checkbox fill empty slots. Rate the arena after the match — top maps float up the community list."), 13, false, Dim);
 }
@@ -1299,9 +1300,9 @@ void UPFOptionsWidget::PullFromSettings()
 
 	if (GConfig)
 	{
-		GConfig->GetFloat(TEXT("CombatForge"), TEXT("MasterVolume"), WorkingMasterVol, GGameUserSettingsIni);
-		GConfig->GetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), WorkingSfxVol, GGameUserSettingsIni);
-		GConfig->GetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), WorkingSens, GGameUserSettingsIni);
+		GConfig->GetFloat(TEXT("CombatForge"), TEXT("MasterVolume"), WorkingMasterVol, FPFPaths::UserPrefsIni());
+		GConfig->GetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), WorkingSfxVol, FPFPaths::UserPrefsIni());
+		GConfig->GetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), WorkingSens, FPFPaths::UserPrefsIni());
 	}
 	WorkingMasterVol = FMath::Clamp(WorkingMasterVol, 0.f, 1.f);
 	WorkingSfxVol = FMath::Clamp(WorkingSfxVol, 0.f, 1.f);
@@ -1423,11 +1424,11 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 
 	if (bSave && GConfig)
 	{
-		GConfig->SetFloat(TEXT("CombatForge"), TEXT("MasterVolume"), WorkingMasterVol, GGameUserSettingsIni);
-		GConfig->SetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), WorkingSfxVol, GGameUserSettingsIni);
-		GConfig->SetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), WorkingSens, GGameUserSettingsIni);
+		GConfig->SetFloat(TEXT("CombatForge"), TEXT("MasterVolume"), WorkingMasterVol, FPFPaths::UserPrefsIni());
+		GConfig->SetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), WorkingSfxVol, FPFPaths::UserPrefsIni());
+		GConfig->SetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), WorkingSens, FPFPaths::UserPrefsIni());
 		FPFUserPrefs::Flush();
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->Flush(false, FPFPaths::UserPrefsIni());
 	}
 
 	if (HintText)
@@ -1460,7 +1461,7 @@ void UPFOptionsWidget::ApplySfxVolume(float Linear01)
 	// Combat code multiplies by this via a shared config read on play.
 	if (GConfig)
 	{
-		GConfig->SetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), FMath::Clamp(Linear01, 0.f, 1.f), GGameUserSettingsIni);
+		GConfig->SetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), FMath::Clamp(Linear01, 0.f, 1.f), FPFPaths::UserPrefsIni());
 	}
 }
 

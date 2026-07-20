@@ -80,14 +80,14 @@ UENUM()
 enum class EPFBodyRegion : uint8 { Chest = 0, Head = 1, Limbs = 2 };
 
 UENUM()
-enum class EPFRespawnMode : uint8 { RoundElimination = 0, Respawn = 1 };  // B1: RoundElimination is v1
+enum class EPFRespawnMode : uint8 { RoundElimination = 0, Respawn = 1 };  // RoundElimination is v1 default; Respawn scores rounds by team tags
 
 // Build Mode = what the BUILD phase does (independent of the match type below).
 UENUM(BlueprintType)
 enum class EPFBuildMode : uint8
 {
 	Creative = 0,     // build your half from empty (v1)
-	Improvement = 1,  // load a saved community arena, then a full build pass on top
+	Improvement = 1,  // Remix (UI label): load a saved community arena, then a full build pass on top
 	PlayOnly = 2,     // no build phase — straight to combat
 	MAX_Count = 3 UMETA(Hidden)
 };
@@ -217,6 +217,30 @@ struct COMBATFORGE_API FPFMatchResult
 	UPROPERTY() uint8  RoundsPlayed = 0;
 	UPROPERTY() bool   bSuddenDeath = false;
 	UPROPERTY() int32  MatchDurationSec = 0;
+};
+
+/** One ranked community arena for the Remix/Play-Only map picker (host disk catalog, replicated on GameState). */
+USTRUCT()
+struct COMBATFORGE_API FPFCommunityMapInfo
+{
+	GENERATED_BODY()
+
+	/** Filename only under ArenaDir (e.g. arena_20260712_….json). */
+	UPROPERTY() FString FileName;
+	UPROPERTY() FString ArenaId;
+	/** Short human label for UI lists. */
+	UPROPERTY() FString DisplayName;
+	/** Vote score (up=+2, down=−1) + piece-count soft boost. */
+	UPROPERTY() int32 Score = 0;
+	UPROPERTY() int32 PieceCount = 0;
+	UPROPERTY() int32 TeamSize = 0;
+	/** Build-grid rows the map was made on (Warehouse 10, Yard 20). Gates catalog + load per shell. */
+	UPROPERTY() int32 CellsY = 10;
+	UPROPERTY() int32 ThumbUp = 0;
+	UPROPERTY() int32 ThumbDown = 0;
+	UPROPERTY() FString CreatedUtc;
+	/** Remix lineage: the arenaId this map was improved FROM (empty for original/from-scratch maps). */
+	UPROPERTY() FString ParentArenaId;
 };
 
 // ---- Vote category vocabulary (T13) ----

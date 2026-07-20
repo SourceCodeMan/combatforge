@@ -491,6 +491,12 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 			C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			C->SetVisibility(false);
 			C->SetHiddenInGame(true);
+			// Owner-hidden from BIRTH. These were the only primitives on the pawn created without an
+			// owner-visibility flag: ApplyCharacterConfig's Mount sets it, but only on the branch that
+			// assigns a mesh, so any part mounted by another path stayed visible to its own first-person
+			// view. A clothing slot resolving to a WEAPON part is then a gun hanging in your own view -
+			// which is what "two guns crossed on a default class" looks like (Tom 2026-07-20).
+			C->SetOwnerNoSee(true);
 		}
 		return C;
 	};
@@ -2758,6 +2764,10 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	UStaticMesh* StowedMesh = PFWeapon::LoadMesh(StowedDef);
 	UMaterialInterface* StowedMat = PFWeapon::LoadMaterial(StowedDef);
 	AttachWeaponToBack(StowedMesh, StowedMat);
+
+	// Every equip path ends here — spawn, respawn, scroll-wheel swap, class change — so this is the one
+	// place that can guarantee the owner is never left looking at two guns.
+	EnforceSingleFirstPersonWeapon();
 }
 
 void ACombatForgeCharacter::ReapplyWeaponLoadout()
@@ -3411,6 +3421,104 @@ void ACombatForgeCharacter::AttachWeaponToHand()
 	ApplyHandWeaponPose();
 }
 
+void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
+{
+	// TWO GUNS CROSSED IN FIRST PERSON on a default, never-edited class (Tom 2026-07-20). Only components
+	// flagged bOnlyOwnerSee can render in the owner's view, and there should be exactly ONE weapon among
+	// them: either RifleFPMesh (real gun) or the MarkerPartsFP primitive stand-in, never both — the ctor
+	// picks one branch. The white/black X in the screenshot is exactly what both would look like: the
+	// marker uses BasicShapeMaterial (light) with its barrel along +X, while RifleFPMesh is yawed -90.
+	//
+	// Belt and braces rather than a guess about how they came to coexist: drop the marker whenever the
+	// real gun exists (a no-op when the ctor took the marker branch), then LOG anything else still
+	// owner-visible with a mesh, so if the second gun is something I have not thought of, the next
+	// playtest log names it outright instead of costing another round trip.
+	if (RifleFPMesh != nullptr && MarkerPartsFP.Num() > 0)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("FP weapon: real rifle AND %d marker part(s) both present — destroying the marker."),
+			MarkerPartsFP.Num());
+		for (TObjectPtr<UStaticMeshComponent>& Part : MarkerPartsFP)
+		{
+			if (Part != nullptr)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		MarkerPartsFP.Reset();
+	}
+
+	if (!IsLocallyControlled())
+	{
+		return;   // only the owning client can see a first-person weapon at all
+	}
+
+	// ENFORCE THE INVARIANT rather than keep guessing which component it is. Tom's screenshot shows two
+	// DETAILED catalog weapons crossed (one reads "APF-45 MKII"), not the crude primitive marker — so the
+	// duplicate is a real gun mesh that is owner-visible when it should not be, and three separate
+	// hypotheses about *which* one have now failed. Whatever it is: exactly one static-mesh weapon may be
+	// owner-visible, and that is RifleFPMesh. Hide every other one and NAME it, so this is fixed on sight
+	// and the log still identifies the source for a proper root-cause fix.
+	//
+	// Deliberately narrow: static meshes only (the modular character parts are skeletal, so clothing and
+	// skin are untouched), and it only ever HIDES - nothing is destroyed, so a mistake here costs a
+	// missing cosmetic, never a crash.
+	// SKELETAL MESHES ARE IN SCOPE TOO. The first version scanned only static meshes and reported
+	// "1 owner-visible weapon mesh" while Tom was plainly looking at two (his log, 2026-07-20) — which
+	// is what proved the duplicate is a SKELETAL component, i.e. a weapon mounted as a modular character
+	// part. A diagnostic that cannot see half the candidates is worse than none: it reads as all-clear.
+	int32 Seen = 0;
+	int32 Hidden = 0;
+	TArray<USceneComponent*> Kids;
+	GetComponents<USceneComponent>(Kids);
+	for (USceneComponent* K : Kids)
+	{
+		UMeshComponent* P = Cast<UMeshComponent>(K);
+		if (P == nullptr || P->bHiddenInGame)
+		{
+			continue;
+		}
+		const UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(P);
+		const USkeletalMeshComponent* SKC = Cast<USkeletalMeshComponent>(P);
+		if ((SMC != nullptr && SMC->GetStaticMesh() == nullptr)
+			|| (SKC != nullptr && SKC->GetSkeletalMeshAsset() == nullptr))
+		{
+			continue;   // component exists but renders nothing
+		}
+		// Owner-visible = explicitly owner-only, OR simply not hidden from the owner (the default).
+		const bool bOwnerSees = P->bOnlyOwnerSee || !P->bOwnerNoSee;
+		if (!bOwnerSees)
+		{
+			continue;
+		}
+		++Seen;
+		if (P == RifleFPMesh)
+		{
+			continue;
+		}
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("FP weapon: SECOND GUN found — '%s' (%s mesh=%s, parent=%s, onlyOwnerSee=%d ownerNoSee=%d)."),
+			*P->GetName(), SKC ? TEXT("SKELETAL") : TEXT("static"),
+			*GetNameSafe(SMC ? (UObject*)SMC->GetStaticMesh() : (UObject*)(SKC ? SKC->GetSkeletalMeshAsset() : nullptr)),
+			*GetNameSafe(P->GetAttachParent()),
+			P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0);
+
+		// Only re-hide the two components that are DEFINITELY third-person guns. Anything else is merely
+		// reported: a carried bomb or some future owner-visible prop must not be hidden by a rule aimed at
+		// weapons, and a wrong guess here would be a new bug rather than a fix.
+		// Third-person guns and mis-mounted character parts are both always wrong in a first-person view,
+		// and hiding either can only ever cost a cosmetic. Anything else is reported and left alone.
+		if (P == WeaponMeshComp || P == BackWeaponMeshComp || SKC != nullptr)
+		{
+			P->SetOwnerNoSee(true);
+			P->MarkRenderStateDirty();
+			++Hidden;
+		}
+	}
+	UE_LOG(CombatForgeLog, Log,
+		TEXT("FP weapon: %d owner-visible weapon mesh(es); hid %d duplicate(s)."), Seen, Hidden);
+}
+
 void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat)
 {
 	if (BackWeaponMeshComp == nullptr)
@@ -3468,9 +3576,96 @@ void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMateria
 		BackWeaponMeshComp->AttachToComponent(Body,
 			FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 	}
+	BackWeaponMeshComp->SetRelativeScale3D(BackWeaponRelativeScale);
+
+	// THE CROTCH-RIFLE BUG (Tom, alpha-10: "an assault rifle protruding from the crotch, pointed forward").
+	//
+	// The old code set a hand-authored RelativeLocation of (-18, 6, -6) on the spine bone. That was written
+	// as if bone space were actor space (-X = behind). It is not: on mannequin-family skeletons a spine
+	// bone's +X runs UP THE BONE toward the neck, so -18 on X drove the gun ~18cm DOWN the spine, into the
+	// pelvis, and the authored rotation left the barrel pointing forward. Every constant in that triple was
+	// meaningless for this skeleton, and none of them were ever checked in-editor.
+	//
+	// So derive the sling from the SKELETON instead of guessing offsets - the same principle that finally
+	// fixed the hand pose. Build a torso frame from bones we can actually measure, then place the weapon
+	// flat on the back plane:
+	//   Up    = spine -> neck            (torso axis, whatever the bone roll happens to be)
+	//   Right = left clavicle -> right   (lateral axis)
+	//   Back  = Up x Right, flipped if it disagrees with the mesh's own backward direction
+	// The weapon is then seated one half-thickness off the back surface and rolled to hang on a diagonal,
+	// which is how a real sling sits. No magic offsets, and it follows the spine as the torso animates.
+	if (bDeriveBackSlingFromSkeleton && !Bone.IsNone())
+	{
+		auto BoneOrSocket = [Body](std::initializer_list<const TCHAR*> Names, FVector& Out) -> bool
+		{
+			for (const TCHAR* N : Names)
+			{
+				const FName FN(N);
+				if (Body->DoesSocketExist(FN) || Body->GetBoneIndex(FN) != INDEX_NONE)
+				{
+					Out = Body->GetSocketLocation(FN);
+					return true;
+				}
+			}
+			return false;
+		};
+
+		FVector SpineLow, SpineHigh, ClavL, ClavR;
+		const bool bHaveSpine = BoneOrSocket({ TEXT("spine_01"), TEXT("Spine_01"), TEXT("pelvis"), TEXT("Pelvis") }, SpineLow)
+			&& BoneOrSocket({ TEXT("neck_01"), TEXT("Neck_01"), TEXT("spine_03"), TEXT("Spine_03"), TEXT("head") }, SpineHigh);
+		const bool bHaveClav = BoneOrSocket({ TEXT("clavicle_l"), TEXT("Clavicle_L"), TEXT("upperarm_l"), TEXT("UpperArm_L") }, ClavL)
+			&& BoneOrSocket({ TEXT("clavicle_r"), TEXT("Clavicle_R"), TEXT("upperarm_r"), TEXT("UpperArm_R") }, ClavR);
+
+		if (bHaveSpine && bHaveClav)
+		{
+			const FVector Up = (SpineHigh - SpineLow).GetSafeNormal();
+			const FVector Right = (ClavR - ClavL).GetSafeNormal();
+			if (!Up.IsNearlyZero() && !Right.IsNearlyZero())
+			{
+				FVector Back = FVector::CrossProduct(Up, Right).GetSafeNormal();
+				// Cross-product handedness depends on the skeleton's bone roll, so settle it against the
+				// component's own facing rather than assuming: the sling must end up BEHIND the chest.
+				if ((Back | Body->GetForwardVector()) > 0.f)
+				{
+					Back = -Back;
+				}
+
+				// Seat it just off the back surface: half the torso width is a good stand-in for how far
+				// back the spine bone sits from the skin, and half the weapon's thickness clears the mesh.
+				const FBoxSphereBounds WB = BackWeaponMeshComp->GetStaticMesh()->GetBounds();
+				const float TorsoHalfDepth = FMath::Max(6.f, (ClavR - ClavL).Size() * 0.45f);
+				const float WeaponHalfThick = FMath::Min3(WB.BoxExtent.X, WB.BoxExtent.Y, WB.BoxExtent.Z)
+					* BackWeaponRelativeScale.X;
+
+				const FVector Anchor = Body->GetSocketLocation(Bone);
+				const FVector WorldLoc = Anchor + Back * (TorsoHalfDepth + WeaponHalfThick);
+
+				// Lay the weapon flat on the back: its barrel runs along a diagonal in the Up/Right plane
+				// (muzzle down toward the left hip, the usual slung look), and its "up" faces away from
+				// the body so the side profile reads correctly rather than edge-on.
+				const float DiagRad = FMath::DegreesToRadians(BackSlingTiltDeg);
+				const FVector Barrel = (-Up * FMath::Cos(DiagRad) - Right * FMath::Sin(DiagRad)).GetSafeNormal();
+				const bool bBarrelAlongY = (WB.BoxExtent.Y >= WB.BoxExtent.X);
+				const FRotator WorldRot = bBarrelAlongY
+					? FRotationMatrix::MakeFromYZ(Barrel, Back).Rotator()
+					: FRotationMatrix::MakeFromXZ(Barrel, Back).Rotator();
+
+				BackWeaponMeshComp->SetWorldLocation(WorldLoc);
+				BackWeaponMeshComp->SetWorldRotation(WorldRot);
+				BackWeaponMeshComp->SetOwnerNoSee(true);
+				BackWeaponMeshComp->SetCastShadow(true);
+				BackWeaponMeshComp->SetVisibility(true);
+				BackWeaponMeshComp->SetHiddenInGame(false);
+				return;
+			}
+		}
+	}
+
+	// Fallback: the authored relative transform. Only reached when the torso bones are missing (a
+	// non-humanoid or renamed skeleton) - and it is the OLD crotch-placing triple, kept only so an
+	// unknown skeleton still shows something rather than nothing.
 	BackWeaponMeshComp->SetRelativeLocation(BackWeaponRelativeLocation);
 	BackWeaponMeshComp->SetRelativeRotation(BackWeaponRelativeRotation);
-	BackWeaponMeshComp->SetRelativeScale3D(BackWeaponRelativeScale);
 	BackWeaponMeshComp->SetOwnerNoSee(true);
 	BackWeaponMeshComp->SetCastShadow(true);
 	BackWeaponMeshComp->SetVisibility(true);

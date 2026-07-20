@@ -71,9 +71,9 @@ namespace
 	}
 
 	bool WriteSeedFile(const FString& FileName, const FString& MatchIdTag,
-		const TArray<FPFBuildPieceRec>& Pieces)
+		const TArray<FPFBuildPieceRec>& Pieces, int32 GridCellsY)
 	{
-		const FString Dir = FPFPaths::ArenaDir();   // stable per-user dir (survives repackaging)
+		const FString Dir = FPFPaths::ArenaDir();   // stable dir (desktop UserSettings / server ProgramData)
 		const FString Path = Dir / FileName;
 		if (IFileManager::Get().FileExists(*Path))
 		{
@@ -82,7 +82,7 @@ namespace
 
 		const FDateTime Utc = FDateTime::UtcNow();
 		const TSharedRef<FJsonObject> Root = FPFArenaSerialization::BuildLayoutJson(
-			Pieces, MatchIdTag, /*TeamSize=*/4, Utc, /*GridCellsY=*/PFGrid::CellsY);   // starter seeds are Warehouse-grid
+			Pieces, MatchIdTag, /*TeamSize=*/4, Utc, GridCellsY);
 
 		// Seed votes so ranking prefers these over empty dumps.
 		TArray<TSharedPtr<FJsonValue>> Votes;
@@ -205,15 +205,36 @@ namespace
 int32 FPFArenaSeed::EnsureSeedArenas()
 {
 	int32 Written = 0;
-	if (WriteSeedFile(TEXT("seed_starter_lanes.json"), TEXT("seed-starter-lanes"), BuildStarterLanes()))
+	// Warehouse (10-row) starters — Remix/Play-Only on the indoor shell.
+	if (WriteSeedFile(TEXT("seed_starter_lanes.json"), TEXT("seed-starter-lanes"),
+		BuildStarterLanes(), PFGrid::CellsY))
 	{
 		++Written;
 	}
-	if (WriteSeedFile(TEXT("seed_bunker_boxes.json"), TEXT("seed-bunker-boxes"), BuildBunkerBoxes()))
+	if (WriteSeedFile(TEXT("seed_bunker_boxes.json"), TEXT("seed-bunker-boxes"),
+		BuildBunkerBoxes(), PFGrid::CellsY))
 	{
 		++Written;
 	}
-	if (WriteSeedFile(TEXT("seed_ramps_heights.json"), TEXT("seed-ramps-heights"), BuildRampsHeights()))
+	if (WriteSeedFile(TEXT("seed_ramps_heights.json"), TEXT("seed-ramps-heights"),
+		BuildRampsHeights(), PFGrid::CellsY))
+	{
+		++Written;
+	}
+	// Yard (20-row) starters — same layouts (piece coords fit both shells); catalog gates by cellsY
+	// so Warehouse maps never appear on The Yard and vice versa. Without these, Yard Remix was empty.
+	if (WriteSeedFile(TEXT("seed_yard_starter_lanes.json"), TEXT("seed-yard-starter-lanes"),
+		BuildStarterLanes(), PFGrid::MaxCellsY))
+	{
+		++Written;
+	}
+	if (WriteSeedFile(TEXT("seed_yard_bunker_boxes.json"), TEXT("seed-yard-bunker-boxes"),
+		BuildBunkerBoxes(), PFGrid::MaxCellsY))
+	{
+		++Written;
+	}
+	if (WriteSeedFile(TEXT("seed_yard_ramps_heights.json"), TEXT("seed-yard-ramps-heights"),
+		BuildRampsHeights(), PFGrid::MaxCellsY))
 	{
 		++Written;
 	}

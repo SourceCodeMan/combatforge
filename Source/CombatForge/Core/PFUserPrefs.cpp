@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tom Chapman. All rights reserved.
 
 #include "Core/PFUserPrefs.h"
+#include "Core/PFPaths.h"
 
 #include "HAL/IConsoleManager.h"
 #include "Misc/ConfigCacheIni.h"
@@ -12,7 +13,7 @@ namespace
 		int32 V = Default;
 		if (GConfig)
 		{
-			GConfig->GetInt(TEXT("CombatForge"), Key, V, GGameUserSettingsIni);
+			GConfig->GetInt(TEXT("CombatForge"), Key, V, FPFPaths::UserPrefsIni());
 		}
 		return V;
 	}
@@ -22,7 +23,7 @@ namespace
 		float V = Default;
 		if (GConfig)
 		{
-			GConfig->GetFloat(TEXT("CombatForge"), Key, V, GGameUserSettingsIni);
+			GConfig->GetFloat(TEXT("CombatForge"), Key, V, FPFPaths::UserPrefsIni());
 		}
 		return V;
 	}
@@ -32,24 +33,24 @@ namespace
 		bool V = Default;
 		if (GConfig)
 		{
-			GConfig->GetBool(TEXT("CombatForge"), Key, V, GGameUserSettingsIni);
+			GConfig->GetBool(TEXT("CombatForge"), Key, V, FPFPaths::UserPrefsIni());
 		}
 		return V;
 	}
 
 	void WriteInt(const TCHAR* Key, int32 V)
 	{
-		if (GConfig) { GConfig->SetInt(TEXT("CombatForge"), Key, V, GGameUserSettingsIni); }
+		if (GConfig) { GConfig->SetInt(TEXT("CombatForge"), Key, V, FPFPaths::UserPrefsIni()); }
 	}
 
 	void WriteFloat(const TCHAR* Key, float V)
 	{
-		if (GConfig) { GConfig->SetFloat(TEXT("CombatForge"), Key, V, GGameUserSettingsIni); }
+		if (GConfig) { GConfig->SetFloat(TEXT("CombatForge"), Key, V, FPFPaths::UserPrefsIni()); }
 	}
 
 	void WriteBool(const TCHAR* Key, bool V)
 	{
-		if (GConfig) { GConfig->SetBool(TEXT("CombatForge"), Key, V, GGameUserSettingsIni); }
+		if (GConfig) { GConfig->SetBool(TEXT("CombatForge"), Key, V, FPFPaths::UserPrefsIni()); }
 	}
 }
 
@@ -148,7 +149,7 @@ FString FPFUserPrefs::GetLastJoinIp()
 	FString Ip;
 	if (GConfig)
 	{
-		GConfig->GetString(TEXT("CombatForge"), TEXT("LastJoinIp"), Ip, GGameUserSettingsIni);
+		GConfig->GetString(TEXT("CombatForge"), TEXT("LastJoinIp"), Ip, FPFPaths::UserPrefsIni());
 	}
 	return Ip;
 }
@@ -157,7 +158,7 @@ void FPFUserPrefs::SetLastJoinIp(const FString& Ip)
 {
 	if (GConfig)
 	{
-		GConfig->SetString(TEXT("CombatForge"), TEXT("LastJoinIp"), *Ip, GGameUserSettingsIni);
+		GConfig->SetString(TEXT("CombatForge"), TEXT("LastJoinIp"), *Ip, FPFPaths::UserPrefsIni());
 	}
 }
 
@@ -167,7 +168,7 @@ TArray<FString> FPFUserPrefs::GetFavoriteMapIds()
 	FString Csv;
 	if (GConfig)
 	{
-		GConfig->GetString(TEXT("CombatForge"), TEXT("FavoriteMapIds"), Csv, GGameUserSettingsIni);
+		GConfig->GetString(TEXT("CombatForge"), TEXT("FavoriteMapIds"), Csv, FPFPaths::UserPrefsIni());
 	}
 	TArray<FString> Raw;
 	Csv.ParseIntoArray(Raw, TEXT(","), /*bCullEmpty=*/true);
@@ -205,7 +206,7 @@ void FPFUserPrefs::SetFavoriteMapIds(const TArray<FString>& InIds)
 	if (GConfig)
 	{
 		GConfig->SetString(TEXT("CombatForge"), TEXT("FavoriteMapIds"),
-			*FString::Join(Ids, TEXT(",")), GGameUserSettingsIni);
+			*FString::Join(Ids, TEXT(",")), FPFPaths::UserPrefsIni());
 	}
 }
 
@@ -239,7 +240,7 @@ float FPFUserPrefs::GetResolutionScalePct()
 	float V = 100.f;
 	if (GConfig)
 	{
-		GConfig->GetFloat(TEXT("CombatForge"), TEXT("ResolutionScalePct"), V, GGameUserSettingsIni);
+		GConfig->GetFloat(TEXT("CombatForge"), TEXT("ResolutionScalePct"), V, FPFPaths::UserPrefsIni());
 	}
 	return FMath::Clamp(V, 50.f, 100.f);
 }
@@ -248,7 +249,7 @@ void FPFUserPrefs::SetResolutionScalePct(float Pct)
 {
 	if (GConfig)
 	{
-		GConfig->SetFloat(TEXT("CombatForge"), TEXT("ResolutionScalePct"), FMath::Clamp(Pct, 50.f, 100.f), GGameUserSettingsIni);
+		GConfig->SetFloat(TEXT("CombatForge"), TEXT("ResolutionScalePct"), FMath::Clamp(Pct, 50.f, 100.f), FPFPaths::UserPrefsIni());
 	}
 }
 
@@ -304,7 +305,7 @@ FKey FPFUserPrefs::GetKeyOverride(FName ActionId)
 	{
 		FString KeyName;
 		const FString CfgKey = FString::Printf(TEXT("Bind_%s"), *ActionId.ToString());
-		if (GConfig->GetString(TEXT("CombatForge"), *CfgKey, KeyName, GGameUserSettingsIni) && !KeyName.IsEmpty())
+		if (GConfig->GetString(TEXT("CombatForge"), *CfgKey, KeyName, FPFPaths::UserPrefsIni()) && !KeyName.IsEmpty())
 		{
 			return FKey(FName(*KeyName));
 		}
@@ -317,7 +318,7 @@ void FPFUserPrefs::SetKeyOverride(FName ActionId, FKey Key)
 	if (GConfig && Key.IsValid())
 	{
 		const FString CfgKey = FString::Printf(TEXT("Bind_%s"), *ActionId.ToString());
-		GConfig->SetString(TEXT("CombatForge"), *CfgKey, *Key.GetFName().ToString(), GGameUserSettingsIni);
+		GConfig->SetString(TEXT("CombatForge"), *CfgKey, *Key.GetFName().ToString(), FPFPaths::UserPrefsIni());
 	}
 }
 
@@ -326,7 +327,7 @@ void FPFUserPrefs::ClearKeyOverride(FName ActionId)
 	if (GConfig)
 	{
 		const FString CfgKey = FString::Printf(TEXT("Bind_%s"), *ActionId.ToString());
-		GConfig->RemoveKey(TEXT("CombatForge"), *CfgKey, GGameUserSettingsIni);
+		GConfig->RemoveKey(TEXT("CombatForge"), *CfgKey, FPFPaths::UserPrefsIni());
 	}
 }
 
@@ -334,7 +335,7 @@ void FPFUserPrefs::Flush()
 {
 	if (GConfig)
 	{
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->Flush(false, FPFPaths::UserPrefsIni());
 	}
 }
 

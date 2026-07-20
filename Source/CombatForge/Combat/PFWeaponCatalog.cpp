@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tom Chapman. All rights reserved.
 
 #include "Combat/PFWeaponCatalog.h"
+#include "Core/PFPaths.h"
 
 #include "CombatForge.h"
 #include "Player/PFCharacterCustomization.h"   // PFChar::GetActiveSaveSlot — weapon choice is per class slot
@@ -691,13 +692,13 @@ namespace PFWeapon
 		const FString CatKey = FString::Printf(TEXT("WeaponCat_%d"), ClassSlot);
 		const FString IdxKey = FString::Printf(TEXT("WeaponIdx_%d"), ClassSlot);
 		const FString IdKey  = FString::Printf(TEXT("WeaponId_%d"), ClassSlot);
-		GConfig->SetInt(TEXT("CombatForge"), *CatKey, Cat, GGameUserSettingsIni);
-		GConfig->SetInt(TEXT("CombatForge"), *IdxKey, Idx, GGameUserSettingsIni);
+		GConfig->SetInt(TEXT("CombatForge"), *CatKey, Cat, FPFPaths::UserPrefsIni());
+		GConfig->SetInt(TEXT("CombatForge"), *IdxKey, Idx, FPFPaths::UserPrefsIni());
 		if (const TCHAR* Wid = GCats[Cat].Defs[Idx].WeaponId)
 		{
-			GConfig->SetString(TEXT("CombatForge"), *IdKey, Wid, GGameUserSettingsIni);
+			GConfig->SetString(TEXT("CombatForge"), *IdKey, Wid, FPFPaths::UserPrefsIni());
 		}
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->Flush(false, FPFPaths::UserPrefsIni());
 	}
 
 	FPFWeaponConfig LoadConfig(int32 ClassSlot)
@@ -708,7 +709,7 @@ namespace PFWeapon
 			// Prefer stable slug (survives category reorders); fall back to int cat/idx for one version.
 			FString SavedId;
 			const FString IdKey = FString::Printf(TEXT("WeaponId_%d"), ClassSlot);
-			if (GConfig->GetString(TEXT("CombatForge"), *IdKey, SavedId, GGameUserSettingsIni) && !SavedId.IsEmpty())
+			if (GConfig->GetString(TEXT("CombatForge"), *IdKey, SavedId, FPFPaths::UserPrefsIni()) && !SavedId.IsEmpty())
 			{
 				const FPFWeaponConfig ById = FindById(SavedId);
 				if (IdOf(ById.Category, ById.Index).Equals(SavedId, ESearchCase::IgnoreCase))
@@ -719,14 +720,14 @@ namespace PFWeapon
 
 			const FString CatKey = FString::Printf(TEXT("WeaponCat_%d"), ClassSlot);
 			const FString IdxKey = FString::Printf(TEXT("WeaponIdx_%d"), ClassSlot);
-			if (!GConfig->GetInt(TEXT("CombatForge"), *CatKey, C.Category, GGameUserSettingsIni))
+			if (!GConfig->GetInt(TEXT("CombatForge"), *CatKey, C.Category, FPFPaths::UserPrefsIni()))
 			{
 				// Legacy single-weapon keys (pre class-slots) seed the first read of any slot.
-				GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponCat"), C.Category, GGameUserSettingsIni);
+				GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponCat"), C.Category, FPFPaths::UserPrefsIni());
 			}
-			if (!GConfig->GetInt(TEXT("CombatForge"), *IdxKey, C.Index, GGameUserSettingsIni))
+			if (!GConfig->GetInt(TEXT("CombatForge"), *IdxKey, C.Index, FPFPaths::UserPrefsIni()))
 			{
-				GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponIdx"), C.Index, GGameUserSettingsIni);
+				GConfig->GetInt(TEXT("CombatForge"), TEXT("WeaponIdx"), C.Index, FPFPaths::UserPrefsIni());
 			}
 		}
 		C.Category = FMath::Clamp(C.Category, 0, GCatCount - 1);
@@ -755,13 +756,13 @@ namespace PFWeapon
 		const FString CatKey = FString::Printf(TEXT("Weapon2Cat_%d"), ClassSlot);
 		const FString IdxKey = FString::Printf(TEXT("Weapon2Idx_%d"), ClassSlot);
 		const FString IdKey  = FString::Printf(TEXT("Weapon2Id_%d"), ClassSlot);
-		GConfig->SetInt(TEXT("CombatForge"), *CatKey, Cat, GGameUserSettingsIni);
-		GConfig->SetInt(TEXT("CombatForge"), *IdxKey, Idx, GGameUserSettingsIni);
+		GConfig->SetInt(TEXT("CombatForge"), *CatKey, Cat, FPFPaths::UserPrefsIni());
+		GConfig->SetInt(TEXT("CombatForge"), *IdxKey, Idx, FPFPaths::UserPrefsIni());
 		if (const TCHAR* Wid = GCats[Cat].Defs[Idx].WeaponId)
 		{
-			GConfig->SetString(TEXT("CombatForge"), *IdKey, Wid, GGameUserSettingsIni);
+			GConfig->SetString(TEXT("CombatForge"), *IdKey, Wid, FPFPaths::UserPrefsIni());
 		}
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->Flush(false, FPFPaths::UserPrefsIni());
 	}
 
 	FPFWeaponConfig LoadSecondaryConfig(int32 ClassSlot)
@@ -772,7 +773,7 @@ namespace PFWeapon
 		{
 			FString SavedId;
 			const FString IdKey = FString::Printf(TEXT("Weapon2Id_%d"), ClassSlot);
-			if (GConfig->GetString(TEXT("CombatForge"), *IdKey, SavedId, GGameUserSettingsIni) && !SavedId.IsEmpty())
+			if (GConfig->GetString(TEXT("CombatForge"), *IdKey, SavedId, FPFPaths::UserPrefsIni()) && !SavedId.IsEmpty())
 			{
 				const FPFWeaponConfig ById = FindById(SavedId);
 				if (IdOf(ById.Category, ById.Index).Equals(SavedId, ESearchCase::IgnoreCase))
@@ -783,8 +784,8 @@ namespace PFWeapon
 
 			const FString CatKey = FString::Printf(TEXT("Weapon2Cat_%d"), ClassSlot);
 			const FString IdxKey = FString::Printf(TEXT("Weapon2Idx_%d"), ClassSlot);
-			GConfig->GetInt(TEXT("CombatForge"), *CatKey, C.Category, GGameUserSettingsIni);
-			GConfig->GetInt(TEXT("CombatForge"), *IdxKey, C.Index, GGameUserSettingsIni);
+			GConfig->GetInt(TEXT("CombatForge"), *CatKey, C.Category, FPFPaths::UserPrefsIni());
+			GConfig->GetInt(TEXT("CombatForge"), *IdxKey, C.Index, FPFPaths::UserPrefsIni());
 		}
 		C.Category = FMath::Clamp(C.Category, 0, GCatCount - 1);
 		C.Index = FMath::Clamp(C.Index, 0, GCats[C.Category].Count - 1);

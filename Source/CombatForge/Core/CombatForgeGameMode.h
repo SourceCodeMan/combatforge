@@ -84,12 +84,14 @@ public:
 	void HostReturnToLobby();                          // Results only
 	/** Mid-match leave: host resets everyone to Lobby (playtest quit-to-menu). */
 	void HostForceReturnToLobby();
-	void HostSetFormat(uint8 NewTeamSize);             // Lobby only: 4v4 / 6v6 (bots fill to it)
+	void HostSetFormat(uint8 NewTeamSize);             // Lobby only: 1–6 (UI offers 4/6; smoke uses 2)
 	void HostSetFillWithBots(bool bFill);              // Lobby only: top teams with bots at Lobby→Build
 	void HostSetBuildMode(EPFBuildMode NewMode);       // Lobby only: Creative / Improvement / Play-only
 	void HostSetMatchType(EPFMatchType NewType);       // Lobby only: Elimination / FFA / Skirmish / …
 	void HostSetArenaMap(EPFArenaMap NewMap);          // Lobby only: respawn the shell as the map's class
 	void HostSetCommunityMap(const FString& FileName, const FString& Label); // Lobby: Improvement/PlayOnly
+	/** Rebuild GS->CommunityMapCatalog from host ArenaDir (seeds + saved matches) for the active shell. */
+	void RefreshCommunityMapCatalog();
 
 	// Objective actors → GameMode (server). Carrier state is stamped on PlayerState.
 	void NotifyFlagTouched(class APFFlagActor* Flag, ACombatForgePlayerState* Toucher);

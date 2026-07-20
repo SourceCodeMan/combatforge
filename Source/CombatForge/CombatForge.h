@@ -23,10 +23,8 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 10;  // alpha.10 — minigun muzzle height, 1-way door swing-on-every-close, bots ignore 1-way doors
-	                                   // (capsule depenetration) fix, modular skin, per-weapon TP pose, Punch rebind,
-	                                   // sniper zoom, class-save fixes. Content + behaviour changed, so the gate MUST
-	                                   // step or alpha-7 clients still join and silently mis-render.
+	constexpr int32 NetProtocol = 11;  // alpha.11 — community map catalog replicates to clients (Remix on dedicated),
+	                                   // map save path hardened for -NOHOMEDIR, PNG no longer required to list maps.
 }
 
 /**

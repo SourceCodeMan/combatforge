@@ -48,11 +48,17 @@ public:
 	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Skirmish; // objective (Skirmish = respawn default)
 	/** Host-picked arena map. Geometry itself travels as the shell's ACTOR CLASS (GameMode respawns
 	 *  it on change) — this enum exists for UI seeding/labels only. */
-	UPROPERTY(Replicated)                       EPFArenaMap ArenaMap = EPFArenaMap::Warehouse;
+	UPROPERTY(ReplicatedUsing=OnRep_ArenaMap)   EPFArenaMap ArenaMap = EPFArenaMap::Warehouse;
 	/** Host-picked community arena filename under Saved/Arenas/ (Improvement / Play-only). Empty = auto top-ranked. */
 	UPROPERTY(Replicated)                       FString SelectedCommunityMapFile;
 	/** Host-facing / lobby label for the selected community map. */
 	UPROPERTY(Replicated)                       FString SelectedCommunityMapLabel;
+	/**
+	 * Server disk catalog for Remix/Play-Only (top 100 for the active shell). Replicated so dedicated
+	 * match leaders and joined clients can pick maps that only exist on the box — client local disk
+	 * is empty there. Updated at Lobby entry, after each match save, and on arena shell swap.
+	 */
+	UPROPERTY(ReplicatedUsing=OnRep_CommunityMapCatalog) TArray<FPFCommunityMapInfo> CommunityMapCatalog;
 	/** Pieces injected at Lobby→Build (Improvement whole map, or Creative all-bot half). HUD reads this. */
 	UPROPERTY(Replicated)                       uint16 CommunityBasePieces = 0;
 	/** Match leader: the player who configures the match (type/mode/format/map) and can force-start.
@@ -91,6 +97,7 @@ public:
 	void ServerSetMatchType(EPFMatchType NewType);           // Lobby only (GameMode gates)
 	void ServerSetArenaMap(EPFArenaMap NewMap);              // Lobby only (GameMode gates + respawns shell)
 	void ServerSetSelectedCommunityMap(const FString& FileName, const FString& Label);
+	void ServerSetCommunityMapCatalog(const TArray<FPFCommunityMapInfo>& Maps); // host disk → all clients
 	void ServerSetMatchLeader(ACombatForgePlayerState* NewLeader);   // GameMode only (PostLogin/Logout)
 	void ServerSetCommunityBasePieces(uint16 Count);         // Lobby→Build inject result
 	void ServerResetMatchState();                            // Lobby→Build: wins/feed/tally/round wiped
@@ -103,8 +110,9 @@ public:
 	FPFOnVoteTallyChanged    OnVoteTallyChangedEvent;
 	FPFOnAliveCountsChanged  OnAliveCountsChangedEvent;
 	FPFOnMatchLeaderChanged  OnMatchLeaderChangedEvent;   // menus re-style their leader-only rows
+	FPFOnMatchLeaderChanged  OnCommunityMapCatalogChangedEvent;   // Remix picker reloads from GS
 
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifeProps) const override;
 
 protected:
 	UFUNCTION() void OnRep_Phase();
@@ -114,4 +122,6 @@ protected:
 	UFUNCTION() void OnRep_ElimFeed();
 	UFUNCTION() void OnRep_VoteTally();
 	UFUNCTION() void OnRep_MatchLeader();
+	UFUNCTION() void OnRep_ArenaMap();
+	UFUNCTION() void OnRep_CommunityMapCatalog();
 };

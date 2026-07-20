@@ -27,8 +27,13 @@ public:
 	/** True after a successful LoadLevelInstance this session. */
 	bool IsWarehouseStreamed() const { return bStreamSucceeded; }
 
+	/** Call after a live ArenaMap change (lobby shell swap). Unloads the warehouse backdrop
+	 *  when leaving Warehouse; streams it when entering Warehouse (if the cvar is on). */
+	void OnArenaMapChanged(UWorld& World);
+
 private:
 	void TryStreamWarehouse(UWorld& World);
+	void UnloadWarehouse(UWorld& World);
 	void ApplyShellBackdrop(UWorld& World);
 
 	UPROPERTY() TObjectPtr<ULevelStreamingDynamic> StreamedWarehouse;

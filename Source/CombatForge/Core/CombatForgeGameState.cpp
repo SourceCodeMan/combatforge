@@ -4,7 +4,9 @@
 
 #include "CombatForge.h"
 #include "Core/CombatForgePlayerState.h"
+#include "Core/PFWarehouseStreamSubsystem.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 
 namespace
@@ -43,6 +45,7 @@ void ACombatForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(ACombatForgeGameState, ArenaMap);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapFile);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapLabel);
+	DOREPLIFETIME(ACombatForgeGameState, CommunityMapCatalog);
 	DOREPLIFETIME(ACombatForgeGameState, TeamScores);
 	DOREPLIFETIME(ACombatForgeGameState, CommunityBasePieces);
 }
@@ -140,6 +143,16 @@ void ACombatForgeGameState::ServerSetPhaseEndTime(float EndServerTime)
 		return;
 	}
 	PhaseEndServerTime = EndServerTime;
+	// Keep PhaseDuration in sync with the new remaining window so UI rings (build early-end,
+	// vote-style normalize) scale to the shortened countdown, not the original full phase.
+	if (EndServerTime > 0.f)
+	{
+		PhaseDuration = FMath::Max(0.f, EndServerTime - GetServerWorldTimeSeconds());
+	}
+	else
+	{
+		PhaseDuration = 0.f;
+	}
 	ForceNetUpdate();
 }
 
@@ -321,7 +334,19 @@ void ACombatForgeGameState::ServerSetArenaMap(EPFArenaMap NewMap)
 		return;
 	}
 	ArenaMap = NewMap;
+	OnRep_ArenaMap();   // listen host: stream unload/load (clients get OnRep)
 	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::OnRep_ArenaMap()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UPFWarehouseStreamSubsystem* Stream = World->GetSubsystem<UPFWarehouseStreamSubsystem>())
+		{
+			Stream->OnArenaMapChanged(*World);
+		}
+	}
 }
 
 void ACombatForgeGameState::ServerSetSelectedCommunityMap(const FString& FileName, const FString& Label)
@@ -340,6 +365,27 @@ void ACombatForgeGameState::ServerSetSelectedCommunityMap(const FString& FileNam
 	SelectedCommunityMapFile = Clean;
 	SelectedCommunityMapLabel = Label.Left(120);
 	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::ServerSetCommunityMapCatalog(const TArray<FPFCommunityMapInfo>& Maps)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	CommunityMapCatalog = Maps;
+	// Cap wire size — ListTop already clamps to 100, but be defensive.
+	if (CommunityMapCatalog.Num() > 100)
+	{
+		CommunityMapCatalog.SetNum(100);
+	}
+	OnRep_CommunityMapCatalog();   // listen host broadcasts too (§5 R9)
+	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::OnRep_CommunityMapCatalog()
+{
+	OnCommunityMapCatalogChangedEvent.Broadcast();
 }
 
 void ACombatForgeGameState::ServerSetCommunityBasePieces(uint16 Count)

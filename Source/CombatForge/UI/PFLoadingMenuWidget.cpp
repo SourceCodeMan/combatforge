@@ -79,7 +79,7 @@ namespace
 		switch (Mode)
 		{
 		case EPFBuildMode::Creative:    return TEXT("Creative");
-		case EPFBuildMode::Improvement: return TEXT("Improvement");
+		case EPFBuildMode::Improvement: return TEXT("Remix");
 		case EPFBuildMode::PlayOnly:    return TEXT("Play-Only");
 		default:                        return TEXT("Creative");
 		}
@@ -92,7 +92,7 @@ namespace
 		case EPFBuildMode::Creative:
 			return TEXT("Empty plots · build your fort from scratch");
 		case EPFBuildMode::Improvement:
-			return TEXT("Load a saved arena · both teams improve it");
+			return TEXT("Load a saved arena · both teams remix it");
 		case EPFBuildMode::PlayOnly:
 			return TEXT("Skip build · straight into combat");
 		default:
@@ -282,8 +282,8 @@ void UPFLoadingMenuWidget::BuildHowToPlayPage(UVerticalBox* Box)
 	AddHowToLine(Box, TEXT("F ready · Enter host start · Tab scoreboard · Esc options · scroll = switch class while out"), 12, false, Key);
 
 	AddHowToLine(Box, TEXT("MAP · MODE · TYPE"), 14, true, Head);
-	AddHowToLine(Box, TEXT("Map = arena (Warehouse indoor / The Yard open-air). Mode = build style (Creative / Improvement / Play-Only). Type = win condition (Elim, Skirmish, CTF…)."), 12, false, Dim);
-	AddHowToLine(Box, TEXT("Improvement & Play-Only: pick a community map (top 100, 10 per page) — hosts can star up to 5 favorites."), 12, false, Dim);
+	AddHowToLine(Box, TEXT("Map = arena (Warehouse indoor / The Yard open-air). Mode = build style (Creative / Remix / Play-Only). Type = win condition (Elim, Skirmish, CTF…)."), 12, false, Dim);
+	AddHowToLine(Box, TEXT("Remix & Play-Only: pick a community map (top 100, 10 per page) — hosts can star up to 5 favorites."), 12, false, Dim);
 	AddHowToLine(Box, TEXT("QUICK START: Play-Only Skirmish 4v4 with bots on a starter fort — best first session."), 12, false, Dim);
 }
 
@@ -623,6 +623,7 @@ void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
 void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 {
 	WeaponConfig = PFWeapon::LoadConfig();
+	Weapon2Config = PFWeapon::LoadSecondaryConfig();
 
 	UTextBlock* Head = WidgetTree->ConstructWidget<UTextBlock>();
 	Head->SetText(FText::FromString(TEXT("WEAPON")));
@@ -687,8 +688,44 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 		}
 	};
 
+	// Full-width wrapping line for the lock state — the stepper's value cell is too narrow and clips.
+	auto MakeLockLine = [&](TObjectPtr<UTextBlock>& Out)
+	{
+		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>();
+		T->SetFont(PFLoadFont(11, false));
+		T->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.62f, 0.20f)));
+		T->SetJustification(ETextJustify::Center);
+		T->SetAutoWrapText(true);
+		T->SetVisibility(ESlateVisibility::Collapsed);
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(T))
+		{
+			V->SetPadding(FMargin(24.f, 0.f, 24.f, 4.f));
+			V->SetHorizontalAlignment(HAlign_Fill);
+		}
+		Out = T;
+	};
+
 	MakeStepRow(TEXT("CATEGORY"), 0, WeaponCatValueText);
 	MakeStepRow(TEXT("WEAPON"), 1, WeaponValueText);
+	MakeLockLine(WeaponLockText);
+
+	// SECOND WEAPON (Tom 2026-07-19: "add to the menu the ability to choose it from all the available guns.
+	// I don't want it to be a pistol only."). Kinds 2/3 mirror 0/1 for the secondary slot. Any category is
+	// selectable - two rifles is a legal, if heavy, loadout. Scroll wheel swaps hand <-> back in game.
+	UTextBlock* SecHdr = WidgetTree->ConstructWidget<UTextBlock>();
+	SecHdr->SetText(FText::FromString(TEXT("SECOND WEAPON  —  carried on the back, scroll wheel to swap")));
+	SecHdr->SetFont(PFLoadFont(11, false));
+	SecHdr->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.55f)));
+	SecHdr->SetJustification(ETextJustify::Center);
+	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SecHdr))
+	{
+		V->SetPadding(FMargin(0.f, 12.f, 0.f, 2.f));
+		V->SetHorizontalAlignment(HAlign_Fill);
+	}
+	MakeStepRow(TEXT("CATEGORY"), 2, Weapon2CatValueText);
+	MakeStepRow(TEXT("WEAPON"), 3, Weapon2ValueText);
+	MakeLockLine(Weapon2LockText);
+
 	RefreshWeaponLabels();
 }
 
@@ -705,26 +742,117 @@ void UPFLoadingMenuWidget::RefreshWeaponLabels()
 	}
 	if (WeaponValueText != nullptr)
 	{
-		FString Label = FString::Printf(TEXT("%s  (%d/%d)"),
+		// A LOCKED row must never read as your selection. Browsing past a locked gun does not equip it
+		// (by design), but the row used to show it in plain white with a small rank badge - so it looked
+		// chosen, and the mismatch only surfaced in game as "the gun I picked isn't there" (Tom
+		// 2026-07-20). Locked entries now go amber, say LOCKED outright, and name what you are ACTUALLY
+		// carrying, so the menu can never disagree with the spawn.
+		// The value cell is a fixed-width, CENTRE-justified, ClipToBounds slot between the < > buttons,
+		// so overlong text loses BOTH ends ("ult) (1/10) LOCKED - Rank 1 (carrying: Rifle" — Tom
+		// 2026-07-20, unreadable). Keep this cell to name + position only; the lock detail goes on its
+		// own wrapping line below, where it has the full page width.
+		const FString Label = FString::Printf(TEXT("%s  (%d/%d)"),
 			*PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index),
 			WeaponConfig.Index + 1, WpnCount);
-		// Rank lock badge when logged in with unlocks (offline = ungated).
+		bool bLocked = false;
 		if (UPFBackendSubsystem* Backend = GetBackend())
 		{
-			const FString Id = PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index);
-			if (!Backend->IsWeaponUnlocked(Id))
-			{
-				Label += FString::Printf(TEXT("  🔒 Rank %u"),
-					PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index));
-			}
+			bLocked = !Backend->IsWeaponUnlocked(PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index));
 		}
+		WeaponValueText->SetColorAndOpacity(FSlateColor(bLocked
+			? FLinearColor(1.f, 0.62f, 0.20f) : FLinearColor::White));
 		WeaponValueText->SetText(FText::FromString(Label));
+		SetLockLine(WeaponLockText, bLocked,
+			PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index),
+			PFWeapon::LoadConfig(ActiveSaveSlot));
 	}
+
+	// Second weapon slot (same labelling rules, own config).
+	const int32 Wpn2Count = FMath::Max(1, PFWeapon::WeaponCount(Weapon2Config.Category));
+	Weapon2Config.Index = FMath::Clamp(Weapon2Config.Index, 0, Wpn2Count - 1);
+	if (Weapon2CatValueText != nullptr)
+	{
+		Weapon2CatValueText->SetText(FText::FromString(FString::Printf(TEXT("%s  (%d/%d)"),
+			*PFWeapon::CategoryLabel(Weapon2Config.Category), Weapon2Config.Category + 1, CatCount)));
+	}
+	if (Weapon2ValueText != nullptr)
+	{
+		const FString Label2 = FString::Printf(TEXT("%s  (%d/%d)"),
+			*PFWeapon::WeaponDisplayName(Weapon2Config.Category, Weapon2Config.Index),
+			Weapon2Config.Index + 1, Wpn2Count);
+		bool bLocked2 = false;
+		if (UPFBackendSubsystem* Backend = GetBackend())
+		{
+			bLocked2 = !Backend->IsWeaponUnlocked(PFWeapon::IdOf(Weapon2Config.Category, Weapon2Config.Index));
+		}
+		Weapon2ValueText->SetColorAndOpacity(FSlateColor(bLocked2
+			? FLinearColor(1.f, 0.62f, 0.20f) : FLinearColor::White));
+		Weapon2ValueText->SetText(FText::FromString(Label2));
+		SetLockLine(Weapon2LockText, bLocked2,
+			PFWeapon::UnlockRankOf(Weapon2Config.Category, Weapon2Config.Index),
+			PFWeapon::LoadSecondaryConfig(ActiveSaveSlot));
+	}
+}
+
+void UPFLoadingMenuWidget::SetLockLine(UTextBlock* Line, bool bLocked, uint8 NeedRank,
+	const FPFWeaponConfig& Equipped)
+{
+	if (Line == nullptr)
+	{
+		return;
+	}
+	if (!bLocked)
+	{
+		Line->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	Line->SetVisibility(ESlateVisibility::Visible);
+	Line->SetText(FText::FromString(FString::Printf(
+		TEXT("LOCKED - needs Rank %u. Not equipped; you are carrying %s."),
+		NeedRank, *PFWeapon::WeaponDisplayName(Equipped.Category, Equipped.Index))));
 }
 
 void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 {
 	const int32 CatCount = PFWeapon::CategoryCount();
+
+	// Kinds 2/3 drive the SECOND weapon slot. Same browse-freely / equip-when-unlocked rules as the
+	// primary, but it saves to the secondary config so the back-slung gun and the scroll-wheel swap
+	// both follow it. Every category is offered - Tom explicitly does not want a pistol-only slot.
+	if (Kind == 2 || Kind == 3)
+	{
+		if (Kind == 2)
+		{
+			Weapon2Config.Category = (Weapon2Config.Category + Dir + CatCount) % CatCount;
+			Weapon2Config.Index = 0;
+		}
+		else
+		{
+			const int32 Count2 = FMath::Max(1, PFWeapon::WeaponCount(Weapon2Config.Category));
+			Weapon2Config.Index = (Weapon2Config.Index + Dir + Count2) % Count2;
+		}
+		RefreshWeaponLabels();
+
+		if (UPFBackendSubsystem* Backend = GetBackend())
+		{
+			const FString Id2 = PFWeapon::IdOf(Weapon2Config.Category, Weapon2Config.Index);
+			if (!Backend->IsWeaponUnlocked(Id2))
+			{
+				SetStatus(FString::Printf(TEXT("%s unlocks at Rank %u — browse freely, equip once unlocked."),
+					*PFWeapon::WeaponDisplayName(Weapon2Config.Category, Weapon2Config.Index),
+					PFWeapon::UnlockRankOf(Weapon2Config.Category, Weapon2Config.Index)));
+				return;
+			}
+		}
+
+		PFWeapon::SaveSecondaryConfig(ActiveSaveSlot, Weapon2Config);
+		if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()))
+		{
+			Char->ReapplyWeaponLoadout();
+		}
+		return;
+	}
+
 	if (Kind == 0)
 	{
 		WeaponConfig.Category = (WeaponConfig.Category + Dir + CatCount) % CatCount;
@@ -997,12 +1125,14 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 			PFChar::SaveConfig(ActiveSaveSlot, CharConfig);
 		}
 		PFWeapon::SaveConfig(ActiveSaveSlot, WeaponConfig);
+		PFWeapon::SaveSecondaryConfig(ActiveSaveSlot, Weapon2Config);   // the second slot is part of the class too
 	}
 
 	ActiveSaveSlot = SaveSlot;
 	PFChar::SetActiveSaveSlot(SaveSlot);
 	CharConfig = PFChar::LoadConfig(SaveSlot);
 	WeaponConfig = PFWeapon::LoadConfig(SaveSlot);   // a class = clothing AND weapon — load both together
+	Weapon2Config = PFWeapon::LoadSecondaryConfig(SaveSlot);   // second slot is per-class too
 	// Push the newly-selected class to the spawned pawn + the tab preview.
 	if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(GetOwningPlayerPawn()))
 	{
@@ -2028,6 +2158,16 @@ void UPFLoadingMenuWidget::NativeConstruct()
 
 	SeedFromGameState();
 	ReloadMapCatalog();
+	LastCatalogCount = MapCatalog.Num();
+	// Dedicated clients: server catalog replicates after join — refresh the Remix picker when it lands.
+	if (UWorld* World = GetWorld())
+	{
+		if (ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>())
+		{
+			GS->OnCommunityMapCatalogChangedEvent.AddUObject(
+				this, &UPFLoadingMenuWidget::HandleCommunityMapCatalogChanged);
+		}
+	}
 	// Host first paint: default UI toward a friendly first session if still Creative default.
 	if (IsLocalHost() && SelectedBuildMode == EPFBuildMode::Creative
 		&& SelectedMatchType == EPFMatchType::Skirmish)
@@ -2054,12 +2194,31 @@ void UPFLoadingMenuWidget::NativeDestruct()
 		CharPreviewActor->Destroy();
 		CharPreviewActor = nullptr;
 	}
+	if (UWorld* World = GetWorld())
+	{
+		if (ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>())
+		{
+			GS->OnCommunityMapCatalogChangedEvent.RemoveAll(this);
+		}
+	}
 	if (UPFBackendSubsystem* Backend = GetBackend())
 	{
 		Backend->OnAuthChanged.RemoveAll(this);
 		Backend->OnStatus.RemoveAll(this);
 	}
 	Super::NativeDestruct();
+}
+
+void UPFLoadingMenuWidget::HandleCommunityMapCatalogChanged()
+{
+	if (bDismissed)
+	{
+		return;
+	}
+	ReloadMapCatalog();
+	LastCatalogCount = MapCatalog.Num();
+	RefreshMapPicker();
+	RefreshSetupLabels();
 }
 
 FReply UPFLoadingMenuWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -2126,6 +2285,23 @@ void UPFLoadingMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 		SeedFromGameState();
 		RefreshSetupLabels();
 		RefreshMapPicker();
+	}
+	// Dedicated clients: catalog may arrive after NativeConstruct (GS late). Re-pull when size changes.
+	if (const UWorld* World = GetWorld())
+	{
+		if (World->GetNetMode() == NM_Client)
+		{
+			if (const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>())
+			{
+				const int32 N = GS->CommunityMapCatalog.Num();
+				if (N != LastCatalogCount)
+				{
+					ReloadMapCatalog();
+					LastCatalogCount = MapCatalog.Num();
+					RefreshMapPicker();
+				}
+			}
+		}
 	}
 	// Leadership can arrive AFTER construction (dedicated: MatchLeader replicates in, or the old
 	// leader left and the crown migrated here). Re-style the leader-only rows exactly once per flip.
@@ -2197,7 +2373,18 @@ bool UPFLoadingMenuWidget::NeedsCommunityMap() const
 void UPFLoadingMenuWidget::ReloadMapCatalog()
 {
 	MapCatalog.Reset();
-	if (const UGameInstance* GI = GetGameInstance())
+	const UWorld* World = GetWorld();
+	// Pure clients (including the dedicated-server MatchLeader) have no ArenaDir of their own —
+	// the catalog is host-authoritative and arrives via GameState replication. Listen host /
+	// standalone still read local disk (which IS the host's ArenaDir).
+	if (World && World->GetNetMode() == NM_Client)
+	{
+		if (const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>())
+		{
+			MapCatalog = GS->CommunityMapCatalog;
+		}
+	}
+	else if (const UGameInstance* GI = GetGameInstance())
 	{
 		if (UPFRatingSubsystem* Rating = GI->GetSubsystem<UPFRatingSubsystem>())
 		{
@@ -2205,15 +2392,9 @@ void UPFLoadingMenuWidget::ReloadMapCatalog()
 			Rating->ListTopCommunityMaps(MapCatalog, MaxMaps);
 		}
 	}
-	// Only surface maps that have a screenshot — hides picture-less arenas (incl. auto-regenerated seeds) so the
-	// picker never shows a blank tile.
-	MapCatalog.RemoveAll([](const FPFCommunityMapInfo& M)
-	{
-		FString PngName = M.FileName;
-		PngName.RemoveFromEnd(TEXT(".json"));
-		PngName += TEXT(".png");
-		return !FPaths::FileExists(FPFPaths::ArenaDir() / PngName);
-	});
+	// Do NOT require a screenshot PNG. Headless dedicated servers never capture previews, and
+	// seed maps ship without them — filtering by PNG made every server-built map (and all seeds)
+	// invisible in Remix mode. Missing previews just show a neutral tile in RefreshMapPicker.
 
 	// ---- Favorites (host-side only; max 5, persisted in GameUserSettings.ini) ----
 	// Favorites are global prefs but each shell only surfaces favorites that exist IN THIS catalog
@@ -2311,7 +2492,7 @@ void UPFLoadingMenuWidget::RefreshMapPicker()
 		{
 			MapSelectedLabel->SetText(FText::FromString(
 				Total > 0 ? TEXT("Selected: Auto (highest ranked)")
-				          : TEXT("Selected: empty field (no Saved/Arenas)")));
+				          : TEXT("Selected: empty field (no community maps yet — play Creative first)")));
 		}
 		else if (MapCatalog.IsValidIndex(SelectedMapCatalogIndex))
 		{
@@ -2421,7 +2602,7 @@ void UPFLoadingMenuWidget::RefreshSetupLabels()
 		SetupHintText->SetText(FText::FromString(
 			IsLocalHost()
 				? (NeedsCommunityMap()
-					? TEXT("Improvement/Play-Only: pick a community map below (10 per page)")
+					? TEXT("Remix/Play-Only: pick a community map below (10 per page)")
 					// Tom: drop the "Click MODE/TYPE/FORMAT to cycle" helper — empty collapses the row.
 					: TEXT(""))
 				: TEXT("Host chooses match setup · waiting for Enter")));
@@ -2536,10 +2717,13 @@ void UPFLoadingMenuWidget::ApplyQuickStartPreset()
 	bSelectedFillBots = true;
 	SelectedMapCatalogIndex = INDEX_NONE;   // auto top-ranked (seeds always available after Ensure)
 	ReloadMapCatalog();
-	// Prefer named starter seed if present so first game is predictable.
+	// Prefer named starter seed if present so first game is predictable (shell-specific).
+	const FString PreferSeed = (SelectedArenaMap == EPFArenaMap::Yard)
+		? TEXT("seed_yard_starter")
+		: TEXT("seed_starter_lanes");
 	for (int32 i = 0; i < MapCatalog.Num(); ++i)
 	{
-		if (MapCatalog[i].FileName.Contains(TEXT("seed_starter")))
+		if (MapCatalog[i].FileName.Contains(PreferSeed))
 		{
 			SelectedMapCatalogIndex = i;
 			break;

@@ -37,7 +37,7 @@ namespace
 		switch (Mode)
 		{
 		case EPFBuildMode::Creative:    return TEXT("Creative");
-		case EPFBuildMode::Improvement: return TEXT("Improvement");
+		case EPFBuildMode::Improvement: return TEXT("Remix");
 		case EPFBuildMode::PlayOnly:    return TEXT("Play-Only");
 		default:                        return TEXT("Creative");
 		}
@@ -50,7 +50,7 @@ namespace
 		case EPFBuildMode::Creative:
 			return TEXT("Empty plots · build your fort from scratch");
 		case EPFBuildMode::Improvement:
-			return TEXT("Load a saved arena · both teams improve it");
+			return TEXT("Load a saved arena · both teams remix it");
 		case EPFBuildMode::PlayOnly:
 			return TEXT("Skip build · straight into combat");
 		default:

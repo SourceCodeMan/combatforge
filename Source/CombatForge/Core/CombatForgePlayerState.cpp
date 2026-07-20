@@ -239,6 +239,68 @@ void ACombatForgePlayerState::ServerClearOutState()
 	ForceNetUpdate();
 }
 
+void ACombatForgePlayerState::ServerSetAliveInRound(bool bAlive)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (bAliveInRound == bAlive)
+	{
+		return;
+	}
+	bAliveInRound = bAlive;
+	ForceNetUpdate();
+}
+
+void ACombatForgePlayerState::ServerAddElimination()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	++Eliminations;
+	ForceNetUpdate();
+}
+
+void ACombatForgePlayerState::ServerAddTimesEliminated()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	++TimesEliminated;
+	ForceNetUpdate();
+}
+
+void ACombatForgePlayerState::ServerSetHasVoted(bool bVoted)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	if (bHasVoted == bVoted)
+	{
+		return;
+	}
+	bHasVoted = bVoted;
+	ForceNetUpdate();
+}
+
+void ACombatForgePlayerState::ServerResetMatchCombatStats()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Eliminations = 0;
+	TimesEliminated = 0;
+	TagCount = 0;
+	MatchScore = 0;
+	bHasVoted = false;
+	ForceNetUpdate();
+}
+
 void ACombatForgePlayerState::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();

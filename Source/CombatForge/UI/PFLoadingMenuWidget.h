@@ -314,7 +314,15 @@ private:
 	// Loadout tab — weapon picker (category + weapon steppers) + local prefs.
 	UPROPERTY() TObjectPtr<UTextBlock> WeaponCatValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> WeaponValueText;
+	/** Second weapon slot (back-slung, scroll-wheel swap). Any category, not pistol-only. */
+	UPROPERTY() TObjectPtr<UTextBlock> Weapon2CatValueText;
+	UPROPERTY() TObjectPtr<UTextBlock> Weapon2ValueText;
+	/** Full-width wrapping "LOCKED - needs Rank N" lines; the stepper cells are too narrow and clip. */
+	UPROPERTY() TObjectPtr<UTextBlock> WeaponLockText;
+	UPROPERTY() TObjectPtr<UTextBlock> Weapon2LockText;
+	void SetLockLine(UTextBlock* Line, bool bLocked, uint8 NeedRank, const FPFWeaponConfig& Equipped);
 	FPFWeaponConfig WeaponConfig;
+	FPFWeaponConfig Weapon2Config;
 	void BuildWeaponPicker(UVerticalBox* Col);
 	void RefreshWeaponLabels();
 
@@ -388,6 +396,10 @@ private:
 	/** Last-seen leader state — NativeTick re-styles the leader-only rows when it flips
 	 *  (dedicated: MatchLeader replicates in late, or migrates when the old leader leaves). */
 	bool bWasHostLastTick = false;
+	/** Last catalog size we painted — dedicated clients re-reload when GS catalog arrives/changes. */
+	int32 LastCatalogCount = -1;
+
+	void HandleCommunityMapCatalogChanged();
 
 	/** Soft paths to force-load so first in-game hit doesn't compile mid-fight. */
 	TArray<FString> PreloadPaths;

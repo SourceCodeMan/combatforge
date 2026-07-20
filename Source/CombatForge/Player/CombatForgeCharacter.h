@@ -383,6 +383,8 @@ public:
 	/** Reload the saved weapon config and re-apply (menu edits an already-spawned pawn). */
 	void ReapplyWeaponLoadout();
 	/** Seat the stowed (non-active) gun on the back. */
+	/** Exactly one owner-visible weapon in FP: drop a stale marker gun, and name anything unexpected. */
+	void EnforceSingleFirstPersonWeapon();
 	void AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat);
 	/** Live-tune the FP weapon pose (console: pf.WeaponFP) — the per-weapon poses need dialing in-editor. */
 	void TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle);
@@ -407,9 +409,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(12.f, 18.f, 10.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(5.f, 90.f, -10.f);
 	// Back-sling pose (spine bone local): clearly ON THE BACK (behind the torso), not glued to the neck.
+	/** Fallback only — used when the skeleton frame can't be derived. See AttachWeaponToBack. */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeLocation = FVector(-18.f, 6.f, -6.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator BackWeaponRelativeRotation = FRotator(0.f, 0.f, 75.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeScale = FVector(0.80f);
+	/** Derive the sling from measured bones instead of the authored offsets (pf.BackSling 0 to disable). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") bool     bDeriveBackSlingFromSkeleton = true;
+	/** Barrel angle off the spine, in the back plane: 0 = straight down, 90 = horizontal. */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") float    BackSlingTiltDeg = 35.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName BackWeaponAttachBone = NAME_None; // resolved at runtime
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
 	// Optional single-slot overrides (mannequin only). Human models keep authored multi-slot mats.

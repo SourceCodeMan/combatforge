@@ -363,12 +363,12 @@ void UPFBuildHUDWidget::UpdateReadyCounts()
 		{
 			if (GS->CommunityBasePieces > 0)
 			{
-				Banner = FString::Printf(TEXT("IMPROVEMENT — %d base pieces · add / delete / rebuild"),
+				Banner = FString::Printf(TEXT("REMIX — %d base pieces · add / delete / rebuild"),
 					GS->CommunityBasePieces);
 			}
 			else
 			{
-				Banner = TEXT("IMPROVEMENT — no saved arena yet · empty field (play a match to seed)");
+				Banner = TEXT("REMIX — no saved arena yet · empty field (play a match to seed)");
 			}
 		}
 		else if (GS->BuildMode == EPFBuildMode::Creative && GS->CommunityBasePieces > 0)
