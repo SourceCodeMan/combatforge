@@ -491,6 +491,12 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 			C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			C->SetVisibility(false);
 			C->SetHiddenInGame(true);
+			// Owner-hidden from BIRTH. These were the only primitives on the pawn created without an
+			// owner-visibility flag: ApplyCharacterConfig's Mount sets it, but only on the branch that
+			// assigns a mesh, so any part mounted by another path stayed visible to its own first-person
+			// view. A clothing slot resolving to a WEAPON part is then a gun hanging in your own view -
+			// which is what "two guns crossed on a default class" looks like (Tom 2026-07-20).
+			C->SetOwnerNoSee(true);
 		}
 		return C;
 	};
@@ -3457,16 +3463,27 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 	// Deliberately narrow: static meshes only (the modular character parts are skeletal, so clothing and
 	// skin are untouched), and it only ever HIDES - nothing is destroyed, so a mistake here costs a
 	// missing cosmetic, never a crash.
+	// SKELETAL MESHES ARE IN SCOPE TOO. The first version scanned only static meshes and reported
+	// "1 owner-visible weapon mesh" while Tom was plainly looking at two (his log, 2026-07-20) — which
+	// is what proved the duplicate is a SKELETAL component, i.e. a weapon mounted as a modular character
+	// part. A diagnostic that cannot see half the candidates is worse than none: it reads as all-clear.
 	int32 Seen = 0;
 	int32 Hidden = 0;
 	TArray<USceneComponent*> Kids;
 	GetComponents<USceneComponent>(Kids);
 	for (USceneComponent* K : Kids)
 	{
-		UStaticMeshComponent* P = Cast<UStaticMeshComponent>(K);
-		if (P == nullptr || P->GetStaticMesh() == nullptr || P->bHiddenInGame)
+		UMeshComponent* P = Cast<UMeshComponent>(K);
+		if (P == nullptr || P->bHiddenInGame)
 		{
 			continue;
+		}
+		const UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(P);
+		const USkeletalMeshComponent* SKC = Cast<USkeletalMeshComponent>(P);
+		if ((SMC != nullptr && SMC->GetStaticMesh() == nullptr)
+			|| (SKC != nullptr && SKC->GetSkeletalMeshAsset() == nullptr))
+		{
+			continue;   // component exists but renders nothing
 		}
 		// Owner-visible = explicitly owner-only, OR simply not hidden from the owner (the default).
 		const bool bOwnerSees = P->bOnlyOwnerSee || !P->bOwnerNoSee;
@@ -3480,14 +3497,18 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 			continue;
 		}
 		UE_LOG(CombatForgeLog, Warning,
-			TEXT("FP weapon: SECOND GUN found — '%s' (mesh=%s, parent=%s, onlyOwnerSee=%d ownerNoSee=%d)."),
-			*P->GetName(), *GetNameSafe(P->GetStaticMesh()), *GetNameSafe(P->GetAttachParent()),
+			TEXT("FP weapon: SECOND GUN found — '%s' (%s mesh=%s, parent=%s, onlyOwnerSee=%d ownerNoSee=%d)."),
+			*P->GetName(), SKC ? TEXT("SKELETAL") : TEXT("static"),
+			*GetNameSafe(SMC ? (UObject*)SMC->GetStaticMesh() : (UObject*)(SKC ? SKC->GetSkeletalMeshAsset() : nullptr)),
+			*GetNameSafe(P->GetAttachParent()),
 			P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0);
 
 		// Only re-hide the two components that are DEFINITELY third-person guns. Anything else is merely
 		// reported: a carried bomb or some future owner-visible prop must not be hidden by a rule aimed at
 		// weapons, and a wrong guess here would be a new bug rather than a fix.
-		if (P == WeaponMeshComp || P == BackWeaponMeshComp)
+		// Third-person guns and mis-mounted character parts are both always wrong in a first-person view,
+		// and hiding either can only ever cost a cosmetic. Anything else is reported and left alone.
+		if (P == WeaponMeshComp || P == BackWeaponMeshComp || SKC != nullptr)
 		{
 			P->SetOwnerNoSee(true);
 			P->MarkRenderStateDirty();
