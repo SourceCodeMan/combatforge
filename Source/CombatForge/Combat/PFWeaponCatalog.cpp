@@ -829,9 +829,13 @@ namespace PFWeapon
 // measured instead of asserted. A real rifle is ~70-90cm, i.e. 70-90 uu.
 static void PFWeaponDumpCmd(const TArray<FString>& /*Args*/, UWorld* /*World*/)
 {
+	// Bounds ORIGIN is the offset from the mesh PIVOT to the mesh centre. It is the number that decides
+	// whether attaching a gun to a hand bone can ever look right: if the pivot is not at the grip, snapping
+	// the pivot to hand_r throws the visible gun that far away from the hand, no matter what small relative
+	// offset you tune. A gun 30cm above the hand on a 3cm offset (Tom, 2026-07-20) is this, not the offset.
 	UE_LOG(CombatForgeLog, Warning,
-		TEXT("WPNDUMP  %-22s %-34s %9s %9s %9s %9s"),
-		TEXT("id"), TEXT("mesh"), TEXT("natLen"), TEXT("FPScale"), TEXT("lenFP"), TEXT("lenTP@0.85"));
+		TEXT("WPNDUMP  %-22s %-34s %9s %26s %9s"),
+		TEXT("id"), TEXT("mesh"), TEXT("natLen"), TEXT("pivot->centre (X,Y,Z)"), TEXT("offsetLen"));
 	for (int32 Cat = 0; Cat < PFWeapon::CategoryCount(); ++Cat)
 	{
 		for (int32 Idx = 0; Idx < PFWeapon::WeaponCount(Cat); ++Idx)
@@ -848,9 +852,9 @@ static void PFWeaponDumpCmd(const TArray<FString>& /*Args*/, UWorld* /*World*/)
 			// Longest axis = barrel length for every gun in this catalog.
 			const float NatLen = FMath::Max3(B.BoxExtent.X, B.BoxExtent.Y, B.BoxExtent.Z) * 2.f;
 			UE_LOG(CombatForgeLog, Warning,
-				TEXT("WPNDUMP  %-22s %-34s %9.1f %9.3f %9.1f %9.1f"),
+				TEXT("WPNDUMP  %-22s %-34s %9.1f   (%7.1f,%7.1f,%7.1f) %9.1f"),
 				D.WeaponId ? D.WeaponId : TEXT("?"), *M->GetName(),
-				NatLen, D.FPScale, NatLen * D.FPScale, NatLen * 0.85f);
+				NatLen, B.Origin.X, B.Origin.Y, B.Origin.Z, B.Origin.Size());
 		}
 	}
 }

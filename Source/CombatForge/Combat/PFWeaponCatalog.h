@@ -27,6 +27,19 @@ struct FPFWeaponDef
 	FVector  AdsLoc  = FVector(15.f, -5.5f, -1.5f);
 	FRotator AdsRot  = FRotator(1.5f, 0.f, -1.5f);
 
+	// ---- Per-weapon THIRD-PERSON grip (where the gun sits in hand_r; what everyone else sees) ----
+	// PER-WEAPON for the same reason FPLoc is, and it is the reason a single shared offset could never work:
+	// these meshes have their PIVOT in wildly different places relative to the model. Measured with
+	// pf.WeaponDump (2026-07-20), pivot->centre ranges from 5.1 (ar_r05) to 21.1 (ar_r02) — so snapping the
+	// pivot to the hand throws each gun a DIFFERENT distance away, and one shared WeaponRelativeLocation is
+	// mathematically incapable of being right for more than one weapon. That is why the third-person grip
+	// failed every attempt, hand-tuned and computed alike.
+	// Tune per weapon with `pf.WeaponTP x y z pitch yaw roll [scale]` and paste the printed line here.
+	// TPScale <= 0 means "unset": fall back to the character's WeaponRelativeScale.
+	FVector  TPLoc   = FVector(-3.f, 4.f, 2.f);
+	FRotator TPRot   = FRotator(10.f, 0.f, 90.f);
+	float    TPScale = 0.f;
+
 	// ---- Per-class fire behaviour + ballistics (defaults = Assault Rifle; SMG/pistol rows override) ----
 	uint8       AllowedFireModes = (1 << 0) | (1 << 1) | (1 << 2);   // bit (1<<EPFFireMode); rifle = all three
 	EPFFireMode DefaultFireMode  = EPFFireMode::Auto;

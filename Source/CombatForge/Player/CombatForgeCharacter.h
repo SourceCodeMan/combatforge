@@ -462,6 +462,10 @@ private:
 	// ApplyWeaponLoadout. Default = SM_Rifle (+Y barrel). Pistols override so they don't render upside-down.
 	float CachedTPRaisedYaw  = -90.f;
 	float CachedTPRaisedRoll = 0.f;
+	/** Per-weapon third-person grip, cached from the catalog row on equip (pf.WeaponTP tunes these). */
+	FVector  CachedTPLoc = FVector(-3.f, 4.f, 2.f);
+	FRotator CachedTPRot = FRotator(10.f, 0.f, 90.f);
+	float    CachedTPScale = 0.85f;
 	// Firing shoulder lift when the ARMED idle isn't driving the arms up (arms hang -> gun sat at the hip).
 	// Kept SMALL so a raised gun stays near the hand (hip/low-ready), not teleported to armpit/neck.
 	// The old 42uu adaptive lift is what put guns on necks while the secondary sat on the spine.

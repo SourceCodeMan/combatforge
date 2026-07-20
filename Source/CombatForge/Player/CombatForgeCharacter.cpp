@@ -2826,6 +2826,11 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	// pistol mesh axis is unverified in-editor; if a pistol still looks off, adjust TPRaisedYawOffset/Roll.
 	CachedTPRaisedYaw  = Def.TPRaisedYawOffset;
 	CachedTPRaisedRoll = Def.TPRaisedRoll;
+	// Per-weapon third-person grip. These meshes have their pivots 5-21uu apart (pf.WeaponDump), so the
+	// grip offset HAS to be per-weapon — a shared one cannot be right for more than one gun.
+	CachedTPLoc   = Def.TPLoc;
+	CachedTPRot   = Def.TPRot;
+	CachedTPScale = (Def.TPScale > 0.f) ? Def.TPScale : WeaponRelativeScale.X;
 	if (ActiveWeaponConfig.Category == 2 && FMath::IsNearlyZero(Def.TPRaisedRoll))
 	{
 		CachedTPRaisedRoll = 180.f;
@@ -3151,7 +3156,12 @@ void ACombatForgeCharacter::TuneWeaponTP(const FVector& Loc, const FRotator& Rot
 {
 	// Third-person grip: where the gun sits in hand_r. Applied by ApplyHandWeaponPose every tick, so simply
 	// writing the members takes effect on the next frame — no re-attach needed.
-	WeaponRelativeLocation = Loc;
+	// Write the CACHED per-weapon grip, not the shared character default — that is what the attach now
+	// uses, and it is what gets pasted back into the weapon's catalog row.
+	CachedTPLoc   = Loc;
+	CachedTPRot   = Rot;
+	CachedTPScale = Scale;
+	WeaponRelativeLocation = Loc;   // keep the character default in step for any weapon with no row value
 	WeaponRelativeRotation = Rot;
 	WeaponRelativeScale = FVector(Scale);
 	ApplyHandWeaponPose();   // immediate feedback while dragging numbers in the console
@@ -3177,8 +3187,9 @@ static void PFWeaponTPCmd(const TArray<FString>& Args, UWorld* World)
 		It->TuneWeaponTP(Loc, Rot, Scale);
 		++Applied;
 	}
-	UE_LOG(CombatForgeLog, Log,
-		TEXT("pf.WeaponTP (%d pawns): WeaponRelativeLocation=FVector(%.2ff,%.2ff,%.2ff), WeaponRelativeRotation=FRotator(%.2ff,%.2ff,%.2ff), WeaponRelativeScale=FVector(%.3ff)"),
+	// Catalog-ready: paste straight onto the weapon's row, the same workflow as pf.WeaponFP.
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.WeaponTP (%d pawns)  ->  paste on the weapon row:  D.TPLoc = FVector(%.2ff, %.2ff, %.2ff); D.TPRot = FRotator(%.2ff, %.2ff, %.2ff); D.TPScale = %.3ff;"),
 		Applied, Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Scale);
 }
 static FAutoConsoleCommandWithWorldAndArgs GPFWeaponTPCmd(
@@ -3898,9 +3909,9 @@ void ACombatForgeCharacter::ApplyHandWeaponPose()
 		// animator — applying the hand_r-tuned offset on top would re-introduce exactly the cant we're removing.
 		// So: identity offset there, tuned offset on a plain hand bone. Scale is a mesh-size choice either way.
 		const bool bOnWeaponBone = CachedWeaponAttachBone.ToString().StartsWith(TEXT("ik_hand_gun"), ESearchCase::IgnoreCase);
-		WeaponMeshComp->SetRelativeLocation(bOnWeaponBone ? FVector::ZeroVector : WeaponRelativeLocation);
-		WeaponMeshComp->SetRelativeRotation(bOnWeaponBone ? FRotator::ZeroRotator : WeaponRelativeRotation);
-		WeaponMeshComp->SetRelativeScale3D(WeaponRelativeScale);
+		WeaponMeshComp->SetRelativeLocation(bOnWeaponBone ? FVector::ZeroVector : CachedTPLoc);
+		WeaponMeshComp->SetRelativeRotation(bOnWeaponBone ? FRotator::ZeroRotator : CachedTPRot);
+		WeaponMeshComp->SetRelativeScale3D(FVector(CachedTPScale));
 
 		// ---- NO DERIVED POSE. THE HAND OFFSET ABOVE IS THE WHOLE ANSWER. ----
 		// A hand_r->hand_l barrel derivation used to run here and overwrite the transform with SetWorldRotation
