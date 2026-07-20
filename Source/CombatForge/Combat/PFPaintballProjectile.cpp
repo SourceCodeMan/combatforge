@@ -22,10 +22,12 @@
 
 namespace
 {
-	// Elongated tracer along velocity (+X with bRotationFollowsVelocity). Halved AGAIN per Tom
-	// 2026-07-15 (was 0.10/0.037, then 0.067/0.025) — collision radius stays forgiving for hit reg.
-	constexpr float TracerLenScale = 0.0335f;  // ~3.4 uu long
-	constexpr float TracerRadScale = 0.0125f;  // ~1.25 uu diameter
+	// Elongated tracer along velocity (+X with bRotationFollowsVelocity). Halved a THIRD time per Tom
+	// 2026-07-20 (0.10/0.037 -> 0.067/0.025 -> 0.0335/0.0125 -> now). The VISUAL only: CollisionComp keeps
+	// DefaultRadiusUU below, so hit registration is unchanged and stays forgiving. Shrinking the mesh does
+	// not make BBs harder to land, only harder to see as blobs.
+	constexpr float TracerLenScale = 0.01675f;  // ~1.7 uu long
+	constexpr float TracerRadScale = 0.00625f;  // ~0.63 uu diameter
 	// 5.5 -> 2.5: at 5.5 the 90-BB frag burst read as an orange blob storm; 2.5 keeps team-color
 	// readability while tracers read as lit BBs, not glowing orbs.
 	constexpr float EmissiveBoost = 2.5f;      // team tracer read (04 §2.2)

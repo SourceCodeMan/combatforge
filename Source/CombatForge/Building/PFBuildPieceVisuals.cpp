@@ -571,11 +571,20 @@ void EnsureLoaded()
 	GBarrel.Paths[2] = TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Sto_Barrel_Metal_Rust_03/SM_Ind_Sto_Barrel_Metal_Rust_03.SM_Ind_Sto_Barrel_Metal_Rust_03");
 	FitSlot(GBarrel, GCylinder);
 
-	// PropDorito → plastic crate (mid cover, was "cone").
+	// PropDorito → THE CONE. Restored 2026-07-20 at Tom's request: "the cone shape was working in early
+	// versions, my first big play test and everyone liked it." It is also what the design has always
+	// specified — docs/design/03-build-system.md: "Dorito | Wedge/tetra | r 120, h 200 | Cone
+	// (2.4, 2.4, 2.0) | Mid cover, angled edges for lean-style peeks." Swapping it to a warehouse crate
+	// was an art-pass decision that quietly dropped a piece players liked, and the angled faces are the
+	// point: a box gives you square peeks, a cone gives you the lean-style ones the mode was built around.
+	//
+	// Deliberately NO warehouse paths. /Engine/BasicShapes/Cone ships with the engine itself, so this
+	// piece is STRUCTURALLY IMMUNE to the whole "one player sees it, another doesn't" class of bug —
+	// there is no /Game asset to miss from a cook, no soft path to lose a race against, nothing a client
+	// can fail to have. Everything below (bWarehouse stays false) then routes it through
+	// BasicShapeTransform, which is where the authored 2.4/2.4/2.0 cone transform already lives in
+	// FPFGridMath::PieceLocalTransform — the geometry was never removed, only the look.
 	GCrate.TargetSize = FVector(240.f, 240.f, 200.f);
-	GCrate.Paths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Crate_Plastic_Blue_01/SM_Ind_War_Storage_Crate_Plastic_Blue_01.SM_Ind_War_Storage_Crate_Plastic_Blue_01");
-	GCrate.Paths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Crate_Plastic_Teal_01/SM_Ind_War_Storage_Crate_Plastic_Teal_01.SM_Ind_War_Storage_Crate_Plastic_Teal_01");
-	GCrate.Paths[2] = TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Crate_Trap_Covered_01/SM_Ind_War_Storage_Crate_Trap_Covered_01.SM_Ind_War_Storage_Crate_Trap_Covered_01");
 	FitSlot(GCrate, GCone);
 
 	// PropSnake → cardboard box stack (long low cover).
@@ -607,14 +616,20 @@ void EnsureLoaded()
 	// note at the top): keep GLoaded false so the next call — next frame, or the grid's retry timer —
 	// tries again and upgrades the ISMs in place. Props falling back to engine shapes is the visible
 	// failure; textures matter too (unset param = checkerboard).
-	GLoaded = GBarrel.bWarehouse && GCrate.bWarehouse && GBoxes.bWarehouse
+	// GCrate is deliberately EXCLUDED: the Dorito is the engine Cone by design, so it can never report
+	// bWarehouse. Requiring it here would leave GLoaded false forever — the retry timer would spin for
+	// its full budget on every single client and then log "GAVE UP" on a load that was always complete.
+	// Only slots that genuinely want a /Game asset belong in this test.
+	GLoaded = GBarrel.bWarehouse && GBoxes.bWarehouse
 		&& GSurfWall.bLoaded && GSurfFloor.bLoaded && GSurfRamp.bLoaded && GSurfRoof.bLoaded;
 
 	UE_LOG(CombatForgeLog, Log,
 		TEXT("BuildPieceVisuals: %s | props Barrel=%s%s Crate=%s%s Boxes=%s%s | tex wall=%d floor=%d ramp=%d roof=%d | warehouseMI floor=%d metal=%d roof=%d | triplanar wall=%d floorAsset=%d(black-do-not-use)"),
 		GLoaded ? TEXT("READY") : TEXT("INCOMPLETE (will retry)"),
 		GBarrel.Mesh ? *GBarrel.Mesh->GetName() : TEXT("null"), GBarrel.bWarehouse ? TEXT("") : TEXT("[FALLBACK]"),
-		GCrate.Mesh  ? *GCrate.Mesh->GetName()  : TEXT("null"), GCrate.bWarehouse  ? TEXT("") : TEXT("[FALLBACK]"),
+		// "Dorito" not "Crate", and never [FALLBACK]: the cone is the intended mesh, not a failed load.
+		// Tagging it as a fallback forever would be a diagnostic that cries wolf on every boot.
+		GCrate.Mesh  ? *GCrate.Mesh->GetName()  : TEXT("null"), TEXT("(cone, by design)"),
 		GBoxes.Mesh  ? *GBoxes.Mesh->GetName()  : TEXT("null"), GBoxes.bWarehouse  ? TEXT("") : TEXT("[FALLBACK]"),
 		GSurfWall.bLoaded ? 1 : 0, GSurfFloor.bLoaded ? 1 : 0, GSurfRamp.bLoaded ? 1 : 0, GSurfRoof.bLoaded ? 1 : 0,
 		GWhFloor ? 1 : 0, GWhMetal ? 1 : 0, GWhRoof ? 1 : 0,
@@ -680,6 +695,9 @@ EPFSurfaceRole RoleForPieceType(EPFPieceType Type)
 		return EPFSurfaceRole::FloorConcrete;
 	case EPFPieceType::Ramp:  return EPFSurfaceRole::MetalRusty;
 	case EPFPieceType::Roof:  return EPFSurfaceRole::MetalRoof;
+	// The Dorito cone wears the CEILING/ROOF panel (Tom 2026-07-20: "it needs to be skinned with a
+	// ceiling tile"). It previously fell through to the concrete default below.
+	case EPFPieceType::PropDorito: return EPFSurfaceRole::MetalRoof;
 	default:                  return EPFSurfaceRole::FloorConcrete;
 	}
 }
@@ -738,6 +756,29 @@ UMaterialInstanceDynamic* CreatePaletteMID(UObject* Outer, EPFSurfaceRole Role)
 
 UMaterialInstanceDynamic* CreateStructuralPaletteMID(UObject* Outer, EPFPieceType Type)
 {
+	// THE WHITE CONE (Tom 2026-07-20: "the cone is back, but it's all white with no skin").
+	//
+	// CreatePaletteMID prefers the Megascans Surface MIs, which are authored against each SOURCE MESH's
+	// own UVs. The Dorito is an /Engine/BasicShapes Cone — a primitive whose UVs those materials were
+	// never made for — so the texture washes out to near-white instead of tiling. This is the same class
+	// of problem the structural pieces hit, and the project already has the answer: the TRIPLANAR master
+	// projects world-space, so it does not care what UVs a mesh has and tiles correctly on any primitive.
+	//
+	// Force that path for the cone, with the ROOF profile = the ceiling panel Tom asked for.
+	if (Type == EPFPieceType::PropDorito)
+	{
+		EnsureLoaded();
+		if (UMaterialInterface* Master = TriplanarFallbackMaster())
+		{
+			if (UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Master, Outer))
+			{
+				ApplyProfileToMID(Mid, GSurfRoof);
+				return Mid;
+			}
+		}
+		// Master missing (shouldn't happen — M_PF_ArenaWall is force-cooked): fall through rather than
+		// return null, so the piece still gets *a* material instead of the engine checker.
+	}
 	return CreatePaletteMID(Outer, RoleForPieceType(Type));
 }
 

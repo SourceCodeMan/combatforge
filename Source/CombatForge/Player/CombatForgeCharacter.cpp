@@ -4185,6 +4185,39 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
 		ViewModelRoot->SetVisibility(!bHideForBuild && !bElim, /*bPropagateToChildren=*/true);
 	}
+	// THE TWO CROSSED RIFLES (Tom, 2026-07-20). bOwnerNoSee is set on both third-person guns and is NOT
+	// culling them: the FPSCAN dump shows WeaponMeshComp (SM_Rifle) at 58 uu from the eye with
+	// ownerNoSee=1 while the player is looking at two identical rifles — his own TP gun drawn over his
+	// viewmodel. Owner culling only happens when FSceneView::ViewActor matches the component's owner, so
+	// anything that leaves the view target as something other than this pawn silently disables EVERY
+	// owner-hidden component on it. Five hypotheses died before the dump proved which component it was.
+	//
+	// So stop trusting the flag on the one machine that can be wrong about it. On the OWNING client the
+	// third-person guns are never wanted — that client is in first person and has RifleFPMesh — so hide
+	// them outright here, in the per-tick arbiter that owns this decision. Every other path that re-shows
+	// them (AttachWeaponToHand, AttachWeaponToBack, the elim/respawn propagate) runs through this function
+	// afterwards, which is why a one-shot hide elsewhere would not have held.
+	//
+	// Safe for multiplayer: visibility is a LOCAL render property and is not replicated, and this only
+	// applies to a pawn this machine locally controls. Remote players' copies of this pawn are untouched,
+	// so everyone else still sees the gun in his hands and the sling on his back. bOwnerNoSee stays set
+	// as well — this is belt and braces, not a replacement.
+	// ⚠️ The owner hide MUST use SetVisibility, NOT SetHiddenInGame. GetMuzzleLocation's authoritative
+	// branch gates on `!WeaponMeshComp->bHiddenInGame` before resolving the real barrel tip, and falls
+	// back to a fixed eye offset otherwise. On a LISTEN HOST the shooter is both locally controlled and
+	// authoritative, so hiding this component via bHiddenInGame would have moved every host shot off the
+	// barrel to that fallback — precisely the "shots don't come from the barrel" class of bug this hide
+	// was never meant to touch. SetVisibility stops the draw and leaves bHiddenInGame alone.
+	const bool bHideTPWeaponsForOwner = IsLocallyControlled();
+	if (WeaponMeshComp != nullptr)
+	{
+		WeaponMeshComp->SetVisibility(!bHideTPWeaponsForOwner);
+	}
+	if (BackWeaponMeshComp != nullptr)
+	{
+		BackWeaponMeshComp->SetVisibility(!bHideTPWeaponsForOwner);
+	}
+
 	// TP rifles (hand + back sling): hide in build / elim so builders don't look armed.
 	if (BackWeaponMeshComp != nullptr)
 	{
@@ -4548,17 +4581,30 @@ FVector ACombatForgeCharacter::ResolveGunMuzzleWorld(const UStaticMeshComponent*
 		// Most MarketplaceBlockout statics: local +X is barrel-forward.
 		TipLocal = FVector(O.X + E.X, O.Y, O.Z + E.Z * 0.12f);
 	}
-	// Nudge past the tip so the BB doesn't spawn inside the solid.
-	const FVector Along = (TipLocal - O).GetSafeNormal();
-	if (!Along.IsNearlyZero())
+	// Clear the barrel face by a WORLD distance. This used to add 3uu in MESH space, i.e. BEFORE the
+	// component transform — so the real clearance was 3 x ComponentScale: only ~1.0-1.5uu on a 0.30-0.50
+	// FP viewmodel, but 2.55uu on the 0.85 TP gun. Tracers therefore started flush with the barrel face
+	// (often occluded by the gun's own geometry), by a different amount for every weapon AND a different
+	// amount in first vs third person. That is exactly Tom's "everything else is off by a little bit"
+	// (2026-07-20), and why the minigun — the one weapon with a hand-authored muzzle — felt right.
+	//
+	// The corroboration: the minigun's approved MuzzleFP.X (40.0) sits 8.8uu ahead of that gun's own
+	// derived bounds tip. The hand-authored number was buying CLEARANCE and nothing else. So one world
+	// constant here does the job of 36 authored muzzles, and does it identically in both views.
+	constexpr float MuzzleClearanceUU = 8.f;
+	const FVector AlongLocal = (TipLocal - O).GetSafeNormal();
+	if (AlongLocal.IsNearlyZero() && !LocalFallback.IsNearlyZero())
 	{
-		TipLocal += Along * 3.f;
+		TipLocal = LocalFallback;   // degenerate bounds — behaviour unchanged
 	}
-	else if (!LocalFallback.IsNearlyZero())
+	const FTransform& GunXf = Gun->GetComponentTransform();
+	FVector MuzzleWorld = GunXf.TransformPosition(TipLocal);
+	if (!AlongLocal.IsNearlyZero())
 	{
-		TipLocal = LocalFallback;
+		const FVector AlongWorld = GunXf.TransformVector(AlongLocal).GetSafeNormal();
+		MuzzleWorld += AlongWorld * MuzzleClearanceUU;
 	}
-	return Gun->GetComponentTransform().TransformPosition(TipLocal);
+	return MuzzleWorld;
 }
 
 FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const

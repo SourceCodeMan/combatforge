@@ -23,11 +23,11 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 12;  // alpha.12 — REAL-RISK audit fixes (AFK kick no longer boots objective
-	                                   // holders, sane bot weapons, terminal prop-retry back-off, pistol roll,
-	                                   // minigun muzzle, honest version readout) + player settings moved out of
-	                                   // the install + second weapon slot + full FPSCAN weapon diagnostic.
-	                                   // 11 was baked repeatedly but never shipped; alpha.10 is what is live.
+	constexpr int32 NetProtocol = 13;  // alpha.13 — everything in 12 (never shipped) PLUS: the two crossed
+	                                   // rifles fixed, every weapon's shots locked to its barrel (world-space
+	                                   // clearance + dedicated-server clients now fire from their own
+	                                   // viewmodel), the Dorito CONE restored, BB + splat halved, shotgun
+	                                   // burst 3. alpha.10 is still what is live on itch and the box.
 }
 
 /**

@@ -416,7 +416,13 @@ namespace PFWeapon
 				nullptr, FVector(1.3f, 9.69f, -6.43f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(38.0f, 6.4f, 0.0f),
 				FVector(8.0f, -9.51f, -0.41f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_SB, EPFFireMode::Single,
-				0.9f, 0.15f, 7200.f, 0.30f, 1, 10, 2.8f,
+				// ClassBurstCount was 1, which made BURST fire exactly one shell — indistinguishable from
+				// SINGLE, so the mode looked broken (Tom 2026-07-20). This is the ONLY burst-capable
+				// shotgun (the other three are Mode_S) and was the only weapon in the catalog below 2.
+				// 3 to match every other burst weapon (Tom's call). That is 18 pellets per pull at close
+				// range, which against the 10-hit-out model is lethal fast — intended, but the number to
+				// turn down first if the shotgun starts dominating CQB.
+				0.9f, 0.15f, 7200.f, 0.30f, 3, 10, 2.8f,
 				TEXT("sg_04"), 1, 6, 2.6f,
 				0.50f, 2.0f, 1, 8.f,
 				1.00f, 0.25f, 14.f,

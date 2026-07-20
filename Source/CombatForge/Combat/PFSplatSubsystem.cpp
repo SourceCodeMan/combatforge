@@ -30,7 +30,7 @@ namespace
 	constexpr float PendingLifetimeSec = 0.6f;     // unconfirmed window (04 §5.2)
 	constexpr float PendingFadeOutSec = 0.2f;      // 04 §5.2 fade (closes prior CONTRACT-GAP)
 	// Airsoft BB impact scuff — small pockmark, not a paint disc. DecalSize X = projection depth.
-	constexpr float SplatSizeUU = 14.f;
+	constexpr float SplatSizeUU = 7.f;   // halved from 14 per Tom 2026-07-20 — a scuff, not a paint disc
 	constexpr float SplatProjectionDepthUU = 8.f;
 	constexpr float SplatNormalOffsetUU = 0.5f;
 	constexpr float JitterMin = 0.75f;
