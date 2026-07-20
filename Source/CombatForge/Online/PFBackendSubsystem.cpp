@@ -6,6 +6,7 @@
 #include "Core/CombatForgeGameInstance.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
+#include "Combat/PFWeaponCatalog.h"
 #include "Core/PFPaths.h"
 
 #include "Dom/JsonObject.h"
@@ -457,6 +458,19 @@ bool UPFBackendSubsystem::IsWeaponUnlocked(const FString& WeaponId) const
 	{
 		return true;
 	}
+
+	// ⚠️ ALPHA ONLY — DELETE BEFORE BETA. `pf.SetRank <n>` lets the catalog be exercised without
+	// grinding: anything whose UnlockRank is within the override counts as unlocked, locally.
+	// Client-side only — a fleet server still clamps against the real profile in ServerSetKit.
+	if (DevRankOverride >= 0)
+	{
+		const FString Bare = WeaponId.StartsWith(TEXT("wpn.")) ? WeaponId.RightChop(4) : WeaponId;
+		const FPFWeaponConfig C = PFWeapon::FindById(Bare);
+		if (PFWeapon::IdOf(C.Category, C.Index).Equals(Bare, ESearchCase::IgnoreCase))
+		{
+			return static_cast<int32>(PFWeapon::UnlockRankOf(C.Category, C.Index)) <= DevRankOverride;
+		}
+	}
 	const FString Prefixed = WeaponId.StartsWith(TEXT("wpn."))
 		? WeaponId
 		: FString::Printf(TEXT("wpn.%s"), *WeaponId);
@@ -840,3 +854,43 @@ void UPFBackendSubsystem::SendCasualReport(const FString& MatchId, const FString
 			UE_LOG(CombatForgeLog, Log, TEXT("Backend: casual-report -> %d %s"), Code, *Resp);
 		});
 }
+
+// ---------------------------------------------------------------------------
+// ⚠️ ALPHA ONLY — DELETE THIS WHOLE BLOCK BEFORE BETA (Tom 2026-07-20)
+// ---------------------------------------------------------------------------
+// `pf.SetRank <n>` unlocks everything up to rank n locally so the catalog can be exercised without
+// grinding. It is CLIENT-SIDE ONLY and cannot be used to cheat on an official server: a fleet server
+// re-checks the real profile in ACombatForgeCharacter::ServerSetKit (ClampSlot), so a claimed-but-
+// locked gun still spawns as the category starter. It only changes what this menu lets you equip.
+// `pf.SetRank -1` returns to the real profile rank.
+static void PFSetRankCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	UGameInstance* GI = World->GetGameInstance();
+	UPFBackendSubsystem* Backend = GI ? GI->GetSubsystem<UPFBackendSubsystem>() : nullptr;
+	if (Backend == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.SetRank: backend subsystem unavailable"));
+		return;
+	}
+	if (Args.Num() < 1)
+	{
+		UE_LOG(CombatForgeLog, Log,
+			TEXT("pf.SetRank <n>   (alpha: unlock everything up to rank n; -1 = back to your real rank). Now: %d (real %d)"),
+			Backend->DevRankOverride, Backend->GetProfile().Level);
+		return;
+	}
+	const int32 Rank = FCString::Atoi(*Args[0]);
+	Backend->DevRankOverride = (Rank < 0) ? -1 : Rank;
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.SetRank: rank override = %d (real rank %d). ALPHA ONLY - local menu unlocks; fleet servers still clamp."),
+		Backend->DevRankOverride, Backend->GetProfile().Level);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFSetRankCmd(
+	TEXT("pf.SetRank"),
+	TEXT("ALPHA ONLY: unlock every weapon up to rank <n> locally (-1 = off). Client-side; fleet servers still clamp."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFSetRankCmd),
+	ECVF_Cheat);

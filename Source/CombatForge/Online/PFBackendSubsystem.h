@@ -104,6 +104,20 @@ public:
 	/** Fleet has loaded unlocks for the local profile (non-empty UnlockIds after profile fetch). */
 	bool HasUnlocksLoaded() const { return Profile.UnlockIds.Num() > 0; }
 
+	/**
+	 * ⚠️ ALPHA ONLY — DELETE BEFORE BETA (Tom 2026-07-20). Local rank override driven by `pf.SetRank`,
+	 * so the whole catalog can be exercised without grinding. CLIENT-SIDE ONLY: it changes what this
+	 * menu lets you equip, and nothing else. A fleet server re-checks the real profile in
+	 * ServerSetKit::ClampSlot, so setting it does NOT let anyone carry locked guns on an official
+	 * server — the pawn simply spawns with the category starter instead. -1 = off.
+	 *
+	 * Search "DevRankOverride" to strip this feature; it is deliberately confined to this one member,
+	 * IsWeaponUnlocked, EffectiveRank, and the pf.SetRank command.
+	 */
+	int32 DevRankOverride = -1;
+	/** Profile level, or the alpha rank override when one is set. */
+	int32 EffectiveRank() const { return DevRankOverride >= 0 ? DevRankOverride : Profile.Level; }
+
 	// ---- server directory (player hat; all require login) ----
 	void FetchServers(TFunction<void(bool bOk, const TArray<FPFBackendServerInfo>&)> Done);
 	void RequestQuickPlay(TFunction<void(bool bOk, const FPFBackendServerInfo&)> Done);

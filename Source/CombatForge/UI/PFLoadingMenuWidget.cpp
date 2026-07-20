@@ -723,19 +723,29 @@ void UPFLoadingMenuWidget::RefreshWeaponLabels()
 	}
 	if (WeaponValueText != nullptr)
 	{
+		// A LOCKED row must never read as your selection. Browsing past a locked gun does not equip it
+		// (by design), but the row used to show it in plain white with a small rank badge - so it looked
+		// chosen, and the mismatch only surfaced in game as "the gun I picked isn't there" (Tom
+		// 2026-07-20). Locked entries now go amber, say LOCKED outright, and name what you are ACTUALLY
+		// carrying, so the menu can never disagree with the spawn.
 		FString Label = FString::Printf(TEXT("%s  (%d/%d)"),
 			*PFWeapon::WeaponDisplayName(WeaponConfig.Category, WeaponConfig.Index),
 			WeaponConfig.Index + 1, WpnCount);
-		// Rank lock badge when logged in with unlocks (offline = ungated).
+		bool bLocked = false;
 		if (UPFBackendSubsystem* Backend = GetBackend())
 		{
 			const FString Id = PFWeapon::IdOf(WeaponConfig.Category, WeaponConfig.Index);
-			if (!Backend->IsWeaponUnlocked(Id))
+			bLocked = !Backend->IsWeaponUnlocked(Id);
+			if (bLocked)
 			{
-				Label += FString::Printf(TEXT("  🔒 Rank %u"),
-					PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index));
+				const FPFWeaponConfig Equipped = PFWeapon::LoadConfig(ActiveSaveSlot);
+				Label += FString::Printf(TEXT("   LOCKED - Rank %u   (carrying: %s)"),
+					PFWeapon::UnlockRankOf(WeaponConfig.Category, WeaponConfig.Index),
+					*PFWeapon::WeaponDisplayName(Equipped.Category, Equipped.Index));
 			}
 		}
+		WeaponValueText->SetColorAndOpacity(FSlateColor(bLocked
+			? FLinearColor(1.f, 0.62f, 0.20f) : FLinearColor::White));
 		WeaponValueText->SetText(FText::FromString(Label));
 	}
 
@@ -752,15 +762,21 @@ void UPFLoadingMenuWidget::RefreshWeaponLabels()
 		FString Label2 = FString::Printf(TEXT("%s  (%d/%d)"),
 			*PFWeapon::WeaponDisplayName(Weapon2Config.Category, Weapon2Config.Index),
 			Weapon2Config.Index + 1, Wpn2Count);
+		bool bLocked2 = false;
 		if (UPFBackendSubsystem* Backend = GetBackend())
 		{
 			const FString Id2 = PFWeapon::IdOf(Weapon2Config.Category, Weapon2Config.Index);
-			if (!Backend->IsWeaponUnlocked(Id2))
+			bLocked2 = !Backend->IsWeaponUnlocked(Id2);
+			if (bLocked2)
 			{
-				Label2 += FString::Printf(TEXT("  🔒 Rank %u"),
-					PFWeapon::UnlockRankOf(Weapon2Config.Category, Weapon2Config.Index));
+				const FPFWeaponConfig Equipped2 = PFWeapon::LoadSecondaryConfig(ActiveSaveSlot);
+				Label2 += FString::Printf(TEXT("   LOCKED - Rank %u   (carrying: %s)"),
+					PFWeapon::UnlockRankOf(Weapon2Config.Category, Weapon2Config.Index),
+					*PFWeapon::WeaponDisplayName(Equipped2.Category, Equipped2.Index));
 			}
 		}
+		Weapon2ValueText->SetColorAndOpacity(FSlateColor(bLocked2
+			? FLinearColor(1.f, 0.62f, 0.20f) : FLinearColor::White));
 		Weapon2ValueText->SetText(FText::FromString(Label2));
 	}
 }
