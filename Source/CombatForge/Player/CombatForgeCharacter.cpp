@@ -617,8 +617,6 @@ void ACombatForgeCharacter::BeginPlay()
 	SetupWeaponMaterials();  // dark gunmetal marker + emissive flash blobs
 	ApplyWeaponLoadout();    // swap to the player's selected weapon (mesh/material/pose) — after the above
 
-	EnforceSingleFirstPersonWeapon();
-
 	// Soft wind/arena bed for the local player only (SFX volume scaled).
 	if (IsLocallyControlled())
 	{
@@ -2760,6 +2758,10 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	UStaticMesh* StowedMesh = PFWeapon::LoadMesh(StowedDef);
 	UMaterialInterface* StowedMat = PFWeapon::LoadMaterial(StowedDef);
 	AttachWeaponToBack(StowedMesh, StowedMat);
+
+	// Every equip path ends here — spawn, respawn, scroll-wheel swap, class change — so this is the one
+	// place that can guarantee the owner is never left looking at two guns.
+	EnforceSingleFirstPersonWeapon();
 }
 
 void ACombatForgeCharacter::ReapplyWeaponLoadout()
@@ -3444,25 +3446,56 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 	{
 		return;   // only the owning client can see a first-person weapon at all
 	}
+
+	// ENFORCE THE INVARIANT rather than keep guessing which component it is. Tom's screenshot shows two
+	// DETAILED catalog weapons crossed (one reads "APF-45 MKII"), not the crude primitive marker — so the
+	// duplicate is a real gun mesh that is owner-visible when it should not be, and three separate
+	// hypotheses about *which* one have now failed. Whatever it is: exactly one static-mesh weapon may be
+	// owner-visible, and that is RifleFPMesh. Hide every other one and NAME it, so this is fixed on sight
+	// and the log still identifies the source for a proper root-cause fix.
+	//
+	// Deliberately narrow: static meshes only (the modular character parts are skeletal, so clothing and
+	// skin are untouched), and it only ever HIDES - nothing is destroyed, so a mistake here costs a
+	// missing cosmetic, never a crash.
 	int32 Seen = 0;
+	int32 Hidden = 0;
 	TArray<USceneComponent*> Kids;
 	GetComponents<USceneComponent>(Kids);
 	for (USceneComponent* K : Kids)
 	{
 		UStaticMeshComponent* P = Cast<UStaticMeshComponent>(K);
-		if (P == nullptr || !P->bOnlyOwnerSee || P->GetStaticMesh() == nullptr || P->bHiddenInGame)
+		if (P == nullptr || P->GetStaticMesh() == nullptr || P->bHiddenInGame)
+		{
+			continue;
+		}
+		// Owner-visible = explicitly owner-only, OR simply not hidden from the owner (the default).
+		const bool bOwnerSees = P->bOnlyOwnerSee || !P->bOwnerNoSee;
+		if (!bOwnerSees)
 		{
 			continue;
 		}
 		++Seen;
-		if (P != RifleFPMesh)
+		if (P == RifleFPMesh)
 		{
-			UE_LOG(CombatForgeLog, Warning,
-				TEXT("FP weapon: UNEXPECTED owner-visible mesh '%s' (mesh=%s, parent=%s) — this is the second gun."),
-				*P->GetName(), *GetNameSafe(P->GetStaticMesh()), *GetNameSafe(P->GetAttachParent()));
+			continue;
+		}
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("FP weapon: SECOND GUN found — '%s' (mesh=%s, parent=%s, onlyOwnerSee=%d ownerNoSee=%d)."),
+			*P->GetName(), *GetNameSafe(P->GetStaticMesh()), *GetNameSafe(P->GetAttachParent()),
+			P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0);
+
+		// Only re-hide the two components that are DEFINITELY third-person guns. Anything else is merely
+		// reported: a carried bomb or some future owner-visible prop must not be hidden by a rule aimed at
+		// weapons, and a wrong guess here would be a new bug rather than a fix.
+		if (P == WeaponMeshComp || P == BackWeaponMeshComp)
+		{
+			P->SetOwnerNoSee(true);
+			P->MarkRenderStateDirty();
+			++Hidden;
 		}
 	}
-	UE_LOG(CombatForgeLog, Log, TEXT("FP weapon: %d owner-visible weapon mesh(es) after setup."), Seen);
+	UE_LOG(CombatForgeLog, Log,
+		TEXT("FP weapon: %d owner-visible weapon mesh(es); hid %d duplicate(s)."), Seen, Hidden);
 }
 
 void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat)
