@@ -3523,9 +3523,13 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 		MarkerPartsFP.Reset();
 	}
 
-	if (!IsLocallyControlled())
+	// IsPlayerControlled() matters as much as IsLocallyControlled(): a BOT is "locally controlled" on the
+	// server (AIController is a local controller), so without it this ran the whole scan — including the
+	// world-wide TObjectIterator sweep — once per bot per equip, and could hide a bot's own weapons. Only a
+	// real human has a first-person view for a second gun to intrude on.
+	if (!IsLocallyControlled() || !IsPlayerControlled())
 	{
-		return;   // only the owning client can see a first-person weapon at all
+		return;
 	}
 
 	// ENFORCE THE INVARIANT rather than keep guessing which component it is. Tom's screenshot shows two
@@ -4187,7 +4191,13 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 	// authoritative, so hiding this component via bHiddenInGame would have moved every host shot off the
 	// barrel to that fallback — precisely the "shots don't come from the barrel" class of bug this hide
 	// was never meant to touch. SetVisibility stops the draw and leaves bHiddenInGame alone.
-	const bool bHideTPWeaponsForOwner = IsLocallyControlled();
+	// IsPlayerControlled() is REQUIRED here. APawn::IsLocallyControlled() is TRUE for a BOT on the server
+	// (an AIController is a local controller), so gating on it alone hid the hand gun AND the back sling on
+	// every bot — they carried invisible weapons, and the sling could not be tuned against a bot at all
+	// because nothing would ever draw (Tom 2026-07-20: "it's not visible no matter what numbers I punch
+	// in"). Only a real human's OWN pawn has a first-person viewmodel making the TP guns redundant. Same
+	// test PFWeaponComponent uses to pick the shot origin, for the same reason.
+	const bool bHideTPWeaponsForOwner = IsLocallyControlled() && IsPlayerControlled();
 	if (WeaponMeshComp != nullptr)
 	{
 		WeaponMeshComp->SetVisibility(!bHideTPWeaponsForOwner);
