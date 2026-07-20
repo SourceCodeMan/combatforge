@@ -383,6 +383,8 @@ public:
 	/** Reload the saved weapon config and re-apply (menu edits an already-spawned pawn). */
 	void ReapplyWeaponLoadout();
 	/** Seat the stowed (non-active) gun on the back. */
+	/** Exactly one owner-visible weapon in FP: drop a stale marker gun, and name anything unexpected. */
+	void EnforceSingleFirstPersonWeapon();
 	void AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat);
 	/** Live-tune the FP weapon pose (console: pf.WeaponFP) — the per-weapon poses need dialing in-editor. */
 	void TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle);

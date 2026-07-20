@@ -617,6 +617,8 @@ void ACombatForgeCharacter::BeginPlay()
 	SetupWeaponMaterials();  // dark gunmetal marker + emissive flash blobs
 	ApplyWeaponLoadout();    // swap to the player's selected weapon (mesh/material/pose) — after the above
 
+	EnforceSingleFirstPersonWeapon();
+
 	// Soft wind/arena bed for the local player only (SFX volume scaled).
 	if (IsLocallyControlled())
 	{
@@ -3409,6 +3411,58 @@ void ACombatForgeCharacter::AttachWeaponToHand()
 	}
 
 	ApplyHandWeaponPose();
+}
+
+void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
+{
+	// TWO GUNS CROSSED IN FIRST PERSON on a default, never-edited class (Tom 2026-07-20). Only components
+	// flagged bOnlyOwnerSee can render in the owner's view, and there should be exactly ONE weapon among
+	// them: either RifleFPMesh (real gun) or the MarkerPartsFP primitive stand-in, never both — the ctor
+	// picks one branch. The white/black X in the screenshot is exactly what both would look like: the
+	// marker uses BasicShapeMaterial (light) with its barrel along +X, while RifleFPMesh is yawed -90.
+	//
+	// Belt and braces rather than a guess about how they came to coexist: drop the marker whenever the
+	// real gun exists (a no-op when the ctor took the marker branch), then LOG anything else still
+	// owner-visible with a mesh, so if the second gun is something I have not thought of, the next
+	// playtest log names it outright instead of costing another round trip.
+	if (RifleFPMesh != nullptr && MarkerPartsFP.Num() > 0)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("FP weapon: real rifle AND %d marker part(s) both present — destroying the marker."),
+			MarkerPartsFP.Num());
+		for (TObjectPtr<UStaticMeshComponent>& Part : MarkerPartsFP)
+		{
+			if (Part != nullptr)
+			{
+				Part->DestroyComponent();
+			}
+		}
+		MarkerPartsFP.Reset();
+	}
+
+	if (!IsLocallyControlled())
+	{
+		return;   // only the owning client can see a first-person weapon at all
+	}
+	int32 Seen = 0;
+	TArray<USceneComponent*> Kids;
+	GetComponents<USceneComponent>(Kids);
+	for (USceneComponent* K : Kids)
+	{
+		UStaticMeshComponent* P = Cast<UStaticMeshComponent>(K);
+		if (P == nullptr || !P->bOnlyOwnerSee || P->GetStaticMesh() == nullptr || P->bHiddenInGame)
+		{
+			continue;
+		}
+		++Seen;
+		if (P != RifleFPMesh)
+		{
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("FP weapon: UNEXPECTED owner-visible mesh '%s' (mesh=%s, parent=%s) — this is the second gun."),
+				*P->GetName(), *GetNameSafe(P->GetStaticMesh()), *GetNameSafe(P->GetAttachParent()));
+		}
+	}
+	UE_LOG(CombatForgeLog, Log, TEXT("FP weapon: %d owner-visible weapon mesh(es) after setup."), Seen);
 }
 
 void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat)
