@@ -3726,69 +3726,48 @@ void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMateria
 	// which is how a real sling sits. No magic offsets, and it follows the spine as the torso animates.
 	if (bDeriveBackSlingFromSkeleton && !Bone.IsNone())
 	{
-		auto BoneOrSocket = [Body](std::initializer_list<const TCHAR*> Names, FVector& Out) -> bool
-		{
-			for (const TCHAR* N : Names)
-			{
-				const FName FN(N);
-				if (Body->DoesSocketExist(FN) || Body->GetBoneIndex(FN) != INDEX_NONE)
-				{
-					Out = Body->GetSocketLocation(FN);
-					return true;
-				}
-			}
-			return false;
-		};
+		// ACTOR SPACE, not bone space. Two attempts at this have now been wrong in front of Tom: hand-authored
+		// bone-space constants put the gun in the crotch (a spine bone's +X runs UP the bone, not backward),
+		// and deriving a frame from spine/clavicle bone POSITIONS put it at the neck pointing forward. Bone
+		// axes on this skeleton are simply not what either version assumed.
+		//
+		// The pawn's own actor frame is unambiguous and needs no assumptions: -Forward is behind the character,
+		// +Up is up, +Right is their right. It also yaws with the body for free. Anchor to the spine bone so the
+		// sling still rides the torso as it animates, but place and orient it in actor space.
+		//
+		// The three offsets and the tilt are live-tunable via `pf.BackSling` — see the command at the bottom of
+		// this file. That is the workflow that actually landed the FP weapon poses (pf.WeaponFP / pf.WeaponADS):
+		// Tom drags it into place in-game and pastes the printed line back, instead of me guessing a third time.
+		const FVector Anchor = Body->GetSocketLocation(Bone);
+		const FVector ActorFwd = GetActorForwardVector();
+		const FVector ActorRgt = GetActorRightVector();
+		const FVector ActorUp  = GetActorUpVector();
 
-		FVector SpineLow, SpineHigh, ClavL, ClavR;
-		const bool bHaveSpine = BoneOrSocket({ TEXT("spine_01"), TEXT("Spine_01"), TEXT("pelvis"), TEXT("Pelvis") }, SpineLow)
-			&& BoneOrSocket({ TEXT("neck_01"), TEXT("Neck_01"), TEXT("spine_03"), TEXT("Spine_03"), TEXT("head") }, SpineHigh);
-		const bool bHaveClav = BoneOrSocket({ TEXT("clavicle_l"), TEXT("Clavicle_L"), TEXT("upperarm_l"), TEXT("UpperArm_L") }, ClavL)
-			&& BoneOrSocket({ TEXT("clavicle_r"), TEXT("Clavicle_R"), TEXT("upperarm_r"), TEXT("UpperArm_R") }, ClavR);
+		const FVector WorldLoc = Anchor
+			- ActorFwd * BackSlingOffset.X      // behind the spine
+			+ ActorRgt * BackSlingOffset.Y      // lateral (0 = centred on the spine)
+			+ ActorUp  * BackSlingOffset.Z;     // negative drops it off the neck toward mid-back
 
-		if (bHaveSpine && bHaveClav)
-		{
-			const FVector Up = (SpineHigh - SpineLow).GetSafeNormal();
-			const FVector Right = (ClavR - ClavL).GetSafeNormal();
-			if (!Up.IsNearlyZero() && !Right.IsNearlyZero())
-			{
-				FVector Back = FVector::CrossProduct(Up, Right).GetSafeNormal();
-				// Cross-product handedness depends on the skeleton's bone roll, so settle it against the
-				// component's own facing rather than assuming: the sling must end up BEHIND the chest.
-				if ((Back | Body->GetForwardVector()) > 0.f)
-				{
-					Back = -Back;
-				}
+		// Barrel lies in the character's own back plane, tilted off vertical toward the left hip — the usual
+		// slung look. 0 deg = straight down, 90 = horizontal.
+		const float DiagRad = FMath::DegreesToRadians(BackSlingTiltDeg);
+		const FVector Barrel = (-ActorUp * FMath::Cos(DiagRad) - ActorRgt * FMath::Sin(DiagRad)).GetSafeNormal();
 
-				// Seat it just off the back surface: half the torso width is a good stand-in for how far
-				// back the spine bone sits from the skin, and half the weapon's thickness clears the mesh.
-				const FBoxSphereBounds WB = BackWeaponMeshComp->GetStaticMesh()->GetBounds();
-				const float TorsoHalfDepth = FMath::Max(6.f, (ClavR - ClavL).Size() * 0.45f);
-				const float WeaponHalfThick = FMath::Min3(WB.BoxExtent.X, WB.BoxExtent.Y, WB.BoxExtent.Z)
-					* BackWeaponRelativeScale.X;
+		// Which mesh axis IS the barrel: the catalog's guns are modelled along +Y (SM_Rifle family) or +X.
+		const FBoxSphereBounds WB = BackWeaponMeshComp->GetStaticMesh()->GetBounds();
+		const bool bBarrelAlongY = (WB.BoxExtent.Y >= WB.BoxExtent.X);
+		const FVector FlatBack = -ActorFwd;   // gun lies flat against the back
+		const FRotator WorldRot = bBarrelAlongY
+			? FRotationMatrix::MakeFromYZ(Barrel, FlatBack).Rotator()
+			: FRotationMatrix::MakeFromXZ(Barrel, FlatBack).Rotator();
 
-				const FVector Anchor = Body->GetSocketLocation(Bone);
-				const FVector WorldLoc = Anchor + Back * (TorsoHalfDepth + WeaponHalfThick);
-
-				// Lay the weapon flat on the back: its barrel runs along a diagonal in the Up/Right plane
-				// (muzzle down toward the left hip, the usual slung look), and its "up" faces away from
-				// the body so the side profile reads correctly rather than edge-on.
-				const float DiagRad = FMath::DegreesToRadians(BackSlingTiltDeg);
-				const FVector Barrel = (-Up * FMath::Cos(DiagRad) - Right * FMath::Sin(DiagRad)).GetSafeNormal();
-				const bool bBarrelAlongY = (WB.BoxExtent.Y >= WB.BoxExtent.X);
-				const FRotator WorldRot = bBarrelAlongY
-					? FRotationMatrix::MakeFromYZ(Barrel, Back).Rotator()
-					: FRotationMatrix::MakeFromXZ(Barrel, Back).Rotator();
-
-				BackWeaponMeshComp->SetWorldLocation(WorldLoc);
-				BackWeaponMeshComp->SetWorldRotation(WorldRot);
-				BackWeaponMeshComp->SetOwnerNoSee(true);
-				BackWeaponMeshComp->SetCastShadow(true);
-				BackWeaponMeshComp->SetVisibility(true);
-				BackWeaponMeshComp->SetHiddenInGame(false);
-				return;
-			}
-		}
+		BackWeaponMeshComp->SetWorldLocation(WorldLoc);
+		BackWeaponMeshComp->SetWorldRotation(WorldRot);
+		BackWeaponMeshComp->SetOwnerNoSee(true);
+		BackWeaponMeshComp->SetCastShadow(true);
+		BackWeaponMeshComp->SetVisibility(true);
+		BackWeaponMeshComp->SetHiddenInGame(false);
+		return;
 	}
 
 	// Fallback: the authored relative transform. Only reached when the torso bones are missing (a
@@ -4758,4 +4737,67 @@ void ACombatForgeCharacter::OnRemoteFireCosmetic()
 	// No raised-pose swap (see OnFireCosmetic — it poisoned same-frame GetMuzzleLocation).
 	// Muzzle VFX/audio are spawned by MulticastShotFX / FireOneShot, not here.
 	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
+}
+
+// ---------------------------------------------------------------------------
+// pf.BackSling — live-tune the back-slung weapon, then paste the printed line.
+// ---------------------------------------------------------------------------
+// Same workflow that actually landed the FP weapon poses (pf.WeaponFP / pf.WeaponADS): rather than me
+// guessing offsets a third time, drag it into place in game and paste the values back. Bone-space guesses
+// put this gun in the crotch once and at the neck once — the eye beats the arithmetic here.
+//
+// Values are ACTOR-space, relative to the spine bone:
+//   Back  = how far BEHIND the character   (bigger = further off the back)
+//   Side  = lateral, + is their right      (0 = centred on the spine)
+//   Up    = vertical, NEGATIVE drops it down the back (use this to get it off the neck)
+//   Tilt  = barrel angle off vertical, 0 = straight down, 90 = horizontal
+//
+// NOTE: the sling is owner-hidden — you cannot see your own. Tune it while watching ANOTHER player, or
+// spawn a bot and look at its back.
+static void PFBackSlingCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	ACombatForgeCharacter* Target = nullptr;
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		if (It->IsLocallyControlled()) { Target = *It; break; }
+	}
+	if (Target == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.BackSling: no locally-controlled pawn"));
+		return;
+	}
+	if (Args.Num() >= 4)
+	{
+		Target->SetBackSling(
+			FVector(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2])),
+			FCString::Atof(*Args[3]));
+	}
+	const FVector O = Target->GetBackSlingOffset();
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.BackSling  Back=%.1f Side=%.1f Up=%.1f Tilt=%.1f   ->  paste: BackSlingOffset = FVector(%.1ff, %.1ff, %.1ff); BackSlingTiltDeg = %.1ff;"),
+		O.X, O.Y, O.Z, Target->GetBackSlingTilt(), O.X, O.Y, O.Z, Target->GetBackSlingTilt());
+	if (GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 6.f, FColor::Yellow,
+			FString::Printf(TEXT("BackSling  Back=%.1f Side=%.1f Up=%.1f Tilt=%.1f"),
+				O.X, O.Y, O.Z, Target->GetBackSlingTilt()));
+	}
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFBackSlingCmd(
+	TEXT("pf.BackSling"),
+	TEXT("Tune the back-slung weapon: pf.BackSling <Back> <Side> <Up> <Tilt>. No args prints current. "
+	     "Up is NEGATIVE to drop it down the back. You cannot see your own sling — watch another player or a bot."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFBackSlingCmd));
+
+void ACombatForgeCharacter::SetBackSling(const FVector& Offset, float TiltDeg)
+{
+	BackSlingOffset = Offset;
+	BackSlingTiltDeg = TiltDeg;
+	// Re-run the equip so AttachWeaponToBack recomputes with the new values — no respawn needed, which is
+	// the whole point of tuning it live.
+	ApplyWeaponLoadout();
 }

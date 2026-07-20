@@ -85,6 +85,12 @@ public:
 	/** Hide FP viewmodel + TP rifle during BuildPhase (marker away while placing). */
 	void UpdateBuildPhaseWeaponVisibility();
 
+	// ---- Back-sling live tuning (pf.BackSling) ----
+	FVector GetBackSlingOffset() const { return BackSlingOffset; }
+	float   GetBackSlingTilt() const   { return BackSlingTiltDeg; }
+	/** Apply new sling placement and re-attach immediately so the change is visible without a respawn. */
+	void SetBackSling(const FVector& Offset, float TiltDeg);
+
 	// ---- Demolition bomb (mid-field pickup only — not granted at spawn) ----
 	bool IsCarryingBomb() const { return bCarryingBomb; }
 	/** Authority: grant one plantable charge (from the mid-field floating pickup). */
@@ -415,8 +421,16 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeScale = FVector(0.80f);
 	/** Derive the sling from measured bones instead of the authored offsets (pf.BackSling 0 to disable). */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") bool     bDeriveBackSlingFromSkeleton = true;
-	/** Barrel angle off the spine, in the back plane: 0 = straight down, 90 = horizontal. */
+	/** Barrel angle off vertical in the back plane: 0 = straight down, 90 = horizontal. pf.BackSling tunes it. */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") float    BackSlingTiltDeg = 35.f;
+	/**
+	 * Sling placement in the pawn's ACTOR frame, relative to the spine bone:
+	 *   X = distance BEHIND the character, Y = lateral (+right), Z = vertical (negative drops it down the back).
+	 * Actor space on purpose — bone space put this in the crotch once and at the neck once, because a spine
+	 * bone's axes are not the character's. Live-tune with `pf.BackSling X Y Z Tilt`, then paste the printed
+	 * values here (same workflow as pf.WeaponFP).
+	 */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackSlingOffset = FVector(16.f, 0.f, -14.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName BackWeaponAttachBone = NAME_None; // resolved at runtime
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UMaterialInterface> TeamBodyMaterial = nullptr; // soft team tint fallback ("Color" param)
 	// Optional single-slot overrides (mannequin only). Human models keep authored multi-slot mats.
