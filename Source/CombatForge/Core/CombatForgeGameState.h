@@ -48,7 +48,7 @@ public:
 	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Skirmish; // objective (Skirmish = respawn default)
 	/** Host-picked arena map. Geometry itself travels as the shell's ACTOR CLASS (GameMode respawns
 	 *  it on change) — this enum exists for UI seeding/labels only. */
-	UPROPERTY(Replicated)                       EPFArenaMap ArenaMap = EPFArenaMap::Warehouse;
+	UPROPERTY(ReplicatedUsing=OnRep_ArenaMap)   EPFArenaMap ArenaMap = EPFArenaMap::Warehouse;
 	/** Host-picked community arena filename under Saved/Arenas/ (Improvement / Play-only). Empty = auto top-ranked. */
 	UPROPERTY(Replicated)                       FString SelectedCommunityMapFile;
 	/** Host-facing / lobby label for the selected community map. */
@@ -122,5 +122,6 @@ protected:
 	UFUNCTION() void OnRep_ElimFeed();
 	UFUNCTION() void OnRep_VoteTally();
 	UFUNCTION() void OnRep_MatchLeader();
+	UFUNCTION() void OnRep_ArenaMap();
 	UFUNCTION() void OnRep_CommunityMapCatalog();
 };

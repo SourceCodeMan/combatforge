@@ -80,7 +80,7 @@ UENUM()
 enum class EPFBodyRegion : uint8 { Chest = 0, Head = 1, Limbs = 2 };
 
 UENUM()
-enum class EPFRespawnMode : uint8 { RoundElimination = 0, Respawn = 1 };  // B1: RoundElimination is v1
+enum class EPFRespawnMode : uint8 { RoundElimination = 0, Respawn = 1 };  // RoundElimination is v1 default; Respawn scores rounds by team tags
 
 // Build Mode = what the BUILD phase does (independent of the match type below).
 UENUM(BlueprintType)
