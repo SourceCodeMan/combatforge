@@ -361,8 +361,23 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	// so the client-sent origin and the server's validation agree.
 	// IsPlayerControlled excludes bots: an AI controller is "locally controlled" too, but a bot has no real FP
 	// viewmodel — it must keep the TP hand muzzle its own LOS/fire checks use.
-	const bool bLocalAuth = Char->HasAuthority() && Char->IsLocallyControlled() && Char->IsPlayerControlled();
-	const FVector ShotOrigin = bLocalAuth ? Char->GetMuzzleLocation(true) : Char->GetMuzzleLocation(false);
+	// HasAuthority() was in this test, which meant it was TRUE on a listen host and FALSE for every client
+	// on the dedicated server — so a dedicated-server player's shots left the INVISIBLE third-person gun
+	// (posed per-frame off the animated hand_r->hand_l line) instead of the viewmodel they are aiming, while
+	// the same player hosting locally got the correct origin. That is a ~15-25uu discrepancy that appears
+	// only in the build most people actually play, and it hid the minigun muzzle fix completely there
+	// (bMuzzleFromAuthoredFP lives inside the bCosmetic branch). Authority is irrelevant to WHICH GUN THE
+	// PLAYER IS LOOKING AT; only "is this my own player pawn" is. Dropping it makes host and client agree.
+	//
+	// Safe against the anti-teleport gate: the server re-derives the TP muzzle and compares against
+	// ServerOriginToleranceUU (200uu) — the FP/TP separation measured across the catalog is 15-25uu, so
+	// there is ~175uu of headroom and no legitimate shot can be rejected.
+	//
+	// IsPlayerControlled excludes bots: an AI controller is "locally controlled" too, but a bot has no real
+	// FP viewmodel — it must keep the TP hand muzzle its own LOS/fire checks use.
+	const bool bUseOwnViewmodelMuzzle = Char->IsLocallyControlled() && Char->IsPlayerControlled();
+	const FVector ShotOrigin = bUseOwnViewmodelMuzzle
+		? Char->GetMuzzleLocation(true) : Char->GetMuzzleLocation(false);
 	// Converge on the crosshair: the muzzle sits below/right of the camera, so flying PARALLEL to the aim (the
 	// old BaseDir = camera forward) splatted low-right of the reticle. Aim from the muzzle THROUGH the
 	// crosshair's world target so shots land on the reticle regardless of the muzzle offset.
@@ -565,9 +580,16 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 		return;
 	}
 
-	// Origin within 150 uu of the server-side muzzle (anti-teleport-fire). Match the client's muzzle choice:
-	// the local host uses its FP barrel, everyone else the TP muzzle (see FireOneShot). Evaluated the same on
-	// each machine — the host's pawn is HasAuthority && IsLocallyControlled here; a remote pawn is not.
+	// Anti-teleport-fire: the claimed origin must be within ServerOriginToleranceUU of where the server
+	// thinks this pawn's muzzle is.
+	//
+	// This DELIBERATELY does not mirror FireOneShot's choice any more. A shooter now always sends its own
+	// FIRST-PERSON barrel (the gun it is actually aiming), but a dedicated server has no viewmodel for a
+	// remote pawn and physically cannot reproduce that — GetMuzzleLocation(true) on a remote pawn resolves
+	// through the TP path anyway. So the server validates against the reproducible TP muzzle and lets the
+	// tolerance absorb the difference: FP-vs-TP separation measured across the catalog is 15-25uu against a
+	// 200uu gate, leaving ~175uu of headroom. Tightening this gate below ~50uu would start rejecting honest
+	// shots, so treat that number as load-bearing.
 	const bool bLocalAuth = Char->HasAuthority() && Char->IsLocallyControlled() && Char->IsPlayerControlled();
 	const FVector ServerMuzzle = bLocalAuth ? Char->GetMuzzleLocation(true) : Char->GetMuzzleLocation(false);
 	if (FVector::DistSquared(FVector(Shot.Origin), ServerMuzzle) >

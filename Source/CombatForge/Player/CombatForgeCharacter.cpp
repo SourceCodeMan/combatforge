@@ -4581,17 +4581,30 @@ FVector ACombatForgeCharacter::ResolveGunMuzzleWorld(const UStaticMeshComponent*
 		// Most MarketplaceBlockout statics: local +X is barrel-forward.
 		TipLocal = FVector(O.X + E.X, O.Y, O.Z + E.Z * 0.12f);
 	}
-	// Nudge past the tip so the BB doesn't spawn inside the solid.
-	const FVector Along = (TipLocal - O).GetSafeNormal();
-	if (!Along.IsNearlyZero())
+	// Clear the barrel face by a WORLD distance. This used to add 3uu in MESH space, i.e. BEFORE the
+	// component transform — so the real clearance was 3 x ComponentScale: only ~1.0-1.5uu on a 0.30-0.50
+	// FP viewmodel, but 2.55uu on the 0.85 TP gun. Tracers therefore started flush with the barrel face
+	// (often occluded by the gun's own geometry), by a different amount for every weapon AND a different
+	// amount in first vs third person. That is exactly Tom's "everything else is off by a little bit"
+	// (2026-07-20), and why the minigun — the one weapon with a hand-authored muzzle — felt right.
+	//
+	// The corroboration: the minigun's approved MuzzleFP.X (40.0) sits 8.8uu ahead of that gun's own
+	// derived bounds tip. The hand-authored number was buying CLEARANCE and nothing else. So one world
+	// constant here does the job of 36 authored muzzles, and does it identically in both views.
+	constexpr float MuzzleClearanceUU = 8.f;
+	const FVector AlongLocal = (TipLocal - O).GetSafeNormal();
+	if (AlongLocal.IsNearlyZero() && !LocalFallback.IsNearlyZero())
 	{
-		TipLocal += Along * 3.f;
+		TipLocal = LocalFallback;   // degenerate bounds — behaviour unchanged
 	}
-	else if (!LocalFallback.IsNearlyZero())
+	const FTransform& GunXf = Gun->GetComponentTransform();
+	FVector MuzzleWorld = GunXf.TransformPosition(TipLocal);
+	if (!AlongLocal.IsNearlyZero())
 	{
-		TipLocal = LocalFallback;
+		const FVector AlongWorld = GunXf.TransformVector(AlongLocal).GetSafeNormal();
+		MuzzleWorld += AlongWorld * MuzzleClearanceUU;
 	}
-	return Gun->GetComponentTransform().TransformPosition(TipLocal);
+	return MuzzleWorld;
 }
 
 FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
