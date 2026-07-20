@@ -4185,16 +4185,35 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
 		ViewModelRoot->SetVisibility(!bHideForBuild && !bElim, /*bPropagateToChildren=*/true);
 	}
+	// THE TWO CROSSED RIFLES (Tom, 2026-07-20). bOwnerNoSee is set on both third-person guns and is NOT
+	// culling them: the FPSCAN dump shows WeaponMeshComp (SM_Rifle) at 58 uu from the eye with
+	// ownerNoSee=1 while the player is looking at two identical rifles — his own TP gun drawn over his
+	// viewmodel. Owner culling only happens when FSceneView::ViewActor matches the component's owner, so
+	// anything that leaves the view target as something other than this pawn silently disables EVERY
+	// owner-hidden component on it. Five hypotheses died before the dump proved which component it was.
+	//
+	// So stop trusting the flag on the one machine that can be wrong about it. On the OWNING client the
+	// third-person guns are never wanted — that client is in first person and has RifleFPMesh — so hide
+	// them outright here, in the per-tick arbiter that owns this decision. Every other path that re-shows
+	// them (AttachWeaponToHand, AttachWeaponToBack, the elim/respawn propagate) runs through this function
+	// afterwards, which is why a one-shot hide elsewhere would not have held.
+	//
+	// Safe for multiplayer: visibility is a LOCAL render property and is not replicated, and this only
+	// applies to a pawn this machine locally controls. Remote players' copies of this pawn are untouched,
+	// so everyone else still sees the gun in his hands and the sling on his back. bOwnerNoSee stays set
+	// as well — this is belt and braces, not a replacement.
+	const bool bHideTPWeaponsForOwner = IsLocallyControlled();
+
 	// TP rifles (hand + back sling): hide in build / elim so builders don't look armed.
 	if (BackWeaponMeshComp != nullptr)
 	{
 		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
-		BackWeaponMeshComp->SetHiddenInGame(bHideForBuild || bElim);
+		BackWeaponMeshComp->SetHiddenInGame(bHideForBuild || bElim || bHideTPWeaponsForOwner);
 	}
 	if (WeaponMeshComp != nullptr)
 	{
 		// Don't fight elimination hide — elim appearance owns that path.
-		if (bHideForBuild)
+		if (bHideForBuild || bHideTPWeaponsForOwner)
 		{
 			WeaponMeshComp->SetHiddenInGame(true);
 		}
