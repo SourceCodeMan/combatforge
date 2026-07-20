@@ -56,6 +56,24 @@ namespace
 	bool GLoaded = false;
 	uint64 GLastAttemptFrame = TNumericLimits<uint64>::Max();   // sentinel: never equals a real frame
 
+	// The per-FRAME throttle above caps a miss at ~20 soft loads per frame — it does NOT cap the
+	// number of frames. The build-phase ghost calls MeshForType + PieceWorldTransform EVERY tick
+	// (PFBuildComponent::UpdateGhost), so on a client with a genuine cook gap that is ~2000 failed
+	// TryLoads and ~2000 un-deduplicated engine "failed to find object" warnings PER SECOND for the
+	// rest of the session — a permanent frame tax on the budget PCs we target, and a flooded log.
+	// PFBuildGrid's retry timer giving up does not stop this: nothing else gates the ghost path.
+	//
+	// So bound it by WALL CLOCK, not by frames (frame count is meaningless across a 30fps laptop and
+	// a 200fps desktop): retry every frame for GEagerWindowSeconds — that is the slow-client self-heal
+	// this whole mechanism exists for, and it is 2x the grid timer's own ~15s give-up — then fall back
+	// to one attempt every GCooldownSeconds. Deliberately a cooldown, not a hard stop, so content that
+	// streams in very late still upgrades the ISMs in place; it just stops doing so at frame rate.
+	constexpr double GEagerWindowSeconds = 30.0;
+	constexpr double GCooldownSeconds = 30.0;
+	double GFirstAttemptTime = 0.0;   // 0 = no attempt yet (FPlatformTime::Seconds() is never 0)
+	double GLastAttemptTime = 0.0;
+	bool GLoggedBackoff = false;      // the back-off notice prints exactly once per session
+
 	// Test hook: force the first N EnsureLoaded attempts to resolve nothing, reproducing the
 	// too-early-load race that a joining client hits for real. Lets the self-heal path be verified
 	// deterministically instead of hoping to catch the race in a playtest. 0 = off (shipping).
@@ -479,11 +497,36 @@ void EnsureLoaded()
 	{
 		return;
 	}
+	// Past the eager window this is a cook gap, not load contention — stop paying it every frame.
+	// Without this the ghost path keeps EnsureLoaded at frame rate for the whole session (see the
+	// note by GEagerWindowSeconds): ~2000 failed TryLoads + 2000 engine warnings per second.
+	const double NowSeconds = FPlatformTime::Seconds();
+	if (GFirstAttemptTime == 0.0)
+	{
+		GFirstAttemptTime = NowSeconds;
+	}
+	else if (NowSeconds - GFirstAttemptTime > GEagerWindowSeconds)
+	{
+		if (NowSeconds - GLastAttemptTime < GCooldownSeconds)
+		{
+			return;
+		}
+		if (!GLoggedBackoff)
+		{
+			GLoggedBackoff = true;
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("BuildPieceVisuals: content still unresolved after %.0fs — backing off to one attempt every %.0fs ")
+				TEXT("(the build ghost was retrying every frame). Props stay on fallback shapes; check the cook."),
+				GEagerWindowSeconds, GCooldownSeconds);
+		}
+	}
+
 	if (GFrameCounter == GLastAttemptFrame)
 	{
 		return;   // already tried this frame — don't re-walk 20 soft paths per placed instance
 	}
 	GLastAttemptFrame = GFrameCounter;
+	GLastAttemptTime = NowSeconds;
 
 	if (GFailFirstN > 0 && GFailedSoFar < GFailFirstN)
 	{

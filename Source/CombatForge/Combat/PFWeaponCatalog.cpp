@@ -502,8 +502,18 @@ namespace PFWeapon
 				0.f, 0.f, 1.35f, 39),
 			// Minigun: negative BloomPerShot, BloomCap as FLOOR, spin-up 0.6s, no climb.
 			MakeW(TEXT("Minigun"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Miniguns/01/SM_Modern_Weapons_Minigun_01.SM_Modern_Weapons_Minigun_01"),
-				// MuzzleFP Z matches FPLoc Z (the catalog-wide convention) — it was authored at 0 (8.7uu above
-				// the gun), which spawned tracers visibly above the barrel cluster (Tom: "rounds a bit high").
+				// MuzzleFP is in ViewModelRoot space (+X = camera forward) and is consumed ONLY by this row, via
+				// bMuzzleFromAuthoredFP (CombatForgeCharacter.cpp). Every other row's MuzzleFP is dead except as a
+				// graybox-marker fallback, so those 36 values are evidence of nothing. There is NO "muzzle Z ==
+				// FPLoc Z" convention — the verified reference row ar_m4 has FPLoc.Z=-6.8 / MuzzleFP.Z=-3.5, i.e.
+				// the muzzle sits ABOVE the mesh origin. The exact relation is
+				//   MuzzleFP = FPLoc + FPRot.RotateVector(FPScale * TipMeshLocal)
+				// and with FPRot pitch -1.5deg the 38.7uu of forward reach alone drops Z by 38.7*sin(1.5) = 1.01uu.
+				// So Z=-8.7 is only correct if the barrel-cluster centre sits ~3.2uu (= 1.01/0.32) above the mesh
+				// origin — nobody has measured that. -8.7 is an eyeballed correction for tracers spawning visibly
+				// high (Tom: "rounds a bit high"), NOT a derived number. Do not copy it to other rows. To retire the
+				// guess: author a "Muzzle" socket on SM_Modern_Weapons_Minigun_01 — GetMuzzleLocation prefers a real
+				// socket over this value and will then ignore it entirely.
 				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.32f, FVector(40.0f, 6.4f, -8.7f),
 				FVector(8.0f, -6.39f, 3.86f), FRotator(8.15f, -0.11f, -0.5f),
 				Mode_A, EPFFireMode::Auto,

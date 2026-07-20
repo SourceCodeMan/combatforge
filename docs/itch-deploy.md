@@ -32,8 +32,49 @@
 
 ```powershell
 # from anywhere; pushes the DIRECTORY, not a zip (butler diffs + compresses on the wire)
-butler push "D:\projects\combatforge\Packaged\Windows" <ITCH_USERNAME>/combatforge:windows-alpha --userversion 0.1.0-alpha.1
+# Do NOT hand-type the version. Save the block below as Scripts\Push-Itch.ps1 and run:
+#   .\Scripts\Push-Itch.ps1 -Channel <ITCH_USERNAME>/combatforge:windows-alpha
 butler status <ITCH_USERNAME>/combatforge:windows-alpha
+```
+
+### `Scripts\Push-Itch.ps1`
+
+The alpha number lives in exactly ONE place — `PFBuild::NetProtocol` in
+`Source\CombatForge\CombatForge.h` — because that constant is what the join handshake
+actually gates on. Typing `--userversion` separately is how the itch page and the wire
+protocol drift apart: the page says alpha.11 while the binary is still speaking 10, and
+players see "update needed" on a build they just downloaded. This script derives the
+version from the header and refuses to push a version the channel already has (which
+means the header bump was forgotten).
+
+```powershell
+param(
+  [Parameter(Mandatory=$true)][string]$Channel,
+  [string]$BuildDir = "$PSScriptRoot\..\Packaged\Windows"
+)
+$ErrorActionPreference = 'Stop'
+
+# Single source of truth: constexpr int32 NetProtocol = N;
+$Header = Join-Path $PSScriptRoot '..\Source\CombatForge\CombatForge.h'
+$m = Select-String -Path $Header -Pattern 'constexpr\s+int32\s+NetProtocol\s*=\s*(\d+)\s*;'
+if (-not $m) { throw "Could not read NetProtocol from $Header - did the declaration change shape?" }
+$Proto = [int]$m.Matches[0].Groups[1].Value
+$UserVersion = "0.1.0-alpha.$Proto"
+Write-Host "NetProtocol $Proto -> --userversion $UserVersion"
+
+# Refuse to re-push a version already on the channel: that always means the header bump
+# was skipped, and pushing anyway ships a binary that cannot talk to the live servers.
+$existing = (& butler status $Channel) -join "`n"
+if ($existing -match [regex]::Escape($UserVersion)) {
+  throw "$UserVersion is ALREADY on $Channel. Bump PFBuild::NetProtocol in CombatForge.h first."
+}
+
+if (-not (Test-Path $BuildDir)) { throw "No packaged build at $BuildDir - run Scripts\Package-Windows.bat." }
+if (Test-Path (Join-Path $BuildDir 'CombatForge\Saved')) { throw "Saved\ still present - privacy scrub did not run." }
+
+& butler push $BuildDir $Channel --userversion $UserVersion
+if ($LASTEXITCODE -ne 0) { throw "butler push failed ($LASTEXITCODE)" }
+& butler status $Channel
 ```
 
 - Channel name contains `windows` → itch auto-tags it as a Windows executable.

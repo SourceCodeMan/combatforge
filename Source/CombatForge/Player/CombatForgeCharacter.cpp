@@ -1894,9 +1894,48 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 	}
 }
 
+uint32 ACombatForgeCharacter::ComputeServerActivityFingerprint() const
+{
+	// One cheap choke point instead of sprinkling "I'm active" calls through ServerFire / ServerStartReload /
+	// ServerThrowGrenade / ServerPlacePiece / ServerMelee / plant / defuse: every one of those already mutates a
+	// server-authoritative counter, so hashing the counters catches all of them and can't drift out of sync when
+	// a new action RPC is added and someone forgets the hook.
+	uint32 Hash = 0;
+	if (const UPFWeaponComponent* W = WeaponComponent)
+	{
+		// Firing and reloading both move the mag/reserve pair; throws move the pouch counts.
+		Hash = HashCombine(Hash, GetTypeHash(W->HopperCount));
+		Hash = HashCombine(Hash, GetTypeHash(W->ReserveAmmo));
+		Hash = HashCombine(Hash, GetTypeHash(W->FragCount));
+		Hash = HashCombine(Hash, GetTypeHash(W->SmokeCount));
+	}
+	if (const UPFHealthComponent* H = HealthComponent)
+	{
+		Hash = HashCombine(Hash, GetTypeHash(H->TotalHits));   // taking paint = being fought, not idle
+	}
+	if (const ACombatForgePlayerState* PS = GetPlayerState<ACombatForgePlayerState>())
+	{
+		// Score/elims/tags cover objective + combat credit; the build budgets cover place and delete
+		// (both route through APFBuildGrid::TryPlacePiece/TryDeletePiece, which debits/refunds the PlayerState).
+		Hash = HashCombine(Hash, GetTypeHash(PS->MatchScore));
+		Hash = HashCombine(Hash, GetTypeHash(PS->Eliminations));
+		Hash = HashCombine(Hash, GetTypeHash(PS->TagCount));
+		Hash = HashCombine(Hash, GetTypeHash(PS->StructuralBudget));
+		Hash = HashCombine(Hash, GetTypeHash(PS->PropBudget));
+		Hash = HashCombine(Hash, static_cast<uint32>(PS->bCarryingFlag ? 1 : 0));
+	}
+	Hash = HashCombine(Hash, GetTypeHash(LastMeleeTimeServer));   // melee tags land no score unless they eliminate
+	Hash = HashCombine(Hash, static_cast<uint32>(bCarryingBomb ? 1 : 0));
+	Hash = HashCombine(Hash, static_cast<uint32>(DefusingBomb.IsValid() ? 1 : 0));
+	return Hash;
+}
+
 void ACombatForgeCharacter::TickServerAfk(float DeltaSeconds)
 {
 	// Authority-only; called from Tick under HasAuthority().
+	const UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.f;
+
 	AController* C = GetController();
 	APlayerController* PC = Cast<APlayerController>(C);
 	// Only police REMOTE humans: bots are AIControllers (Cast<APlayerController> fails), and the listen-server
@@ -1911,9 +1950,17 @@ void ACombatForgeCharacter::TickServerAfk(float DeltaSeconds)
 		ServerLastActiveTime = -1.f;
 		return;
 	}
-
-	const UWorld* World = GetWorld();
-	const float Now = World ? World->GetTimeSeconds() : 0.f;
+	// Nor during the map vote and the post-match results screen: everyone is SUPPOSED to be sitting still there,
+	// and the accrued idle time was carrying into the next match — a player who watched a 60 s results screen
+	// arrived in Combat already most of the way to the 3-minute kick. Reseed (-1) so the window starts fresh.
+	if (const ACombatForgeGameState* GS = World ? World->GetGameState<ACombatForgeGameState>() : nullptr)
+	{
+		if (GS->Phase == EPFMatchPhase::Vote || GS->Phase == EPFMatchPhase::Results)
+		{
+			ServerLastActiveTime = -1.f;
+			return;
+		}
+	}
 
 	// Poll ~1 Hz — cheap, and the 3-minute window doesn't need sub-second resolution.
 	ServerAfkPollAccum += DeltaSeconds;
@@ -1925,6 +1972,7 @@ void ACombatForgeCharacter::TickServerAfk(float DeltaSeconds)
 
 	const FVector Loc = GetActorLocation();
 	const FRotator Aim = PC->GetControlRotation();   // remote client's view rotation, replicated via ServerMove
+	const uint32 Fingerprint = ComputeServerActivityFingerprint();
 
 	if (ServerLastActiveTime < 0.f)
 	{
@@ -1932,17 +1980,23 @@ void ACombatForgeCharacter::TickServerAfk(float DeltaSeconds)
 		ServerLastActiveTime = Now;
 		ServerAfkLastLoc = Loc;
 		ServerAfkLastAim = Aim;
+		ServerAfkLastFingerprint = Fingerprint;
 		return;
 	}
 
 	const bool bMoved = FVector::DistSquared(Loc, ServerAfkLastLoc) > (8.f * 8.f);
 	const float AimDelta = FMath::Abs(FRotator::NormalizeAxis(Aim.Yaw - ServerAfkLastAim.Yaw))
 	                     + FMath::Abs(FRotator::NormalizeAxis(Aim.Pitch - ServerAfkLastAim.Pitch));
-	if (bMoved || AimDelta > 1.0f)
+	// bActed is the real fix: position + aim alone kicked a point holder who was crouched, still and firing
+	// single shots — single-shot recoil is ~0.17 deg (under the 1.0 deg gate) AND is recovered between two
+	// 1 Hz polls, so neither signal ever moved while they were top-scoring and holding the objective.
+	const bool bActed = (Fingerprint != ServerAfkLastFingerprint);
+	if (bMoved || bActed || AimDelta > 1.0f)
 	{
 		ServerLastActiveTime = Now;
 		ServerAfkLastLoc = Loc;
 		ServerAfkLastAim = Aim;
+		ServerAfkLastFingerprint = Fingerprint;
 		return;
 	}
 
@@ -2586,8 +2640,29 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 		{
 			KitRep.CharParts.Add(static_cast<int16>(Slot));
 		}
-		const int32 Cat = FMath::RandRange(0, PFWeapon::CategoryCount() - 1);
-		const int32 Idx = FMath::RandRange(0, FMath::Max(0, PFWeapon::WeaponCount(Cat) - 1));
+		// SANE ROLL, not a flat one. A flat RandRange over all six categories gave every bot a 1-in-6 shot at the
+		// Sniper category, and this block writes KitRep directly — it never passes the ServerSetKit rank gate
+		// (ClampSlot) that a human kit does, so bots ignored UnlockRank completely. Concrete failure: snipers are
+		// HitValue 5-8 and ChestOut is 5 (PFHealthComponent.h:39-42, HitValue applied whole in ApplyPaintHit), so a
+		// bot that rolled snp_01 ONE-SHOT a player from across the map — a difficulty spike nobody chose. LMGs are
+		// excluded for the same reason (belt-fed suppression from a bot that never had to unlock it). Weighted bag
+		// keeps AR/SMG common with pistol/shotgun as spice, and the per-weapon filter caps bots at low-rank,
+		// low-HitValue guns so a bot can never carry something a rank-1 player has not even seen yet.
+		static const int32 BotCatBag[] = { 0, 0, 0, 1, 1, 1, 2, 3 };   // AR x3, SMG x3, Pistol, Shotgun (no sniper/LMG)
+		constexpr uint8 kBotMaxUnlockRank = 20;
+		constexpr uint8 kBotMaxHitValue   = 2;
+		const int32 Cat = BotCatBag[FMath::RandRange(0, static_cast<int32>(UE_ARRAY_COUNT(BotCatBag)) - 1)];
+		TArray<int32, TInlineAllocator<12>> BotPool;
+		for (int32 W = 0; W < PFWeapon::WeaponCount(Cat); ++W)
+		{
+			const FPFWeaponDef& Cand = PFWeapon::Weapon(Cat, W);
+			if (Cand.UnlockRank <= kBotMaxUnlockRank && Cand.HitValue <= kBotMaxHitValue)
+			{
+				BotPool.Add(W);
+			}
+		}
+		// Empty pool is only reachable if the catalog's rank/HitValue values move; index 0 is the category starter.
+		const int32 Idx = BotPool.Num() > 0 ? BotPool[FMath::RandRange(0, BotPool.Num() - 1)] : 0;
 		KitRep.WeaponCategory = static_cast<uint8>(Cat);
 		KitRep.WeaponIndex    = static_cast<uint8>(Idx);
 		KitRep.SecondaryCategory = 2;   // pistol sidearm, same as a player's default secondary
@@ -3467,6 +3542,25 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 	// "1 owner-visible weapon mesh" while Tom was plainly looking at two (his log, 2026-07-20) — which
 	// is what proved the duplicate is a SKELETAL component, i.e. a weapon mounted as a modular character
 	// part. A diagnostic that cannot see half the candidates is worse than none: it reads as all-clear.
+	// REPORT EVERYTHING, FILTER NOTHING. Four hypotheses about *which* component the second gun is have now
+	// failed, and every one of them failed the same way: this diagnostic decided what to look at by READING
+	// THE FLAGS (skip bHiddenInGame, skip bOwnerNoSee) and then reported "1 owner-visible weapon mesh(es)"
+	// while Tom was plainly looking at two (2026-07-20). If a flag is set but is not TAKING EFFECT at render
+	// time, a flag-reading scan reports all-clear forever. So: dump EVERY UMeshComponent that has a mesh —
+	// owner-hidden ones included — with its distance from the eye, its flags and its attach parent, and let
+	// the log name the culprit instead of costing another playtest round trip.
+	const FVector EyeLoc = (FirstPersonCamera != nullptr)
+		? FirstPersonCamera->GetComponentLocation()
+		: GetActorLocation();
+	auto IsBuildGhost = [](const UMeshComponent* P) -> bool
+	{
+		// UPFBuildComponent::EnsureGhost NewObject's these on the pawn, unattached and owner-visible by design
+		// (Building/PFBuildComponent.cpp). They are the build placement preview, not a gun — excluding them
+		// stops the "SECOND GUN found" line firing on a false positive every single equip.
+		const FString N = P->GetName();
+		return N.StartsWith(TEXT("BuildGhost"), ESearchCase::IgnoreCase);
+	};
+
 	int32 Seen = 0;
 	int32 Hidden = 0;
 	TArray<USceneComponent*> Kids;
@@ -3474,7 +3568,7 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 	for (USceneComponent* K : Kids)
 	{
 		UMeshComponent* P = Cast<UMeshComponent>(K);
-		if (P == nullptr || P->bHiddenInGame)
+		if (P == nullptr)
 		{
 			continue;
 		}
@@ -3485,38 +3579,74 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 		{
 			continue;   // component exists but renders nothing
 		}
-		// Owner-visible = explicitly owner-only, OR simply not hidden from the owner (the default).
-		const bool bOwnerSees = P->bOnlyOwnerSee || !P->bOwnerNoSee;
-		if (!bOwnerSees)
+		if (IsBuildGhost(P))
 		{
 			continue;
 		}
 		++Seen;
-		if (P == RifleFPMesh)
-		{
-			continue;
-		}
+		// Owner-visible = explicitly owner-only, OR simply not hidden from the owner (the default).
+		const bool bOwnerSees = P->bOnlyOwnerSee || !P->bOwnerNoSee;
 		UE_LOG(CombatForgeLog, Warning,
-			TEXT("FP weapon: SECOND GUN found — '%s' (%s mesh=%s, parent=%s, onlyOwnerSee=%d ownerNoSee=%d)."),
-			*P->GetName(), SKC ? TEXT("SKELETAL") : TEXT("static"),
+			TEXT("FPSCAN pawn: '%s' %s mesh=%s dist=%.0f vis=%d hidden=%d onlyOwnerSee=%d ownerNoSee=%d ownerSees=%d parent=%s socket=%s"),
+			*P->GetName(), SKC ? TEXT("SKEL") : TEXT("STAT"),
 			*GetNameSafe(SMC ? (UObject*)SMC->GetStaticMesh() : (UObject*)(SKC ? SKC->GetSkeletalMeshAsset() : nullptr)),
-			*GetNameSafe(P->GetAttachParent()),
-			P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0);
+			FVector::Dist(EyeLoc, P->GetComponentLocation()),
+			P->IsVisible() ? 1 : 0, P->bHiddenInGame ? 1 : 0,
+			P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0, bOwnerSees ? 1 : 0,
+			*GetNameSafe(P->GetAttachParent()), *P->GetAttachSocketName().ToString());
 
-		// Only re-hide the two components that are DEFINITELY third-person guns. Anything else is merely
-		// reported: a carried bomb or some future owner-visible prop must not be hidden by a rule aimed at
-		// weapons, and a wrong guess here would be a new bug rather than a fix.
-		// Third-person guns and mis-mounted character parts are both always wrong in a first-person view,
-		// and hiding either can only ever cost a cosmetic. Anything else is reported and left alone.
-		if (P == WeaponMeshComp || P == BackWeaponMeshComp || SKC != nullptr)
+		// Only re-hide the two components that are DEFINITELY third-person guns, plus mis-mounted skeletal
+		// character parts. Anything else is merely reported: a carried bomb or some future owner-visible prop
+		// must not be hidden by a rule aimed at weapons, and a wrong guess here would be a new bug, not a fix.
+		if (bOwnerSees && !P->bHiddenInGame && P != RifleFPMesh
+			&& (P == WeaponMeshComp || P == BackWeaponMeshComp || SKC != nullptr))
 		{
 			P->SetOwnerNoSee(true);
 			P->MarkRenderStateDirty();
 			++Hidden;
 		}
 	}
+
+	// AND SWEEP THE WORLD, not just this pawn. The pawn-only scan has already come back clean once while the
+	// bug was on screen, so the second gun may not be a component of this actor at all (the menu preview actor,
+	// a pooled VFX component, an unparented NewObject'd component like the build ghost). Anything with a mesh
+	// within arm's reach of the eye is a viewmodel-space object by definition — if it is not one of ours, this
+	// is the line that names it. Radius-gated and capped so a busy arena can't spam the log.
+	int32 NearbyLogged = 0;
+	for (TObjectIterator<UMeshComponent> It; It; ++It)
+	{
+		UMeshComponent* P = *It;
+		if (P == nullptr || P->GetWorld() != GetWorld() || P->GetOwner() == this || !P->IsRegistered())
+		{
+			continue;
+		}
+		const UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(P);
+		const USkeletalMeshComponent* SKC = Cast<USkeletalMeshComponent>(P);
+		if ((SMC != nullptr && SMC->GetStaticMesh() == nullptr)
+			|| (SKC != nullptr && SKC->GetSkeletalMeshAsset() == nullptr))
+		{
+			continue;
+		}
+		const float D = FVector::Dist(EyeLoc, P->GetComponentLocation());
+		if (D > 250.f || P->bHiddenInGame || !P->IsVisible())
+		{
+			continue;
+		}
+		if (++NearbyLogged > 24)
+		{
+			UE_LOG(CombatForgeLog, Warning, TEXT("FPSCAN world: (more than 24 nearby meshes — list truncated)"));
+			break;
+		}
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("FPSCAN world: '%s' owner=%s %s mesh=%s dist=%.0f onlyOwnerSee=%d ownerNoSee=%d parent=%s"),
+			*P->GetName(), *GetNameSafe(P->GetOwner()), SKC ? TEXT("SKEL") : TEXT("STAT"),
+			*GetNameSafe(SMC ? (UObject*)SMC->GetStaticMesh() : (UObject*)(SKC ? SKC->GetSkeletalMeshAsset() : nullptr)),
+			D, P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0, *GetNameSafe(P->GetAttachParent()));
+	}
+
 	UE_LOG(CombatForgeLog, Log,
-		TEXT("FP weapon: %d owner-visible weapon mesh(es); hid %d duplicate(s)."), Seen, Hidden);
+		TEXT("FP weapon: scanned %d mesh comp(s) on pawn, %d nearby off-pawn; hid %d duplicate(s). Eye=(%.0f,%.0f,%.0f)"),
+		Seen, NearbyLogged, Hidden, EyeLoc.X, EyeLoc.Y, EyeLoc.Z);
 }
 
 void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMaterialInterface* StowedMat)
@@ -3845,8 +3975,15 @@ void ACombatForgeCharacter::ApplyHandWeaponPose()
 				const FVector GripLoc  = Body->GetSocketLocation(CachedWeaponAttachBone);
 				const FVector FrontLoc = Body->GetSocketLocation(LeftHand);
 				const FVector Barrel   = (FrontLoc - GripLoc).GetSafeNormal();
-				// Guard: if the hands are together (holstered/unarmed poses) the direction is meaningless.
-				if (!Barrel.IsNearlyZero() && FVector::Dist(FrontLoc, GripLoc) > 10.f)
+				// Guard: hand_r->hand_l is the WEAPON's line only while the arms are actually posed ON a gun.
+				// Distance alone does NOT establish that (the old Dist>10 test): with pf.ArmedAnims 0 the arms
+				// hang at the sides, hand-to-hand is a ~40cm LATERAL vector that passes the distance test, and
+				// every third-person weapon swung round to point across the body. Also require the line to run
+				// generally where the pawn faces, so the hanging-arm and holstered cases fall through to the
+				// fixed WeaponRelative* offset that was tuned for exactly them.
+				const bool bHandsOnWeapon = FVector::Dist(FrontLoc, GripLoc) > 10.f
+					&& (Barrel | GetActorForwardVector()) > 0.25f;
+				if (!Barrel.IsNearlyZero() && bHandsOnWeapon)
 				{
 					// Which local axis is the barrel? Same bounds test the FP auto-pose uses: the longest
 					// horizontal extent of the mesh IS the barrel (SM_Rifle family is +Y; others are +X).
@@ -3854,9 +3991,21 @@ void ACombatForgeCharacter::ApplyHandWeaponPose()
 					const bool bBarrelAlongY = (B.BoxExtent.Y >= B.BoxExtent.X);
 					// Roll reference: the hand's up keeps the gun from spinning about its own barrel.
 					const FVector HandUp = Body->GetSocketQuaternion(CachedWeaponAttachBone).GetUpVector();
-					const FRotator WorldRot = bBarrelAlongY
+					FRotator WorldRot = bBarrelAlongY
 						? FRotationMatrix::MakeFromYZ(Barrel, HandUp).Rotator()
 						: FRotationMatrix::MakeFromXZ(Barrel, HandUp).Rotator();
+					// PER-WEAPON roll about the barrel. The hand derivation fixes WHERE the gun points but says
+					// nothing about which way is up for a given mesh, and a pistol whose local up is inverted
+					// relative to SM_Rifle renders GRIP-UP. CachedTPRaisedRoll (180 for pistols, set in
+					// ApplyWeaponLoadout) used to be applied only in the fire-time raise in UpdateWeaponHoldPose,
+					// which is gated behind !bArmedIdleActive and therefore DEAD at the pf.ArmedAnims 1 default —
+					// so the correction never ran and pistols were upside down for every other player. Rotate about
+					// the derived Barrel axis so the barrel direction the animation gives us is preserved exactly.
+					if (!FMath::IsNearlyZero(CachedTPRaisedRoll))
+					{
+						const FQuat BarrelRoll(Barrel, FMath::DegreesToRadians(CachedTPRaisedRoll));
+						WorldRot = (BarrelRoll * WorldRot.Quaternion()).Rotator();
+					}
 					WeaponMeshComp->SetWorldRotation(WorldRot);
 					// Seat the GRIP (rear of the gun) in the right hand rather than the mesh centre, so the
 					// receiver doesn't float forward of the fist.
@@ -4344,14 +4493,15 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	}
 }
 
-FVector ACombatForgeCharacter::ResolveGunMuzzleWorld(const UStaticMeshComponent* Gun, const FVector& LocalFallback)
+// Authored muzzle sockets (Marketplace / Bandits often ship these) — ground truth for the barrel tip.
+// Split out of ResolveGunMuzzleWorld so callers that deliberately BYPASS the bounds heuristic (the minigun's
+// bMuzzleFromAuthoredFP path) can still prefer a real socket over a hand-authored catalog number.
+static bool PFTryGunMuzzleSocketWorld(const UStaticMeshComponent* Gun, FVector& OutWorld)
 {
 	if (Gun == nullptr || Gun->GetStaticMesh() == nullptr)
 	{
-		return FVector::ZeroVector;
+		return false;
 	}
-
-	// 1) Authored sockets (Marketplace / Bandits often ship these) — true barrel tip when present.
 	static const FName SocketNames[] = {
 		TEXT("Muzzle"), TEXT("muzzle"), TEXT("MuzzleFlash"), TEXT("muzzle_flash"),
 		TEXT("Muzzle_Flash"), TEXT("barrel"), TEXT("Barrel"), TEXT("barrel_end"),
@@ -4361,8 +4511,25 @@ FVector ACombatForgeCharacter::ResolveGunMuzzleWorld(const UStaticMeshComponent*
 	{
 		if (Gun->DoesSocketExist(Sock))
 		{
-			return Gun->GetSocketLocation(Sock);
+			OutWorld = Gun->GetSocketLocation(Sock);
+			return true;
 		}
+	}
+	return false;
+}
+
+FVector ACombatForgeCharacter::ResolveGunMuzzleWorld(const UStaticMeshComponent* Gun, const FVector& LocalFallback)
+{
+	if (Gun == nullptr || Gun->GetStaticMesh() == nullptr)
+	{
+		return FVector::ZeroVector;
+	}
+
+	// 1) Authored sockets — true barrel tip when present.
+	FVector SocketWorld = FVector::ZeroVector;
+	if (PFTryGunMuzzleSocketWorld(Gun, SocketWorld))
+	{
+		return SocketWorld;
 	}
 
 	// 2) Auto tip from mesh bounds: barrel runs along the longest horizontal axis; tip at the +end,
@@ -4399,10 +4566,23 @@ FVector ACombatForgeCharacter::GetMuzzleLocation(bool bCosmetic) const
 	// Owning-client cosmetic tracers: FP viewmodel gun mesh barrel (any catalog weapon).
 	if (bCosmetic)
 	{
-		// Guns whose bounds fool the auto-tip (minigun) use the authored ViewModelRoot-space muzzle instead.
-		if (bMuzzleFromAuthoredFP && ViewModelRoot != nullptr && !MuzzleLocalFP.IsNearlyZero())
+		// Guns whose bounds fool the auto-tip (minigun) fall back to the authored ViewModelRoot-space muzzle —
+		// but only AFTER trying a real socket. That authored value (PFWeaponCatalog.cpp, lmg_minigun) is an
+		// eyeballed height, not a measurement, and this branch used to short-circuit ahead of the socket lookup
+		// in ResolveGunMuzzleWorld — so adding a "Muzzle" socket to the minigun mesh would have silently done
+		// nothing and tracers would keep coming out of the guessed spot.
+		if (bMuzzleFromAuthoredFP)
 		{
-			return ViewModelRoot->GetComponentTransform().TransformPosition(MuzzleLocalFP);
+			FVector SocketWorld = FVector::ZeroVector;
+			if (RifleFPMesh != nullptr && RifleFPMesh->IsVisible()
+				&& PFTryGunMuzzleSocketWorld(RifleFPMesh, SocketWorld))
+			{
+				return SocketWorld;
+			}
+			if (ViewModelRoot != nullptr && !MuzzleLocalFP.IsNearlyZero())
+			{
+				return ViewModelRoot->GetComponentTransform().TransformPosition(MuzzleLocalFP);
+			}
 		}
 		if (RifleFPMesh != nullptr && RifleFPMesh->GetStaticMesh() != nullptr && RifleFPMesh->IsVisible())
 		{

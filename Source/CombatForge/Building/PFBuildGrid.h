@@ -155,6 +155,10 @@ private:
 	void TickPieceVisualsRetry();
 	FTimerHandle PieceVisualsRetryHandle;
 	int32 PieceVisualsRetryCount = 0;
+	/** Set once the retry budget is spent. StartPieceVisualsRetry guarded only on IsTimerActive, and
+	 *  after give-up the timer is inactive — so every subsequent AddPieceLocal armed a fresh 30-retry
+	 *  cycle and re-printed the "GAVE UP" warning. Give up once, stay given up. */
+	bool bPieceVisualsGaveUp = false;
 
 	/** Add/remove the local mirror of a record: ISM instance + occupancy (server AND client path). */
 	void AddPieceLocal(const FPFBuildPieceRec& Rec);
