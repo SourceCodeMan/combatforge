@@ -4,6 +4,8 @@
 
 #include "CombatForge.h"
 #include "HAL/FileManager.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/FileHelper.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/CommandLine.h"
@@ -108,4 +110,66 @@ FString FPFPaths::ServerDataDir()
 {
 	// Parent of the (persistent, possibly -ArenaDir-overridden) arena dir. Created lazily by callers as needed.
 	return FPaths::GetPath(ArenaDir());
+}
+
+const FString& FPFPaths::UserPrefsIni()
+{
+	// Function-local static: the directory creation + one-time migration run exactly ONCE, before the
+	// first read, so no caller can observe a half-migrated file.
+	static const FString IniPath = []() -> FString
+	{
+		const FString Dir = FPFPaths::ServerDataDir();
+		IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+		const FString Path = Dir / TEXT("UserPrefs.ini");
+
+		// GConfig will not CREATE a config file it has never seen: SetString on an unknown absolute path
+		// updates nothing a later Flush can find, and Flush returns silently — writes just vanish (verified
+		// 2026-07-20: the migration logged "31 prefs" and produced no file at all). Materialise the file and
+		// register it with the cache first; after this, the ordinary Set/Get/Flush calls behave normally.
+		if (!FPaths::FileExists(Path))
+		{
+			FFileHelper::SaveStringToFile(TEXT("[CombatForge]") LINE_TERMINATOR, *Path);
+		}
+		if (GConfig != nullptr)
+		{
+			GConfig->LoadFile(Path);
+		}
+
+		// One-time migration: lift the player's existing [CombatForge] keys out of the in-install
+		// GameUserSettings.ini so upgrading does not silently reset their classes. Only runs when the
+		// new file has nothing for us yet, so it can never clobber newer prefs with stale ones.
+		if (GConfig != nullptr)
+		{
+			TArray<FString> Existing;
+			GConfig->GetSection(TEXT("CombatForge"), Existing, Path);
+			if (Existing.Num() == 0)
+			{
+				int32 Moved = 0;
+				for (const TCHAR* Section : { TEXT("CombatForge"), TEXT("CombatForge.Backend") })
+				{
+					TArray<FString> Legacy;
+					GConfig->GetSection(Section, Legacy, GGameUserSettingsIni);
+					for (const FString& Entry : Legacy)
+					{
+						FString Key, Value;
+						if (Entry.Split(TEXT("="), &Key, &Value))
+						{
+							GConfig->SetString(Section, *Key, *Value, Path);
+							++Moved;
+						}
+					}
+				}
+				if (Moved > 0)
+				{
+					GConfig->Flush(false, Path);
+					UE_LOG(CombatForgeLog, Log,
+						TEXT("PFPaths: migrated %d player pref(s) from GameUserSettings.ini -> %s"), Moved, *Path);
+				}
+			}
+		}
+
+		UE_LOG(CombatForgeLog, Log, TEXT("PFPaths: UserPrefsIni = %s"), *Path);
+		return Path;
+	}();
+	return IniPath;
 }

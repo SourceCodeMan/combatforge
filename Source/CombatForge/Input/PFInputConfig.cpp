@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tom Chapman. All rights reserved.
 
 #include "Input/PFInputConfig.h"
+#include "Core/PFPaths.h"
 
 #include "Core/CombatForgePlayerController.h"   // complete type for the UObject* outer conversion
 #include "CombatForge.h"
@@ -133,7 +134,7 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 		float Sensitivity = 3.0f;   // Tom 2026-07-17 default = the old max (range now 0.2..6)
 		if (GConfig != nullptr)
 		{
-			GConfig->GetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), Sensitivity, GGameUserSettingsIni);
+			GConfig->GetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), Sensitivity, FPFPaths::UserPrefsIni());
 		}
 		const float Scale = BaseDegreesPerMouseUnit * Sensitivity;
 

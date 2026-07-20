@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tom Chapman. All rights reserved.
 
 #include "Player/PFCharacterCustomization.h"
+#include "Core/PFPaths.h"
 
 #include "CombatForge.h"
 #include "AssetRegistry/AssetData.h"
@@ -218,11 +219,11 @@ namespace PFChar
 		{
 			return false;
 		}
-		if (GConfig->GetInt(PrefSectionPrimary, Key, Out, GGameUserSettingsIni))
+		if (GConfig->GetInt(PrefSectionPrimary, Key, Out, FPFPaths::UserPrefsIni()))
 		{
 			return true;
 		}
-		return GConfig->GetInt(PrefSectionLegacy, Key, Out, GGameUserSettingsIni);
+		return GConfig->GetInt(PrefSectionLegacy, Key, Out, FPFPaths::UserPrefsIni());
 	}
 
 	static bool ReadBoolEither(const TCHAR* Key, bool& Out)
@@ -231,11 +232,11 @@ namespace PFChar
 		{
 			return false;
 		}
-		if (GConfig->GetBool(PrefSectionPrimary, Key, Out, GGameUserSettingsIni))
+		if (GConfig->GetBool(PrefSectionPrimary, Key, Out, FPFPaths::UserPrefsIni()))
 		{
 			return true;
 		}
-		return GConfig->GetBool(PrefSectionLegacy, Key, Out, GGameUserSettingsIni);
+		return GConfig->GetBool(PrefSectionLegacy, Key, Out, FPFPaths::UserPrefsIni());
 	}
 
 	int32 GetActiveSaveSlot()
@@ -252,8 +253,8 @@ namespace PFChar
 			return;
 		}
 		// Flush so a menu slot switch survives a quick process kill (class setup was "never saved").
-		GConfig->SetInt(PrefSectionPrimary, TEXT("CharActiveSlot"), ClampSaveSlot(SaveSlot), GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->SetInt(PrefSectionPrimary, TEXT("CharActiveSlot"), ClampSaveSlot(SaveSlot), FPFPaths::UserPrefsIni());
+		GConfig->Flush(false, FPFPaths::UserPrefsIni());
 	}
 
 	void SaveConfig(int32 SaveSlot, const FPFCharacterConfig& Config)
@@ -263,16 +264,16 @@ namespace PFChar
 			return;
 		}
 		const int32 S = ClampSaveSlot(SaveSlot);
-		GConfig->SetBool(PrefSectionPrimary, *FString::Printf(TEXT("CharSaved%d"), S), true, GGameUserSettingsIni);
+		GConfig->SetBool(PrefSectionPrimary, *FString::Printf(TEXT("CharSaved%d"), S), true, FPFPaths::UserPrefsIni());
 		for (int32 i = 0; i < GSlotCount; ++i)
 		{
 			const int32 Sel = Config.Slots.IsValidIndex(i) ? Config.Slots[i] : -1;
 			const FString Key = FString::Printf(TEXT("CharS%d_%s"), S, GSlots[i].Id);
-			GConfig->SetInt(PrefSectionPrimary, *Key, Sel, GGameUserSettingsIni);
+			GConfig->SetInt(PrefSectionPrimary, *Key, Sel, FPFPaths::UserPrefsIni());
 		}
 		// Mirror active slot so LoadConfig() without an explicit slot stays coherent.
-		GConfig->SetInt(PrefSectionPrimary, TEXT("CharActiveSlot"), S, GGameUserSettingsIni);
-		GConfig->Flush(false, GGameUserSettingsIni);
+		GConfig->SetInt(PrefSectionPrimary, TEXT("CharActiveSlot"), S, FPFPaths::UserPrefsIni());
+		GConfig->Flush(false, FPFPaths::UserPrefsIni());
 	}
 
 	FPFCharacterConfig LoadConfig(int32 SaveSlot)
@@ -287,7 +288,7 @@ namespace PFChar
 		if (!bSaved && S == 0 && GConfig != nullptr)
 		{
 			bool bLegacySingle = false;
-			if (GConfig->GetBool(PrefSectionLegacy, TEXT("CharConfigSaved"), bLegacySingle, GGameUserSettingsIni)
+			if (GConfig->GetBool(PrefSectionLegacy, TEXT("CharConfigSaved"), bLegacySingle, FPFPaths::UserPrefsIni())
 				&& bLegacySingle)
 			{
 				bSaved = true;   // fall through and read CharSlot_* below as CharS0
@@ -317,7 +318,7 @@ namespace PFChar
 		if (GConfig != nullptr)
 		{
 			bool bPrimarySaved = false;
-			GConfig->GetBool(PrefSectionPrimary, *SavedKey, bPrimarySaved, GGameUserSettingsIni);
+			GConfig->GetBool(PrefSectionPrimary, *SavedKey, bPrimarySaved, FPFPaths::UserPrefsIni());
 			if (!bPrimarySaved)
 			{
 				SaveConfig(S, C);

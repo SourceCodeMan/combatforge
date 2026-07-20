@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Tom Chapman. All rights reserved.
 
 #include "Combat/PFCombatAudio.h"
+#include "Core/PFPaths.h"
 
 #include "CombatForge.h"
 #include "Core/PFUserPrefs.h"
@@ -232,7 +233,7 @@ namespace
 		float Sfx = 1.f;
 		if (GConfig)
 		{
-			GConfig->GetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), Sfx, GGameUserSettingsIni);
+			GConfig->GetFloat(TEXT("CombatForge"), TEXT("SfxVolume"), Sfx, FPFPaths::UserPrefsIni());
 		}
 		return FMath::Clamp(Sfx, 0.f, 1.f);
 	}
