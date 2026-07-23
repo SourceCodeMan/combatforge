@@ -1158,6 +1158,8 @@ void APFArenaShell::BindToGameState(ACombatForgeGameState* GS)
 void APFArenaShell::HandlePhaseChanged(EPFMatchPhase NewPhase)
 {
 	const bool bBuild = (NewPhase == EPFMatchPhase::Build);
+	UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: HandlePhaseChanged phase=%d bBuild=%d"),
+		static_cast<int32>(NewPhase), bBuild ? 1 : 0);   // if THIS never prints, the loaded DLL lacks my code
 	SetMidlineBarrierActive(bBuild);
 	if (bBuild)
 	{
@@ -1181,6 +1183,8 @@ void APFArenaShell::EnsureMidWallScreen()
 	// against the phase bind never matters.
 	if (MidWallScreen != nullptr || ShellRoot == nullptr || CubeMesh == nullptr)
 	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: EnsureMidWallScreen bail (screen=%d shellRoot=%d cube=%d)"),
+			MidWallScreen ? 1 : 0, ShellRoot ? 1 : 0, CubeMesh ? 1 : 0);
 		return;
 	}
 	const float MidX = FieldX * 0.5f;
@@ -1206,10 +1210,13 @@ void APFArenaShell::EnsureMidWallScreen()
 
 void APFArenaShell::BeginMidWallFade()
 {
+	UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: BeginMidWallFade entered"));
 	EnsureMidWallScreen();   // lazy runtime creation — guarantees the screen exists regardless of ordering
 	UWorld* World = GetWorld();
 	if (World == nullptr || MidWallScreen == nullptr)
 	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: BeginMidWallFade early-out (world=%d screen=%d)"),
+			World ? 1 : 0, MidWallScreen ? 1 : 0);
 		return;
 	}
 	// Anchor the fade to when THIS machine enters build. Host is exact; a late-joining client restarts the
