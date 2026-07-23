@@ -34,21 +34,25 @@ $Args = @()
 $WorkDir = $ProjectRoot
 $Mode = ""
 
+# Persistent maps + XP state MUST live outside the extract/tree (wiped on redeploy under -NOHOMEDIR).
+$ArenaDir = Join-Path $env:ProgramData "CombatForge\Arenas"
+New-Item -ItemType Directory -Force -Path $ArenaDir | Out-Null
+
 if (-not $PreferEditor -and $ServerExe) {
 	$Mode = "dedicated-binary"
 	$Exe = $ServerExe
 	$WorkDir = Split-Path $Exe -Parent
-	$Args = @($Map, "-log", "-port=$Port", "-NOHOMEDIR")
+	$Args = @($Map, "-log", "-port=$Port", "-NOHOMEDIR", "-ArenaDir=$ArenaDir")
 }
 elseif (-not $PreferEditor -and $GameExe) {
 	$Mode = "game-server"
 	$Exe = $GameExe
 	$WorkDir = Split-Path $Exe -Parent
 	# VERIFIED 2026-07-17: on a GAME exe, "-server" alone boots a NON-listening headless
-	# standalone (LogNet shows a plain Browse, no ListenURL) — "?listen" on the map URL is what
+	# standalone (LogNet shows a plain Browse, no ListenURL) - "?listen" on the map URL is what
 	# actually opens the port. The local phantom player is excluded from leader/human counts by
 	# ACombatForgePlayerState::IsHeadlessServerPhantom (nullrhi machines only).
-	$Args = @("$Map?listen", "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR")
+	$Args = @("$Map?listen", "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR", "-ArenaDir=$ArenaDir")
 	if ($Exe -match "[\\/]Binaries[\\/]Win64[\\/]") {
 		$Args += "-project=$UProject"
 	}

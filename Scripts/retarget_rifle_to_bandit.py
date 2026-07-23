@@ -8,9 +8,14 @@
 #     -script=D:/projects/combatforge/Scripts/retarget_rifle_to_bandit.py -stdout -unattended -nosplash -nullrhi -NoLogTimes
 # Results are written to the OUT file (headless print is unreliable).
 
+import os
 import unreal
 
-OUT = "C:/Users/tomch/AppData/Local/Temp/claude/C--Users-tomch/47a812dc-c31d-41e1-bc01-d5e949eabc20/scratchpad/retarget_result.txt"
+# Project-relative result file (overridable): the old value was a machine- and SESSION-specific
+# temp path that silently vanished for anyone else (issue #20 S2).
+OUT = os.environ.get(
+    "PF_RETARGET_OUT",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "retarget_result.txt"))
 L = []
 def log(m):
     L.append(str(m)); unreal.log("RETARGET: " + str(m))

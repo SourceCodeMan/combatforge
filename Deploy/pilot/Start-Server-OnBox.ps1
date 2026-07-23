@@ -1,4 +1,4 @@
-# CombatForge — headless dedicated server for a cloud/VPS box (e.g. Vultr Windows Server).
+# CombatForge - headless dedicated server for a cloud/VPS box (e.g. Vultr Windows Server).
 #
 # Runs the PACKAGED client exe headless as the fleet dedicated server, pointed at the LIVE backend
 # (api.playcombatforge.com). Reads the server key from ServerKey.txt sitting next to this script.
@@ -39,7 +39,7 @@ if (-not $Exe) {
 }
 if (-not $Exe) { throw "CombatForge.exe not found under $Here - extract the Windows build here first." }
 
-# --- Server key (secret) — read from ServerKey.txt next to this script ---
+# --- Server key (secret) - read from ServerKey.txt next to this script ---
 $KeyFile = Join-Path $Here "ServerKey.txt"
 if (-not (Test-Path $KeyFile)) { throw "ServerKey.txt not found next to this script - copy it here." }
 $Key = (Get-Content $KeyFile -Raw).Trim()
@@ -88,9 +88,9 @@ $LogDir = Join-Path $Here "Logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir "server.log"
 
-# --- PERSISTENT data dir (built maps + un-sent XP reports) — MUST live OUTSIDE the extracted build ---
+# --- PERSISTENT data dir (built maps + un-sent XP reports) - MUST live OUTSIDE the extracted build ---
 # The build runs with -NOHOMEDIR, so UE's UserSettingsDir() (where maps + PendingReports would otherwise land)
-# resolves INSIDE this folder and is wiped every time you re-extract a new build over it — which silently
+# resolves INSIDE this folder and is wiped every time you re-extract a new build over it - which silently
 # dropped built maps AND un-minted XP on every redeploy (#8/#9). Passing -ArenaDir pins them to ProgramData
 # (survives re-extraction). The game derives PendingReports/JoinCode/ServerKey.txt from this dir's parent too.
 $DataDir = Join-Path $env:ProgramData "CombatForge"
@@ -99,7 +99,7 @@ New-Item -ItemType Directory -Force -Path $ArenaDir | Out-Null
 
 $mapUrl = "$Map`?listen"
 # CombatForge.exe is a GUI-subsystem app, so PowerShell's "& $exe" call operator returns INSTANTLY without
-# waiting for it — which made the restart loop below spawn a new server every 3 s (stacked processes fighting
+# waiting for it - which made the restart loop below spawn a new server every 3 s (stacked processes fighting
 # over the port). Launch via Start-Process -PassThru + WaitForExit so we block until the server truly exits.
 # ArgumentList is ONE string on purpose: Start-Process -ArgumentList as an ARRAY drops the quotes around
 # space-containing args (e.g. -LogCmds="CombatForgeLog Verbose, LogNet Log"), corrupting them.
@@ -122,12 +122,23 @@ Write-Host "  Watch the log for:  Backend: fleet registered (port $Port)" -Foreg
 Write-Host "  Then it appears in the game's SERVERS list + QUICK PLAY. Ctrl+C or close to stop."
 Write-Host ""
 
-# Restart-on-exit loop (crude Restart=always).
+# Restart-on-exit loop (crude Restart=always) with crash-loop backoff (issue #21 D9/D8): a server
+# that dies inside 60s doubles the delay (3s -> 300s cap) instead of hammering restarts; any run
+# longer than 60s resets the delay to 3s.
+$RestartDelay = 3
 while ($true) {
   Write-Host ("[{0}] launching server..." -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor Green
+  $LaunchedAt = Get-Date
   $proc = Start-Process -FilePath $Exe -ArgumentList $cmdLine -PassThru
   if ($proc) { $proc.WaitForExit() }   # BLOCKS until the GUI server process actually exits (not the & bug)
   $code = if ($proc) { $proc.ExitCode } else { "?" }
-  Write-Host ("[{0}] server exited (code {1}) - restarting in 3s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $code) -ForegroundColor Yellow
-  Start-Sleep -Seconds 3
+  $RanSecs = ((Get-Date) - $LaunchedAt).TotalSeconds
+  if ($RanSecs -lt 60) {
+    $RestartDelay = [Math]::Min($RestartDelay * 2, 300)
+    Write-Host ("[{0}] server exited after only {1:n0}s (code {2}) - CRASH LOOP? backing off {3}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $RanSecs, $code, $RestartDelay) -ForegroundColor Red
+  } else {
+    $RestartDelay = 3
+    Write-Host ("[{0}] server exited (code {1}) - restarting in {2}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $code, $RestartDelay) -ForegroundColor Yellow
+  }
+  Start-Sleep -Seconds $RestartDelay
 }

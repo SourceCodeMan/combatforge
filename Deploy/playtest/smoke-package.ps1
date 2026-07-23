@@ -116,7 +116,7 @@ $SeedJson = @'
 '@
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 # Arenas moved to the stable per-user dir (the old 3-root Saved\Arenas loop existed because the packaged
-# ProjectSavedDir was ambiguous — moot now).
+# ProjectSavedDir was ambiguous - moot now).
 $ArenasDir = Join-Path $env:LOCALAPPDATA "CombatForge\Arenas"
 New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
 Set-Content -Path (Join-Path $ArenasDir ("arena_{0}_packagesmoke.json" -f $Stamp)) -Value $SeedJson -Encoding UTF8
@@ -171,8 +171,11 @@ if ($Fail -or $Fatal) {
 }
 
 if ($Started -and $Done) {
-	Write-Host "PASS: package cook + packaged process started (no Improvement marker)"
-	exit 0
+	# Distinct SOFT-FAIL (issue #21 D9): the process booted but the Improvement marker never appeared,
+	# so the smoke did NOT prove the game content loaded. Exit 3 so automation can distinguish this
+	# from a real PASS (0) and a hard fail (1).
+	Write-Host "WARN: packaged process started but NO Improvement marker - content load unproven (exit 3)"
+	exit 3
 }
 
 Write-Host "FAIL: packaged boot inconclusive"

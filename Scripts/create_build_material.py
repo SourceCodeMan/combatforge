@@ -93,6 +93,13 @@ def _load_tex(path, label):
 # NOTE: do NOT wipe-and-rebuild in place. delete_all_material_expressions on an existing,
 # loaded material can call MarkAsGarbage() on a rooted object -> crash (check(!IsRooted())).
 # Always DELETE the asset and create it fresh; the fresh-create path is crash-safe.
+# PF_DRY_RUN=1: report what would be deleted/created and exit before anything destructive
+# (issue #20 S6 — these commandlets have no undo).
+import os as _os
+if _os.environ.get("PF_DRY_RUN") == "1":
+    unreal.log_warning("[M_PF_BuildPiece] DRY RUN: would delete %s (exists=%s) and recreate it. Exiting."
+        % (FULL_PATH, unreal.EditorAssetLibrary.does_asset_exist(FULL_PATH)))
+    raise SystemExit(0)
 if unreal.EditorAssetLibrary.does_asset_exist(FULL_PATH):
     unreal.EditorAssetLibrary.delete_asset(FULL_PATH)
     unreal.log_warning("[M_PF_BuildPiece] existing asset deleted; recreating fresh.")
@@ -219,8 +226,7 @@ try:
     xform   = _expr(unreal.MaterialExpressionTransformPosition, -1560, 1320)
     xform.set_editor_property("transform_source_type", unreal.MaterialPositionTransformSource.TRANSFORMSOURCE_LOCAL)
     xform.set_editor_property("transform_type",        unreal.MaterialPositionTransformSource.TRANSFORMSOURCE_WORLD)
-    _link_out(top_max, BOUNDS_MAX, xform, _link_in(top_max, BOUNDS_MAX[0], xform, ["", "Input"])) \
-        if False else _link_out(top_max, BOUNDS_MAX, xform, "Input")   # bounds-max -> transform input
+    _link_out(top_max, BOUNDS_MAX, xform, "Input")   # bounds-max -> transform input
 
     top_z = _expr(unreal.MaterialExpressionComponentMask, -1250, 1320)     # object top world Z
     top_z.set_editor_property("r", False); top_z.set_editor_property("g", False)
