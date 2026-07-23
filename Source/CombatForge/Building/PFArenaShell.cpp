@@ -1158,8 +1158,6 @@ void APFArenaShell::BindToGameState(ACombatForgeGameState* GS)
 void APFArenaShell::HandlePhaseChanged(EPFMatchPhase NewPhase)
 {
 	const bool bBuild = (NewPhase == EPFMatchPhase::Build);
-	UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: HandlePhaseChanged phase=%d bBuild=%d"),
-		static_cast<int32>(NewPhase), bBuild ? 1 : 0);   // if THIS never prints, the loaded DLL lacks my code
 	SetMidlineBarrierActive(bBuild);
 	if (bBuild)
 	{
@@ -1183,8 +1181,6 @@ void APFArenaShell::EnsureMidWallScreen()
 	// against the phase bind never matters.
 	if (MidWallScreen != nullptr || ShellRoot == nullptr || CubeMesh == nullptr)
 	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: EnsureMidWallScreen bail (screen=%d shellRoot=%d cube=%d)"),
-			MidWallScreen ? 1 : 0, ShellRoot ? 1 : 0, CubeMesh ? 1 : 0);
 		return;
 	}
 	const float MidX = FieldX * 0.5f;
@@ -1210,13 +1206,10 @@ void APFArenaShell::EnsureMidWallScreen()
 
 void APFArenaShell::BeginMidWallFade()
 {
-	UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: BeginMidWallFade entered"));
 	EnsureMidWallScreen();   // lazy runtime creation — guarantees the screen exists regardless of ordering
 	UWorld* World = GetWorld();
 	if (World == nullptr || MidWallScreen == nullptr)
 	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall DIAG: BeginMidWallFade early-out (world=%d screen=%d)"),
-			World ? 1 : 0, MidWallScreen ? 1 : 0);
 		return;
 	}
 	// Anchor the fade to when THIS machine enters build. Host is exact; a late-joining client restarts the
@@ -1242,10 +1235,17 @@ void APFArenaShell::UpdateMidWallFade()
 		return;
 	}
 	const float Elapsed = static_cast<float>(World->GetTimeSeconds() - MidWallFadeStartTime);
-	const float Dur = FMath::Max(0.01f, MidWallFadeSeconds);
-	if (Elapsed >= Dur)
+	const float Hold = FMath::Max(0.f, MidWallHoldSeconds);
+	const float Fade = FMath::Max(0.01f, MidWallFadeSeconds);
+	if (Elapsed < Hold)
 	{
-		// Fully clear from here (minute 2 → 30): hide the draw and stop the fade tick.
+		ApplyMidWallOpacity(MidWallStartOpacity);   // fully opaque, no change (0:00 → 1:30)
+		return;
+	}
+	const float FadeElapsed = Elapsed - Hold;
+	if (FadeElapsed >= Fade)
+	{
+		// Fully clear from here on (build end onward): hide the draw and stop the fade tick.
 		ApplyMidWallOpacity(0.f);
 		if (MidWallScreen)
 		{
@@ -1255,7 +1255,7 @@ void APFArenaShell::UpdateMidWallFade()
 		MidWallFadeStartTime = -1.0;
 		return;
 	}
-	ApplyMidWallOpacity(MidWallStartOpacity * (1.f - Elapsed / Dur));   // linear opaque → clear
+	ApplyMidWallOpacity(MidWallStartOpacity * (1.f - FadeElapsed / Fade));   // lighten a little each tick (1:30 → 2:30)
 }
 
 void APFArenaShell::ApplyMidWallOpacity(float Alpha01)
@@ -1292,10 +1292,11 @@ void APFArenaShell::Tick(float DeltaSeconds)
 	}
 }
 
-void APFArenaShell::PreviewMidWallFade(float StartOpacity01, float FadeSeconds)
+void APFArenaShell::PreviewMidWallFade(float StartOpacity01, float HoldSeconds, float FadeSeconds)
 {
 	if (StartOpacity01 >= 0.f) { MidWallStartOpacity = FMath::Clamp(StartOpacity01, 0.f, 1.f); }
-	if (FadeSeconds > 0.f)     { MidWallFadeSeconds  = FadeSeconds; }
+	if (HoldSeconds    >= 0.f) { MidWallHoldSeconds  = HoldSeconds; }
+	if (FadeSeconds     > 0.f) { MidWallFadeSeconds  = FadeSeconds; }
 	BeginMidWallFade();
 }
 
@@ -1314,31 +1315,34 @@ void APFArenaShell::SetMidWallMaterial(UMaterialInterface* Mat)
 	BeginMidWallFade();     // re-arm so the fade re-drives against the new material's params
 }
 
-// Preview the midline fade without sitting through a build phase: re-arms it opaque and lets it run.
-// Optional args override the look live so it can be dialed: pf.MidWall [startOpacity] [fadeSeconds].
+// Preview the midline fade without sitting through a build phase: re-arms it and lets it run.
+// Args (all optional): pf.MidWall [startOpacity 0..1] [holdSeconds] [fadeSeconds]. e.g. quick test:
+// pf.MidWall 1 5 10 = opaque, hold 5 s, then lighten over 10 s. Real match values default 1 / 90 / 60.
 static void PFMidWallCmd(const TArray<FString>& Args, UWorld* World)
 {
 	if (World == nullptr)
 	{
 		return;
 	}
-	const float Op  = (Args.Num() >= 1) ? FCString::Atof(*Args[0]) : -1.f;
-	const float Sec = (Args.Num() >= 2) ? FCString::Atof(*Args[1]) : -1.f;
+	const float Op   = (Args.Num() >= 1) ? FCString::Atof(*Args[0]) : -1.f;
+	const float Hold = (Args.Num() >= 2) ? FCString::Atof(*Args[1]) : -1.f;
+	const float Fade = (Args.Num() >= 3) ? FCString::Atof(*Args[2]) : -1.f;
 	int32 Count = 0;
 	for (TActorIterator<APFArenaShell> It(World); It; ++It)
 	{
-		It->PreviewMidWallFade(Op, Sec);
+		It->PreviewMidWallFade(Op, Hold, Fade);
 		++Count;
 	}
 	UE_LOG(CombatForgeLog, Warning,
-		TEXT("pf.MidWall: re-armed the fade on %d shell(s)  (startOpacity=%s  fadeSeconds=%s)"),
+		TEXT("pf.MidWall: re-armed on %d shell(s)  (startOpacity=%s hold=%s fade=%s)"),
 		Count,
-		Args.Num() >= 1 ? *Args[0] : TEXT("unchanged"),
-		Args.Num() >= 2 ? *Args[1] : TEXT("unchanged"));
+		Args.Num() >= 1 ? *Args[0] : TEXT("keep"),
+		Args.Num() >= 2 ? *Args[1] : TEXT("keep"),
+		Args.Num() >= 3 ? *Args[2] : TEXT("keep"));
 }
 static FAutoConsoleCommandWithWorldAndArgs GPFMidWallCmd(
 	TEXT("pf.MidWall"),
-	TEXT("Preview/tune the midline tint-screen fade: pf.MidWall [startOpacity 0..1] [fadeSeconds]. Re-arms it opaque and fades to clear."),
+	TEXT("Preview/tune the midline tint-screen: pf.MidWall [startOpacity 0..1] [holdSeconds] [fadeSeconds]. Re-arms opaque, holds, then lightens to clear."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFMidWallCmd));
 
 // Test a glass (or any) material on the midline screen live: pf.MidWallMat /Game/Path/To/M_Glass

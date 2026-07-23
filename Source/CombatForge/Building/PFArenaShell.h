@@ -188,11 +188,13 @@ protected:
 	UPROPERTY() TObjectPtr<UMaterialInterface> MarkMaterial;   // Color-driven spawn / hazard lines
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> TintMIDs;
 
-	// ---- Midline tint-screen fade config (build-phase visual) ----
-	// Opaque -> clear over the first 2 minutes of the build phase (Tom: "over the first two minutes...
-	// gradually change opacity towards being clear. From minute 2 to minute 30, completely clear").
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallFadeSeconds  = 120.f;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallStartOpacity = 0.96f;   // near-opaque tinted glass
+	// ---- Midline tint-screen fade config (build-phase visual). Same on every map (base class). ----
+	// Tom 2026-07-23: start FULLY opaque (can't see across), hold solid for the first 1:30, then lighten a
+	// little each second from 1:30 to 2:30 (build end). So: hold for MidWallHoldSeconds, then fade to clear
+	// over MidWallFadeSeconds. 90 + 60 = 150 s = the 2:30 build phase.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallStartOpacity = 1.0f;   // fully opaque
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallHoldSeconds  = 90.f;   // solid until 1:30
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallFadeSeconds  = 60.f;   // then fade to clear over 1:00
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") FLinearColor MidWallTint  = FLinearColor(0.012f, 0.017f, 0.03f, 1.f);
 	double MidWallFadeStartTime = -1.0;   // world seconds when the current build phase began (-1 = idle/hidden)
 
@@ -208,8 +210,9 @@ protected:
 
 public:
 	virtual void Tick(float DeltaSeconds) override;
-	/** Dev preview (pf.MidWall): optionally override the look, then re-arm the opaque->clear fade now. */
-	void PreviewMidWallFade(float StartOpacity01, float FadeSeconds);
+	/** Dev preview (pf.MidWall): optionally override the look/timing, then re-arm the fade now.
+	 *  Any arg < 0 means "keep the current value". */
+	void PreviewMidWallFade(float StartOpacity01, float HoldSeconds, float FadeSeconds);
 	/** Dev (pf.MidWallMat): swap the screen's base material live (test a glass material), rebuild the MID,
 	 *  and re-arm the fade so you can see whether its opacity actually drives. */
 	void SetMidWallMaterial(UMaterialInterface* Mat);
