@@ -37,7 +37,7 @@ public:
 
 	// ---- Config (contract §3.2 / §4.3) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFRespawnMode RespawnMode = EPFRespawnMode::RoundElimination;   // B1
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float BuildPhaseDuration   = 180.f;  // T2 — 3 minute build window
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float BuildPhaseDuration   = 150.f;  // 2:30 build window (Creative + Remix; PlayOnly is forced to ~0). Was 180 (Tom 2026-07-23).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float LobbyStartCountdown  = 0.f;     // 0: no pre-match grace — the per-round Freeze ("GET READY") is the single spawn countdown (was a double)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float FreezeDuration       = 5.f;     // T6
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float RoundDuration        = 90.f;    // 60 at ≤2v2 (T15)

@@ -11,6 +11,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"                 // TActorIterator (pf.MidWall preview)
 #include "GameFramework/GameStateBase.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
@@ -97,7 +98,9 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	, PerimeterH(static_cast<float>(InDef.HeightCapUU) + 600.f)   // taller than the map's cap + jump
 	, EscapeLidZ(static_cast<float>(InDef.HeightCapUU) + 150.f)   // lid just above the map's build cap
 {
-	PrimaryActorTick.bCanEverTick = false;
+	// Ticks so the midline tint-screen can fade opaque->clear over the build phase. The tick early-outs
+	// unless a fade is actively running, so it is free the rest of the match.
+	PrimaryActorTick.bCanEverTick = true;
 
 	// Replicated for existence only — the geometry is constructor-built identically everywhere.
 	bReplicates = true;
@@ -132,6 +135,11 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Tile.M_Tile"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhDemoMetalFinder(
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Metal.M_Metal"));
+	// Reliable engine translucent master (Color = RGB + A) — the same one the build ghost uses, so alpha
+	// actually blends. Drives the midline tint-screen's fade. Engine content, always cooked.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MidWallMatFinder(
+		TEXT("/Engine/EngineDebugMaterials/M_SimpleUnlitTranslucent.M_SimpleUnlitTranslucent"));
+	MidWallBaseMaterial = MidWallMatFinder.Succeeded() ? MidWallMatFinder.Object : nullptr;
 	// Heavy Megascans prop meshes are NOT hard-loaded here — CDO TryLoad freezes PIE for minutes.
 	// Soft-load in BeginPlay via BuildWarehouseBackdropDrape() instead.
 	CubeMesh = CubeFinder.Object;
@@ -274,6 +282,11 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	MidlineBarrier->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	MidlineBarrier->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
 	MidlineBarrier->SetCollisionEnabled(ECollisionEnabled::NoCollision);   // off outside BuildPhase
+
+	// --- The VISIBLE tinted-glass screen on the midline (cosmetic; fade driven at runtime) ---
+	// Spans the PLAY field only (not the 20000-uu desert extension of the collision barrier), full height.
+	// Two-sided by construction (a thin box has faces both ways). Hidden until a build phase begins.
+	SetupMidWallScreen();
 
 	// --- Warm-up pen: floor + 4 low walls (players cannot jump 300 uu) ---
 	PenFloor = MakeShapePart(TEXT("PenFloor"),
@@ -1141,8 +1154,153 @@ void APFArenaShell::BindToGameState(ACombatForgeGameState* GS)
 
 void APFArenaShell::HandlePhaseChanged(EPFMatchPhase NewPhase)
 {
-	SetMidlineBarrierActive(NewPhase == EPFMatchPhase::Build);
+	const bool bBuild = (NewPhase == EPFMatchPhase::Build);
+	SetMidlineBarrierActive(bBuild);
+	if (bBuild)
+	{
+		// Build begins: raise the tinted-glass screen opaque and start it fading to clear.
+		BeginMidWallFade();
+	}
+	else if (MidWallScreen)
+	{
+		// Combat / vote / lobby: no screen (players cross the midline now). A new build phase re-arms it.
+		MidWallFadeStartTime = -1.0;
+		MidWallScreen->SetHiddenInGame(true);
+		MidWallScreen->SetVisibility(false);
+	}
 }
+
+void APFArenaShell::SetupMidWallScreen()
+{
+	if (ShellRoot == nullptr || CubeMesh == nullptr)
+	{
+		return;
+	}
+	const float MidX = FieldX * 0.5f;
+	MidWallScreen = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MidWallScreen"));
+	MidWallScreen->SetupAttachment(ShellRoot);
+	MidWallScreen->SetStaticMesh(CubeMesh);
+	// Thin slab on the midline, spanning the play field width and the full perimeter height.
+	MidWallScreen->SetRelativeLocation(FVector(MidX, FieldY * 0.5f, PerimeterH * 0.5f));
+	MidWallScreen->SetRelativeScale3D(FVector(0.12f, FieldY / 100.f, PerimeterH / 100.f));
+	MidWallScreen->SetCollisionEnabled(ECollisionEnabled::NoCollision);   // purely visual
+	MidWallScreen->SetCastShadow(false);
+	MidWallScreen->bReceivesDecals = false;
+	MidWallScreen->SetTranslucentSortPriority(50);   // overlay after opaque world
+	if (MidWallBaseMaterial)
+	{
+		MidWallScreen->SetMaterial(0, MidWallBaseMaterial);
+	}
+	MidWallScreen->SetHiddenInGame(true);            // shown only while a build-phase fade is running
+	MidWallScreen->SetVisibility(false);
+}
+
+void APFArenaShell::BeginMidWallFade()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || MidWallScreen == nullptr)
+	{
+		return;
+	}
+	// Anchor the fade to when THIS machine enters build. Host is exact; a late-joining client restarts the
+	// fade from full (accepted — a 2-minute cosmetic, and joiners mid-build are rare).
+	MidWallFadeStartTime = World->GetTimeSeconds();
+	MidWallScreen->SetHiddenInGame(false);
+	MidWallScreen->SetVisibility(true);
+	ApplyMidWallOpacity(MidWallStartOpacity);
+}
+
+void APFArenaShell::UpdateMidWallFade()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || MidWallFadeStartTime < 0.0)
+	{
+		return;
+	}
+	const float Elapsed = static_cast<float>(World->GetTimeSeconds() - MidWallFadeStartTime);
+	const float Dur = FMath::Max(0.01f, MidWallFadeSeconds);
+	if (Elapsed >= Dur)
+	{
+		// Fully clear from here (minute 2 → 30): hide the draw and stop the fade tick.
+		ApplyMidWallOpacity(0.f);
+		if (MidWallScreen)
+		{
+			MidWallScreen->SetHiddenInGame(true);
+			MidWallScreen->SetVisibility(false);
+		}
+		MidWallFadeStartTime = -1.0;
+		return;
+	}
+	ApplyMidWallOpacity(MidWallStartOpacity * (1.f - Elapsed / Dur));   // linear opaque → clear
+}
+
+void APFArenaShell::ApplyMidWallOpacity(float Alpha01)
+{
+	if (MidWallScreen == nullptr)
+	{
+		return;
+	}
+	Alpha01 = FMath::Clamp(Alpha01, 0.f, 1.f);
+	if (MidWallMID == nullptr && MidWallBaseMaterial != nullptr)
+	{
+		MidWallMID = UMaterialInstanceDynamic::Create(MidWallBaseMaterial, this);
+		MidWallScreen->SetMaterial(0, MidWallMID);
+	}
+	if (MidWallMID != nullptr)
+	{
+		FLinearColor C = MidWallTint;
+		C.A = Alpha01;
+		// M_SimpleUnlitTranslucent reads Color (RGB + A); set the same aliases the build ghost uses so the
+		// alpha lands regardless of which param the material actually wired.
+		MidWallMID->SetVectorParameterValue(TEXT("Color"), C);
+		MidWallMID->SetVectorParameterValue(TEXT("BaseColor"), C);
+		MidWallMID->SetScalarParameterValue(TEXT("Opacity"), Alpha01);
+		MidWallMID->SetScalarParameterValue(TEXT("OpacityMultiplier"), Alpha01);
+	}
+}
+
+void APFArenaShell::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (MidWallFadeStartTime >= 0.0)
+	{
+		UpdateMidWallFade();
+	}
+}
+
+void APFArenaShell::PreviewMidWallFade(float StartOpacity01, float FadeSeconds)
+{
+	if (StartOpacity01 >= 0.f) { MidWallStartOpacity = FMath::Clamp(StartOpacity01, 0.f, 1.f); }
+	if (FadeSeconds > 0.f)     { MidWallFadeSeconds  = FadeSeconds; }
+	BeginMidWallFade();
+}
+
+// Preview the midline fade without sitting through a build phase: re-arms it opaque and lets it run.
+// Optional args override the look live so it can be dialed: pf.MidWall [startOpacity] [fadeSeconds].
+static void PFMidWallCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	const float Op  = (Args.Num() >= 1) ? FCString::Atof(*Args[0]) : -1.f;
+	const float Sec = (Args.Num() >= 2) ? FCString::Atof(*Args[1]) : -1.f;
+	int32 Count = 0;
+	for (TActorIterator<APFArenaShell> It(World); It; ++It)
+	{
+		It->PreviewMidWallFade(Op, Sec);
+		++Count;
+	}
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.MidWall: re-armed the fade on %d shell(s)  (startOpacity=%s  fadeSeconds=%s)"),
+		Count,
+		Args.Num() >= 1 ? *Args[0] : TEXT("unchanged"),
+		Args.Num() >= 2 ? *Args[1] : TEXT("unchanged"));
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFMidWallCmd(
+	TEXT("pf.MidWall"),
+	TEXT("Preview/tune the midline tint-screen fade: pf.MidWall [startOpacity 0..1] [fadeSeconds]. Re-arms it opaque and fades to clear."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFMidWallCmd));
 
 void APFArenaShell::SetMidlineBarrierActive(bool bActive)
 {

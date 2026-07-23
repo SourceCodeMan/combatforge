@@ -158,6 +158,12 @@ protected:
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> MidlinePosts;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> MidlineStripe;
 	UPROPERTY() TObjectPtr<UBoxComponent> MidlineBarrier;
+	// Tinted-glass midline SCREEN (Tom 2026-07-23): dark near-opaque at build start so teams can't peek
+	// across while building, fading to fully clear over the first MidWallFadeSeconds. Cosmetic only — the
+	// crossing block is MidlineBarrier above; this is what you SEE. Fully transparent + hidden in combat.
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> MidWallScreen;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> MidWallMID;
+	UPROPERTY() TObjectPtr<UMaterialInterface> MidWallBaseMaterial;   // /Engine .../M_SimpleUnlitTranslucent
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> PenFloor;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> PenWalls;
 
@@ -182,8 +188,26 @@ protected:
 	UPROPERTY() TObjectPtr<UMaterialInterface> MarkMaterial;   // Color-driven spawn / hazard lines
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> TintMIDs;
 
+	// ---- Midline tint-screen fade config (build-phase visual) ----
+	// Opaque -> clear over the first 2 minutes of the build phase (Tom: "over the first two minutes...
+	// gradually change opacity towards being clear. From minute 2 to minute 30, completely clear").
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallFadeSeconds  = 120.f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallStartOpacity = 0.96f;   // near-opaque tinted glass
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") FLinearColor MidWallTint  = FLinearColor(0.012f, 0.017f, 0.03f, 1.f);
+	double MidWallFadeStartTime = -1.0;   // world seconds when the current build phase began (-1 = idle/hidden)
+
+	void SetupMidWallScreen();            // ctor: build the screen mesh over the midline
+	void BeginMidWallFade();              // build-phase entered: opaque now, start the clock
+	void UpdateMidWallFade();             // per-tick lerp toward clear; hides + stops when done
+	void ApplyMidWallOpacity(float Alpha01);
+
 	FDelegateHandle GameStateSetHandle;
 	bool bMapBackdropActive = false;
 	bool bWarehouseMeshesLoaded = false;
 	bool bWarehouseDrapeBuilt = false;
+
+public:
+	virtual void Tick(float DeltaSeconds) override;
+	/** Dev preview (pf.MidWall): optionally override the look, then re-arm the opaque->clear fade now. */
+	void PreviewMidWallFade(float StartOpacity01, float FadeSeconds);
 };
