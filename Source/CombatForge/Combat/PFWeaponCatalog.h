@@ -141,15 +141,22 @@ namespace PFWeapon
 
 	/**
 	 * TRUE-SCALE first-person pose derived from the lmg_01 REFERENCE row (Tom's 2026-07-23 life-size
-	 * tune). The legacy FP rows were hand-tuned around HALF-size viewmodels (FPScale 0.32-0.50); this
-	 * re-derives any such row at the reference scale instead of invalidating 36 tuned poses by hand:
-	 * the reference defines where the GRIP sits in viewmodel space (hip) and where the SIGHT sits in
-	 * camera space (ADS); each mesh's own bounds geometry (grip region, sight line, barrel axis) fills
-	 * in the rest — the same grip/sight anchors ComputeAutoPose uses, aimed at reference-derived targets
-	 * instead of constants. Returns false if the reference row/mesh can't be resolved or bounds are
-	 * degenerate (caller keeps the legacy row).
+	 * tune). EVERY catalog row now carries FPScale 1.0 (Tom: "I want every gun to be a scale of one"),
+	 * but the legacy FPLoc/FPRot/AdsLoc numbers beside them were hand-tuned around HALF-size viewmodels,
+	 * so at 1.0 they would place the gun wrong. This re-derives hip + ADS at life size: the reference
+	 * defines where the GRIP sits in viewmodel space and where the SIGHT sits in camera space at full
+	 * ADS; each mesh's own bounds geometry (grip region, sight line, barrel axis) fills in the rest —
+	 * the same anchors ComputeAutoPose uses, aimed at reference-derived targets instead of constants.
+	 * Returns false if the reference row/mesh can't be resolved or bounds are degenerate.
 	 */
 	bool ComputeTrueScaleFP(const UStaticMesh* Mesh, FPFWeaponAutoPose& Out);
+
+	/**
+	 * True once a row's FPLoc/FPRot/AdsLoc/AdsRot have been hand-tuned AT life size — those are used
+	 * verbatim and never derived. Scale can no longer identify this (all rows read 1.0), so it is an
+	 * explicit list: add a WeaponId here when its pose is dialed with pf.WeaponFP/pf.WeaponADS at 1.0.
+	 */
+	bool HasTrueScaleFP(const FPFWeaponDef& Def);
 
 	/**
 	 * The scale every AUTO-gripped weapon starts from (the shipped character default). A NAMED constant on

@@ -128,7 +128,7 @@ namespace PFWeapon
 		const FPFWeaponDef ArM4 = MakeW(
 			TEXT("Rifle (default)"), TEXT("/Game/Weapons/Rifle/Mesh/SM_Rifle.SM_Rifle"),
 			TEXT("/Game/Weapons/Rifle/M_PF_Rifle.M_PF_Rifle"),
-			FVector(15.35f, 8.38f, -6.8f), FRotator(-2.0f, -90.0f, 0.0f), 0.495f, FVector(42.0f, 3.5f, -3.5f),
+			FVector(15.35f, 8.38f, -6.8f), FRotator(-2.0f, -90.0f, 0.0f), 1.000f, FVector(42.0f, 3.5f, -3.5f),
 			FVector(1.5f, -8.18f, 1.71f), FRotator(0.98f, -0.07f, -0.4f),   // baked from log 2026-07-17
 			Mode_SBA, EPFFireMode::Auto,
 			1.1f, 0.05f, 12000.f, 2.2f, 3, 30, 12.f,
@@ -140,7 +140,7 @@ namespace PFWeapon
 
 		const FPFWeaponDef ArAkBlack = MakeW(
 			TEXT("AK (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black"),
-			nullptr, FVector(1.3f, 2.72f, -7.05f), FRotator(-1.5f, -90.0f, 1.5f), 0.48f, FVector(28.7f, 6.4f, 0.0f),
+			nullptr, FVector(1.3f, 2.72f, -7.05f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(28.7f, 6.4f, 0.0f),
 			FVector(5.0f, -2.52f, -0.22f), FRotator(1.8f, 0.0f, -0.5f),   // Tom-tuned 2026-07-15
 			Mode_SA, EPFFireMode::Auto,
 			1.4f, 0.06f, 11000.f, 2.4f, 3, 30, 6.5f,
@@ -155,17 +155,17 @@ namespace PFWeapon
 			SkinOf(ArM4, TEXT("Rifle (Olive)"),
 				TEXT("/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive"),
 				TEXT("/Game/QuantumCharacter/Materials/M_Rifle_Olive.M_Rifle_Olive"),
-				FVector(5.91f, 14.31f, -14.19f), FRotator(-2.0f, -90.0f, 0.0f), 0.495f, FVector(42.0f, 3.5f, -3.5f),
+				FVector(5.91f, 14.31f, -14.19f), FRotator(-2.0f, -90.0f, 0.0f), 1.000f, FVector(42.0f, 3.5f, -3.5f),
 				FVector(-0.29f, -13.92f, 3.6f), FRotator(2.15f, -0.16f, -0.4f),   // baked 2026-07-17 (from ar_m4)
 				TEXT("ar_m4_olive"), 4),
 			ArAkBlack,
 			SkinOf(ArAkBlack, TEXT("AK (Wood)"),
 				TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood"),
-				nullptr, FVector(1.3f, 2.72f, -7.05f), FRotator(-1.5f, -90.0f, 1.5f), 0.48f, FVector(28.7f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 2.72f, -7.05f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(28.7f, 6.4f, 0.0f),
 				FVector(5.0f, -2.49f, -0.22f), FRotator(1.8f, 0.0f, -0.5f),   // baked 2026-07-17 (same as ar_ak_black)
 				TEXT("ar_ak_wood"), 17),
 			MakeW(TEXT("Rifle 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Rifles/01/SM_Modern_Weapons_Rifle_01.SM_Modern_Weapons_Rifle_01"),
-				nullptr, FVector(1.3f, 6.54f, -7.79f), FRotator(-1.5f, -90.0f, 1.5f), 0.42f, FVector(35.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.54f, -7.79f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(35.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.35f, 1.03f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_SA, EPFFireMode::Auto,
 				1.0f, 0.06f, 10500.f, 1.8f, 3, 30, 13.5f,
@@ -175,7 +175,7 @@ namespace PFWeapon
 				0.20f, 0.18f, 1.00f, 1.0f,
 				0.f, 0.f, 1.35f, 9),
 			MakeW(TEXT("Rifle 02"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Rifles/02/SM_Modern_Weapons_Rifle_02.SM_Modern_Weapons_Rifle_02"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.42f, FVector(35.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(35.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.28f, 2.68f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_SBA, EPFFireMode::Auto,
 				1.3f, 0.03f, 13500.f, 2.6f, 3, 30, 10.5f,
@@ -185,7 +185,7 @@ namespace PFWeapon
 				0.32f, 0.18f, 0.95f, 1.0f,
 				0.f, 0.f, 1.35f, 14),
 			MakeW(TEXT("Rifle 03"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Rifles/03/SM_Modern_Weapons_Rifle_03.SM_Modern_Weapons_Rifle_03"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.42f, FVector(35.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(35.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.24f, 1.66f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_B, EPFFireMode::Burst,
 				1.6f, 0.04f, 13000.f, 2.6f, 3, 21, 14.0f,
@@ -195,7 +195,7 @@ namespace PFWeapon
 				0.25f, 0.18f, 0.95f, 1.0f,
 				0.f, 0.38f, 1.35f, 35),
 			MakeW(TEXT("Rifle 04"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Rifles/04/SM_Modern_Weapons_Rifle_04.SM_Modern_Weapons_Rifle_04"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.42f, FVector(35.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(35.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.29f, 2.73f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_SA, EPFFireMode::Auto,
 				1.5f, 0.06f, 12000.f, 2.4f, 3, 24, 6.0f,
@@ -205,7 +205,7 @@ namespace PFWeapon
 				0.32f, 0.18f, 0.90f, 1.0f,
 				0.f, 0.f, 1.35f, 27),
 			MakeW(TEXT("Rifle 05"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Rifles/05/SM_Modern_Weapons_Rifle_05.SM_Modern_Weapons_Rifle_05"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.96f), 0.42f, FVector(35.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.96f), 1.000f, FVector(35.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.29f, 2.58f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_SBA, EPFFireMode::Auto,
 				1.1f, 0.05f, 12500.f, 2.2f, 3, 30, 11.0f,
@@ -215,7 +215,7 @@ namespace PFWeapon
 				0.25f, 0.18f, 0.95f, 1.0f,
 				0.f, 0.f, 1.35f, 20),
 			MakeW(TEXT("Rifle 06"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Rifles/06/SM_Modern_Weapons_Rifle_06.SM_Modern_Weapons_Rifle_06"),
-				nullptr, FVector(1.3f, 6.84f, -5.65f), FRotator(-1.5f, -90.0f, 1.5f), 0.42f, FVector(35.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.84f, -5.65f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(35.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.7f, 0.02f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_SA, EPFFireMode::Auto,
 				1.3f, 0.06f, 12000.f, 2.2f, 3, 40, 12.0f,
@@ -229,7 +229,7 @@ namespace PFWeapon
 		// ---- Category 1: SMG (8) — ReloadTime 0.9, MoveSpreadMult 1.15 (smg_02: 1.05) ----
 		const FPFWeaponDef SmgAksuBlack = MakeW(
 			TEXT("AKSU (Black)"), TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black"),
-			nullptr, FVector(-17.92f, -3.49f, 4.26f), FRotator(-5.0f, -89.84f, 3.36f), 0.3f, FVector(10.8f, 6.4f, 0.6f),
+			nullptr, FVector(-17.92f, -3.49f, 4.26f), FRotator(-5.0f, -89.84f, 3.36f), 1.000f, FVector(10.8f, 6.4f, 0.6f),
 			FVector(26.33f, 3.81f, -7.61f), FRotator(5.0f, 0.0f, 0.0f),   // Tom 2026-07-17: zeroed roll
 			Mode_BA, EPFFireMode::Auto,
 			1.5f, 0.10f, 8500.f, 1.4f, 3, 25, 14.0f,
@@ -243,11 +243,11 @@ namespace PFWeapon
 			SmgAksuBlack,
 			SkinOf(SmgAksuBlack, TEXT("AKSU (Wood)"),
 				TEXT("/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood"),
-				nullptr, FVector(-17.92f, -4.13f, 4.75f), FRotator(-3.69f, -90.07f, 5.45f), 0.3f, FVector(10.8f, 6.4f, 0.6f),
+				nullptr, FVector(-17.92f, -4.13f, 4.75f), FRotator(-3.69f, -90.07f, 5.45f), 1.000f, FVector(10.8f, 6.4f, 0.6f),
 				FVector(24.81f, 4.38f, -7.82f), FRotator(5.0f, 0.0f, 0.13f),
 				TEXT("smg_aksu_wood"), 11),
 			MakeW(TEXT("SMG 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/SMGs/01/SM_Modern_Weapons_SMG_01.SM_Modern_Weapons_SMG_01"),
-				nullptr, FVector(-10.0f, 2.6f, 1.42f), FRotator(-5.0f, -90.0f, -0.0f), 0.36f, FVector(18.0f, 6.0f, 0.5f),
+				nullptr, FVector(-10.0f, 2.6f, 1.42f), FRotator(-5.0f, -90.0f, -0.0f), 1.000f, FVector(18.0f, 6.0f, 0.5f),
 				FVector(20.0f, -2.17f, -6.06f), FRotator(0.44f, 0.05f, 0.0f),
 				Mode_BA, EPFFireMode::Auto,
 				1.4f, 0.09f, 9000.f, 1.5f, 3, 30, 15.0f,
@@ -257,7 +257,7 @@ namespace PFWeapon
 				0.20f, 0.18f, 1.00f, 0.9f,
 				0.f, 0.f, 1.15f, 3),
 			MakeW(TEXT("SMG 02"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/SMGs/02/SM_Modern_Weapons_SMG_02.SM_Modern_Weapons_SMG_02"),
-				nullptr, FVector(-10.0f, 3.74f, -0.46f), FRotator(-5.0f, -90.0f, -0.0f), 0.36f, FVector(18.0f, 6.0f, 0.5f),
+				nullptr, FVector(-10.0f, 3.74f, -0.46f), FRotator(-5.0f, -90.0f, -0.0f), 1.000f, FVector(18.0f, 6.0f, 0.5f),
 				FVector(20.0f, -3.14f, -5.67f), FRotator(-0.12f, 0.25f, 0.0f),
 				Mode_A, EPFFireMode::Auto,
 				1.6f, 0.12f, 8800.f, 1.3f, 3, 25, 16.0f,
@@ -267,7 +267,7 @@ namespace PFWeapon
 				0.18f, 0.18f, 1.00f, 0.9f,
 				0.f, 0.f, 1.05f, 8),
 			MakeW(TEXT("SMG 03"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/SMGs/03/SM_Modern_Weapons_SMG_03.SM_Modern_Weapons_SMG_03"),
-				nullptr, FVector(-10.0f, 2.1f, 2.45f), FRotator(-5.0f, -90.0f, 6.5f), 0.36f, FVector(18.0f, 6.0f, 0.5f),
+				nullptr, FVector(-10.0f, 2.1f, 2.45f), FRotator(-5.0f, -90.0f, 6.5f), 1.000f, FVector(18.0f, 6.0f, 0.5f),
 				FVector(21.07f, -1.7f, -6.1f), FRotator(6.06f, 0.14f, 0.56f),
 				Mode_SBA, EPFFireMode::Auto,
 				1.2f, 0.07f, 10000.f, 1.8f, 3, 30, 13.0f,
@@ -277,7 +277,7 @@ namespace PFWeapon
 				0.20f, 0.18f, 1.00f, 0.9f,
 				0.f, 0.f, 1.15f, 13),
 			MakeW(TEXT("SMG 04"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/SMGs/04/SM_Modern_Weapons_SMG_04.SM_Modern_Weapons_SMG_04"),
-				nullptr, FVector(-12.53f, -0.02f, 2.81f), FRotator(-5.0f, -90.0f, 6.21f), 0.36f, FVector(18.0f, 6.0f, 0.5f),
+				nullptr, FVector(-12.53f, -0.02f, 2.81f), FRotator(-5.0f, -90.0f, 6.21f), 1.000f, FVector(18.0f, 6.0f, 0.5f),
 				FVector(20.0f, 0.45f, -7.24f), FRotator(5.0f, 0.0f, 0.58f),
 				Mode_SA, EPFFireMode::Auto,
 				1.7f, 0.10f, 9500.f, 1.6f, 3, 20, 5.5f,
@@ -287,7 +287,7 @@ namespace PFWeapon
 				0.25f, 0.18f, 1.00f, 0.9f,
 				0.f, 0.f, 1.15f, 19),
 			MakeW(TEXT("SMG 05"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/SMGs/05/SM_Modern_Weapons_SMG_05.SM_Modern_Weapons_SMG_05"),
-				nullptr, FVector(-10.0f, 4.4f, 1.52f), FRotator(-5.0f, -90.0f, -0.0f), 0.36f, FVector(18.0f, 6.0f, 0.5f),
+				nullptr, FVector(-10.0f, 4.4f, 1.52f), FRotator(-5.0f, -90.0f, -0.0f), 1.000f, FVector(18.0f, 6.0f, 0.5f),
 				FVector(20.0f, -4.05f, -5.36f), FRotator(0.04f, 0.04f, 0.0f),
 				Mode_A, EPFFireMode::Auto,
 				1.8f, 0.12f, 9000.f, 1.4f, 3, 50, 15.0f,
@@ -297,7 +297,7 @@ namespace PFWeapon
 				0.32f, 0.18f, 0.95f, 0.9f,
 				0.f, 0.f, 1.15f, 29),
 			MakeW(TEXT("SMG 06"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/SMGs/06/SM_Modern_Weapons_SMG_06.SM_Modern_Weapons_SMG_06"),
-				nullptr, FVector(-10.0f, 4.82f, -0.73f), FRotator(-5.0f, -90.0f, -0.0f), 0.36f, FVector(18.0f, 6.0f, 0.5f),
+				nullptr, FVector(-10.0f, 4.82f, -0.73f), FRotator(-5.0f, -90.0f, -0.0f), 1.000f, FVector(18.0f, 6.0f, 0.5f),
 				FVector(20.0f, -4.27f, -5.53f), FRotator(-0.54f, 0.11f, 0.0f),
 				Mode_BA, EPFFireMode::Auto,
 				1.5f, 0.10f, 8800.f, 1.2f, 3, 22, 17.0f,
@@ -311,7 +311,7 @@ namespace PFWeapon
 		// ---- Category 2: Pistol (7) — ReloadTime 0.8, MoveSpreadMult 1.2, MoveSpeedMult 1.0 ----
 		const FPFWeaponDef Pis01 = MakeW(
 			TEXT("Pistol 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Pistols/01/SM_Modern_Weapons_Pistol_01.SM_Modern_Weapons_Pistol_01"),
-			nullptr, FVector(-0.34f, 8.8f, -7.4f), FRotator(-2.0f, -90.0f, 2.0f), 0.38f, FVector(8.0f, 6.4f, 0.5f),
+			nullptr, FVector(-0.34f, 8.8f, -7.4f), FRotator(-2.0f, -90.0f, 2.0f), 1.000f, FVector(8.0f, 6.4f, 0.5f),
 			FVector(21.0f, -8.85f, 3.71f), FRotator(2.0f, 0.0f, -2.0f),
 			Mode_S, EPFFireMode::Single,
 			1.2f, 0.12f, 9200.f, 1.2f, 3, 15, 10.0f,
@@ -323,7 +323,7 @@ namespace PFWeapon
 
 		const FPFWeaponDef GPistols[] = {
 			MakeW(TEXT("Pistol"), TEXT("/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol"),
-				nullptr, FVector(-0.34f, 14.22f, -9.46f), FRotator(-2.0f, -90.0f, 2.0f), 0.4f, FVector(7.0f, 6.4f, 0.5f),
+				nullptr, FVector(-0.34f, 14.22f, -9.46f), FRotator(-2.0f, -90.0f, 2.0f), 1.000f, FVector(7.0f, 6.4f, 0.5f),
 			FVector(21.1f, -14.11f, 2.78f), FRotator(2.0f, 0.0f, -2.0f),
 				Mode_SB, EPFFireMode::Single,
 				1.3f, 0.15f, 9000.f, 1.2f, 3, 18, 8.0f,
@@ -335,11 +335,11 @@ namespace PFWeapon
 			Pis01,
 			SkinOf(Pis01, TEXT("Pistol 02"),
 				TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Pistols/02/SM_Modern_Weapons_Pistol_02.SM_Modern_Weapons_Pistol_02"),
-				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 0.38f, FVector(8.0f, 6.4f, 0.5f),
+				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 1.000f, FVector(8.0f, 6.4f, 0.5f),
 			FVector(21.0f, -5.74f, 3.99f), FRotator(2.0f, 0.0f, -2.0f),
 				TEXT("pis_02"), 24),
 			MakeW(TEXT("Pistol 03"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Pistols/03/SM_Modern_Weapons_Pistol_03.SM_Modern_Weapons_Pistol_03"),
-				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 0.38f, FVector(8.0f, 6.4f, 0.5f),
+				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 1.000f, FVector(8.0f, 6.4f, 0.5f),
 			FVector(21.0f, -5.78f, 4.36f), FRotator(2.0f, 0.0f, -2.0f),
 				Mode_SB, EPFFireMode::Single,
 				1.4f, 0.14f, 9200.f, 1.2f, 3, 17, 9.0f,
@@ -349,7 +349,7 @@ namespace PFWeapon
 				0.17f, 0.18f, 1.00f, 0.8f,
 				0.f, 0.f, 1.2f, 12),
 			MakeW(TEXT("Pistol 04"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Pistols/04/SM_Modern_Weapons_Pistol_04.SM_Modern_Weapons_Pistol_04"),
-				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 0.38f, FVector(8.0f, 6.4f, 0.5f),
+				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 1.000f, FVector(8.0f, 6.4f, 0.5f),
 			FVector(21.0f, -5.69f, 3.75f), FRotator(2.0f, 0.0f, -2.0f),
 				Mode_S, EPFFireMode::Single,
 				0.9f, 0.08f, 9200.f, 1.3f, 3, 15, 9.0f,
@@ -359,7 +359,7 @@ namespace PFWeapon
 				0.17f, 0.18f, 1.00f, 0.8f,
 				0.f, 0.f, 1.2f, 33),
 			MakeW(TEXT("Revolver 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Revolvers/01/SM_Modern_Weapons_Revolver_01.SM_Modern_Weapons_Revolver_01"),
-				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 0.4f, FVector(9.0f, 6.4f, 0.5f),
+				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 1.000f, FVector(9.0f, 6.4f, 0.5f),
 			FVector(20.0f, -5.65f, 2.58f), FRotator(2.0f, 0.0f, -2.0f),
 				Mode_S, EPFFireMode::Single,
 				1.6f, 0.10f, 9500.f, 1.6f, 1, 6, 4.0f,
@@ -369,7 +369,7 @@ namespace PFWeapon
 				0.17f, 0.18f, 1.00f, 0.8f,
 				0.f, 0.f, 1.2f, 16),
 			MakeW(TEXT("Revolver 02"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Revolvers/02/SM_Modern_Weapons_Revolver_02.SM_Modern_Weapons_Revolver_02"),
-				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 0.4f, FVector(9.0f, 6.4f, 0.5f),
+				nullptr, FVector(-0.34f, 5.71f, -7.72f), FRotator(-2.0f, -90.0f, 2.0f), 1.000f, FVector(9.0f, 6.4f, 0.5f),
 				FVector(20.0f, -5.66f, 2.71f), FRotator(2.0f, 0.0f, -2.0f),
 				Mode_S, EPFFireMode::Single,
 				1.9f, 0.14f, 9000.f, 1.2f, 1, 6, 5.0f,
@@ -383,7 +383,7 @@ namespace PFWeapon
 		// ---- Category 3: Shotgun (4) — ReloadTime 1.4 (sg_03: 2.2), pellets@spread ----
 		const FPFWeaponDef GShotguns[] = {
 			MakeW(TEXT("Shotgun 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/01/SM_Modern_Weapons_Shotgun_01.SM_Modern_Weapons_Shotgun_01"),
-				nullptr, FVector(1.3f, 8.51f, -8.26f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(38.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 8.51f, -8.26f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(38.0f, 6.4f, 0.0f),
 				FVector(8.0f, -8.45f, 4.25f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_S, EPFFireMode::Single,
 				0.9f, 0.15f, 7000.f, 0.30f, 1, 6, 1.3f,
@@ -393,7 +393,7 @@ namespace PFWeapon
 				0.28f, 0.18f, 0.95f, 1.4f,
 				0.f, 0.f, 1.35f, 5),
 			MakeW(TEXT("Shotgun 02"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/02/SM_Modern_Weapons_Shotgun_02.SM_Modern_Weapons_Shotgun_02"),
-				nullptr, FVector(1.3f, 7.69f, -8.43f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(38.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 7.69f, -8.43f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(38.0f, 6.4f, 0.0f),
 				FVector(8.0f, -7.63f, 3.24f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_S, EPFFireMode::Single,
 				0.9f, 0.15f, 7500.f, 0.35f, 1, 5, 1.1f,
@@ -403,7 +403,7 @@ namespace PFWeapon
 				0.28f, 0.18f, 0.95f, 1.4f,
 				0.f, 0.f, 1.35f, 15),
 			MakeW(TEXT("Shotgun 03"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/03/SM_Modern_Weapons_Shotgun_03.SM_Modern_Weapons_Shotgun_03"),
-				nullptr, FVector(1.3f, 8.2f, -8.75f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(38.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 8.2f, -8.75f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(38.0f, 6.4f, 0.0f),
 				FVector(8.0f, -8.19f, 4.68f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_S, EPFFireMode::Single,
 				0.9f, 0.15f, 7000.f, 0.30f, 1, 2, 3.0f,
@@ -413,7 +413,7 @@ namespace PFWeapon
 				0.22f, 0.18f, 1.00f, 2.2f,
 				0.f, 0.f, 1.35f, 22),
 			MakeW(TEXT("Shotgun 04"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/04/SM_Modern_Weapons_Shotgun_04.SM_Modern_Weapons_Shotgun_04"),
-				nullptr, FVector(1.3f, 9.69f, -6.43f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(38.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 9.69f, -6.43f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(38.0f, 6.4f, 0.0f),
 				FVector(8.0f, -9.51f, -0.41f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_SB, EPFFireMode::Single,
 				// ClassBurstCount was 1, which made BURST fire exactly one shell — indistinguishable from
@@ -433,7 +433,7 @@ namespace PFWeapon
 		// ---- Category 4: Sniper (4) — no bloom chain; ClimbRecover ~20 ----
 		const FPFWeaponDef GSnipers[] = {
 			MakeW(TEXT("Sniper 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Snipers/01/SM_Modern_Weapons_Sniper_01.SM_Modern_Weapons_Sniper_01"),
-				nullptr, FVector(1.3f, 8.22f, -7.47f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(48.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 8.22f, -7.47f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(48.0f, 6.4f, 0.0f),
 				FVector(12.0f, -8.06f, 0.9f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_S, EPFFireMode::Single,
 				4.5f, 0.02f, 16000.f, 3.0f, 1, 5, 0.90f,
@@ -443,7 +443,7 @@ namespace PFWeapon
 				0.45f, 0.18f, 0.90f, 1.0f,
 				0.f, 0.f, 1.35f, 7),
 			MakeW(TEXT("Sniper 02"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Snipers/02/SM_Modern_Weapons_Sniper_02.SM_Modern_Weapons_Sniper_02"),
-				nullptr, FVector(1.3f, 7.94f, -8.09f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(48.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 7.94f, -8.09f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(48.0f, 6.4f, 0.0f),
 				FVector(12.0f, -7.9f, 3.92f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_S, EPFFireMode::Single,
 				4.5f, 0.02f, 16000.f, 2.8f, 1, 5, 1.10f,
@@ -453,7 +453,7 @@ namespace PFWeapon
 				0.30f, 0.18f, 0.90f, 1.0f,
 				0.f, 0.f, 1.35f, 18),
 			MakeW(TEXT("Sniper 03"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Snipers/03/SM_Modern_Weapons_Sniper_03.SM_Modern_Weapons_Sniper_03"),
-				nullptr, FVector(1.3f, 6.47f, -8.67f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(48.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.47f, -8.67f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(48.0f, 6.4f, 0.0f),
 				FVector(12.0f, -6.44f, 4.51f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_S, EPFFireMode::Single,
 				4.0f, 0.03f, 15000.f, 2.8f, 1, 10, 3.00f,
@@ -463,7 +463,7 @@ namespace PFWeapon
 				0.35f, 0.18f, 0.90f, 1.0f,
 				0.f, 0.f, 1.35f, 31),
 			MakeW(TEXT("Sniper 04"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Snipers/04/SM_Modern_Weapons_Sniper_04.SM_Modern_Weapons_Sniper_04"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.4f, FVector(48.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(48.0f, 6.4f, 0.0f),
 				FVector(12.0f, -6.3f, 1.91f), FRotator(1.8f, 0.0f, -0.5f),
 				Mode_S, EPFFireMode::Single,
 				4.5f, 0.02f, 17000.f, 3.2f, 1, 4, 0.65f,
@@ -490,7 +490,7 @@ namespace PFWeapon
 				0.40f, 0.18f, 0.90f, 2.5f,
 				0.f, 0.f, 1.35f, 10),
 			MakeW(TEXT("LMG 02"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/LMGs/02/SM_Modern_Weapons_LMG_02.SM_Modern_Weapons_LMG_02"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.38f, FVector(42.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(42.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.22f, 0.8f), FRotator(1.49f, 0.2f, -0.5f),
 				Mode_A, EPFFireMode::Auto,
 				2.4f, 0.16f, 12000.f, 2.2f, 3, 60, 6.0f,
@@ -500,7 +500,7 @@ namespace PFWeapon
 				0.45f, 0.18f, 0.88f, 2.5f,
 				0.f, 0.f, 1.35f, 25),
 			MakeW(TEXT("LMG 03"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/LMGs/03/SM_Modern_Weapons_LMG_03.SM_Modern_Weapons_LMG_03"),
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.38f, FVector(42.0f, 6.4f, 0.0f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(42.0f, 6.4f, 0.0f),
 				FVector(8.0f, -6.22f, 1.29f), FRotator(1.2f, 0.0f, -0.5f),
 				Mode_A, EPFFireMode::Auto,
 				2.6f, 0.18f, 11000.f, 2.0f, 3, 100, 12.0f,
@@ -523,7 +523,7 @@ namespace PFWeapon
 				// high (Tom: "rounds a bit high"), NOT a derived number. Do not copy it to other rows. To retire the
 				// guess: author a "Muzzle" socket on SM_Modern_Weapons_Minigun_01 — GetMuzzleLocation prefers a real
 				// socket over this value and will then ignore it entirely.
-				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 0.32f, FVector(40.0f, 6.4f, -8.7f),
+				nullptr, FVector(1.3f, 6.4f, -8.7f), FRotator(-1.5f, -90.0f, 1.5f), 1.000f, FVector(40.0f, 6.4f, -8.7f),
 				FVector(8.0f, -6.39f, 3.86f), FRotator(8.15f, -0.11f, -0.5f),
 				Mode_A, EPFFireMode::Auto,
 				3.0f, 0.5f, 9000.f, 1.5f, 3, 150, 18.0f,
@@ -802,6 +802,25 @@ namespace PFWeapon
 		};
 
 		FPFTrueScaleRef GTrueScaleRef;
+	}
+
+	bool HasTrueScaleFP(const FPFWeaponDef& Def)
+	{
+		if (Def.WeaponId == nullptr)
+		{
+			return false;
+		}
+		// Rows dialed by hand at FPScale 1.0. lmg_01 is the reference itself (deriving it would be a
+		// no-op round-trip anyway, but skipping keeps it exactly as tuned). Append as guns get tuned.
+		static const TCHAR* const TunedAtTrueScale[] = { TEXT("lmg_01") };
+		for (const TCHAR* Id : TunedAtTrueScale)
+		{
+			if (FCString::Strcmp(Def.WeaponId, Id) == 0)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	bool ComputeTrueScaleFP(const UStaticMesh* Mesh, FPFWeaponAutoPose& Out)

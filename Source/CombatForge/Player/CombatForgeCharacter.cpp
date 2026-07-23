@@ -87,12 +87,12 @@ static TAutoConsoleVariable<int32> CVarWeaponAutoPose(
 	TEXT("pf.WeaponAutoPose"), 0,
 	TEXT("1 = auto-generate FP hip+ADS from mesh bounds (ignores catalog). 0 = catalog poses only (default)."));
 
-// TRUE-SCALE FP (Tom 2026-07-23: "increase the scale to one across all of the guns"). The legacy FP rows
-// were hand-tuned around HALF-size viewmodels (FPScale 0.32-0.50); rather than invalidate 36 tuned rows,
-// any row still below 0.9 gets its hip+ADS DERIVED at life size from the lmg_01 reference row (the gun
-// Tom dialed at 1.0 — its baked FPLoc/FPRot/AdsLoc/AdsRot define where the grip and sight belong; each
-// mesh's own bounds do the rest). A row re-tuned at scale >= 0.9 is respected as-is, pf.WeaponFP session
-// tunes still override everything, and 0 turns the derivation off (raw legacy rows).
+// TRUE-SCALE FP (Tom 2026-07-23: "I want every gun to be a scale of one"). EVERY catalog row now reads
+// FPScale 1.000f. The FPLoc/FPRot/AdsLoc numbers beside them were hand-tuned around HALF-size viewmodels
+// though, so at 1.0 they place the gun wrong — this derives hip+ADS at life size from the lmg_01
+// reference row (the gun Tom dialed at 1.0; its baked pose defines where grip and sight belong, each
+// mesh's own bounds do the rest). Rows listed in PFWeapon::HasTrueScaleFP are used verbatim,
+// pf.WeaponFP session tunes still override everything, and 0 turns the derivation off (raw rows).
 static TAutoConsoleVariable<int32> CVarWeaponFPTrueScale(
 	TEXT("pf.WeaponFPTrueScale"), 1,
 	TEXT("1 = derive life-size FP hip+ADS for legacy half-scale catalog rows from the lmg_01 reference (default). 0 = raw catalog rows."));
@@ -2830,9 +2830,9 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 #endif
 		}
 	}
-	else if (CVarWeaponFPTrueScale.GetValueOnGameThread() != 0 && Def.FPScale < 0.9f)
+	else if (CVarWeaponFPTrueScale.GetValueOnGameThread() != 0 && !PFWeapon::HasTrueScaleFP(Def))
 	{
-		// Legacy half-scale row → derive this gun's life-size hip+ADS from the lmg_01 reference (see the
+		// Row not yet hand-tuned at life size → derive its hip+ADS from the lmg_01 reference (see the
 		// cvar comment). Falls back to the raw row if the reference can't resolve.
 		FPFWeaponAutoPose TrueScale;
 		if (PFWeapon::ComputeTrueScaleFP(WpnMesh, TrueScale))
