@@ -23,12 +23,17 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 14;  // alpha.14 (NOT pushed yet — local playtest package 2026-07-23):
-	                                   // ALL 35 guns life-size + hand-tuned FP/ADS, computed TP grip +
-	                                   // one-gun calibrate, left palm on the gun (humans; bots keep the
-	                                   // tuned pose), midline tinted wall (opaque 1:30 then clears by 2:30),
-	                                   // build 2:30, Yard bounds flush with the buildable pad, cone roof
-	                                   // skin, code-review fix batch. alpha.13 is live on itch + the box.
+	constexpr int32 NetProtocol = 15;  // alpha.15 — FIRST-PERSON ARMS (Bandit gloved arms on the viewmodel,
+	                                   // seated per-weapon, fire + reload one-shots) on top of everything
+	                                   // in 14. Bumped off 14 on purpose: 14 was never pushed, but FIVE
+	                                   // local alpha-14 playtest packages exist on disk, and a 14-without-
+	                                   // arms client meeting a 14-with-arms server is exactly the silent
+	                                   // skew this gate exists to prevent.
+	                                   // Carried from 14 (also never pushed): all 35 guns life-size +
+	                                   // hand-tuned FP/ADS, computed TP grip + one-gun calibrate, left palm
+	                                   // on the gun (humans; bots keep the tuned pose), midline tinted wall
+	                                   // (opaque 1:30 then clears by 2:30), build 2:30, Yard bounds flush
+	                                   // with the buildable pad, cone roof skin, code-review fix batch.
 }
 
 /**
