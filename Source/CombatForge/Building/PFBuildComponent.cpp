@@ -607,6 +607,12 @@ void UPFBuildComponent::EnsureGhost()
 		// Translucent sort: draw after world so the soft green reads as an overlay.
 		Comp->SetTranslucentSortPriority(100);
 		Comp->SetRenderCustomDepth(false);
+		// Prop previews use the REAL warehouse meshes, which are Nanite (Megascans) — and Nanite does
+		// not render translucent blends, so the GlassFade ghost MID made the engine substitute the
+		// DEFAULT (checker) material on box/barrel previews ("Invalid material ... used on Nanite
+		// static mesh SM_Ind_War_Storage_Box..." in Tom's 2026-07-23 server-join log). Render the
+		// ghost from the mesh's non-Nanite fallback instead; placed instances keep Nanite.
+		Comp->bDisallowNanite = true;
 		Comp->RegisterComponent();
 		return Comp;
 	};

@@ -113,7 +113,18 @@ APFBuildGrid::APFBuildGrid()
 
 			UInstancedStaticMeshComponent* ISMC = CreateDefaultSubobject<UInstancedStaticMeshComponent>(CompName);
 			ISMC->SetupAttachment(GridRoot);
-			ISMC->SetMobility(EComponentMobility::Static);
+			// PROPS must be Movable: they swap from these engine placeholders to the real warehouse
+			// meshes at runtime (EnsurePieceVisualsApplied), and the engine REFUSES SetStaticMesh on a
+			// registered Static component once the world has begun play (the AreDynamicDataChangesAllowed
+			// gate). The AUTHORITY dresses the grid during world init — before begin-play — so its swap
+			// sticks; a JOINING client receives this actor mid-match, its swap was silently refused
+			// ("Calling SetStaticMesh on ... ISM_Barrel_Team0 but Mobility is Static", Tom's 2026-07-23
+			// server-join log), and instances stamped with warehouse-FITTED transforms rendered on the
+			// unit engine shapes: the "extra large shapes with no skins" every remote joiner saw while
+			// the host looked perfect. Structural ISMs never change mesh after the ctor and stay Static.
+			ISMC->SetMobility(PFIsProp(static_cast<EPFPieceType>(TypeIdx))
+				? EComponentMobility::Movable
+				: EComponentMobility::Static);
 			ISMC->SetStaticMesh(MeshPerType[TypeIdx]);
 			ISMC->SetMaterial(0, ShapeMaterial);
 			// Built pieces shape the runtime navmesh so bots PATH AROUND player forts instead of running into
@@ -188,7 +199,25 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 				const int32 K = ISMCIndexFor(Type, Team);
 				if (PieceISMCs[K] && PieceISMCs[K]->GetStaticMesh() != PropMesh)
 				{
-					PieceISMCs[K]->SetStaticMesh(PropMesh);
+					// SetStaticMesh RETURNS FALSE when the engine refuses it (registered + Static +
+					// world begun — the remote-join case; see the ctor mobility comment). That refusal
+					// was silent for three alphas: the latch below keyed off CONTENT being loaded, the
+					// content loads fine on clients, so the poll stopped while the ISMs still wore the
+					// engine placeholders. Never trust the call blindly again — flip mobility and
+					// retry once, and if it STILL refuses, log loudly and keep the retry poll alive.
+					if (!PieceISMCs[K]->SetStaticMesh(PropMesh))
+					{
+						PieceISMCs[K]->SetMobility(EComponentMobility::Movable);
+						if (!PieceISMCs[K]->SetStaticMesh(PropMesh))
+						{
+							UE_LOG(CombatForgeLog, Warning,
+								TEXT("BuildGrid: prop mesh swap REFUSED on %s (mobility=%d) — keeping retry alive"),
+								*PieceISMCs[K]->GetName(),
+								static_cast<int32>(PieceISMCs[K]->Mobility));
+							bPieceVisualsReady = false;
+							continue;
+						}
+					}
 					// Warehouse assets keep their own materials (looks like real cover, not neon cubes).
 					if (PFBuildPieceVisuals::UsesNativeMaterials(Type))
 					{
