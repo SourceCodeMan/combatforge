@@ -109,21 +109,36 @@ static TAutoConsoleVariable<int32> CVarWeaponAimFromHands(
 	TEXT("pf.WeaponAimFromHands"), 1,
 	TEXT("1 = orient the TP weapon along the animated hand_r->hand_l line (default). 0 = fixed WeaponRelative* offset."));
 
+// Computed DEFAULT for the per-weapon third-person grip. This is not the old derived pose coming back:
+// the tick never recomputes anything (ApplyHandWeaponPose still applies plain relative values), rows a
+// human tuned with pf.WeaponTP always win, and the whole layer dies at runtime with pf.WeaponAutoTP 0.
+// What it fixes: all 36 catalog rows still ride ONE shared offset, and pf.WeaponDump measured the mesh
+// pivots 5-21uu apart — so the shared value is wrong for almost every gun (the misaligned-hands bug).
+// The computed default cancels each mesh's pivot offset and barrel axis with the same bounds recipe the
+// FP auto-pose uses, and pf.WeaponTPCalibrate lets ONE hand-tuned gun correct the whole family.
+static TAutoConsoleVariable<int32> CVarWeaponAutoTP(
+	TEXT("pf.WeaponAutoTP"), 1,
+	TEXT("1 = per-weapon TP grip computed from mesh bounds for UNTUNED catalog rows (default). 0 = shared/manual values only."));
+
 // Live toggle: pawns are REUSED across respawns, so waiting for the next AssembleBanditCharacter meant the
 // kill switch never took effect. The sink fires when any cvar changes; re-route the anim set on a real edge.
 static void PFArmedAnimsSink()
 {
 	static int32 LastArmed = CVarArmedAnims.GetValueOnGameThread();
 	static int32 LastBoneAttach = CVarWeaponBoneAttach.GetValueOnGameThread();
+	static int32 LastAutoTP = CVarWeaponAutoTP.GetValueOnGameThread();
 	const int32 Now = CVarArmedAnims.GetValueOnGameThread();
 	const int32 NowBone = CVarWeaponBoneAttach.GetValueOnGameThread();
-	if (Now == LastArmed && NowBone == LastBoneAttach)
+	const int32 NowAutoTP = CVarWeaponAutoTP.GetValueOnGameThread();
+	if (Now == LastArmed && NowBone == LastBoneAttach && NowAutoTP == LastAutoTP)
 	{
 		return;
 	}
 	const bool bArmedChanged = (Now != LastArmed);
+	const bool bAutoTPChanged = (NowAutoTP != LastAutoTP);
 	LastArmed = Now;
 	LastBoneAttach = NowBone;
+	LastAutoTP = NowAutoTP;
 	for (TObjectIterator<ACombatForgeCharacter> It; It; ++It)
 	{
 		if (It->GetWorld() != nullptr && It->GetWorld()->IsGameWorld())
@@ -135,6 +150,15 @@ static void PFArmedAnimsSink()
 			if (bArmedChanged)
 			{
 				It->RefreshBanditAnimSet();
+			}
+			if (bAutoTPChanged)
+			{
+				// Live A/B for the computed grip: re-layer the cached TP values on every pawn immediately —
+				// same reason as the attach bone above, otherwise the toggle waits for the next equip. The
+				// back sling answers the same switch, so refresh it too or the A/B looks broken on the one
+				// gun you can only judge on somebody else's back.
+				It->RecomputeTPGrip();
+				It->ApplyBackSlingPose();
 			}
 		}
 	}
@@ -586,6 +610,7 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	bSprintKeyHeld = false;
 	bADSHeld = false;
 	bFireHeld = false;
+	bSprintOutTapBuffered = false;
 	bJumpKeyHeld = false;
 	bADSToggleMode = false;
 	bCrouchToggleMode = false;
@@ -1154,8 +1179,21 @@ void ACombatForgeCharacter::DevEquipCatalogWeapon(int32 Category, int32 Index)
 	C.Category = Category;
 	C.Index = Index;
 	PrimaryWeaponConfig = C;
-	// Keep secondary as-is; force primary in hand for a clean tune view.
-	bSecondaryActive = false;
+	// Keep secondary as-is; force primary in hand for a clean tune view. bSecondaryActive is a
+	// SERVER-replicated flag: writing it directly on a non-authority client would diverge forever (the
+	// server never changes its copy, so replication never corrects us back — muzzle/stats disagreement
+	// on every shot). Flip it through the existing swap RPC instead.
+	if (bSecondaryActive)
+	{
+		if (HasAuthority())
+		{
+			bSecondaryActive = false;
+		}
+		else
+		{
+			ServerSwapWeapon();   // toggles true -> false server-side and replicates back
+		}
+	}
 	PFWeapon::SaveConfig(C);
 
 	// Kit rep so listen host + any remote see the same gun stats/mesh.
@@ -1296,6 +1334,7 @@ void ACombatForgeCharacter::OnCrouchSlideReleased()
 void ACombatForgeCharacter::OnFirePressed()
 {
 	bFireHeld = true;
+	bSprintOutTapBuffered = false;   // a fresh press supersedes any buffered tap
 
 	// Capture sprint state BEFORE the intent update cancels it.
 	const bool bNeedsRaise = (PFMovement != nullptr) && PFMovement->IsSprintingEffective();
@@ -1318,18 +1357,30 @@ void ACombatForgeCharacter::OnFirePressed()
 
 void ACombatForgeCharacter::OnSprintOutFinished()
 {
-	// Buffered fire releases when the raise timer ends (04 §1.1).
-	if (bFireHeld && WeaponComponent != nullptr)
+	// Buffered fire releases when the raise timer ends (04 §1.1). A TAP (press+release faster than the
+	// sprint-out window) fires exactly one shot here instead of being silently eaten — the release used to
+	// clear the timer, so a quick trigger pull out of sprint produced nothing and no feedback (issue #13 B10).
+	if ((bFireHeld || bSprintOutTapBuffered) && WeaponComponent != nullptr)
 	{
 		WeaponComponent->StartFire();
+		if (!bFireHeld)
+		{
+			WeaponComponent->StopFire();   // tap: single release, not sustained fire
+		}
 	}
+	bSprintOutTapBuffered = false;
 }
 
 void ACombatForgeCharacter::OnFireReleased()
 {
 	bFireHeld = false;
-	GetWorldTimerManager().ClearTimer(SprintOutTimerHandle);
-	if (WeaponComponent != nullptr)
+	// Release during the sprint-out window BUFFERS the tap instead of cancelling it — let the timer land
+	// and OnSprintOutFinished emit the single shot.
+	if (GetWorldTimerManager().IsTimerActive(SprintOutTimerHandle))
+	{
+		bSprintOutTapBuffered = true;
+	}
+	else if (WeaponComponent != nullptr)
 	{
 		WeaponComponent->StopFire();
 	}
@@ -1797,6 +1848,13 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 {
 	UWorld* World = GetWorld();
 	if (World == nullptr)
+	{
+		return;
+	}
+	// Same combat window as every gun path (Lobby || Combat+Live). Without this, melee could eliminate
+	// players during Build/Freeze/Results while weapons were locked out (issue #13 P3).
+	const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>();
+	if (GS == nullptr || !GS->IsFireAllowed())
 	{
 		return;
 	}
@@ -2608,6 +2666,15 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 		CharBaseComps[PFChar::kBaseLegs]->SetHiddenInGame(!bShowLegs);
 		CharBaseComps[PFChar::kBaseLegs]->SetCastShadow(bShowLegs);
 	}
+
+	// CORPSE RE-ASSERT: a class switch on the DEATH SCREEN replicates the new kit to every machine, and the
+	// Mount lambda above un-hides each freshly-mounted part — re-dressing the hidden corpse in place on the
+	// server and all remote clients until respawn. If this pawn is currently eliminated, put the hide back
+	// (instant, no death anim — the fall already played when they died).
+	if (bEliminatedAppearanceActive)
+	{
+		SetEliminatedAppearance(true, /*bPlayDeathAnim=*/false);
+	}
 }
 
 void ACombatForgeCharacter::ReapplyCharacterConfig()
@@ -2774,6 +2841,14 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 
 	if (WeaponComponent != nullptr)
 	{
+		// SAME-WEAPON kit re-push must NOT hand out a free magazine: opening the loadout/character menu
+		// mid-fight re-pushes the kit (PushLocalKit -> ServerSetKit -> ApplyKit -> here), and the old
+		// unconditional refill made that a 0-second reload (issue scan #68). Preserve the current hopper
+		// when the equipped weapon is unchanged; a real weapon CHANGE still starts full (the scroll-swap
+		// path restores its own per-slot stash on top), and respawns refill via ServerResetLoadout.
+		const FName NewWeaponId(Def.WeaponId != nullptr ? Def.WeaponId : TEXT(""));
+		const bool bSameWeapon = !LastAppliedWeaponId.IsNone() && LastAppliedWeaponId == NewWeaponId;
+		const uint8 PrevHopper = WeaponComponent->HopperCount;
 		WeaponComponent->SpreadHip     = Def.SpreadHipDeg;
 		WeaponComponent->SpreadADS     = Def.SpreadADSDeg;
 		WeaponComponent->SpreadHipMoving = Def.SpreadHipDeg * Def.MoveSpreadMult;
@@ -2781,7 +2856,16 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 		WeaponComponent->ProjLifetime  = Def.ProjLifetimeSec;
 		WeaponComponent->BurstCount    = Def.ClassBurstCount;
 		WeaponComponent->HopperCapacity = Def.MagSize;
-		WeaponComponent->HopperCount    = Def.MagSize;
+		// COUNT is written by the AUTHORITY only (issue #13 P2): an owning client writing it here raced
+		// the owner-only ammo OnRep on weapon swaps — a stale full-mag flashed on the HUD until the next
+		// server delta. Capacity stays unconditional (cosmetic bound); clients get counts from OnRep_Hopper.
+		if (HasAuthority())
+		{
+			WeaponComponent->HopperCount = bSameWeapon
+				? FMath::Min<uint8>(PrevHopper, Def.MagSize)
+				: Def.MagSize;
+		}
+		LastAppliedWeaponId = NewWeaponId;
 		WeaponComponent->FireRateBps    = Def.FireRateBps;
 		WeaponComponent->HitValue       = Def.HitValue;
 		WeaponComponent->Pellets        = Def.Pellets;
@@ -2823,24 +2907,12 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 		CMC->CachedWeaponMoveSpeedMult = Def.MoveSpeedMult;
 	}
 
-	// TP RAISED (fire/ADS) rotation is per-weapon (Tom 2026-07-18): the default (-90 / 0) is SM_Rifle's
-	// +Y-barrel axis; pistols/revolvers render UPSIDE DOWN with it (different mesh barrel axis), so category 2
-	// flips 180° about the barrel unless the catalog row explicitly overrides TPRaisedRoll. Best-guess — the
-	// pistol mesh axis is unverified in-editor; if a pistol still looks off, adjust TPRaisedYawOffset/Roll.
-	CachedTPRaisedYaw  = Def.TPRaisedYawOffset;
-	CachedTPRaisedRoll = Def.TPRaisedRoll;
-	// Per-weapon third-person grip. These meshes have their pivots 5-21uu apart (pf.WeaponDump), so the
-	// grip offset HAS to be per-weapon — a shared one cannot be right for more than one gun.
-	CachedTPLoc   = Def.TPLoc;
-	CachedTPRot   = Def.TPRot;
-	CachedTPScale = (Def.TPScale > 0.f) ? Def.TPScale : WeaponRelativeScale.X;
-	if (ActiveWeaponConfig.Category == 2 && FMath::IsNearlyZero(Def.TPRaisedRoll))
-	{
-		CachedTPRaisedRoll = 180.f;
-	}
-
-	// TP hand gun + back-slung stowed gun.
+	// TP hand gun + back-slung stowed gun. WeaponMesh must be assigned BEFORE RecomputeTPGrip — the
+	// computed grip measures this mesh's bounds. All per-weapon TP caching (raised yaw/roll, grip layers,
+	// pistol flip) lives in RecomputeTPGrip so live refreshes (pf.WeaponAutoTP / pf.WeaponTPAnchor /
+	// pf.WeaponTPCalibrate) can re-derive it without re-running this whole equip (which refills ammo).
 	WeaponMesh = WpnMesh;
+	RecomputeTPGrip();
 	AttachWeaponToHand();
 
 	const FPFWeaponDef& StowedDef = PFWeapon::Weapon(StowedConfig.Category, StowedConfig.Index);
@@ -3145,7 +3217,10 @@ static ACombatForgeCharacter* PFFindWeaponTuneTarget(UWorld* World)
 	ACombatForgeCharacter* Fallback = nullptr;
 	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
 	{
-		if (*It == PFFindWeaponTuneTarget(World))
+		// The locally-controlled pawn wins during normal play. (This line once read
+		// `*It == PFFindWeaponTuneTarget(World)` — unconditional self-recursion, stack-overflow crash on
+		// every weapon dev command with any pawn in the world. Compare a PAWN PROPERTY here, never re-enter.)
+		if (It->IsLocallyControlled())
 		{
 			return *It;
 		}
@@ -3170,12 +3245,9 @@ static void PFWeaponFPCmd(const TArray<FString>& Args, UWorld* World)
 	const FVector Muzzle = (Args.Num() >= 10)
 		? FVector(FCString::Atof(*Args[7]), FCString::Atof(*Args[8]), FCString::Atof(*Args[9]))
 		: FVector(42.f, 3.5f, -3.5f);
-	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	if (ACombatForgeCharacter* Target = PFFindWeaponTuneTarget(World))
 	{
-		if (*It == PFFindWeaponTuneTarget(World))
-		{
-			It->TuneWeaponFP(Loc, Rot, Scale, Muzzle);
-		}
+		Target->TuneWeaponFP(Loc, Rot, Scale, Muzzle);
 	}
 	UE_LOG(CombatForgeLog, Log,
 		TEXT("pf.WeaponFP: FPLoc=FVector(%.2ff,%.2ff,%.2ff), FPRot=FRotator(%.2ff,%.2ff,%.2ff), FPScale=%.3ff, MuzzleFP=FVector(%.2ff,%.2ff,%.2ff)"),
@@ -3186,7 +3258,7 @@ static FAutoConsoleCommandWithWorldAndArgs GPFWeaponFPCmd(
 	TEXT("Tune the equipped weapon's first-person pose: x y z pitch yaw roll scale [muzX muzY muzZ]. Prints values to paste into PFWeaponCatalog."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponFPCmd));
 
-void ACombatForgeCharacter::TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale)
+void ACombatForgeCharacter::TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale, bool bRecordSession)
 {
 	// Third-person grip: where the gun sits in hand_r. Applied by ApplyHandWeaponPose every tick, so simply
 	// writing the members takes effect on the next frame — no re-attach needed.
@@ -3198,7 +3270,140 @@ void ACombatForgeCharacter::TuneWeaponTP(const FVector& Loc, const FRotator& Rot
 	WeaponRelativeLocation = Loc;   // keep the character default in step for any weapon with no row value
 	WeaponRelativeRotation = Rot;
 	WeaponRelativeScale = FVector(Scale);
+	if (bRecordSession)
+	{
+		// Under the ACTIVE weapon's id, so respawn / class-cycle / scroll-swap re-applies the tune instead
+		// of silently reverting it on the next ApplyWeaponLoadout (which used to eat mid-session tunes).
+		const FString Id = PFWeapon::IdOf(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+		if (!Id.IsEmpty())
+		{
+			FPFSessionWeaponTP& S = SessionWeaponTPs.FindOrAdd(FName(*Id));
+			S.TPLoc = Loc;
+			S.TPRot = Rot;
+			S.TPScale = Scale;
+		}
+	}
 	ApplyHandWeaponPose();   // immediate feedback while dragging numbers in the console
+}
+
+bool ACombatForgeCharacter::TryApplySessionWeaponTP(const FName& WeaponId, FVector& InOutLoc,
+	FRotator& InOutRot, float& InOutScale) const
+{
+	const FPFSessionWeaponTP* S = SessionWeaponTPs.Find(WeaponId);
+	if (S == nullptr)
+	{
+		return false;
+	}
+	InOutLoc = S->TPLoc;
+	InOutRot = S->TPRot;
+	InOutScale = S->TPScale;
+	return true;
+}
+
+void ACombatForgeCharacter::RecomputeTPGrip()
+{
+	const FPFWeaponDef& Def = PFWeapon::Weapon(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+
+	// TP RAISED (fire/ADS) rotation is per-weapon (Tom 2026-07-18): the default (-90 / 0) is SM_Rifle's
+	// +Y-barrel axis; pistols/revolvers render UPSIDE DOWN with it (different mesh barrel axis), so category 2
+	// flips 180° about the barrel unless the catalog row explicitly overrides TPRaisedRoll.
+	CachedTPRaisedYaw  = Def.TPRaisedYawOffset;
+	CachedTPRaisedRoll = Def.TPRaisedRoll;
+
+	// LAYER 1 — the catalog row. A hand-tuned row (pf.WeaponTP paste) is FULLY manual and stops here.
+	// These meshes have their pivots 5-21uu apart (pf.WeaponDump), so the grip offset HAS to be per-weapon —
+	// a shared one cannot be right for more than one gun.
+	CachedTPLoc   = Def.TPLoc;
+	CachedTPRot   = Def.TPRot;
+	CachedTPScale = (Def.TPScale > 0.f) ? Def.TPScale : WeaponRelativeScale.X;
+
+	// LAYER 2 — computed default for UNTUNED rows: cancel this mesh's pivot offset + barrel axis so its
+	// grip region lands where the row default says a grip should sit (plus the global calibrate anchor).
+	// Plain relative values, applied once per equip — the tick never recomputes, so pf.WeaponTP always wins
+	// on the next frame exactly like before.
+	if (CVarWeaponAutoTP.GetValueOnGameThread() != 0 && !PFWeapon::HasTunedTP(Def) && WeaponMesh != nullptr)
+	{
+		FVector AnchorLoc;
+		FRotator AnchorRot;
+		float AnchorScaleMult = 1.f;
+		PFWeapon::GetAutoTPAnchor(AnchorLoc, AnchorRot, AnchorScaleMult);
+		// The auto base scale is the NAMED constant, never WeaponRelativeScale — TuneWeaponTP overwrites
+		// that member live, and deriving the base from it made the calibrate solve move the very gun that
+		// was just dialed (base*mult != dialed unless the dial happened to be 0.85).
+		CachedTPScale = PFWeapon::AutoTPBaseScale * AnchorScaleMult;
+		FPFWeaponAutoTP Auto;
+		if (PFWeapon::ComputeAutoTPGrip(WeaponMesh, CachedTPScale, Def.TPLoc, Def.TPRot,
+			0.55f, 0.55f, /*bApplyAnchor=*/true, Auto))
+		{
+			CachedTPLoc = Auto.TPLoc;
+			CachedTPRot = Auto.TPRot;
+			// The raised-pose default (-90) is the +Y-barrel convention. A measured +X-barrel mesh whose row
+			// kept that default gets the matching axis correction so it isn't sideways while firing (the
+			// raised override only drives rotation when the UNARMED anim set is active).
+			if (!Auto.bBarrelAlongY && FMath::IsNearlyEqual(Def.TPRaisedYawOffset, -90.f))
+			{
+				CachedTPRaisedYaw = 0.f;
+			}
+		}
+	}
+
+	// LAYER 3 — session live-tune (pf.WeaponTP) wins over both and survives respawn / class cycles.
+	if (Def.WeaponId != nullptr)
+	{
+		TryApplySessionWeaponTP(FName(Def.WeaponId), CachedTPLoc, CachedTPRot, CachedTPScale);
+	}
+
+	if (ActiveWeaponConfig.Category == 2 && FMath::IsNearlyZero(Def.TPRaisedRoll))
+	{
+		CachedTPRaisedRoll = 180.f;
+	}
+
+	ApplyHandWeaponPose();
+}
+
+bool ACombatForgeCharacter::CalibrateAutoTPFromCurrent()
+{
+	const FPFWeaponDef& Def = PFWeapon::Weapon(ActiveWeaponConfig.Category, ActiveWeaponConfig.Index);
+	UStaticMesh* M = (WeaponMesh != nullptr) ? WeaponMesh.Get() : PFWeapon::LoadMesh(Def);
+
+	// Solve against the ANCHOR-FREE auto pose over the immutable struct defaults (the base every untuned
+	// row uses), at the scale currently on screen — so "what Tom dialed" minus "what auto would produce"
+	// becomes the global correction every other gun inherits.
+	static const FPFWeaponDef CatalogDefaults;
+	FPFWeaponAutoTP Auto0;
+	if (!PFWeapon::ComputeAutoTPGrip(M, CachedTPScale, CatalogDefaults.TPLoc, CatalogDefaults.TPRot,
+		0.55f, 0.55f, /*bApplyAnchor=*/false, Auto0))
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("pf.WeaponTPCalibrate: cannot measure the equipped mesh (missing or degenerate bounds)."));
+		return false;
+	}
+	if (PFWeapon::HasTunedTP(Def))
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("pf.WeaponTPCalibrate: NOTE — '%s' has a hand-tuned catalog row, which the auto grip never "
+			     "touches. The solve still works, but calibrate from an untuned gun to see the result on it."),
+			Def.WeaponId ? Def.WeaponId : TEXT("?"));
+	}
+	const FQuat AnchorQ = FQuat(CachedTPRot) * FQuat(Auto0.TPRot).Inverse();
+	const FVector AnchorLoc = CachedTPLoc - AnchorQ.RotateVector(Auto0.TPLoc);
+	// Divisor = the same named base every auto gun multiplies (AutoTPBaseScale * mult == the dialed scale,
+	// exactly) — never WeaponRelativeScale, which pf.WeaponTP itself mutates mid-session.
+	const float ScaleMult = (CachedTPScale > 0.f) ? (CachedTPScale / PFWeapon::AutoTPBaseScale) : 1.f;
+	PFWeapon::SetAutoTPAnchor(AnchorLoc, AnchorQ.Rotator(), ScaleMult);
+	// This gun should ride the anchor from here on like everyone else — drop its session override
+	// (which by construction now produces the identical pose anyway).
+	if (Def.WeaponId != nullptr)
+	{
+		SessionWeaponTPs.Remove(FName(Def.WeaponId));
+	}
+	const FRotator AnchorR = AnchorQ.Rotator();
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.WeaponTPCalibrate [%s] solved the global auto-TP anchor. Paste into PFWeaponCatalog.cpp: ")
+		TEXT("GAutoTPAnchorLoc = FVector(%.2ff, %.2ff, %.2ff); GAutoTPAnchorRot = FRotator(%.2ff, %.2ff, %.2ff); GAutoTPAnchorScaleMult = %.3ff;"),
+		Def.WeaponId ? Def.WeaponId : TEXT("?"),
+		AnchorLoc.X, AnchorLoc.Y, AnchorLoc.Z, AnchorR.Pitch, AnchorR.Yaw, AnchorR.Roll, ScaleMult);
+	return true;
 }
 
 // Live-tune the THIRD-PERSON grip (what everyone else sees). The FP tools above only move the viewmodel; this
@@ -3215,21 +3420,93 @@ static void PFWeaponTPCmd(const TArray<FString>& Args, UWorld* World)
 	const FVector Loc(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
 	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
 	const float Scale = (Args.Num() >= 7) ? FCString::Atof(*Args[6]) : 0.85f;
+	ACombatForgeCharacter* Target = PFFindWeaponTuneTarget(World);
 	int32 Applied = 0;
 	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
 	{
-		It->TuneWeaponTP(Loc, Rot, Scale);
+		// Only the tune TARGET records a session override (under ITS weapon id) — the world-wide mirror is
+		// for eyeballing, and recording it on every pawn would stamp these values onto other weapons' ids.
+		It->TuneWeaponTP(Loc, Rot, Scale, /*bRecordSession=*/(*It == Target));
 		++Applied;
 	}
 	// Catalog-ready: paste straight onto the weapon's row, the same workflow as pf.WeaponFP.
 	UE_LOG(CombatForgeLog, Warning,
 		TEXT("pf.WeaponTP (%d pawns)  ->  paste on the weapon row:  D.TPLoc = FVector(%.2ff, %.2ff, %.2ff); D.TPRot = FRotator(%.2ff, %.2ff, %.2ff); D.TPScale = %.3ff;"),
 		Applied, Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Scale);
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.WeaponTP: or run pf.WeaponTPCalibrate now to transfer THIS placement to every untuned weapon."));
 }
 static FAutoConsoleCommandWithWorldAndArgs GPFWeaponTPCmd(
 	TEXT("pf.WeaponTP"),
 	TEXT("Tune the THIRD-PERSON weapon grip (hand_r): x y z pitch yaw roll [scale]. Applies to all pawns incl. bots; prints paste-ready values."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponTPCmd));
+
+// One hand-tuned gun corrects the whole catalog: dial ANY weapon with pf.WeaponTP until it sits right,
+// then run this. It solves the global auto-TP anchor (the delta between the dialed pose and the computed
+// one) and re-poses every pawn — all untuned weapons inherit the same correction, because their per-mesh
+// pivot/axis differences are already cancelled by the computed grip. Prints paste-ready constants to bake.
+static void PFWeaponTPCalibrateCmd(const TArray<FString>& /*Args*/, UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	ACombatForgeCharacter* Target = PFFindWeaponTuneTarget(World);
+	if (Target == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.WeaponTPCalibrate: no pawns in the world yet"));
+		return;
+	}
+	if (!Target->CalibrateAutoTPFromCurrent())
+	{
+		return;
+	}
+	int32 Applied = 0;
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		It->RecomputeTPGrip();
+		++Applied;
+	}
+	UE_LOG(CombatForgeLog, Warning, TEXT("pf.WeaponTPCalibrate: anchor applied to %d pawn(s). Cycle weapons (pf.WeaponNext) to inspect."), Applied);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponTPCalibrateCmd(
+	TEXT("pf.WeaponTPCalibrate"),
+	TEXT("Solve the global auto-TP anchor from the CURRENT pf.WeaponTP placement so every untuned weapon inherits it. Prints paste-ready constants."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponTPCalibrateCmd));
+
+// Direct edit of the same global anchor (pf.WeaponTPCalibrate solves it instead — usually what you want).
+// No args prints the current values.
+static void PFWeaponTPAnchorCmd(const TArray<FString>& Args, UWorld* World)
+{
+	FVector CurLoc;
+	FRotator CurRot;
+	float CurMult = 1.f;
+	PFWeapon::GetAutoTPAnchor(CurLoc, CurRot, CurMult);
+	if (World == nullptr || Args.Num() < 6)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("usage: pf.WeaponTPAnchor x y z pitch yaw roll [scaleMult]   current: (%.2f, %.2f, %.2f) / (%.2f, %.2f, %.2f) x%.3f"),
+			CurLoc.X, CurLoc.Y, CurLoc.Z, CurRot.Pitch, CurRot.Yaw, CurRot.Roll, CurMult);
+		return;
+	}
+	const FVector Loc(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
+	const float Mult = (Args.Num() >= 7) ? FCString::Atof(*Args[6]) : CurMult;
+	PFWeapon::SetAutoTPAnchor(Loc, Rot, Mult);
+	int32 Applied = 0;
+	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	{
+		It->RecomputeTPGrip();
+		++Applied;
+	}
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.WeaponTPAnchor (%d pawns)  ->  paste into PFWeaponCatalog.cpp:  GAutoTPAnchorLoc = FVector(%.2ff, %.2ff, %.2ff); GAutoTPAnchorRot = FRotator(%.2ff, %.2ff, %.2ff); GAutoTPAnchorScaleMult = %.3ff;"),
+		Applied, Loc.X, Loc.Y, Loc.Z, Rot.Pitch, Rot.Yaw, Rot.Roll, Mult);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFWeaponTPAnchorCmd(
+	TEXT("pf.WeaponTPAnchor"),
+	TEXT("Set the global auto-TP anchor directly: x y z pitch yaw roll [scaleMult]. No args prints current. Applies only to UNTUNED catalog rows."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFWeaponTPAnchorCmd));
 
 void ACombatForgeCharacter::TuneWeaponADS(const FVector& Loc, const FRotator& Rot)
 {
@@ -3247,12 +3524,9 @@ static void PFWeaponADSCmd(const TArray<FString>& Args, UWorld* World)
 	}
 	const FVector Loc(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
 	const FRotator Rot(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
-	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	if (ACombatForgeCharacter* Target = PFFindWeaponTuneTarget(World))
 	{
-		if (*It == PFFindWeaponTuneTarget(World))
-		{
-			It->TuneWeaponADS(Loc, Rot);
-		}
+		Target->TuneWeaponADS(Loc, Rot);
 	}
 	UE_LOG(CombatForgeLog, Log,
 		TEXT("pf.WeaponADS: AdsLoc=FVector(%.2ff,%.2ff,%.2ff), AdsRot=FRotator(%.2ff,%.2ff,%.2ff)"),
@@ -3276,12 +3550,9 @@ static void PFWeapon2Cmd(const TArray<FString>& Args, UWorld* World)
 	C.Category = FCString::Atoi(*Args[0]);
 	C.Index = FCString::Atoi(*Args[1]);
 	PFWeapon::SaveSecondaryConfig(C);
-	for (TActorIterator<ACombatForgeCharacter> It(World); It; ++It)
+	if (ACombatForgeCharacter* Target = PFFindWeaponTuneTarget(World))
 	{
-		if (*It == PFFindWeaponTuneTarget(World))
-		{
-			It->ReapplyWeaponLoadout();
-		}
+		Target->ReapplyWeaponLoadout();
 	}
 	const FPFWeaponDef& D = PFWeapon::Weapon(C.Category, C.Index);
 	UE_LOG(CombatForgeLog, Log, TEXT("pf.Weapon2: secondary = %s / %s (on back when primary is drawn)"),
@@ -3647,7 +3918,14 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 		// Only re-hide the two components that are DEFINITELY third-person guns, plus mis-mounted skeletal
 		// character parts. Anything else is merely reported: a carried bomb or some future owner-visible prop
 		// must not be hidden by a rule aimed at weapons, and a wrong guess here would be a new bug, not a fix.
-		if (bOwnerSees && !P->bHiddenInGame && P != RifleFPMesh
+		// FirstPersonArms (and anything else living in viewmodel space under the camera) is a LEGITIMATE
+		// owner-visible skeletal mesh — the moment an arms asset is assigned, the blanket skeletal rule
+		// would owner-hide it forever with no path back (ApplyArtLoadout only sets visibility, not
+		// OwnerNoSee). Exempt viewmodel-space components from the auto-hide.
+		const bool bViewmodelSpace = (P == FirstPersonArms)
+			|| (FirstPersonCamera != nullptr && P->IsAttachedTo(FirstPersonCamera))
+			|| (ViewModelRoot != nullptr && P->IsAttachedTo(ViewModelRoot));
+		if (bOwnerSees && !P->bHiddenInGame && P != RifleFPMesh && !bViewmodelSpace
 			&& (P == WeaponMeshComp || P == BackWeaponMeshComp || SKC != nullptr))
 		{
 			P->SetOwnerNoSee(true);
@@ -3782,15 +4060,45 @@ void ACombatForgeCharacter::AttachWeaponToBack(UStaticMesh* StowedMesh, UMateria
 	// pawn in the world, because the sling is owner-hidden and you can only judge it on somebody else).
 	// Paste whatever lands into BackWeaponRelative* in CombatForgeCharacter.h.
 
-	// Fallback: the authored relative transform. Only reached when the torso bones are missing (a
-	// non-humanoid or renamed skeleton) - and it is the OLD crotch-placing triple, kept only so an
-	// unknown skeleton still shows something rather than nothing.
-	BackWeaponMeshComp->SetRelativeLocation(BackWeaponRelativeLocation);
-	BackWeaponMeshComp->SetRelativeRotation(BackWeaponRelativeRotation);
+	ApplyBackSlingPose();
 	BackWeaponMeshComp->SetOwnerNoSee(true);
 	BackWeaponMeshComp->SetCastShadow(true);
 	BackWeaponMeshComp->SetVisibility(true);
 	BackWeaponMeshComp->SetHiddenInGame(false);
+}
+
+void ACombatForgeCharacter::ApplyBackSlingPose()
+{
+	if (BackWeaponMeshComp == nullptr)
+	{
+		return;
+	}
+	UStaticMesh* StowedMesh = BackWeaponMeshComp->GetStaticMesh();
+	if (StowedMesh == nullptr)
+	{
+		return;
+	}
+	// Fallback: the authored relative transform. Reached as the base for every mesh, and left as the FINAL
+	// pose whenever the auto layer is off or can't measure the mesh.
+	BackWeaponMeshComp->SetRelativeLocation(BackWeaponRelativeLocation);
+	BackWeaponMeshComp->SetRelativeRotation(BackWeaponRelativeRotation);
+	// Per-mesh correction on the authored sling pose: the same pivot/axis compensation as the hand grip,
+	// but anchored at the mesh CENTRE (a slung gun lies centred on the back — GripFracs 0/0) and without the
+	// hand anchor. A pivot-at-centre +Y-barrel gun reproduces the authored constants EXACTLY; every other
+	// mesh stops hanging off-back or lying across the wrong axis. pf.BackSling still tunes the base values
+	// live (SetBackSling re-runs the attach), and pf.WeaponAutoTP toggles this LIVE via the cvar sink
+	// (which calls this next to RecomputeTPGrip — the hand and the sling always answer the switch together).
+	if (CVarWeaponAutoTP.GetValueOnGameThread() != 0)
+	{
+		FPFWeaponAutoTP SlingAuto;
+		if (PFWeapon::ComputeAutoTPGrip(StowedMesh, BackWeaponRelativeScale.X,
+			BackWeaponRelativeLocation, BackWeaponRelativeRotation,
+			/*GripAlongFrac=*/0.f, /*GripDownFrac=*/0.f, /*bApplyAnchor=*/false, SlingAuto))
+		{
+			BackWeaponMeshComp->SetRelativeLocation(SlingAuto.TPLoc);
+			BackWeaponMeshComp->SetRelativeRotation(SlingAuto.TPRot);
+		}
+	}
 }
 
 FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponent* Body) const
@@ -3799,13 +4107,12 @@ FName ACombatForgeCharacter::ResolveWeaponAttachBone(const USkeletalMeshComponen
 	{
 		return NAME_None;
 	}
-	// ik_hand_gun FIRST when the rifle-hold animation set is driving the arms (Tom 2026-07-18: "just use whatever
-	// the animation says is correct — don't hand-tune it"). On mannequin-family skeletons ik_hand_gun IS the
-	// animator's weapon marker: the rifle pack animates it to sit exactly in the grip, and the IK-retarget carried
-	// it onto SKM_Bandit_Skeleton. Attaching there needs NO offset — position/orientation come from the animation
-	// itself and track it for free, which is why this beats a hand-tuned hand_r offset that only matches one pose.
-	// Only preferred while the armed set is active; with the unarmed set the arms hang and ik_hand_gun isn't
-	// meaningfully posed, so hand_r + the tuned offset remains correct there.
+	// ik_hand_gun path — A/B ONLY, and it LOST: on THIS skeleton (SKM_Bandit) ik_hand_gun is NOT animated,
+	// even after adding an IKGun retarget chain to both IK rigs and re-exporting — it parks at its parent
+	// ik_hand_root near the pelvis, which is the "rifle at the hip while the hands pose correctly" bug
+	// (Tom playtest 2026-07-18; see CVarWeaponBoneAttach above, default 0 for exactly this reason). On a
+	// skeleton whose retarget DOES carry ik_hand_gun, attaching there would need no offset — keep the switch
+	// for that A/B, but do not flip the default without re-verifying the bone actually animates.
 	const bool bArmedIdleActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
 	static const FName WeaponBoneFirst[] = { TEXT("ik_hand_gun"), TEXT("IK_hand_gun") };
 	// Do NOT prefer "weapon_r" / holster sockets first — many packs put weapon_r on the hip; attaching there left
@@ -4184,14 +4491,16 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 		{
 			WeaponMeshComp->SetHiddenInGame(true);
 		}
-		// When leaving build, re-show unless eliminated (SetEliminatedAppearance may re-hide).
+		// When leaving build, re-show unless eliminated (SetEliminatedAppearance may re-hide) or a punch
+		// clip owns the mesh — PlayMeleeSwingLocal hides the gun for the swing, and without this guard the
+		// per-tick arbiter un-hid it ONE FRAME later, so the rifle floated on the fist for the whole punch.
 		else if (const UPFHealthComponent* Health = GetHealth())
 		{
-			WeaponMeshComp->SetHiddenInGame(Health->bEliminated);
+			WeaponMeshComp->SetHiddenInGame(Health->bEliminated || MeleeSwingAnimRemain > 0.f);
 		}
 		else
 		{
-			WeaponMeshComp->SetHiddenInGame(false);
+			WeaponMeshComp->SetHiddenInGame(MeleeSwingAnimRemain > 0.f);
 		}
 	}
 }
@@ -4320,6 +4629,17 @@ void ACombatForgeCharacter::ApplyArtLoadout()
 	AttachWeaponToHand();
 
 	SetTeamColor(CachedTeamId);   // re-tint whatever body is now active (skeletal or cubes)
+
+	// LATE-JOIN CORPSE RE-ASSERT. On a client that joins mid-match, an eliminated pawn's OnRep_Eliminated
+	// fires during the initial bunch — BEFORE BeginPlay — so SetEliminatedAppearance(true) ran while
+	// bUsingArtBody was still false and only hid the graybox/weapon comps. The assembly above then mounted
+	// and SHOWED the full art body, leaving a standing, fully-clothed "corpse" at the death spot that only
+	// vanished on the next elimination event. Re-assert after assembly; instant-hide (no death anim) because
+	// this elimination is old news to a machine that just arrived.
+	if (HealthComponent != nullptr && HealthComponent->bEliminated)
+	{
+		SetEliminatedAppearance(true, /*bPlayDeathAnim=*/false);
+	}
 }
 
 void ACombatForgeCharacter::SetTeamColor(uint8 TeamId)
@@ -4411,7 +4731,7 @@ void ACombatForgeCharacter::SetTeamColor(uint8 TeamId)
 	}
 }
 
-void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
+void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated, bool bPlayDeathAnim)
 {
 	// Mesh only — collision timing (0.5 s corpse block) is the health
 	// component's job (04 §2.4).
@@ -4428,7 +4748,7 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated)
 	}
 	if (bUsingArtBody && GetMesh() != nullptr)
 	{
-		if (bEliminated && bSequenceLocoActive && DeathDirAnims.Num() == 4 && DeathDirAnims[0] != nullptr)
+		if (bEliminated && bPlayDeathAnim && bSequenceLocoActive && DeathDirAnims.Num() == 4 && DeathDirAnims[0] != nullptr)
 		{
 			// "He's out": play a directional fall (random pick — the shot direction isn't plumbed here and the
 			// read at gameplay distance is 'body drops', not which way), THEN hide when the anim lands. Beats
@@ -4720,11 +5040,11 @@ void ACombatForgeCharacter::OnRemoteFireCosmetic()
 // guessing offsets a third time, drag it into place in game and paste the values back. Bone-space guesses
 // put this gun in the crotch once and at the neck once — the eye beats the arithmetic here.
 //
-// Values are ACTOR-space, relative to the spine bone:
-//   Back  = how far BEHIND the character   (bigger = further off the back)
-//   Side  = lateral, + is their right      (0 = centred on the spine)
-//   Up    = vertical, NEGATIVE drops it down the back (use this to get it off the neck)
-//   Tilt  = barrel angle off vertical, 0 = straight down, 90 = horizontal
+// Values are applied as a PLAIN RELATIVE transform in SPINE-BONE space (the actor-space derivation was
+// removed with the other computed placements — commit 09fce68's actor-space claim no longer matches the
+// code). The Back/Side/Up arg names are the human-friendly INTENT; on this skeleton the bone axes don't
+// line up with them exactly, so tune by eye and trust the printed paste line, not the axis names:
+//   arg 1..3 = relative location on the spine bone,  arg 4 = roll (tilt) in degrees
 //
 // NOTE: the sling is owner-hidden — you cannot see your own. Tune it while watching ANOTHER player, or
 // spawn a bot and look at its back.

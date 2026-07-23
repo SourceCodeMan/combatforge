@@ -662,6 +662,86 @@ namespace PFWeapon
 		return true;
 	}
 
+	// ---- Auto third-person grip ----------------------------------------------------------------------
+	// Global anchor: one live correction shared by every AUTO-posed weapon. pf.WeaponTPCalibrate solves it
+	// from a single hand-tuned gun (pf.WeaponTP one weapon → calibrate → all untuned rows inherit the fix)
+	// and prints a paste-ready line for these three constants. Identity by default so the struct-default
+	// base pose is the out-of-the-box behavior.
+	static FVector  GAutoTPAnchorLoc = FVector::ZeroVector;
+	static FRotator GAutoTPAnchorRot = FRotator::ZeroRotator;
+	static float    GAutoTPAnchorScaleMult = 1.f;
+
+	void SetAutoTPAnchor(const FVector& Loc, const FRotator& Rot, float ScaleMult)
+	{
+		GAutoTPAnchorLoc = Loc;
+		GAutoTPAnchorRot = Rot;
+		GAutoTPAnchorScaleMult = (ScaleMult > 0.f) ? ScaleMult : 1.f;
+	}
+
+	void GetAutoTPAnchor(FVector& OutLoc, FRotator& OutRot, float& OutScaleMult)
+	{
+		OutLoc = GAutoTPAnchorLoc;
+		OutRot = GAutoTPAnchorRot;
+		OutScaleMult = GAutoTPAnchorScaleMult;
+	}
+
+	bool HasTunedTP(const FPFWeaponDef& Def)
+	{
+		// A pf.WeaponTP paste always includes D.TPScale (> 0), and any loc/rot different from the struct
+		// defaults means a human placed this row. Tuned = the whole TP row is manual.
+		static const FPFWeaponDef Defaults;
+		return Def.TPScale > 0.f
+			|| !Def.TPLoc.Equals(Defaults.TPLoc, KINDA_SMALL_NUMBER)
+			|| !Def.TPRot.Equals(Defaults.TPRot, KINDA_SMALL_NUMBER);
+	}
+
+	bool ComputeAutoTPGrip(const UStaticMesh* Mesh, float AppliedScale,
+		const FVector& BaseLoc, const FRotator& BaseRot,
+		float GripAlongFrac, float GripDownFrac, bool bApplyAnchor, FPFWeaponAutoTP& Out)
+	{
+		if (Mesh == nullptr || AppliedScale <= 0.f)
+		{
+			return false;
+		}
+		const FBoxSphereBounds B = Mesh->GetBounds();
+		const FVector O = B.Origin;    // pivot -> centre: the per-mesh scatter this exists to cancel
+		const FVector E = B.BoxExtent;
+		if (E.IsNearlyZero())
+		{
+			return false;
+		}
+		const float LenX = FMath::Max(E.X * 2.f, 1.f);
+		const float LenY = FMath::Max(E.Y * 2.f, 1.f);
+		const bool bAlongY = (LenY >= LenX);   // same axis test as ComputeAutoPose / the muzzle auto-tip
+		const float BarrelHalf = (bAlongY ? LenY : LenX) * 0.5f;
+		Out.bBarrelAlongY = bAlongY;
+
+		// BaseRot is authored for a +Y-barrel mesh. A +X-barrel mesh gets a +90° yaw PRE-rotation in mesh
+		// space so its barrel takes the same hand-space line (FRotator(0,90,0) maps +X onto +Y — the same
+		// convention ComputeAutoPose uses when it hands +Y-barrel meshes yaw -90 and +X-barrel meshes yaw 0).
+		const FQuat BaseQ(BaseRot);
+		const FQuat MeshQ = bAlongY ? BaseQ : BaseQ * FQuat(FRotator(0.f, 90.f, 0.f));
+
+		// Anchor point in mesh space: rear of the gun along the barrel, below the bore — the grip region,
+		// the exact recipe the FP auto-pose uses. For a pivot-at-grip mesh this is ~zero, so BaseLoc/BaseRot
+		// are reproduced unchanged; every other pivot is compensated instead of thrown to the wrong distance.
+		const FVector Along = bAlongY ? FVector(0.f, 1.f, 0.f) : FVector(1.f, 0.f, 0.f);
+		const FVector GripMesh = O - Along * (BarrelHalf * GripAlongFrac) + FVector(0.f, 0.f, -E.Z * GripDownFrac);
+
+		FVector  Loc = BaseLoc - MeshQ.RotateVector(GripMesh) * AppliedScale;
+		FQuat    RotQ = MeshQ;
+
+		if (bApplyAnchor)
+		{
+			const FQuat AnchorQ(GAutoTPAnchorRot);
+			RotQ = AnchorQ * RotQ;
+			Loc = GAutoTPAnchorLoc + AnchorQ.RotateVector(Loc);
+		}
+		Out.TPLoc = Loc;
+		Out.TPRot = RotQ.Rotator();
+		return true;
+	}
+
 	FPFWeaponConfig DefaultConfig()
 	{
 		return FPFWeaponConfig{ 0, 0 };   // SM_Rifle / ar_m4
@@ -834,8 +914,9 @@ static void PFWeaponDumpCmd(const TArray<FString>& /*Args*/, UWorld* /*World*/)
 	// the pivot to hand_r throws the visible gun that far away from the hand, no matter what small relative
 	// offset you tune. A gun 30cm above the hand on a 3cm offset (Tom, 2026-07-20) is this, not the offset.
 	UE_LOG(CombatForgeLog, Warning,
-		TEXT("WPNDUMP  %-22s %-34s %9s %26s %9s"),
-		TEXT("id"), TEXT("mesh"), TEXT("natLen"), TEXT("pivot->centre (X,Y,Z)"), TEXT("offsetLen"));
+		TEXT("WPNDUMP  %-22s %-34s %9s %26s %9s  %s"),
+		TEXT("id"), TEXT("mesh"), TEXT("natLen"), TEXT("pivot->centre (X,Y,Z)"), TEXT("offsetLen"),
+		TEXT("autoTP loc / rot (axis, tuned rows say TUNED)"));
 	for (int32 Cat = 0; Cat < PFWeapon::CategoryCount(); ++Cat)
 	{
 		for (int32 Idx = 0; Idx < PFWeapon::WeaponCount(Cat); ++Idx)
@@ -851,10 +932,34 @@ static void PFWeaponDumpCmd(const TArray<FString>& /*Args*/, UWorld* /*World*/)
 			const FBoxSphereBounds B = M->GetBounds();
 			// Longest axis = barrel length for every gun in this catalog.
 			const float NatLen = FMath::Max3(B.BoxExtent.X, B.BoxExtent.Y, B.BoxExtent.Z) * 2.f;
+			// What the auto grip would do to this row (0.85 = the character-default TP scale). Tuned rows
+			// never receive it — flagged so the table shows which guns are manual.
+			FString AutoStr;
+			FPFWeaponAutoTP Auto;
+			FVector AnchorLoc;
+			FRotator AnchorRot;
+			float AnchorMult = 1.f;
+			PFWeapon::GetAutoTPAnchor(AnchorLoc, AnchorRot, AnchorMult);
+			const float DumpScale = (D.TPScale > 0.f) ? D.TPScale : (PFWeapon::AutoTPBaseScale * AnchorMult);
+			if (PFWeapon::HasTunedTP(D))
+			{
+				AutoStr = TEXT("TUNED (row is manual)");
+			}
+			else if (PFWeapon::ComputeAutoTPGrip(M, DumpScale, D.TPLoc, D.TPRot, 0.55f, 0.55f, true, Auto))
+			{
+				AutoStr = FString::Printf(TEXT("(%6.1f,%6.1f,%6.1f) / (%5.1f,%5.1f,%5.1f) (%s)"),
+					Auto.TPLoc.X, Auto.TPLoc.Y, Auto.TPLoc.Z,
+					Auto.TPRot.Pitch, Auto.TPRot.Yaw, Auto.TPRot.Roll,
+					Auto.bBarrelAlongY ? TEXT("+Y") : TEXT("+X"));
+			}
+			else
+			{
+				AutoStr = TEXT("auto FAILED (degenerate bounds)");
+			}
 			UE_LOG(CombatForgeLog, Warning,
-				TEXT("WPNDUMP  %-22s %-34s %9.1f   (%7.1f,%7.1f,%7.1f) %9.1f"),
+				TEXT("WPNDUMP  %-22s %-34s %9.1f   (%7.1f,%7.1f,%7.1f) %9.1f  %s"),
 				D.WeaponId ? D.WeaponId : TEXT("?"), *M->GetName(),
-				NatLen, B.Origin.X, B.Origin.Y, B.Origin.Z, B.Origin.Size());
+				NatLen, B.Origin.X, B.Origin.Y, B.Origin.Z, B.Origin.Size(), *AutoStr);
 		}
 	}
 }

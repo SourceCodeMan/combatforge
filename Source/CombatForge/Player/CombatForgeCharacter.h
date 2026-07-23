@@ -70,7 +70,9 @@ public:
 
 	// ---- Team + elimination cosmetics (pkg-weapons calls these) ----
 	void  SetTeamColor(uint8 TeamId);      // MID tint on the graybox mesh
-	void  SetEliminatedAppearance(bool bEliminated); // hide mesh; collision handled by health component
+	/** Hide/show the body for elimination; collision handled by health component. bPlayDeathAnim=false =
+	 *  instant hide (late-join re-assert: the death is old news, don't replay the fall). */
+	void  SetEliminatedAppearance(bool bEliminated, bool bPlayDeathAnim = true);
 	/** BB/tracer origin. Prefers a Muzzle* socket on the gun mesh, else auto tip from mesh bounds
 	 *  (longest horizontal axis) so every catalog weapon fires from its barrel without hand offsets. */
 	FVector GetMuzzleLocation(bool bCosmetic) const;
@@ -368,6 +370,18 @@ private:
 	bool TryApplySessionWeaponPose(const FName& WeaponId, FVector& InOutFPLoc, FRotator& InOutFPRot,
 		float& InOutFPScale, FVector& InOutMuzzle, FVector& InOutAdsLoc, FRotator& InOutAdsRot) const;
 
+	/** Session-only THIRD-PERSON grip overrides (key = WeaponId). pf.WeaponTP records here so a live tune
+	 *  survives respawn/class-cycle instead of silently reverting on the next ApplyWeaponLoadout. */
+	struct FPFSessionWeaponTP
+	{
+		FVector  TPLoc = FVector::ZeroVector;
+		FRotator TPRot = FRotator::ZeroRotator;
+		float    TPScale = 0.85f;
+	};
+	TMap<FName, FPFSessionWeaponTP> SessionWeaponTPs;
+	bool TryApplySessionWeaponTP(const FName& WeaponId, FVector& InOutLoc, FRotator& InOutRot,
+		float& InOutScale) const;
+
 	/** Phase-1 spike: mount the modular Bandit body + sequence-loco anims on GetMesh(). */
 	void AssembleBanditCharacter();
 	/** Phase-2: mount base skin + each config-selected overlay part via Leader Pose. */
@@ -396,8 +410,20 @@ public:
 	void TuneWeaponFP(const FVector& Loc, const FRotator& Rot, float Scale, const FVector& Muzzle);
 	/** Live-tune the per-weapon aim-down-sight pose (console: pf.WeaponADS). Hold right-click to preview. */
 	void TuneWeaponADS(const FVector& Loc, const FRotator& Rot);
-	/** Live-tune the THIRD-PERSON grip in hand_r (console: pf.WeaponTP) — what everyone else sees. */
-	void TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale);
+	/** Live-tune the THIRD-PERSON grip in hand_r (console: pf.WeaponTP) — what everyone else sees.
+	 *  bRecordSession stores the values under this pawn's ACTIVE WeaponId so they survive respawn (the
+	 *  console cmd sets it only on the tune-target pawn — mirrors don't pollute other weapons' entries). */
+	void TuneWeaponTP(const FVector& Loc, const FRotator& Rot, float Scale, bool bRecordSession = true);
+	/** Recompute the per-weapon TP grip layers (catalog row → auto+anchor → session tune) and re-pose.
+	 *  Cheap: no mesh reload, no ammo/stat side effects — safe for live cvar/anchor refreshes. */
+	void RecomputeTPGrip();
+	/** Re-apply the back-sling transform (authored base + per-mesh auto correction) to the already-mounted
+	 *  stowed mesh. Split out so the pf.WeaponAutoTP live toggle refreshes the sling too, not just the hand. */
+	void ApplyBackSlingPose();
+	/** Solve the global auto-TP anchor so this pawn's CURRENT (hand-tuned) grip becomes what the auto pose
+	 *  produces for its equipped weapon — then every untuned weapon inherits the same correction.
+	 *  Console: pf.WeaponTPCalibrate. Returns false if the mesh/bounds can't be computed. */
+	bool CalibrateAutoTPFromCurrent();
 	/** Drop the cached TP attach bone so it re-resolves next tick (pf.ArmedAnims / pf.WeaponBoneAttach toggles). */
 	void InvalidateWeaponAttachBone() { CachedWeaponAttachBone = NAME_None; }
 
@@ -414,13 +440,14 @@ private:
 	// Fallback when the mesh has no hand bone: low hip-carry in mesh space (never chest/head).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  WeaponMeshFallbackLocation = FVector(12.f, 18.f, 10.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator WeaponMeshFallbackRotation = FRotator(5.f, 90.f, -10.f);
-	// Back-sling pose (spine bone local): clearly ON THE BACK (behind the torso), not glued to the neck.
-	/** Fallback only — used when the skeleton frame can't be derived. See AttachWeaponToBack. */
+	// Back-sling pose: THE live values, applied as a plain relative transform on the spine bone by
+	// ApplyBackSlingPose (the derived/actor-space placements were removed — two computed versions were
+	// wrong in front of Tom). These are SPINE-BONE-space numbers despite pf.BackSling's Back/Side/Up arg
+	// names; tune with pf.BackSling and paste what it prints. The per-mesh pivot/axis correction in
+	// ApplyBackSlingPose layers ON TOP of these so one tune holds across all stowed meshes.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeLocation = FVector(-18.f, 6.f, -6.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FRotator BackWeaponRelativeRotation = FRotator(0.f, 0.f, 75.f);
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FVector  BackWeaponRelativeScale = FVector(0.80f);
-	/** Derive the sling from measured bones instead of the authored offsets (pf.BackSling 0 to disable). */
-	UPROPERTY(EditDefaultsOnly, Category="PF|Art") bool     bDeriveBackSlingFromSkeleton = true;
 	/** Barrel angle off vertical in the back plane: 0 = straight down, 90 = horizontal. pf.BackSling tunes it. */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") float    BackSlingTiltDeg = 35.f;
 	/**
@@ -462,6 +489,9 @@ private:
 	// ApplyWeaponLoadout. Default = SM_Rifle (+Y barrel). Pistols override so they don't render upside-down.
 	float CachedTPRaisedYaw  = -90.f;
 	float CachedTPRaisedRoll = 0.f;
+	/** Last weapon id ApplyWeaponLoadout configured the WeaponComponent for — a SAME-id kit re-push
+	 *  preserves the hopper instead of refilling (the free-instant-reload exploit); NAME_None = first apply. */
+	FName LastAppliedWeaponId;
 	/** Per-weapon third-person grip, cached from the catalog row on equip (pf.WeaponTP tunes these). */
 	FVector  CachedTPLoc = FVector(-3.f, 4.f, 2.f);
 	FRotator CachedTPRot = FRotator(10.f, 0.f, 90.f);
@@ -563,6 +593,7 @@ private:
 	uint8 bSprintKeyHeld : 1;
 	uint8 bADSHeld : 1;          // player's standing ADS intent (hold = button down; toggle = latched)
 	uint8 bFireHeld : 1;
+	uint8 bSprintOutTapBuffered : 1;   // press+release inside the sprint-out window -> one shot when it ends
 	uint8 bJumpKeyHeld : 1;
 	uint8 bADSToggleMode : 1;    // cached FPFUserPrefs::GetADSToggle(): false = hold, true = toggle
 	uint8 bCrouchToggleMode : 1; // cached FPFUserPrefs::GetCrouchToggle(): false = hold, true = toggle

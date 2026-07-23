@@ -105,6 +105,14 @@ struct FPFWeaponAutoPose
 	FRotator AdsRot  = FRotator(1.5f, 0.f, -0.5f);
 };
 
+/** Computed third-person grip for one weapon mesh (hand_r bone space unless noted). */
+struct FPFWeaponAutoTP
+{
+	FVector  TPLoc = FVector(-3.f, 4.f, 2.f);
+	FRotator TPRot = FRotator(10.f, 0.f, 90.f);
+	bool     bBarrelAlongY = true;   // mesh-local +Y is the barrel (SM_Rifle family); false = +X (Modern Weapons)
+};
+
 /**
  * Curated weapon registry (categories -> weapons). NOT UObjectLibrary-enumerated like the character parts,
  * because each weapon needs its own FP pose + material handling. Mirrors the PFChar API shape so the loadout
@@ -127,6 +135,46 @@ namespace PFWeapon
 	 * when pf.WeaponAutoPose is 0.
 	 */
 	bool ComputeAutoPose(const UStaticMesh* Mesh, int32 Category, FPFWeaponAutoPose& Out);
+
+	/**
+	 * The scale every AUTO-gripped weapon starts from (the shipped character default). A NAMED constant on
+	 * purpose: TuneWeaponTP mutates the character's WeaponRelativeScale live, so deriving the auto base from
+	 * that member would let a pf.WeaponTP session silently shift what the calibrate solve and the baked
+	 * GAutoTPAnchorScaleMult mean. Everything auto (RecomputeTPGrip, CalibrateAutoTPFromCurrent,
+	 * pf.WeaponDump's autoTP column) keys off this one number so the round-trip is exact.
+	 */
+	inline constexpr float AutoTPBaseScale = 0.85f;
+
+	/**
+	 * True if this row carries hand-tuned third-person values (pf.WeaponTP paste). A tuned row is FULLY
+	 * manual — the auto default never touches it. Untuned rows (all still at the struct defaults) get
+	 * ComputeAutoTPGrip instead when pf.WeaponAutoTP is on.
+	 */
+	bool HasTunedTP(const FPFWeaponDef& Def);
+
+	/**
+	 * Per-weapon third-person grip computed from mesh bounds — the same grip-anchor recipe ComputeAutoPose
+	 * uses for FP, aimed at the hand instead of the camera. BaseLoc/BaseRot describe where a mesh whose
+	 * PIVOT sits at its grip should attach (the catalog struct defaults, authored for a +Y-barrel gun); the
+	 * function then (a) pre-rotates +X-barrel meshes 90° so every barrel takes the same hand-space line and
+	 * (b) offsets the attach so the mesh's GRIP REGION (rear of gun, below the bore) lands exactly where
+	 * BaseLoc puts it — cancelling the per-mesh pivot scatter (5–21uu, pf.WeaponDump 2026-07-20) that made
+	 * one shared offset mathematically incapable of fitting more than one gun.
+	 * GripAlongFrac/GripDownFrac pick the anchor point (0.55/0.55 = grip, 0/0 = mesh centre — the back sling).
+	 * bApplyAnchor folds in the global live correction (pf.WeaponTPAnchor / pf.WeaponTPCalibrate).
+	 * Returns false on null mesh / degenerate bounds / non-positive scale (Out untouched).
+	 */
+	bool ComputeAutoTPGrip(const UStaticMesh* Mesh, float AppliedScale,
+		const FVector& BaseLoc, const FRotator& BaseRot,
+		float GripAlongFrac, float GripDownFrac, bool bApplyAnchor, FPFWeaponAutoTP& Out);
+
+	/**
+	 * Global correction applied on top of every AUTO TP grip (never to hand-tuned rows). Solved live by
+	 * pf.WeaponTPCalibrate from ONE hand-tuned gun so the whole catalog inherits the fix; paste the printed
+	 * constants into PFWeaponCatalog.cpp (GAutoTPAnchor*) to bake.
+	 */
+	void SetAutoTPAnchor(const FVector& Loc, const FRotator& Rot, float ScaleMult);
+	void GetAutoTPAnchor(FVector& OutLoc, FRotator& OutRot, float& OutScaleMult);
 
 	FPFWeaponConfig DefaultConfig();
 
