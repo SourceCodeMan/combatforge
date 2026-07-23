@@ -23,11 +23,12 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 13;  // alpha.13 — everything in 12 (never shipped) PLUS: the two crossed
-	                                   // rifles fixed, every weapon's shots locked to its barrel (world-space
-	                                   // clearance + dedicated-server clients now fire from their own
-	                                   // viewmodel), the Dorito CONE restored, BB + splat halved, shotgun
-	                                   // burst 3. alpha.10 is still what is live on itch and the box.
+	constexpr int32 NetProtocol = 14;  // alpha.14 (NOT pushed yet — local playtest package 2026-07-23):
+	                                   // ALL 35 guns life-size + hand-tuned FP/ADS, computed TP grip +
+	                                   // one-gun calibrate, left palm on the gun (humans; bots keep the
+	                                   // tuned pose), midline tinted wall (opaque 1:30 then clears by 2:30),
+	                                   // build 2:30, Yard bounds flush with the buildable pad, cone roof
+	                                   // skin, code-review fix batch. alpha.13 is live on itch + the box.
 }
 
 /**
