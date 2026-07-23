@@ -476,9 +476,12 @@ namespace PFWeapon
 
 		// ---- Category 5: LMG (4) — ReloadTime 2.5 ----
 		const FPFWeaponDef GLMGs[] = {
+			// FP hip + ADS hand-tuned by Tom 2026-07-23 (pf.WeaponFP / pf.WeaponADS live session, baked from
+			// the log). FP scale 1.0 = his call (life-size viewmodel read). MuzzleFP stays authored — lmg_01
+			// resolves its tracer tip via the bounds auto-tip, so that field is inert here.
 			MakeW(TEXT("LMG 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/LMGs/01/SM_Modern_Weapons_LMG_01.SM_Modern_Weapons_LMG_01"),
-				nullptr, FVector(1.3f, 6.39f, -8.72f), FRotator(-1.5f, -90.0f, 1.5f), 0.38f, FVector(42.0f, 6.4f, 0.0f),
-				FVector(8.0f, -6.21f, 3.2f), FRotator(0.95f, 0.31f, -0.03f),
+				nullptr, FVector(-3.00f, 6.00f, -2.80f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(42.0f, 6.4f, 0.0f),
+				FVector(8.19f, 0.26f, 3.32f), FRotator(5.17f, -0.21f, 2.64f),
 				Mode_A, EPFFireMode::Auto,
 				2.2f, 0.15f, 11000.f, 2.0f, 3, 75, 10.0f,
 				TEXT("lmg_01"), 1, 1, 0.f,
@@ -667,9 +670,12 @@ namespace PFWeapon
 	// from a single hand-tuned gun (pf.WeaponTP one weapon → calibrate → all untuned rows inherit the fix)
 	// and prints a paste-ready line for these three constants. Identity by default so the struct-default
 	// base pose is the out-of-the-box behavior.
-	static FVector  GAutoTPAnchorLoc = FVector::ZeroVector;
-	static FRotator GAutoTPAnchorRot = FRotator::ZeroRotator;
-	static float    GAutoTPAnchorScaleMult = 1.f;
+	// BAKED 2026-07-23: Tom's pf.WeaponTPCalibrate solve, dialed on lmg_01 in PIE (grip seated in the
+	// right palm at true 1.0 scale; rotation solve came out identity — the base orientation was right).
+	// ScaleMult 1.176 = his 1.0 real-size choice over the 0.85 base, applied to every auto gun.
+	static FVector  GAutoTPAnchorLoc = FVector(-0.58f, -6.84f, 3.29f);
+	static FRotator GAutoTPAnchorRot = FRotator(0.00f, 0.00f, 0.00f);
+	static float    GAutoTPAnchorScaleMult = 1.176f;
 
 	void SetAutoTPAnchor(const FVector& Loc, const FRotator& Rot, float ScaleMult)
 	{
@@ -727,6 +733,8 @@ namespace PFWeapon
 		// are reproduced unchanged; every other pivot is compensated instead of thrown to the wrong distance.
 		const FVector Along = bAlongY ? FVector(0.f, 1.f, 0.f) : FVector(1.f, 0.f, 0.f);
 		const FVector GripMesh = O - Along * (BarrelHalf * GripAlongFrac) + FVector(0.f, 0.f, -E.Z * GripDownFrac);
+		Out.GripLocalMesh = GripMesh;
+		Out.BarrelAxisLocal = Along;
 
 		FVector  Loc = BaseLoc - MeshQ.RotateVector(GripMesh) * AppliedScale;
 		FQuat    RotQ = MeshQ;

@@ -424,8 +424,8 @@ public:
 	 *  produces for its equipped weapon — then every untuned weapon inherits the same correction.
 	 *  Console: pf.WeaponTPCalibrate. Returns false if the mesh/bounds can't be computed. */
 	bool CalibrateAutoTPFromCurrent();
-	/** Drop the cached TP attach bone so it re-resolves next tick (pf.ArmedAnims / pf.WeaponBoneAttach toggles). */
-	void InvalidateWeaponAttachBone() { CachedWeaponAttachBone = NAME_None; }
+	/** Drop the cached TP attach bones so they re-resolve next tick (pf.ArmedAnims / pf.WeaponBoneAttach toggles). */
+	void InvalidateWeaponAttachBone() { CachedWeaponAttachBone = NAME_None; CachedHandLBone = NAME_None; }
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
@@ -496,6 +496,12 @@ private:
 	FVector  CachedTPLoc = FVector(-3.f, 4.f, 2.f);
 	FRotator CachedTPRot = FRotator(10.f, 0.f, 90.f);
 	float    CachedTPScale = 0.85f;
+	/** Equipped mesh's grip point + barrel axis in MESH space (RecomputeTPGrip harvest) — drives the
+	 *  per-tick left-palm aim. Zero = unavailable, aim no-ops. */
+	FVector  CachedGripLocalMesh = FVector::ZeroVector;
+	FVector  CachedBarrelAxisLocal = FVector::ZeroVector;
+	/** Lazily-resolved left-hand bone for the palm aim (cleared with the attach bone). */
+	FName    CachedHandLBone;
 	// Firing shoulder lift when the ARMED idle isn't driving the arms up (arms hang -> gun sat at the hip).
 	// Kept SMALL so a raised gun stays near the hand (hip/low-ready), not teleported to armpit/neck.
 	// The old 42uu adaptive lift is what put guns on necks while the secondary sat on the spine.

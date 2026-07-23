@@ -111,6 +111,9 @@ struct FPFWeaponAutoTP
 	FVector  TPLoc = FVector(-3.f, 4.f, 2.f);
 	FRotator TPRot = FRotator(10.f, 0.f, 90.f);
 	bool     bBarrelAlongY = true;   // mesh-local +Y is the barrel (SM_Rifle family); false = +X (Modern Weapons)
+	// MESH-LOCAL geometry harvested for the per-tick left-hand aim (valid even when the row is hand-tuned):
+	FVector  GripLocalMesh = FVector::ZeroVector;    // the grip-region anchor point
+	FVector  BarrelAxisLocal = FVector(0.f, 1.f, 0.f);  // unit barrel direction
 };
 
 /**

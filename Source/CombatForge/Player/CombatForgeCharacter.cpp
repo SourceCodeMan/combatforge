@@ -100,14 +100,22 @@ static TAutoConsoleVariable<int32> CVarWeaponBoneAttach(
 	TEXT("pf.WeaponBoneAttach"), 0,
 	TEXT("1 = attach TP weapon to ik_hand_gun (NOT animated on this skeleton — leaves the gun at the hip). 0 = hand_r (default)."));
 
-// THE fix for "gun isn't where the hands are". The rifle-hold animation poses BOTH hands correctly (right hand
-// on the grip, left on the foregrip) — so the weapon's line IS the vector between them. Orienting the gun along
-// hand_r -> hand_l is derived entirely from the live animated pose: no hand-tuned numbers, correct for every
-// frame of every clip, and self-correcting if the animation set ever changes. Falls back to the old fixed
-// offset for one-handed weapons or if hand_l is missing.
+// LEFT HAND ON THE GUN. The rifle-hold set animates BOTH palms, but the gun is a rigid child of hand_r —
+// the left palm only touches meshes whose foregrip sits exactly where the animation reaches (it was
+// authored for one specific rifle), so on most guns the left hand floated near the handguard (Tom's
+// lmg_01 playtest 2026-07-23). Fix: keep the CALIBRATED grip seated in the right palm and rotate the gun
+// ABOUT THAT GRIP POINT so the barrel line passes through the animated left palm — the one thing a
+// constant offset can never do, because the palm moves with every anim frame.
+// This is NOT the d1afa32-removed derivation returning: position is never recomputed (the grip stays
+// exactly where pf.WeaponTP/auto/calibrate put it), the rotation is a CAPPED nudge on top of the tuned
+// base (the old bug REPLACED the whole transform every tick, which ate typed values), pistols are
+// excluded (one-handed anims), and this switch kills it live.
 static TAutoConsoleVariable<int32> CVarWeaponAimFromHands(
 	TEXT("pf.WeaponAimFromHands"), 1,
-	TEXT("1 = orient the TP weapon along the animated hand_r->hand_l line (default). 0 = fixed WeaponRelative* offset."));
+	TEXT("1 = rotate the TP weapon about its grip so the barrel meets the animated left palm (default). 0 = tuned base pose only."));
+static TAutoConsoleVariable<float> CVarWeaponAimFromHandsMaxDeg(
+	TEXT("pf.WeaponAimFromHandsMaxDeg"), 35.f,
+	TEXT("Cap (degrees) on the left-palm aim nudge — big enough to bridge foregrip mismatch, small enough to never flip a gun."));
 
 // Computed DEFAULT for the per-weapon third-person grip. This is not the old derived pose coming back:
 // the tick never recomputes anything (ApplyHandWeaponPose still applies plain relative values), rows a
@@ -3353,6 +3361,22 @@ void ACombatForgeCharacter::RecomputeTPGrip()
 		TryApplySessionWeaponTP(FName(Def.WeaponId), CachedTPLoc, CachedTPRot, CachedTPScale);
 	}
 
+	// Harvest this mesh's grip point + barrel axis (MESH-local, scale-independent) for the per-tick
+	// left-palm aim in UpdateWeaponHoldPose. Runs for tuned rows too — the geometry is the same no matter
+	// who authored the pose. Zeroed on failure so the aim block cleanly no-ops.
+	CachedGripLocalMesh = FVector::ZeroVector;
+	CachedBarrelAxisLocal = FVector::ZeroVector;
+	if (WeaponMesh != nullptr)
+	{
+		FPFWeaponAutoTP Harvest;
+		if (PFWeapon::ComputeAutoTPGrip(WeaponMesh, (CachedTPScale > 0.f) ? CachedTPScale : PFWeapon::AutoTPBaseScale,
+			Def.TPLoc, Def.TPRot, 0.55f, 0.55f, /*bApplyAnchor=*/false, Harvest))
+		{
+			CachedGripLocalMesh = Harvest.GripLocalMesh;
+			CachedBarrelAxisLocal = Harvest.BarrelAxisLocal;
+		}
+	}
+
 	if (ActiveWeaponConfig.Category == 2 && FMath::IsNearlyZero(Def.TPRaisedRoll))
 	{
 		CachedTPRaisedRoll = 180.f;
@@ -4572,6 +4596,57 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 	// mesh to the capsule root at eye height — remotes saw every gun sitting on the head
 	// and auth balls spawned from that tip. FP viewmodel (camera) stays separate for the owner.
 	ApplyHandWeaponPose();
+
+	// LEFT PALM AIM (see CVarWeaponAimFromHands): with the armed set driving the arms, rotate the gun
+	// about its (calibrated, untouched) grip point so the barrel line passes through the animated left
+	// palm. Runs AFTER ApplyHandWeaponPose re-applied the tuned base each tick, so it is a bounded
+	// per-frame nudge on top of the base — never a replacement, never accumulating.
+	{
+		const bool bArmedSetActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
+		USkeletalMeshComponent* Body = GetMesh();
+		if (bArmedSetActive
+			&& CVarWeaponAimFromHands.GetValueOnGameThread() != 0
+			&& ActiveWeaponConfig.Category != 2                    // pistols: one-handed anims, no foregrip
+			&& Body != nullptr
+			&& !CachedBarrelAxisLocal.IsNearlyZero())
+		{
+			if (CachedHandLBone.IsNone())
+			{
+				static const FName HandLNames[] = { TEXT("hand_l"), TEXT("Hand_L"), TEXT("hand_lSocket"), TEXT("LeftHand"), TEXT("HandL") };
+				for (const FName& N : HandLNames)
+				{
+					if (Body->DoesSocketExist(N) || Body->GetBoneIndex(N) != INDEX_NONE)
+					{
+						CachedHandLBone = N;
+						break;
+					}
+				}
+			}
+			if (!CachedHandLBone.IsNone())
+			{
+				const FTransform GunXf = WeaponMeshComp->GetComponentTransform();
+				const FVector GripWorld = GunXf.TransformPosition(CachedGripLocalMesh);
+				const FVector PalmWorld = Body->GetSocketLocation(CachedHandLBone);
+				const FVector ToPalm = PalmWorld - GripWorld;
+				const FVector CurDir = GunXf.TransformVectorNoScale(CachedBarrelAxisLocal).GetSafeNormal();
+				// Degenerate guard: a palm nearly ON the grip (crossed hands mid-anim) gives no stable line.
+				if (ToPalm.SizeSquared() > FMath::Square(15.f) && !CurDir.IsNearlyZero())
+				{
+					const FVector WantDir = ToPalm.GetSafeNormal();
+					FVector Axis;
+					float AngleRad;
+					FQuat::FindBetweenNormals(CurDir, WantDir).ToAxisAndAngle(Axis, AngleRad);
+					const float MaxRad = FMath::DegreesToRadians(
+						FMath::Max(0.f, CVarWeaponAimFromHandsMaxDeg.GetValueOnGameThread()));
+					const FQuat Delta(Axis, FMath::Min(AngleRad, MaxRad));
+					// Rigid rotation ABOUT THE GRIP: the right palm keeps exactly the pose Tom calibrated.
+					WeaponMeshComp->SetWorldLocationAndRotation(
+						GripWorld + Delta.RotateVector(GunXf.GetLocation() - GripWorld),
+						Delta * GunXf.GetRotation());
+				}
+			}
+		}
+	}
 
 	// While aiming/shooting, POINT the hand-held gun along the aim. Gun STAYS attached to hand_r (muzzle
 	// sampling depends on that). We re-orient in place and apply a SMALL lift so the barrel clears the
