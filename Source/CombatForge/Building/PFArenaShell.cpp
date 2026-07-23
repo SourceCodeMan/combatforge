@@ -1166,20 +1166,12 @@ void APFArenaShell::BindToGameState(ACombatForgeGameState* GS)
 
 void APFArenaShell::HandlePhaseChanged(EPFMatchPhase NewPhase)
 {
-	const bool bBuild = (NewPhase == EPFMatchPhase::Build);
-	SetMidlineBarrierActive(bBuild);
-	if (bBuild)
-	{
-		// Build begins: raise the tinted-glass screen opaque and start it fading to clear.
-		BeginMidWallFade();
-	}
-	else if (MidWallScreen)
-	{
-		// Combat / vote / lobby: no screen (players cross the midline now). A new build phase re-arms it.
-		MidWallFadeStartTime = -1.0;
-		MidWallScreen->SetHiddenInGame(true);
-		MidWallScreen->SetVisibility(false);
-	}
+	// The tint wall rides INSIDE SetMidlineBarrierActive, not here. This delegate does NOT fire on the
+	// host — the GameMode drives the barrier DIRECTLY (SetMidlineBarrierActive at build start/end), which
+	// is why a wall armed from this handler never appeared in any host match or package while the barrier
+	// worked everywhere: the ONE call every machine actually makes is SetMidlineBarrierActive (GameMode
+	// direct on the host, this OnRep-driven handler on remote clients).
+	SetMidlineBarrierActive(NewPhase == EPFMatchPhase::Build);
 }
 
 void APFArenaShell::EnsureMidWallScreen()
@@ -1408,6 +1400,20 @@ void APFArenaShell::SetMidlineBarrierActive(bool bActive)
 		MidlineBarrier->SetCollisionEnabled(Wanted);
 		UE_LOG(CombatForgeLog, Log, TEXT("ArenaShell: midline barrier %s"),
 			bActive ? TEXT("ON") : TEXT("OFF"));
+		// THE TINT WALL rides the same switch — this is the one call every machine provably makes at
+		// build start/end (Tom's packaged host logs show it firing while the phase delegate stayed
+		// silent). Cosmetic + per-machine; the collision early-out above makes it edge-triggered, so a
+		// GameMode direct call and a client OnRep can't double-arm in the same transition.
+		if (bActive)
+		{
+			BeginMidWallFade();
+		}
+		else if (MidWallScreen)
+		{
+			MidWallFadeStartTime = -1.0;
+			MidWallScreen->SetHiddenInGame(true);
+			MidWallScreen->SetVisibility(false);
+		}
 	}
 }
 
