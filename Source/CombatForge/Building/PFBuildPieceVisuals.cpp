@@ -252,22 +252,8 @@ namespace
 		S.Normal = SoftLoadFirstTexture(S.NormalPaths);
 		S.ORD = SoftLoadFirstTexture(S.OrdPaths);
 		S.bLoaded = (S.BaseColor != nullptr);
-		// FORCE FULL MIPS RESIDENT on profile textures. These are set on RUNTIME-created MIDs driving
-		// ISM components — UE's distance-based texture streaming can't attribute them, so in PACKAGED
-		// builds they can sit at the lowest mip forever: the cone read as shiny BLACK at range and only
-		// resolved white-ish up close (Tom, alpha-14). A handful of surfaces at full res is well inside
-		// the 3000 MB pool. PIE never showed it because the editor pre-streams everything it touches.
-		auto ForceResident = [](UTexture* T)
-		{
-			if (UTexture2D* T2D = Cast<UTexture2D>(T))
-			{
-				T2D->bForceMiplevelsToBeResident = true;
-				T2D->SetForceMipLevelsToBeResident(30.f);
-			}
-		};
-		ForceResident(S.BaseColor);
-		ForceResident(S.Normal);
-		ForceResident(S.ORD);
+		// (A force-mips-resident hack briefly lived here chasing the cone's packaged shiny-black — wrong
+		// theory. The real cause was VT textures through the triplanar's non-VT samplers; see GSurfRoof.)
 	}
 
 	void InitSurfaceProfiles()
@@ -323,18 +309,24 @@ namespace
 		GSurfRamp.OrdPaths[2] = CC0_R;
 		LoadSurface(GSurfRamp);
 
-		// Roof — painted metal (distinct from rusty ramp)
+		// Roof — painted metal (distinct from rusty ramp).
+		// PRIMARY = the NON-VT RoofPanel copies (Scripts-era make_roofpanel_nonvt.py duplicates): every
+		// Megascans source texture is VIRTUAL, and the triplanar master's samplers are regular — a VT
+		// texture through a non-VT sampler renders BLACK in a COOKED build (the editor forgives it, which
+		// is why the cone looked right in PIE and shiny-black in the package, alpha-14). All the surfaces
+		// that render correctly in packages go through the Megascans MIs (proper VT samplers); the CONE is
+		// the one triplanar consumer, so it gets non-VT copies. Originals stay VT for the MIs.
 		GSurfRoof.Label = TEXT("roof-metal");
 		GSurfRoof.WorldTileSize = 200.f;
 		GSurfRoof.AccentBoost = 1.8f;
 		GSurfRoof.AlbedoTint = FLinearColor(0.9f, 0.92f, 0.95f);
-		GSurfRoof.BaseColorPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_D.T_Ind_War_Roof_Painted_01_D");
+		GSurfRoof.BaseColorPaths[0] = TEXT("/Game/Textures/RoofPanel/T_RoofPanel_D.T_RoofPanel_D");
 		GSurfRoof.BaseColorPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_D.T_Ind_War_Sheet_Metal_Rusty_01_D");
 		GSurfRoof.BaseColorPaths[2] = CC0_BC;
-		GSurfRoof.NormalPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_N.T_Ind_War_Roof_Painted_01_N");
+		GSurfRoof.NormalPaths[0] = TEXT("/Game/Textures/RoofPanel/T_RoofPanel_N.T_RoofPanel_N");
 		GSurfRoof.NormalPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_N.T_Ind_War_Sheet_Metal_Rusty_01_N");
 		GSurfRoof.NormalPaths[2] = CC0_N;
-		GSurfRoof.OrdPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_ORDp.T_Ind_War_Roof_Painted_01_ORDp");
+		GSurfRoof.OrdPaths[0] = TEXT("/Game/Textures/RoofPanel/T_RoofPanel_ORDp.T_RoofPanel_ORDp");
 		GSurfRoof.OrdPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_ORDp.T_Ind_War_Sheet_Metal_Rusty_01_ORDp");
 		GSurfRoof.OrdPaths[2] = CC0_R;
 		LoadSurface(GSurfRoof);
