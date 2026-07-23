@@ -1275,6 +1275,21 @@ void APFArenaShell::PreviewMidWallFade(float StartOpacity01, float FadeSeconds)
 	BeginMidWallFade();
 }
 
+void APFArenaShell::SetMidWallMaterial(UMaterialInterface* Mat)
+{
+	if (Mat == nullptr)
+	{
+		return;
+	}
+	MidWallBaseMaterial = Mat;
+	MidWallMID = nullptr;   // force ApplyMidWallOpacity to rebuild the MID from the new base
+	if (MidWallScreen)
+	{
+		MidWallScreen->SetMaterial(0, Mat);
+	}
+	BeginMidWallFade();     // re-arm so the fade re-drives against the new material's params
+}
+
 // Preview the midline fade without sitting through a build phase: re-arms it opaque and lets it run.
 // Optional args override the look live so it can be dialed: pf.MidWall [startOpacity] [fadeSeconds].
 static void PFMidWallCmd(const TArray<FString>& Args, UWorld* World)
@@ -1301,6 +1316,36 @@ static FAutoConsoleCommandWithWorldAndArgs GPFMidWallCmd(
 	TEXT("pf.MidWall"),
 	TEXT("Preview/tune the midline tint-screen fade: pf.MidWall [startOpacity 0..1] [fadeSeconds]. Re-arms it opaque and fades to clear."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFMidWallCmd));
+
+// Test a glass (or any) material on the midline screen live: pf.MidWallMat /Game/Path/To/M_Glass
+// The fade only animates if that material exposes an Opacity/Color param the MID can drive.
+static void PFMidWallMatCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 1)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("usage: pf.MidWallMat /Game/Path/To/Material   (swaps the midline screen material live)"));
+		return;
+	}
+	UMaterialInterface* Mat = Cast<UMaterialInterface>(FSoftObjectPath(Args[0]).TryLoad());
+	if (Mat == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.MidWallMat: could not load material '%s'"), *Args[0]);
+		return;
+	}
+	int32 Count = 0;
+	for (TActorIterator<APFArenaShell> It(World); It; ++It)
+	{
+		It->SetMidWallMaterial(Mat);
+		++Count;
+	}
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.MidWallMat: applied '%s' to %d shell(s). If it doesn't fade, the material has no drivable Opacity/Color param."),
+		*Mat->GetName(), Count);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFMidWallMatCmd(
+	TEXT("pf.MidWallMat"),
+	TEXT("Swap the midline tint-screen material live to test a glass material: pf.MidWallMat /Game/Path/To/Material."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFMidWallMatCmd));
 
 void APFArenaShell::SetMidlineBarrierActive(bool bActive)
 {

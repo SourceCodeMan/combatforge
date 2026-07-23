@@ -210,4 +210,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	/** Dev preview (pf.MidWall): optionally override the look, then re-arm the opaque->clear fade now. */
 	void PreviewMidWallFade(float StartOpacity01, float FadeSeconds);
+	/** Dev (pf.MidWallMat): swap the screen's base material live (test a glass material), rebuild the MID,
+	 *  and re-arm the fade so you can see whether its opacity actually drives. */
+	void SetMidWallMaterial(UMaterialInterface* Mat);
 };

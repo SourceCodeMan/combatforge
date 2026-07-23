@@ -251,6 +251,27 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 		}
 	}
 
+	// THE DORITO CONE is the ONE prop that wants a STRUCTURAL skin (the roof/ceiling panel) rather than a
+	// native warehouse material — it is always the /Engine Cone, so the prop-skip guard above (which keeps
+	// fallback props neutral and warehouse props on their native mats) leaves it on the ctor's gray. The
+	// role→material was wired for it (RoleForPieceType(PropDorito)=MetalRoof, and CreateStructuralPaletteMID
+	// force-routes the cone through the triplanar+roof profile so the Megascans UVs don't wash it white) —
+	// but nothing CALLED it for the cone until now. Skin it explicitly. Safe: the cone never has a native
+	// or fallback state to protect (it is the engine Cone by design), so there is no wrong-material race.
+	if (UMaterialInstanceDynamic* ConeMID =
+		PFBuildPieceVisuals::CreateStructuralPaletteMID(this, EPFPieceType::PropDorito))
+	{
+		for (uint8 Team = 0; Team < 2; ++Team)
+		{
+			const int32 K = ISMCIndexFor(EPFPieceType::PropDorito, Team);
+			if (PieceISMCs[K])
+			{
+				PieceISMCs[K]->SetMaterial(0, ConeMID);
+				TeamMIDs[K] = ConeMID;
+			}
+		}
+	}
+
 	UE_LOG(CombatForgeLog, Log,
 		TEXT("BuildGrid: cohesion palette Wall=%s Floor=%s Ramp=%s Roof=%s (visualsReady=%d)"),
 		PFBuildPieceVisuals::StructuralSurfaceName(EPFPieceType::Wall),
