@@ -53,13 +53,19 @@ UPFBuildComponent::UPFBuildComponent()
 	// is fully opaque so alpha on Color never softens the green overlay.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	// PREFER the project's own cooked translucent (/Game/Materials is force-cooked); the engine DEBUG
+	// material is not guaranteed to exist in packaged builds — if it was missing, the ghost silently fell
+	// back to the OPAQUE BasicShapeMaterial in every alpha (same failure class as the midline tint screen).
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GlassFadeFinder(
+		TEXT("/Game/Materials/M_PF_GlassFade.M_PF_GlassFade"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GhostMatFinder(
 		TEXT("/Engine/EngineDebugMaterials/M_SimpleUnlitTranslucent.M_SimpleUnlitTranslucent"));
 	CubeMesh      = CubeFinder.Object;
 	CylinderMesh  = CylinderFinder.Object;
 	ConeMesh      = ConeFinder.Object;
 	ShapeMaterial = BasicMatFinder.Succeeded() ? BasicMatFinder.Object : ArtMatFinder.Object;
-	GhostMaterial = GhostMatFinder.Succeeded() ? GhostMatFinder.Object : ShapeMaterial;
+	GhostMaterial = GlassFadeFinder.Succeeded() ? GlassFadeFinder.Object
+		: (GhostMatFinder.Succeeded() ? GhostMatFinder.Object : ShapeMaterial);
 }
 
 void UPFBuildComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)

@@ -127,6 +127,21 @@ static TAutoConsoleVariable<float> CVarWeaponAimFromHandsMaxDeg(
 	TEXT("pf.WeaponAimFromHandsMaxDeg"), 35.f,
 	TEXT("Cap (degrees) on the left-palm aim nudge — big enough to bridge foregrip mismatch, small enough to never flip a gun."));
 
+// BOT gun correction (Tom playtest 2026-07-23, packaged alpha-14): with bots excluded from the palm aim
+// they hold the raw tuned base pose, which on the bots' walk/locomotion clips reads "barrel at the
+// ground, trigger up, sights down" — consistently on every bot. The armed set's hand_r orientation
+// differs between the ADS-style idle (where the base was calibrated) and the carry/walk pose bots live
+// in, so bots get their own grip-preserving correction: rotate the gun about the grip, muzzle UP by
+// Pitch degrees (+ optional Roll about the barrel). Live-tunable so the numbers come from Tom's eyes;
+// if +pitch turns out to point the muzzle DOWN on this skeleton, use a negative value — sign conventions
+// on rotated axes have burned us before, so the knob is signed on purpose.
+static TAutoConsoleVariable<float> CVarBotGunPitchDeg(
+	TEXT("pf.BotGunPitchDeg"), 45.f,
+	TEXT("BOT-only third-person gun correction: rotate about the grip so the muzzle pitches UP this many degrees (negative = down). 0 = off."));
+static TAutoConsoleVariable<float> CVarBotGunRollDeg(
+	TEXT("pf.BotGunRollDeg"), 0.f,
+	TEXT("BOT-only third-person gun correction: roll about the barrel axis, degrees. 0 = off."));
+
 // Computed DEFAULT for the per-weapon third-person grip. This is not the old derived pose coming back:
 // the tick never recomputes anything (ApplyHandWeaponPose still applies plain relative values), rows a
 // human tuned with pf.WeaponTP always win, and the whole layer dies at runtime with pf.WeaponAutoTP 0.
@@ -4673,6 +4688,38 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 						FMath::Max(0.f, CVarWeaponAimFromHandsMaxDeg.GetValueOnGameThread()));
 					const FQuat Delta(Axis, FMath::Min(AngleRad, MaxRad));
 					// Rigid rotation ABOUT THE GRIP: the right palm keeps exactly the pose Tom calibrated.
+					WeaponMeshComp->SetWorldLocationAndRotation(
+						GripWorld + Delta.RotateVector(GunXf.GetLocation() - GripWorld),
+						Delta * GunXf.GetRotation());
+				}
+			}
+		}
+		// BOT-only correction (see CVarBotGunPitchDeg): the tuned base was calibrated against the ADS-style
+		// idle, but bots live in the carry/walk clips whose hand_r orientation leaves the barrel at the
+		// ground. Same grip-preserving rigid rotation the palm aim uses — the gun pivots about the grip so
+		// it stays seated in the hand: muzzle up by Pitch about the pawn's right axis, then Roll about the
+		// barrel. Applied fresh each tick on top of the re-applied base (never accumulates).
+		else if (bArmedSetActive
+			&& IsBotControlled()
+			&& WeaponMeshComp != nullptr
+			&& !CachedBarrelAxisLocal.IsNearlyZero())
+		{
+			const float PitchDeg = CVarBotGunPitchDeg.GetValueOnGameThread();
+			const float RollDeg  = CVarBotGunRollDeg.GetValueOnGameThread();
+			if (!FMath::IsNearlyZero(PitchDeg) || !FMath::IsNearlyZero(RollDeg))
+			{
+				const FTransform GunXf = WeaponMeshComp->GetComponentTransform();
+				const FVector GripWorld = GunXf.TransformPosition(CachedGripLocalMesh);
+				const FVector BarrelDir = GunXf.TransformVectorNoScale(CachedBarrelAxisLocal).GetSafeNormal();
+				if (!BarrelDir.IsNearlyZero())
+				{
+					// Negative angle about the pawn-right axis = muzzle UP for a forward-ish barrel in UE's
+					// convention; the cvar is signed so a wrong-reading skeleton just flips the value live.
+					FQuat Delta = FQuat(GetActorRightVector(), FMath::DegreesToRadians(-PitchDeg));
+					if (!FMath::IsNearlyZero(RollDeg))
+					{
+						Delta = Delta * FQuat(BarrelDir, FMath::DegreesToRadians(RollDeg));
+					}
 					WeaponMeshComp->SetWorldLocationAndRotation(
 						GripWorld + Delta.RotateVector(GunXf.GetLocation() - GripWorld),
 						Delta * GunXf.GetRotation());

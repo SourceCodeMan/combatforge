@@ -135,11 +135,17 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Tile.M_Tile"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhDemoMetalFinder(
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Metal.M_Metal"));
-	// Reliable engine translucent master (Color = RGB + A) — the same one the build ghost uses, so alpha
-	// actually blends. Drives the midline tint-screen's fade. Engine content, always cooked.
+	// Tinted-glass master for the midline screen. PREFER the project's own /Game/Materials/M_PF_GlassFade
+	// (gen_glass_fade_material.py; /Game/Materials is force-cooked, so it exists in PACKAGED builds) and
+	// only fall back to the engine debug translucent — engine DEBUG content is not guaranteed to cook,
+	// which is the class of "works in PIE, gone in the package" failure the tint screen hit in alpha-14.
+	// Same parameter contract either way: Vector "Color" (RGB+A) + Scalar "Opacity".
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GlassFadeFinder(
+		TEXT("/Game/Materials/M_PF_GlassFade.M_PF_GlassFade"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MidWallMatFinder(
 		TEXT("/Engine/EngineDebugMaterials/M_SimpleUnlitTranslucent.M_SimpleUnlitTranslucent"));
-	MidWallBaseMaterial = MidWallMatFinder.Succeeded() ? MidWallMatFinder.Object : nullptr;
+	MidWallBaseMaterial = GlassFadeFinder.Succeeded() ? GlassFadeFinder.Object
+		: (MidWallMatFinder.Succeeded() ? MidWallMatFinder.Object : nullptr);
 	// Heavy Megascans prop meshes are NOT hard-loaded here — CDO TryLoad freezes PIE for minutes.
 	// Soft-load in BeginPlay via BuildWarehouseBackdropDrape() instead.
 	CubeMesh = CubeFinder.Object;
@@ -1182,8 +1188,17 @@ void APFArenaShell::EnsureMidWallScreen()
 	// render; the build ghost (same M_SimpleUnlitTranslucent) works because it is a runtime NewObject +
 	// RegisterComponent. Mirror that. Called from BeginPlay and lazily from BeginMidWallFade so ordering
 	// against the phase bind never matters.
-	if (MidWallScreen != nullptr || ShellRoot == nullptr || CubeMesh == nullptr)
+	if (MidWallScreen != nullptr)
 	{
+		return;   // already created (idempotent)
+	}
+	if (ShellRoot == nullptr || CubeMesh == nullptr)
+	{
+		// PERMANENT diagnostic, not debug spam: this bail was silent once and cost a full packaged
+		// playtest to discover ("the wall didn't show" with zero log evidence). Cheap — runs at most
+		// once per missing-prereq call.
+		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall: screen NOT created (shellRoot=%d cubeMesh=%d)"),
+			ShellRoot ? 1 : 0, CubeMesh ? 1 : 0);
 		return;
 	}
 	const float MidX = FieldX * 0.5f;
@@ -1213,6 +1228,8 @@ void APFArenaShell::BeginMidWallFade()
 	UWorld* World = GetWorld();
 	if (World == nullptr || MidWallScreen == nullptr)
 	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall: fade NOT armed (world=%d screen=%d)"),
+			World ? 1 : 0, MidWallScreen ? 1 : 0);
 		return;
 	}
 	// Anchor the fade to when THIS machine enters build. Host is exact; a late-joining client restarts the
