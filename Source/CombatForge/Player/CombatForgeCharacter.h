@@ -195,6 +195,30 @@ protected:
 	 */
 	void ApplyArtLoadout();
 
+	/**
+	 * Seat the FP arms on the CURRENT viewmodel gun: sample the hold anim's hand_r/hand_l (component
+	 * space), rigidly align the hand pair to the weapon's grip point + barrel axis in ViewModelRoot
+	 * space (same harvest the TP palm-aim uses), and place the component so hand_r lands on the grip.
+	 * Re-run on every FP pose apply (weapon swap / kit push); no-op without arms mesh or gun.
+	 */
+	void UpdateFirstPersonArmsPose();
+
+	/**
+	 * The two points on the CURRENT viewmodel gun the hands belong on, in ViewModelRoot space:
+	 * trigger grip (rear/low) and handguard (forward) — both off the same bounds recipe the
+	 * third-person grip uses, so FP and TP read identical per-weapon geometry.
+	 */
+	bool ComputeFPGunHandAnchors(FVector& OutGripVM, FVector& OutForeVM) const;
+
+	/**
+	 * Play a one-shot clip on the FP arms (fire kick, reload), then return to the hold loop.
+	 * DurationOverrideSec > 0 stretches/compresses the clip to that many seconds (reload clips match the
+	 * weapon's actual ReloadTime). Owner-only cosmetic — no-ops for bots/remote pawns/unmounted arms.
+	 */
+	void PlayFirstPersonArmsOneShot(UAnimSequence* Anim, float DurationOverrideSec = 0.f);
+	/** Back to the looping hold clip at rate 1 (one-shot finished or was preempted). */
+	void ResumeFirstPersonArmsHold();
+
 	/** Mounts the per-team skeletal body (Manny=0 / Quinn=1) with feet alignment; gated by CachedBodyTeamId. */
 	void ApplyTeamBody(uint8 Team);
 
@@ -354,6 +378,15 @@ public:
 	void DevEquipCatalogWeapon(int32 Category, int32 Index);
 	/** Step Dir through the flat catalog (all categories). Returns true if equipped. */
 	bool DevCycleCatalogWeapon(int32 Dir);
+#if !UE_BUILD_SHIPPING
+	/** Log the FP-arms seating numbers (per-hand anchor error, arms scale, near-plane clearances). */
+	void DumpFirstPersonArmsVerify() const;
+	/** pf.FPArmsVerify driver: dismiss menu -> equip lmg_01 -> dump + screenshot -> quit. */
+	void FPArmsVerifyTick();
+	FTimerHandle FPArmsVerifyTimer;
+	int32 FPArmsVerifyStep = 0;
+	int32 FPArmsVerifyTicks = 0;
+#endif
 private:
 	/** Session-only pose overrides while tuning (key = WeaponId). Survives cycle; cleared on EndPlay. */
 	struct FPFSessionWeaponPose
@@ -429,6 +462,16 @@ public:
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<USkeletalMesh> FirstPersonArmsMesh = nullptr;   // FP arms -> FirstPersonArms
+	// Rifle-hold pose the FP arms play (single node, looping). An AIM idle on purpose: its gun line is
+	// already close to the level viewmodel, so the rigid hand->grip alignment is a small correction —
+	// the LOW-READY ArmedIdleAnim would need a ~30° pitch-up that reads as dislocated shoulders.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> FirstPersonArmsAnim = nullptr;
+	// One-shot overlays on the same single node: fire (the _Aim variant — it fires from the shouldered
+	// hold the arms live in) and reload (ReloadLoaded mag swap, rate-matched to the weapon's ReloadTime).
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> FirstPersonArmsFireAnim = nullptr;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> FirstPersonArmsReloadAnim = nullptr;
+	// Pending return-to-hold after a one-shot arm clip (fire kick / reload) finishes.
+	FTimerHandle FPArmsReturnTimer;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
 	// Grip in hand_r bone space (SM_Rifle family: local +Y = barrel-forward).

@@ -27,6 +27,7 @@
 #include "Building/PFBuildGrid.h"          // plant: aimed-piece lookup (FindPieceByHit)
 #include "Core/CombatForgeGameMode.h"      // plant: server route to ServerTryPlantBomb
 #include "Core/PFUserPrefs.h"
+#include "UI/PFLoadingMenuWidget.h"   // pf.FPArmsVerify: step past the boot menu unattended
 
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -52,6 +53,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
+#include "UnrealClient.h"   // FScreenshotRequest (pf.FPArmsVerify proof shot)
 #include "UObject/ConstructorHelpers.h"
 
 // Rifle-hold locomotion kill-switch: the armed set plays AnimStarterPack sequences on the Bandit skeleton via
@@ -73,6 +75,13 @@ static TAutoConsoleVariable<int32> CVarArmedAnims(
 static TAutoConsoleVariable<int32> CVarShowMuzzle(
 	TEXT("pf.ShowMuzzle"), 0,
 	TEXT("1 = draw a marker at the first-person muzzle + shot line (align pf.WeaponFP's last 3 args to the barrel)."));
+
+// Automated FP-arms proof pass (dev builds; launch with -ExecCmds="pf.FPArmsVerify 1"): T+2s equips the
+// lmg_01 reference, T+4s logs the numeric seating (hand->grip distance, hand-line vs barrel, near-plane
+// clearances) + takes a screenshot named FPArmsVerify, T+7s quits. No-op for bots/remote pawns.
+static TAutoConsoleVariable<int32> CVarFPArmsVerify(
+	TEXT("pf.FPArmsVerify"), 0,
+	TEXT("1 = automated FP-arms verification: equip lmg_01, log seating numbers, screenshot, quit."));
 
 // Dev pose-tuning drag: hold MIDDLE MOUSE.
 //   plain MMB = translate  |  Shift = depth  |  Ctrl = pitch/yaw the MUZZLE  |  Alt = roll
@@ -280,12 +289,7 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	}
 
 	// ---- Art loadout components (M1): created empty; ApplyArtLoadout assigns meshes if set ----
-	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
-	FirstPersonArms->SetupAttachment(FirstPersonCamera);
-	FirstPersonArms->SetOnlyOwnerSee(true);          // FP arms: only the owning client sees them
-	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FirstPersonArms->SetVisibility(false);
-
+	// (FirstPersonArms is created below, AFTER ViewModelRoot — it lives in viewmodel space.)
 	WeaponMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMeshComp"));
 	WeaponMeshComp->SetupAttachment(GetMesh());      // re-attached to the hand socket in ApplyArtLoadout
 	WeaponMeshComp->SetOwnerNoSee(true);             // slice: weapon rides the TP body only
@@ -312,6 +316,33 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	ViewModelRoot->SetupAttachment(FirstPersonCamera);
 	ViewModelHomeLoc = FVector(26.f, 9.f, -12.f);   // forward-right-down of the eye, classic viewmodel pose
 	ViewModelRoot->SetRelativeLocation(ViewModelHomeLoc);
+
+	// ---- First-person ARMS: child of ViewModelRoot so ADS/recoil/reload sway and every hide/show that
+	// propagates through the viewmodel (build mode, elimination, respawn) carries the arms with the gun
+	// for free. Bandit modular arms (SKM_Bandit_Skeleton) posed by a rifle-hold clip from the RifleAnims
+	// pack — that skeleton is already registered compatible with the Bandit skeleton for the TP body
+	// (Scripts/add_compatible_skeleton.py), so the same clip plays on the arms-only mesh directly.
+	// UpdateFirstPersonArmsPose seats the animated hands on the per-weapon grip after every pose apply.
+	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
+	FirstPersonArms->SetupAttachment(ViewModelRoot);
+	FirstPersonArms->SetOnlyOwnerSee(true);          // FP arms: only the owning client sees them
+	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonArms->SetCastShadow(false);           // viewmodel-space: never shadow the world
+	FirstPersonArms->SetVisibility(false);
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> FPArmsFinder(
+		TEXT("/Game/Bandits/Mesh/Arms/Arms_Gloves/SKM_Arms_Gloves_Black.SKM_Arms_Gloves_Black"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FPArmsAnimFinder(
+		TEXT("/Game/RifleAnims/AS_Rifle_Aim.AS_Rifle_Aim"));
+	// Fire/reload one-shots from the SAME root-level retargeted set (the BlendSpaces-folder originals
+	// stretch — see the pf.ArmedAnims comment at the top of this file).
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FPArmsFireFinder(
+		TEXT("/Game/RifleAnims/AS_Rifle_Fire_Aim.AS_Rifle_Fire_Aim"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FPArmsReloadFinder(
+		TEXT("/Game/RifleAnims/AS_Rifle_ReloadLoaded.AS_Rifle_ReloadLoaded"));
+	if (FPArmsFinder.Succeeded())       { FirstPersonArmsMesh = FPArmsFinder.Object; }
+	if (FPArmsAnimFinder.Succeeded())   { FirstPersonArmsAnim = FPArmsAnimFinder.Object; }
+	if (FPArmsFireFinder.Succeeded())   { FirstPersonArmsFireAnim = FPArmsFireFinder.Object; }
+	if (FPArmsReloadFinder.Succeeded()) { FirstPersonArmsReloadAnim = FPArmsReloadFinder.Object; }
 
 	// First-person weapon: the real rifle if available (Lyra SM_Rifle + generated M_PF_Rifle, self-contained),
 	// otherwise the primitive marker gun. We build ONE or the OTHER — building no primitive means the
@@ -694,7 +725,147 @@ void ACombatForgeCharacter::BeginPlay()
 			Audio->StartAmbientBed();
 		}
 	}
+
+#if !UE_BUILD_SHIPPING
+	// pf.FPArmsVerify pass. Scheduled for EVERY pawn because possession happens AFTER BeginPlay (a
+	// locally-controlled gate here would skip the player pawn); the tick re-checks and bot/remote pawns
+	// just poll harmlessly. State-driven, not fixed delays: the boot flow parks on the loading menu
+	// until the host presses Enter, so a timed sequence fires (and quits) before a pawn is ever playable.
+	// ALSO check the raw command line: the boot pawns' BeginPlay runs with the world, ~1s BEFORE
+	// -ExecCmds sets the cvar, so a cvar-only gate read 0 on the pawn that mattered and the harness
+	// never armed (2026-07-23 smoke runs — every menu dismissal in those logs was Tom, not the harness).
+	if (CVarFPArmsVerify.GetValueOnGameThread() != 0
+		|| FCString::Strifind(FCommandLine::Get(), TEXT("pf.FPArmsVerify")) != nullptr)
+	{
+		GetWorldTimerManager().SetTimer(FPArmsVerifyTimer, this,
+			&ACombatForgeCharacter::FPArmsVerifyTick, 1.f, /*bLoop=*/true, 2.f);
+	}
+#endif
 }
+
+#if !UE_BUILD_SHIPPING
+void ACombatForgeCharacter::FPArmsVerifyTick()
+{
+	// Hard cap: this pass must always terminate, even if the menu never completes warmup.
+	if (++FPArmsVerifyTicks > 90)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("FPArmsVerify: timed out at step %d — quitting"), FPArmsVerifyStep);
+		FPArmsVerifyStep = 2;
+	}
+	if (!IsLocallyControlled() || IsBotControlled())
+	{
+		return;   // not the human pawn (yet)
+	}
+
+	// Step through the loading menu first: it owns input until dismissed, so nothing below is real
+	// until it's gone. OnEnterClicked is the menu's own private UFUNCTION — invoked reflectively so
+	// this dev-only harness doesn't widen the widget's API.
+	for (TObjectIterator<UPFLoadingMenuWidget> It; It; ++It)
+	{
+		UPFLoadingMenuWidget* Menu = *It;
+		if (Menu == nullptr || Menu->GetWorld() != GetWorld() || Menu->IsFinished())
+		{
+			continue;
+		}
+		if (!Menu->IsWarmupComplete())
+		{
+			return;   // still warming shaders — wait
+		}
+		if (UFunction* Enter = Menu->FindFunction(TEXT("OnEnterClicked")))
+		{
+			Menu->ProcessEvent(Enter, nullptr);
+			UE_LOG(CombatForgeLog, Log, TEXT("FPArmsVerify: dismissed loading menu"));
+		}
+		return;   // let the lobby settle a tick
+	}
+
+	switch (FPArmsVerifyStep)
+	{
+	case 0:
+	{
+		const FPFWeaponConfig Ref = PFWeapon::FindById(TEXT("lmg_01"));
+		DevEquipCatalogWeapon(Ref.Category, Ref.Index);
+		UE_LOG(CombatForgeLog, Log, TEXT("FPArmsVerify: equipped lmg_01 reference (cat=%d idx=%d)"),
+			Ref.Category, Ref.Index);
+		++FPArmsVerifyStep;
+		break;
+	}
+	case 1:
+		DumpFirstPersonArmsVerify();
+		FScreenshotRequest::RequestScreenshot(TEXT("FPArmsVerify"), /*bShowUI=*/false,
+			/*bAddFilenameSuffix=*/false);
+		++FPArmsVerifyStep;
+		break;
+	default:
+		GetWorldTimerManager().ClearTimer(FPArmsVerifyTimer);
+		if (APlayerController* PC = Cast<APlayerController>(GetController());
+			PC != nullptr && PC->IsLocalController())
+		{
+			PC->ConsoleCommand(TEXT("quit"));
+		}
+		break;
+	}
+}
+#endif
+
+#if !UE_BUILD_SHIPPING
+void ACombatForgeCharacter::DumpFirstPersonArmsVerify() const
+{
+	if (FirstPersonArms == nullptr || FirstPersonCamera == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("FPArmsVerify: no arms/camera component"));
+		return;
+	}
+	const bool bMounted = FirstPersonArms->GetSkeletalMeshAsset() != nullptr;
+	UE_LOG(CombatForgeLog, Log,
+		TEXT("FPArmsVerify: weapon=%s mounted=%d visible=%d render=%d anim=%s parent=%s relLoc=%s relRot=%s"),
+		*LastAppliedWeaponId.ToString(), bMounted ? 1 : 0,
+		FirstPersonArms->IsVisible() ? 1 : 0,
+		FirstPersonArms->GetSkeletalMeshAsset() != nullptr && FirstPersonArms->IsVisible() ? 1 : 0,
+		*GetNameSafe(FirstPersonArms->GetAnimationMode() == EAnimationMode::AnimationSingleNode
+			? FirstPersonArmsAnim.Get() : nullptr),
+		*GetNameSafe(FirstPersonArms->GetAttachParent()),
+		*FirstPersonArms->GetRelativeLocation().ToCompactString(),
+		*FirstPersonArms->GetRelativeRotation().ToCompactString());
+	if (!bMounted || RifleFPMesh == nullptr || RifleFPMesh->GetStaticMesh() == nullptr)
+	{
+		return;
+	}
+
+	// Both hand targets, measured where they actually landed. These are the pass/fail numbers: each hand
+	// should sit within a palm-width (~5uu) of its anchor.
+	FVector GripVM, ForeVM;
+	if (ComputeFPGunHandAnchors(GripVM, ForeVM) && ViewModelRoot != nullptr)
+	{
+		const FTransform VMXf = ViewModelRoot->GetComponentTransform();
+		const FVector GripW = VMXf.TransformPosition(GripVM);
+		const FVector ForeW = VMXf.TransformPosition(ForeVM);
+		const FVector HandRW = FirstPersonArms->GetSocketLocation(TEXT("hand_r"));
+		const FVector HandLW = FirstPersonArms->GetSocketLocation(TEXT("hand_l"));
+		UE_LOG(CombatForgeLog, Log,
+			TEXT("FPArmsVerify: handR->grip=%.2fuu handL->foregrip=%.2fuu armsScale=%.3f gunHandSpan=%.1fuu"),
+			FVector::Dist(HandRW, GripW), FVector::Dist(HandLW, ForeW),
+			FirstPersonArms->GetRelativeScale3D().X, FVector::Dist(GripW, ForeW));
+	}
+
+	// Near-plane clearance: forward distance from the camera for the bones a player can actually see.
+	// NearClipPlane is 4uu (DefaultEngine.ini) — hands/forearms should sit well past it; elbows and
+	// shoulders are EXPECTED to be at/behind the plane (every FPS clips them).
+	const FVector CamLoc = FirstPersonCamera->GetComponentLocation();
+	const FVector CamFwd = FirstPersonCamera->GetForwardVector();
+	static const TCHAR* Bones[] = { TEXT("hand_r"), TEXT("hand_l"), TEXT("lowerarm_r"), TEXT("lowerarm_l") };
+	for (const TCHAR* B : Bones)
+	{
+		const FName BoneName(B);
+		if (FirstPersonArms->GetBoneIndex(BoneName) == INDEX_NONE)
+		{
+			continue;
+		}
+		const float Fwd = FVector::DotProduct(FirstPersonArms->GetSocketLocation(BoneName) - CamLoc, CamFwd);
+		UE_LOG(CombatForgeLog, Log, TEXT("FPArmsVerify: bone %s fwdOfCamera=%.2fuu"), B, Fwd);
+	}
+}
+#endif
 
 void ACombatForgeCharacter::PossessedBy(AController* NewController)
 {
@@ -828,6 +999,10 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 				bReloadDipActive = true;
 				ReloadDipElapsed = 0.f;
 				ReloadDipDuration = (WeaponComponent != nullptr) ? FMath::Max(0.2f, WeaponComponent->ReloadTime) : 1.f;
+				// FP arms act out the mag swap, stretched to span the weapon's actual reload window
+				// (an LMG's 2.5s reload plays the clip at ~stretched rate; the gun-dip and the hands
+				// then finish together).
+				PlayFirstPersonArmsOneShot(FirstPersonArmsReloadAnim, ReloadDipDuration);
 			}
 			bWasReloading = bNowReloading;
 
@@ -2890,6 +3065,9 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 	// instead. Only this gun — slim rifles/SMGs/snipers auto-tip correctly and stay on that path.
 	bMuzzleFromAuthoredFP = (Def.WeaponId != nullptr && FCString::Strcmp(Def.WeaponId, TEXT("lmg_minigun")) == 0);
 
+	// Re-seat the FP arms on the NEW gun's grip (per-weapon FPLoc/FPRot just changed above).
+	UpdateFirstPersonArmsPose();
+
 	if (WeaponComponent != nullptr)
 	{
 		// SAME-WEAPON kit re-push must NOT hand out a free magazine: opening the loadout/character menu
@@ -4782,10 +4960,15 @@ void ACombatForgeCharacter::ApplyArtLoadout()
 	// authoritatively when the real TeamId lands.
 	ApplyTeamBody(CachedTeamId);
 
-	if (FirstPersonArmsMesh != nullptr && FirstPersonArms != nullptr)
+	// FP arms mount — ONLY with a hold anim: an unanimated arms mesh renders a T-pose through the
+	// player's face, which is worse than no arms at all.
+	if (FirstPersonArmsMesh != nullptr && FirstPersonArmsAnim != nullptr && FirstPersonArms != nullptr)
 	{
 		FirstPersonArms->SetSkeletalMeshAsset(FirstPersonArmsMesh);
+		FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		FirstPersonArms->PlayAnimation(FirstPersonArmsAnim, /*bLooping=*/true);
 		FirstPersonArms->SetVisibility(true);
+		UpdateFirstPersonArmsPose();
 	}
 
 	AttachWeaponToHand();
@@ -4802,6 +4985,153 @@ void ACombatForgeCharacter::ApplyArtLoadout()
 	{
 		SetEliminatedAppearance(true, /*bPlayDeathAnim=*/false);
 	}
+}
+
+void ACombatForgeCharacter::UpdateFirstPersonArmsPose()
+{
+	// Owner-only cosmetic: a dedicated server never renders the arms, so skip the anim eval there.
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	if (FirstPersonArms == nullptr || FirstPersonArms->GetSkeletalMeshAsset() == nullptr
+		|| RifleFPMesh == nullptr || RifleFPMesh->GetStaticMesh() == nullptr)
+	{
+		return;
+	}
+
+	// Where THIS gun wants the two hands, in ViewModelRoot space.
+	FVector GripVM, ForeVM;
+	if (!ComputeFPGunHandAnchors(GripVM, ForeVM))
+	{
+		return;
+	}
+	const FVector GunHandVec = ForeVM - GripVM;
+	const float   GunHandDist = GunHandVec.Size();
+	const FVector GunHandDir  = GunHandVec.GetSafeNormal();
+	if (GunHandDist < 1.f || GunHandDir.IsNearlyZero())
+	{
+		return;
+	}
+
+	// Sample the HOLD clip specifically: a weapon swap can land mid fire/reload one-shot, and seating
+	// solved against those clips' hand positions would stick the arms in a fire/reload pose. Re-assert
+	// the hold (cancelling any pending return timer), then evaluate NOW so hand bones are posed even
+	// before the component's first rendered tick.
+	if (FirstPersonArmsAnim != nullptr)
+	{
+		GetWorldTimerManager().ClearTimer(FPArmsReturnTimer);
+		FirstPersonArms->SetPlayRate(1.f);
+		FirstPersonArms->PlayAnimation(FirstPersonArmsAnim, /*bLooping=*/true);
+	}
+	FirstPersonArms->TickAnimation(0.f, /*bNeedsValidRootMotion=*/false);
+	FirstPersonArms->RefreshBoneTransforms();
+
+	static const FName HandRName(TEXT("hand_r"));
+	static const FName HandLName(TEXT("hand_l"));
+	if (FirstPersonArms->GetBoneIndex(HandRName) == INDEX_NONE
+		|| FirstPersonArms->GetBoneIndex(HandLName) == INDEX_NONE)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("FPArms: mesh '%s' has no hand_r/hand_l — arms left unposed"),
+			*GetNameSafe(FirstPersonArms->GetSkeletalMeshAsset()));
+		return;
+	}
+	const FVector HandR = FirstPersonArms->GetSocketTransform(HandRName, RTS_Component).GetLocation();
+	const FVector HandL = FirstPersonArms->GetSocketTransform(HandLName, RTS_Component).GetLocation();
+
+	// Coarse frame first: skeletal meshes are authored +Y-forward, so yaw -90 faces the pose down the
+	// viewmodel's +X (identical to how a character mesh sits under its capsule). The residual correction
+	// is then SMALL, so FindBetweenNormals cannot introduce a large roll — the anim's natural wrist/elbow
+	// roll is preserved (same reasoning as the TP grip-preserving pivot).
+	const FQuat BaseQ = FRotator(0.f, -90.f, 0.f).Quaternion();
+	const FVector AnimHandVec = BaseQ.RotateVector(HandL - HandR);
+	const float   AnimHandDist = AnimHandVec.Size();
+	if (AnimHandDist < 1.f)
+	{
+		return;
+	}
+
+	// BOTH hands on the gun, not just the trigger hand. Aligning only the hand-pair DIRECTION (what the
+	// first pass did) leaves the support hand wherever the clip's own hand spacing puts it — Tom, first
+	// look: "it's not mounted to the gun. At least the left hand is not." A rifle hold is two point
+	// constraints, so solve the similarity (rotation + uniform scale + translation) that satisfies both:
+	// rotate the anim's hand line onto the gun's grip->handguard line, scale by the length ratio, then
+	// translate hand_r onto the grip. hand_l then lands ON the handguard by construction.
+	const FQuat ArmsQ = FQuat::FindBetweenNormals(AnimHandVec / AnimHandDist, GunHandDir) * BaseQ;
+	// Clamped: arm length is a character trait, not a weapon trait. Inside the clamp both hands are exact;
+	// at the clamp the support hand takes the residual (a stubby SMG can't stretch arms 40%).
+	const float ArmsScale = FMath::Clamp(GunHandDist / AnimHandDist, 0.85f, 1.15f);
+	const FVector ArmsLoc = GripVM - ArmsQ.RotateVector(HandR) * ArmsScale;
+
+	FirstPersonArms->SetRelativeScale3D(FVector(ArmsScale));
+	FirstPersonArms->SetRelativeLocation(ArmsLoc);
+	FirstPersonArms->SetRelativeRotation(ArmsQ.Rotator());
+}
+
+bool ACombatForgeCharacter::ComputeFPGunHandAnchors(FVector& OutGripVM, FVector& OutForeVM) const
+{
+	if (RifleFPMesh == nullptr || RifleFPMesh->GetStaticMesh() == nullptr)
+	{
+		return false;
+	}
+	const UStaticMesh* GunMesh = RifleFPMesh->GetStaticMesh();
+
+	// Two anchors off the SAME bounds recipe the TP grip uses (ComputeAutoTPGrip's anchor is
+	// centre - Along*(BarrelHalf*AlongFrac) - Z*(HalfHeight*DownFrac), so the fraction is SIGNED:
+	// +0.55 = rear/low = the trigger grip, -0.35 = forward/less-low = the handguard the support hand
+	// wraps). Reusing the catalog function keeps FP and TP reading the same geometry per weapon.
+	FPFWeaponAutoTP Grip, Fore;
+	if (!PFWeapon::ComputeAutoTPGrip(GunMesh, 1.f, FVector::ZeroVector, FRotator::ZeroRotator,
+			0.55f, 0.55f, /*bApplyAnchor=*/false, Grip)
+		|| !PFWeapon::ComputeAutoTPGrip(GunMesh, 1.f, FVector::ZeroVector, FRotator::ZeroRotator,
+			-0.35f, 0.35f, /*bApplyAnchor=*/false, Fore))
+	{
+		return false;
+	}
+
+	// Into ViewModelRoot space via the FP transform ACTUALLY applied to the gun (catalog hand-tuned row /
+	// true-scale derivation / session pf.WeaponFP — whoever won, this is the result).
+	const FVector FPLoc  = RifleFPMesh->GetRelativeLocation();
+	const FQuat   FPQuat = RifleFPMesh->GetRelativeRotation().Quaternion();
+	const float   FPScl  = RifleFPMesh->GetRelativeScale3D().X;
+	OutGripVM = FPLoc + FPQuat.RotateVector(Grip.GripLocalMesh * FPScl);
+	OutForeVM = FPLoc + FPQuat.RotateVector(Fore.GripLocalMesh * FPScl);
+	return true;
+}
+
+void ACombatForgeCharacter::PlayFirstPersonArmsOneShot(UAnimSequence* Anim, float DurationOverrideSec)
+{
+	// Owner-only cosmetic. The arms exist on every pawn (owner-only-see), but playing clips on arms
+	// nobody can see is pure churn — a listen host's bots would restart this every shot of full-auto.
+	if (Anim == nullptr || FirstPersonArms == nullptr || FirstPersonArms->GetSkeletalMeshAsset() == nullptr
+		|| !IsLocallyControlled() || IsBotControlled())
+	{
+		return;
+	}
+	const float ClipLen = Anim->GetPlayLength();
+	if (ClipLen <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	const float Duration = (DurationOverrideSec > 0.f) ? DurationOverrideSec : ClipLen;
+	FirstPersonArms->PlayAnimation(Anim, /*bLooping=*/false);
+	FirstPersonArms->SetPlayRate(ClipLen / Duration);
+	// One return timer, always pushed out by the newest one-shot: full-auto keeps restarting the fire
+	// clip and the hold only resumes after the LAST shot's clip runs out.
+	GetWorldTimerManager().SetTimer(FPArmsReturnTimer, this,
+		&ACombatForgeCharacter::ResumeFirstPersonArmsHold, Duration, /*bLoop=*/false);
+}
+
+void ACombatForgeCharacter::ResumeFirstPersonArmsHold()
+{
+	if (FirstPersonArms == nullptr || FirstPersonArms->GetSkeletalMeshAsset() == nullptr
+		|| FirstPersonArmsAnim == nullptr)
+	{
+		return;
+	}
+	FirstPersonArms->SetPlayRate(1.f);
+	FirstPersonArms->PlayAnimation(FirstPersonArmsAnim, /*bLooping=*/true);
 }
 
 void ACombatForgeCharacter::SetTeamColor(uint8 TeamId)
@@ -5182,6 +5512,12 @@ void ACombatForgeCharacter::OnFireCosmetic(float RecoilScale)
 	KickYaw.Vel   += FMath::FRandRange(-45.f, 45.f) * RecoilScale;
 	KickRoll.Vel  += FMath::FRandRange(-80.f, 80.f) * RecoilScale;
 	WeaponRaiseHoldSec = FMath::Max(WeaponRaiseHoldSec, WeaponRaiseHoldOnShot);
+	// FP arms fire the trigger-squeeze clip with each shot; a shot mid-reload (shouldn't happen — the
+	// weapon blocks it — but belt-and-suspenders) must not cut the reload clip short.
+	if (WeaponComponent == nullptr || !WeaponComponent->bReloading)
+	{
+		PlayFirstPersonArmsOneShot(FirstPersonArmsFireAnim);
+	}
 	// Do NOT ApplyRaisedWeaponPose() here. It re-parented the TP rifle to the capsule AT EYE HEIGHT for exactly
 	// the one frame in which FireOneShot samples GetMuzzleLocation(false) → the hand-rifle gate failed and every
 	// third-person shot (bots + remote players) spawned its BB at the shooter's EYES. The raise was already
