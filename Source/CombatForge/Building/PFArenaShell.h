@@ -196,7 +196,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") FLinearColor MidWallTint  = FLinearColor(0.012f, 0.017f, 0.03f, 1.f);
 	double MidWallFadeStartTime = -1.0;   // world seconds when the current build phase began (-1 = idle/hidden)
 
-	void SetupMidWallScreen();            // ctor: build the screen mesh over the midline
+	void EnsureMidWallScreen();           // runtime: create the screen mesh over the midline (idempotent)
 	void BeginMidWallFade();              // build-phase entered: opaque now, start the clock
 	void UpdateMidWallFade();             // per-tick lerp toward clear; hides + stops when done
 	void ApplyMidWallOpacity(float Alpha01);

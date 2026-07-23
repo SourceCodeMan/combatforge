@@ -283,10 +283,9 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	MidlineBarrier->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
 	MidlineBarrier->SetCollisionEnabled(ECollisionEnabled::NoCollision);   // off outside BuildPhase
 
-	// --- The VISIBLE tinted-glass screen on the midline (cosmetic; fade driven at runtime) ---
-	// Spans the PLAY field only (not the 20000-uu desert extension of the collision barrier), full height.
-	// Two-sided by construction (a thin box has faces both ways). Hidden until a build phase begins.
-	SetupMidWallScreen();
+	// The VISIBLE tinted-glass midline screen is created at RUNTIME (BeginPlay / first fade), NOT here —
+	// a translucent static-mesh DEFAULT SUBOBJECT set up in the ctor did not render (the build ghost, same
+	// material, works because it is a runtime NewObject + RegisterComponent). See EnsureMidWallScreen.
 
 	// --- Warm-up pen: floor + 4 low walls (players cannot jump 300 uu) ---
 	PenFloor = MakeShapePart(TEXT("PenFloor"),
@@ -1045,6 +1044,10 @@ void APFArenaShell::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Create the midline tint-screen now (runtime component — see EnsureMidWallScreen). Before the phase
+	// bind below, so a match already in Build gets the screen immediately.
+	EnsureMidWallScreen();
+
 	// Cohesion: rebind cube shell surfaces onto the same warehouse triplanar palette as built forts.
 	// Must run before ApplyTint so metal posts still get their gray Color MID on the new master.
 	ApplyCohesivePalette();
@@ -1170,15 +1173,20 @@ void APFArenaShell::HandlePhaseChanged(EPFMatchPhase NewPhase)
 	}
 }
 
-void APFArenaShell::SetupMidWallScreen()
+void APFArenaShell::EnsureMidWallScreen()
 {
-	if (ShellRoot == nullptr || CubeMesh == nullptr)
+	// RUNTIME creation (idempotent). A translucent static-mesh default subobject built in the ctor did not
+	// render; the build ghost (same M_SimpleUnlitTranslucent) works because it is a runtime NewObject +
+	// RegisterComponent. Mirror that. Called from BeginPlay and lazily from BeginMidWallFade so ordering
+	// against the phase bind never matters.
+	if (MidWallScreen != nullptr || ShellRoot == nullptr || CubeMesh == nullptr)
 	{
 		return;
 	}
 	const float MidX = FieldX * 0.5f;
-	MidWallScreen = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MidWallScreen"));
+	MidWallScreen = NewObject<UStaticMeshComponent>(this, TEXT("MidWallScreen"));
 	MidWallScreen->SetupAttachment(ShellRoot);
+	MidWallScreen->SetMobility(EComponentMobility::Movable);
 	MidWallScreen->SetStaticMesh(CubeMesh);
 	// Thin slab on the midline, spanning the play field width and the full perimeter height.
 	MidWallScreen->SetRelativeLocation(FVector(MidX, FieldY * 0.5f, PerimeterH * 0.5f));
@@ -1191,12 +1199,14 @@ void APFArenaShell::SetupMidWallScreen()
 	{
 		MidWallScreen->SetMaterial(0, MidWallBaseMaterial);
 	}
+	MidWallScreen->RegisterComponent();              // the ghost pattern — makes a runtime translucent comp render
 	MidWallScreen->SetHiddenInGame(true);            // shown only while a build-phase fade is running
 	MidWallScreen->SetVisibility(false);
 }
 
 void APFArenaShell::BeginMidWallFade()
 {
+	EnsureMidWallScreen();   // lazy runtime creation — guarantees the screen exists regardless of ordering
 	UWorld* World = GetWorld();
 	if (World == nullptr || MidWallScreen == nullptr)
 	{
