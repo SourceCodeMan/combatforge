@@ -4628,7 +4628,16 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 	{
 		const bool bArmedSetActive = CVarArmedAnims.GetValueOnGameThread() != 0 && ArmedIdleAnim != nullptr;
 		USkeletalMeshComponent* Body = GetMesh();
+		// HUMANS ONLY. The palm aim's premise — hand_l rides the foregrip roughly forward along the barrel —
+		// holds for a player whose aim tracks level, but a BOT's AI aim-offset drags the animated hand_l
+		// toward its current target at any pitch/yaw, so grip->palm points off-axis and every bot's gun
+		// canted (up to the 35° cap) in a different direction ("pointed all kinds of directions",
+		// Tom playtest 2026-07-23). Bots keep the clean hand-tuned base pose from ApplyHandWeaponPose —
+		// the rotation they had correctly before c0a28b5. IsBotControlled() keys off the REPLICATED
+		// PlayerState IsABot flag, so remote clients agree; never use IsLocallyControlled() here (TRUE
+		// for bots on the host — the invisible-bot-guns lesson, a1dc2b6).
 		if (bArmedSetActive
+			&& !IsBotControlled()
 			&& CVarWeaponAimFromHands.GetValueOnGameThread() != 0
 			&& ActiveWeaponConfig.Category != 2                    // pistols: one-handed anims, no foregrip
 			&& Body != nullptr
