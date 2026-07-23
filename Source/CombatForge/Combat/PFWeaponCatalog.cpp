@@ -750,6 +750,117 @@ namespace PFWeapon
 		return true;
 	}
 
+	// ---- True-scale FP derivation (reference = lmg_01) -----------------------------------------------
+	namespace
+	{
+		// Shared mesh-geometry anchors (the ComputeAutoPose recipe, factored so the true-scale path uses
+		// byte-identical formulas).
+		struct FPFMeshGunGeom
+		{
+			FVector Along = FVector(0.f, 1.f, 0.f);   // unit barrel axis (mesh local)
+			FVector GripMesh = FVector::ZeroVector;   // rear-below-bore grip region
+			FVector SightMesh = FVector::ZeroVector;  // top-of-receiver sight line
+			bool    bAlongY = true;
+		};
+
+		bool PFComputeGunGeom(const UStaticMesh* Mesh, FPFMeshGunGeom& Out)
+		{
+			if (Mesh == nullptr)
+			{
+				return false;
+			}
+			const FBoxSphereBounds B = Mesh->GetBounds();
+			const FVector O = B.Origin;
+			const FVector E = B.BoxExtent;
+			if (E.IsNearlyZero())
+			{
+				return false;
+			}
+			const float LenX = FMath::Max(E.X * 2.f, 1.f);
+			const float LenY = FMath::Max(E.Y * 2.f, 1.f);
+			Out.bAlongY = (LenY >= LenX);
+			const float BarrelHalf = (Out.bAlongY ? LenY : LenX) * 0.5f;
+			Out.Along = Out.bAlongY ? FVector(0.f, 1.f, 0.f) : FVector(1.f, 0.f, 0.f);
+			Out.GripMesh = O - Out.Along * (BarrelHalf * 0.55f) + FVector(0.f, 0.f, -E.Z * 0.55f);
+			Out.SightMesh = O + Out.Along * (BarrelHalf * 0.15f) + FVector(0.f, 0.f, E.Z * 0.82f);
+			return true;
+		}
+
+		// Lazily-derived reference targets, all read off the BAKED lmg_01 catalog row + its mesh — so if
+		// Tom ever re-tunes that row and rebuilds, every derived gun follows on next launch.
+		struct FPFTrueScaleRef
+		{
+			bool  bTried = false;
+			bool  bValid = false;
+			FQuat RotQ = FQuat::Identity;        // reference viewmodel rotation (for a ref-axis mesh)
+			bool  bRefAlongY = true;
+			float Scale = 1.f;
+			FVector GripView = FVector::ZeroVector;   // where the grip sits in ViewModelRoot space (hip)
+			FQuat AdsRotQ = FQuat::Identity;
+			FRotator AdsRot = FRotator::ZeroRotator;
+			FVector SightCam = FVector::ZeroVector;   // where the sight sits in camera space at full ADS
+		};
+
+		FPFTrueScaleRef GTrueScaleRef;
+	}
+
+	bool ComputeTrueScaleFP(const UStaticMesh* Mesh, FPFWeaponAutoPose& Out)
+	{
+		FPFMeshGunGeom Geom;
+		if (!PFComputeGunGeom(Mesh, Geom))
+		{
+			return false;
+		}
+
+		FPFTrueScaleRef& Ref = GTrueScaleRef;
+		if (!Ref.bTried)
+		{
+			Ref.bTried = true;
+			const FPFWeaponConfig RefCfg = FindById(TEXT("lmg_01"));
+			const FPFWeaponDef& RefDef = Weapon(RefCfg.Category, RefCfg.Index);
+			FPFMeshGunGeom RefGeom;
+			if (RefDef.WeaponId != nullptr && FCString::Strcmp(RefDef.WeaponId, TEXT("lmg_01")) == 0
+				&& PFComputeGunGeom(LoadMesh(RefDef), RefGeom))
+			{
+				Ref.RotQ = FQuat(RefDef.FPRot);
+				Ref.bRefAlongY = RefGeom.bAlongY;
+				Ref.Scale = RefDef.FPScale;
+				Ref.GripView = RefDef.FPLoc + Ref.RotQ.RotateVector(RefGeom.GripMesh * Ref.Scale);
+				Ref.AdsRotQ = FQuat(RefDef.AdsRot);
+				Ref.AdsRot = RefDef.AdsRot;
+				const FVector HipSightRef = RefDef.FPLoc + Ref.RotQ.RotateVector(RefGeom.SightMesh * Ref.Scale);
+				Ref.SightCam = RefDef.AdsLoc + Ref.AdsRotQ.RotateVector(HipSightRef);
+				Ref.bValid = true;
+			}
+		}
+		if (!Ref.bValid)
+		{
+			return false;
+		}
+
+		// Axis fix: rotate this mesh in its own space so ITS barrel takes the role the REFERENCE mesh's
+		// barrel has under the reference rotation (yaw +/-90 maps +X<->+Y, same convention as the TP grip).
+		FQuat RotQ = Ref.RotQ;
+		if (Geom.bAlongY != Ref.bRefAlongY)
+		{
+			RotQ = Ref.RotQ * FQuat(FRotator(0.f, Ref.bRefAlongY ? 90.f : -90.f, 0.f));
+		}
+
+		Out.FPRot = RotQ.Rotator();
+		Out.FPScale = Ref.Scale;
+		Out.FPLoc = Ref.GripView - RotQ.RotateVector(Geom.GripMesh * Ref.Scale);
+
+		// ADS: park THIS gun's estimated sight exactly where the reference's sight sits in camera space.
+		Out.AdsRot = Ref.AdsRot;
+		const FVector HipSight = Out.FPLoc + RotQ.RotateVector(Geom.SightMesh * Ref.Scale);
+		Out.AdsLoc = Ref.SightCam - Ref.AdsRotQ.RotateVector(HipSight);
+		// Sane band (same guard idea as ComputeAutoPose, widened for life-size meshes).
+		Out.AdsLoc.X = FMath::Clamp(Out.AdsLoc.X, -5.f, 45.f);
+		Out.AdsLoc.Y = FMath::Clamp(Out.AdsLoc.Y, -30.f, 30.f);
+		Out.AdsLoc.Z = FMath::Clamp(Out.AdsLoc.Z, -30.f, 25.f);
+		return true;
+	}
+
 	FPFWeaponConfig DefaultConfig()
 	{
 		return FPFWeaponConfig{ 0, 0 };   // SM_Rifle / ar_m4

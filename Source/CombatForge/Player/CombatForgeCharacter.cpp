@@ -87,6 +87,16 @@ static TAutoConsoleVariable<int32> CVarWeaponAutoPose(
 	TEXT("pf.WeaponAutoPose"), 0,
 	TEXT("1 = auto-generate FP hip+ADS from mesh bounds (ignores catalog). 0 = catalog poses only (default)."));
 
+// TRUE-SCALE FP (Tom 2026-07-23: "increase the scale to one across all of the guns"). The legacy FP rows
+// were hand-tuned around HALF-size viewmodels (FPScale 0.32-0.50); rather than invalidate 36 tuned rows,
+// any row still below 0.9 gets its hip+ADS DERIVED at life size from the lmg_01 reference row (the gun
+// Tom dialed at 1.0 — its baked FPLoc/FPRot/AdsLoc/AdsRot define where the grip and sight belong; each
+// mesh's own bounds do the rest). A row re-tuned at scale >= 0.9 is respected as-is, pf.WeaponFP session
+// tunes still override everything, and 0 turns the derivation off (raw legacy rows).
+static TAutoConsoleVariable<int32> CVarWeaponFPTrueScale(
+	TEXT("pf.WeaponFPTrueScale"), 1,
+	TEXT("1 = derive life-size FP hip+ADS for legacy half-scale catalog rows from the lmg_01 reference (default). 0 = raw catalog rows."));
+
 // Third-person grip source. 1 (default) = attach the TP gun to the ANIMATION's own weapon bone (ik_hand_gun),
 // which the rifle pack animates to sit exactly in the grip and which the IK-retarget carried onto the Bandit —
 // so the position is correct by construction and tracks the animation, with NO hand-tuned offset.
@@ -2818,6 +2828,20 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 					UseAdsLoc.X, UseAdsLoc.Y, UseAdsLoc.Z);
 			}
 #endif
+		}
+	}
+	else if (CVarWeaponFPTrueScale.GetValueOnGameThread() != 0 && Def.FPScale < 0.9f)
+	{
+		// Legacy half-scale row → derive this gun's life-size hip+ADS from the lmg_01 reference (see the
+		// cvar comment). Falls back to the raw row if the reference can't resolve.
+		FPFWeaponAutoPose TrueScale;
+		if (PFWeapon::ComputeTrueScaleFP(WpnMesh, TrueScale))
+		{
+			UseFPLoc   = TrueScale.FPLoc;
+			UseFPRot   = TrueScale.FPRot;
+			UseFPScale = TrueScale.FPScale;
+			UseAdsLoc  = TrueScale.AdsLoc;
+			UseAdsRot  = TrueScale.AdsRot;
 		}
 	}
 	// Session drag edits (pose-tune cycle) override catalog/auto so guns don't "change every time".

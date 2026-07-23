@@ -140,6 +140,18 @@ namespace PFWeapon
 	bool ComputeAutoPose(const UStaticMesh* Mesh, int32 Category, FPFWeaponAutoPose& Out);
 
 	/**
+	 * TRUE-SCALE first-person pose derived from the lmg_01 REFERENCE row (Tom's 2026-07-23 life-size
+	 * tune). The legacy FP rows were hand-tuned around HALF-size viewmodels (FPScale 0.32-0.50); this
+	 * re-derives any such row at the reference scale instead of invalidating 36 tuned poses by hand:
+	 * the reference defines where the GRIP sits in viewmodel space (hip) and where the SIGHT sits in
+	 * camera space (ADS); each mesh's own bounds geometry (grip region, sight line, barrel axis) fills
+	 * in the rest — the same grip/sight anchors ComputeAutoPose uses, aimed at reference-derived targets
+	 * instead of constants. Returns false if the reference row/mesh can't be resolved or bounds are
+	 * degenerate (caller keeps the legacy row).
+	 */
+	bool ComputeTrueScaleFP(const UStaticMesh* Mesh, FPFWeaponAutoPose& Out);
+
+	/**
 	 * The scale every AUTO-gripped weapon starts from (the shipped character default). A NAMED constant on
 	 * purpose: TuneWeaponTP mutates the character's WeaponRelativeScale live, so deriving the auto base from
 	 * that member would let a pf.WeaponTP session silently shift what the calibrate solve and the baked
