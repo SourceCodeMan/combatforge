@@ -480,8 +480,8 @@ namespace PFWeapon
 			// the log). FP scale 1.0 = his call (life-size viewmodel read). MuzzleFP stays authored — lmg_01
 			// resolves its tracer tip via the bounds auto-tip, so that field is inert here.
 			MakeW(TEXT("LMG 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/LMGs/01/SM_Modern_Weapons_LMG_01.SM_Modern_Weapons_LMG_01"),
-				nullptr, FVector(-3.00f, 6.00f, -2.80f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(42.0f, 6.4f, 0.0f),
-				FVector(8.19f, 0.26f, 3.32f), FRotator(5.17f, -0.21f, 2.64f),
+				nullptr, FVector(10.80f, -1.24f, -14.29f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(42.00f, 6.40f, 0.00f),
+				FVector(8.19f, 2.68f, -1.13f), FRotator(5.17f, -0.21f, 2.64f),
 				Mode_A, EPFFireMode::Auto,
 				2.2f, 0.15f, 11000.f, 2.0f, 3, 75, 10.0f,
 				TEXT("lmg_01"), 1, 1, 0.f,

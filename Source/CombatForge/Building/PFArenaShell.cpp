@@ -1208,6 +1208,13 @@ void APFArenaShell::BeginMidWallFade()
 	MidWallScreen->SetHiddenInGame(false);
 	MidWallScreen->SetVisibility(true);
 	ApplyMidWallOpacity(MidWallStartOpacity);
+	const FBoxSphereBounds B = MidWallScreen->Bounds;
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("MidWall: fade armed. screen=%s mat=%s worldLoc=(%.0f,%.0f,%.0f) extent=(%.0f,%.0f,%.0f) startOpacity=%.2f vis=%d"),
+		MidWallScreen ? TEXT("ok") : TEXT("NULL"),
+		MidWallBaseMaterial ? *MidWallBaseMaterial->GetName() : TEXT("NULL"),
+		B.Origin.X, B.Origin.Y, B.Origin.Z, B.BoxExtent.X, B.BoxExtent.Y, B.BoxExtent.Z,
+		MidWallStartOpacity, MidWallScreen->IsVisible() ? 1 : 0);
 }
 
 void APFArenaShell::UpdateMidWallFade()
