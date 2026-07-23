@@ -32,9 +32,6 @@ public:
 	/** Switch bed for the current match phase (local client only). */
 	void SetPhaseMusic(EPFMatchPhase Phase);
 
-	/** Re-read GameState phase and AmbientVolume (options apply / pawn spawn). */
-	void RefreshFromWorld(UWorld* World);
-
 	/** Live volume update from Options slider (0..1 ambient pref). */
 	void ApplyVolumeFromPrefs();
 

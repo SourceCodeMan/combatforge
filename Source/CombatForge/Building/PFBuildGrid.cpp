@@ -689,6 +689,21 @@ EPFDenyReason APFBuildGrid::TryDeletePiece(ACombatForgePlayerState* Requester, u
 		return EPFDenyReason::WrongPhase;
 	}
 
+	// Same 10/s/player window as placement (issue #12 BD3). The only throttle before was the CLIENT-side
+	// self-cap, which a modified client skips — an uncapped delete loop could strip a fort as fast as the
+	// RPCs land. Separate window map so deletes don't eat the placement allowance.
+	const double Now = World ? World->GetTimeSeconds() : 0.0;
+	FPFRateWindow& DelWindow = DeleteRateWindows.FindOrAdd(Requester->RosterIndex);
+	if (Now - DelWindow.WindowStart >= 1.0)
+	{
+		DelWindow.WindowStart = Now;
+		DelWindow.Count = 0;
+	}
+	if (DelWindow.Count >= 10)
+	{
+		return EPFDenyReason::RateLimited;
+	}
+
 	int32 FoundIdx = INDEX_NONE;
 	for (int32 Idx = 0; Idx < Pieces.Items.Num(); ++Idx)
 	{
@@ -733,6 +748,7 @@ EPFDenyReason APFBuildGrid::TryDeletePiece(ACombatForgePlayerState* Requester, u
 	RemovePieceLocal(Rec);
 	Pieces.Items.RemoveAt(FoundIdx);
 	Pieces.MarkArrayDirty();
+	++DelWindow.Count;   // count only SUCCESSFUL deletes against the window (mirrors placement)
 
 	// Delete attribution — social pressure is the anti-grief enforcement in v1 (03 §5).
 	UE_LOG(CombatForgeLog, Log, TEXT("BuildGrid: %s removed %s's %s #%u"),

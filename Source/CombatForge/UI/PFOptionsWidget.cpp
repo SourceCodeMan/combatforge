@@ -7,7 +7,6 @@
 #include "Core/CombatForgePlayerController.h"
 #include "Core/PFUserPrefs.h"
 #include "Input/PFInputConfig.h"
-#include "Core/PFUserPrefs.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "InputCoreTypes.h"

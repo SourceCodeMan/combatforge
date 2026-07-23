@@ -43,7 +43,7 @@ public:
 	UPROPERTY(Replicated)                       uint8  TargetTeamSize = 4;         // match format: 4 (4v4) or 6 (6v6); bots fill to this
 	/** When true, GameMode tops each team up to TargetTeamSize with bots at Lobby→Build. */
 	UPROPERTY(Replicated)                       bool   bFillWithBots = true;
-	UPROPERTY(Replicated)                       uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count reads this
+	UPROPERTY(ReplicatedUsing=OnRep_Score)      uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count re-renders via OnRep_Score (issue #14 U1)
 	UPROPERTY(Replicated)                       EPFBuildMode BuildMode = EPFBuildMode::Creative;  // build style
 	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Skirmish; // objective (Skirmish = respawn default)
 	/** Host-picked arena map. Geometry itself travels as the shell's ACTOR CLASS (GameMode respawns

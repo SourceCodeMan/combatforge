@@ -84,6 +84,7 @@ void APFGrenadeProjectile::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(APFGrenadeProjectile, KindRep);
 	DOREPLIFETIME(APFGrenadeProjectile, BurstSeed);
 	DOREPLIFETIME(APFGrenadeProjectile, DetonatePoint);
+	DOREPLIFETIME(APFGrenadeProjectile, TeamId);   // cosmetic burst tint on remotes (issue #11 CB1)
 }
 
 void APFGrenadeProjectile::BeginPlay()

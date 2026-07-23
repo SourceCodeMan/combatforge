@@ -60,11 +60,9 @@ namespace
 	// Map-INVARIANT constants only — FieldX/FieldY (and the Pen*/spacing values derived from them)
 	// moved onto the actor as ctor-initialized members (task #40) so APFYardShell can build the
 	// same shell at 6400×8000. Everything left here is identical on every map by definition.
-	// Perimeter must be taller than HeightCap + jump: players can stand on max-height floors
-	// (~1200) and jump over a wall that only reaches the height cap.
-	constexpr float PerimeterH = static_cast<float>(PFGrid::HeightCapUU) + 600.f;   // 1800
-	// Solid lid just above build cap so you can't leap over the rim from the top deck.
-	constexpr float EscapeLidZ = static_cast<float>(PFGrid::HeightCapUU) + 150.f;   // 1350
+	// PerimeterH / EscapeLidZ moved onto the actor too (issue #12 BD1): they must track the MAP's
+	// HeightCapUU (Warehouse 1200 → 1800/1350, Yard 2100 → 2700/2250) or a player on high Yard decks
+	// jumps the midline barrier / open-field bounds, which were capped at the Warehouse height.
 	constexpr float EscapeLidThickness = 40.f;
 	constexpr float SpawnZ = 100.f;            // capsule half-height + clearance over the Z=0 floor
 
@@ -96,6 +94,8 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	, PenCenterX(InDef.FieldX * 0.5f)
 	, TeamSpawnSpacingY(InDef.FieldY / PFGrid::SpawnPointsPerTeam)
 	, PenSlotStartX(InDef.FieldX * 0.5f - PenSlotSpacingX * (PFGrid::MaxRosterSlots - 1) * 0.5f)
+	, PerimeterH(static_cast<float>(InDef.HeightCapUU) + 600.f)   // taller than the map's cap + jump
+	, EscapeLidZ(static_cast<float>(InDef.HeightCapUU) + 150.f)   // lid just above the map's build cap
 {
 	PrimaryActorTick.bCanEverTick = false;
 

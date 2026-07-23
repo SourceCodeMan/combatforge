@@ -303,7 +303,15 @@ void ACombatForgeGameState::ServerSetRoundWinsToTake(uint8 NewWins)
 	{
 		return;
 	}
+	const bool bChanged = (RoundWinsToTake != NewWins);
 	RoundWinsToTake = NewWins;
+	if (bChanged)
+	{
+		// The pip row sizes itself off this value but only re-renders on the score event; without the
+		// local broadcast the LISTEN HOST kept the Lobby-era pip count until the first score change
+		// (clients get it via the ReplicatedUsing OnRep). Issue #14 U1.
+		OnRep_Score();
+	}
 	ForceNetUpdate();
 }
 

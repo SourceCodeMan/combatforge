@@ -209,10 +209,6 @@ void UPFBuildComponent::EquipTool(EPFBuildTool Tool)
 		RampRotOffset = 0;   // ramp offset resets on switch; prop offset persists (§3.5)
 	}
 	EquippedTool = Tool;
-	if (Tool != EPFBuildTool::Delete)
-	{
-		LastUsedPiece = Tool;
-	}
 	OnEquippedToolChangedEvent.Broadcast(EquippedTool);
 }
 

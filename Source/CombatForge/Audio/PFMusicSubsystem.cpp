@@ -214,19 +214,3 @@ void UPFMusicSubsystem::SetPhaseMusic(EPFMatchPhase Phase)
 	}
 }
 
-void UPFMusicSubsystem::RefreshFromWorld(UWorld* World)
-{
-	if (!World)
-	{
-		return;
-	}
-	const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>();
-	if (GS)
-	{
-		SetPhaseMusic(GS->Phase);
-	}
-	else
-	{
-		StopMusic();
-	}
-}

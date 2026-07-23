@@ -84,7 +84,8 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_EquipFloor;  // F2
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_EquipRamp;   // F3
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_EquipRoof;   // F4
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_QuickEquip;  // retained (unmapped); was last-piece quick equip
+	// (IA_QuickEquip removed — it was unmapped, unread dead state. If last-piece quick equip returns,
+	// re-add the action AND a mapping AND a handler together.)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_BuildWheel;  // Q tap → open/commit build wheel
 
 	// ---- Contexts ----

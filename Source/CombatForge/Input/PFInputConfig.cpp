@@ -99,7 +99,6 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IA_EquipFloor  = MakeAction(Outer, TEXT("IA_EquipFloor"),  EInputActionValueType::Boolean);
 	IA_EquipRamp   = MakeAction(Outer, TEXT("IA_EquipRamp"),   EInputActionValueType::Boolean);
 	IA_EquipRoof   = MakeAction(Outer, TEXT("IA_EquipRoof"),   EInputActionValueType::Boolean);
-	IA_QuickEquip  = MakeAction(Outer, TEXT("IA_QuickEquip"),  EInputActionValueType::Boolean);
 	IA_BuildWheel  = MakeAction(Outer, TEXT("IA_BuildWheel"),  EInputActionValueType::Boolean);
 
 	// ---- Contexts ----
@@ -136,6 +135,9 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 		{
 			GConfig->GetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), Sensitivity, FPFPaths::UserPrefsIni());
 		}
+		// A hand-edited/corrupt INI value must not produce an unusable (0 or absurd) look scale — same
+		// clamp SetLookSensitivity applies (issue #19 I2).
+		Sensitivity = FMath::Clamp(Sensitivity, 0.2f, 6.f);
 		const float Scale = BaseDegreesPerMouseUnit * Sensitivity;
 
 		FEnhancedActionKeyMapping& Look = IMC_Common->MapKey(IA_Look, EKeys::Mouse2D);
@@ -289,6 +291,28 @@ bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
 	if (E == nullptr || E->Action == nullptr || E->Context == nullptr || !NewKey.IsValid())
 	{
 		return false;
+	}
+	// Conflict check (issue #19 I1): without it a duplicate bind silently made two actions fire on one
+	// key (or stole a FIXED key like Escape) with no feedback — the classic "my controls broke" report.
+	// Reserved keys stay off-limits; a key held by ANOTHER rebindable entry is rejected too (predictable
+	// beats auto-swap: the player sees the rejection and picks another key).
+	static const FKey ReservedKeys[] = { EKeys::Escape, EKeys::Tab, EKeys::Enter, EKeys::F };
+	for (const FKey& R : ReservedKeys)
+	{
+		if (NewKey == R && E->CurrentKey != R)
+		{
+			UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is reserved"), *NewKey.GetDisplayName().ToString());
+			return false;
+		}
+	}
+	for (const FRebindEntry& Other : RebindEntries)
+	{
+		if (Other.Id != E->Id && Other.CurrentKey == NewKey)
+		{
+			UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is already bound to %s"),
+				*NewKey.GetDisplayName().ToString(), *Other.Label);
+			return false;
+		}
 	}
 	E->Context->UnmapKey(E->Action, E->CurrentKey);
 	E->Context->MapKey(E->Action, NewKey);

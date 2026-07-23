@@ -127,7 +127,6 @@ private:
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> GhostFacingMID;
 
 	EPFBuildTool EquippedTool  = EPFBuildTool::Wall;
-	EPFBuildTool LastUsedPiece = EPFBuildTool::Wall;   // last non-delete tool (session default Wall)
 	uint8  RampRotOffset = 0;   // resets after placement and on tool switch
 	uint8  PropRotOffset = 0;   // persists (03 §2)
 	int32  CurrentGhostMeshType = -1;

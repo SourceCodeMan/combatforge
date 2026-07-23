@@ -272,10 +272,19 @@ void UPFCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const 
 	}
 
 	// Deterministic slide entry — same inputs on client and server:
-	// crouch wanted + sprint flag + grounded + speed >= 750 + cooldown elapsed.
+	// crouch wanted + sprint flag + FORWARD intent + grounded + speed >= 750 + cooldown elapsed.
+	// The forward-hemisphere test mirrors IsSprintingEffective (issue #13 B8: the raw sprint flag let a
+	// sideways strafe enter a slide sprint never actually powered) — inlined rather than calling it,
+	// because IsSprintingEffective() also tests IsCrouching(), which is in flux on the entry frame.
+	// Reads only Acceleration + the component transform, both replayed, so prediction stays deterministic.
+	const FVector SlideAccelDir = Acceleration.GetSafeNormal2D();
+	const bool bSlideForwardIntent = UpdatedComponent != nullptr
+		&& !SlideAccelDir.IsNearlyZero()
+		&& FVector::DotProduct(SlideAccelDir, UpdatedComponent->GetForwardVector().GetSafeNormal2D()) > 0.5f;
 	if (!IsSliding()
 		&& bWantsToCrouch
 		&& bWantsToSprintPF
+		&& bSlideForwardIntent
 		&& IsMovingOnGround()
 		&& Velocity.Size2D() >= SlideMinEnterSpeed
 		&& SlideCooldownRemaining <= 0.f)

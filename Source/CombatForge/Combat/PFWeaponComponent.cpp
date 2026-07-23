@@ -614,6 +614,38 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 		return;
 	}
 
+	// Server mirror of the CLIENT-ONLY cadence gates (issue #11 CB2): the token bucket enforces only the
+	// AVERAGE rate, so a modified client could skip the minigun cold-start and the DMR burst rhythm.
+	// Both gates anchor to the VALIDATED monotonic client clock (strictly increasing + gap-clamped above),
+	// so network latency never punishes honest shots.
+	const double ClientGap = static_cast<double>(StampT) - static_cast<double>(LastAcceptedClientTime);
+	if (SpinupSec > 0.f && LastAcceptedClientTime > -999.f)
+	{
+		// Honest client-time gaps for a spin-up weapon are either WARM (continuous fire / a <=0.4 s
+		// feather, i.e. < ~0.45 s) or COLD-and-fully-spun (>= 0.4 grace + SpinupSec — see StartFire).
+		// A gap INSIDE that band is a shot the client took without spinning up.
+		const double SpunGap = 0.4 + static_cast<double>(SpinupSec) - 0.05;   // small tolerance
+		if (ClientGap > 0.45 && ClientGap < SpunGap)
+		{
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("ServerFire reject (%s): spin-up skipped (gap %.2fs, need >= %.2fs)"),
+				*GetNameSafe(Char), ClientGap, SpunGap);
+			return;
+		}
+	}
+	const bool bAutoAllowed = (AllowedFireModeMask & (1u << static_cast<uint8>(EPFFireMode::Auto))) != 0;
+	if (ReburstDelaySec > 0.f && !bAutoAllowed && ServerBurstRun >= BurstCount
+		&& ClientGap < static_cast<double>(ReburstDelaySec) * 0.9)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("ServerFire reject (%s): re-burst delay skipped (gap %.2fs after %u-shot burst)"),
+			*GetNameSafe(Char), ClientGap, static_cast<uint32>(BurstCount));
+		return;
+	}
+	// Burst-run bookkeeping: consecutive shots (< 0.3 s apart in client time) grow the run; any real
+	// pause starts a new one.
+	ServerBurstRun = (ClientGap < 0.3) ? static_cast<uint8>(FMath::Min<int32>(ServerBurstRun + 1, 250)) : 1;
+
 	FireTokens -= 1.f;
 	LastServerShotIndex = Shot.ShotIndex;
 	LastAcceptedClientTime = StampT;

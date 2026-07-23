@@ -100,8 +100,10 @@ private:
 	bool ParseArenaFile(const FString& AbsolutePath, const FString& FileName,
 	                    FPFCommunityMapInfo& OutInfo, TArray<FPFBuildPieceRec>& OutPieces) const;
 
-	/** Serializes CurrentRecordJson to CurrentFilePath. Logs and returns false on failure. */
-	bool WriteRecordToDisk() const;
+	/** Serializes CurrentRecordJson to CurrentFilePath. Logs and returns false on failure.
+	 *  bRequestScreenshot: only the COMMIT call wants the map-preview PNG — the record-open write at
+	 *  BeginMatchRecord fired one too, capturing a useless just-started-match frame (issue #16 V1). */
+	bool WriteRecordToDisk(bool bRequestScreenshot = false) const;
 
 	/** Drops all in-progress record state. */
 	void ClearRecordState();

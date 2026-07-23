@@ -257,4 +257,7 @@ private:
 	// inter-shot gap can't exceed the server-observed gap (a forged big gap would be a free accuracy reset).
 	float  LastAcceptedClientTime = -1000.f;
 	double LastServerAcceptTime = -1000.0;
+	// Consecutive accepted shots < 0.3 s apart (client clock) — drives the server-side DMR re-burst gate
+	// (issue #11 CB2). Reset to 1 on any real pause.
+	uint8  ServerBurstRun = 0;
 };

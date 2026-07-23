@@ -1049,6 +1049,16 @@ ACombatForgeCharacter* APFBotController::AcquireNearestEnemy() const
 		{
 			continue;
 		}
+		// bAliveInRound never clears in the CONTINUOUS modes (Skirmish/CTF/Dom/HP) — an eliminated pawn
+		// waiting out its respawn timer still reads alive there, so bots locked on and shot the hidden
+		// corpse at the death spot. The health flag is the cross-mode truth (issue #17 AI1).
+		if (const UPFHealthComponent* OtherHealth = OtherChar->GetHealth())
+		{
+			if (OtherHealth->bEliminated)
+			{
+				continue;
+			}
+		}
 		const FVector ToEnemy = OtherChar->GetActorLocation() - BotLoc;
 		const float DistSq = ToEnemy.SizeSquared();
 		if (DistSq > SightSq)
@@ -1056,9 +1066,14 @@ ACombatForgeCharacter* APFBotController::AcquireNearestEnemy() const
 			continue;   // out of sight range
 		}
 		const FVector ToEnemy2D = FVector(ToEnemy.X, ToEnemy.Y, 0.f).GetSafeNormal();
-		if (!Look2D.IsNearlyZero() && FVector::DotProduct(Look2D, ToEnemy2D) < CosHalfFOV)
+		// The documented close-range "sixth sense": inside ProximityAwareUU the cone test is waived (LOS
+		// below still required), so a point-blank attacker behind the bot registers. The property was
+		// declared + advertised in three comments but read NOWHERE after the manual-cone rewrite — bots
+		// were fully deaf-blind at contact range from behind (issue #17 AI2).
+		if (DistSq > FMath::Square(ProximityAwareUU)
+			&& !Look2D.IsNearlyZero() && FVector::DotProduct(Look2D, ToEnemy2D) < CosHalfFOV)
 		{
-			continue;   // outside the view cone → the bot can't see it (flankable)
+			continue;   // outside the view cone (and not close enough to feel) → flankable
 		}
 		if (!HasLineOfSight(OtherChar))
 		{
@@ -1079,6 +1094,15 @@ bool APFBotController::IsTargetEngageable(const ACombatForgeCharacter* Target) c
 	if (TargetPS == nullptr || !TargetPS->bAliveInRound)
 	{
 		return false;   // dead / despawned → drop it and re-scan
+	}
+	// Same eliminated gate as acquisition: bAliveInRound stays true in continuous modes, so without this
+	// the sticky-retention path kept a bot shooting a respawn-waiting corpse (issue #17 AI1).
+	if (const UPFHealthComponent* TargetHealth = Target->GetHealth())
+	{
+		if (TargetHealth->bEliminated)
+		{
+			return false;
+		}
 	}
 	const ACombatForgeCharacter* Bot = GetBotCharacter();
 	if (Bot == nullptr)

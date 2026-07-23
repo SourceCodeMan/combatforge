@@ -143,6 +143,11 @@ protected:
 	float PenCenterX = 3200.f;          // FieldX * 0.5 (pen stays south at Y=-3000 on every map)
 	float TeamSpawnSpacingY = 4000.f / PFGrid::SpawnPointsPerTeam;
 	float PenSlotStartX = 0.f;          // derived from PenCenterX in the ctor init list
+	// Vertical extents follow the MAP's build cap, not the Warehouse constant: the Yard builds to 2100 uu,
+	// so a 1800-uu midline barrier / open-field bound was hoppable from high Yard decks (issue #12 BD1).
+	// Warehouse values are numerically identical to the former file-scope constants (1800 / 1350).
+	float PerimeterH = static_cast<float>(PFGrid::HeightCapUU) + 600.f;   // MapDef.HeightCapUU + 600
+	float EscapeLidZ = static_cast<float>(PFGrid::HeightCapUU) + 150.f;   // MapDef.HeightCapUU + 150
 
 	UPROPERTY() TObjectPtr<USceneComponent> ShellRoot;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> FieldFloor;

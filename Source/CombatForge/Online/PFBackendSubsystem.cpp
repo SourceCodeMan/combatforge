@@ -585,7 +585,17 @@ void UPFBackendSubsystem::RequestQuickPlay(TFunction<void(bool, const FPFBackend
 void UPFBackendSubsystem::RequestJoinByCode(const FString& Code,
 	TFunction<void(bool, const FPFBackendServerInfo&)> Done)
 {
-	const FString Clean = Code.TrimStartAndEnd().ToUpper();
+	// Join codes are 6-char A-Z0-9 — strip anything else BEFORE the string is Printf'd into a URL path
+	// (a pasted "AB/CD?" would otherwise rewrite the request path; issue #18 ON3).
+	FString Clean;
+	Clean.Reserve(8);
+	for (const TCHAR C : Code.TrimStartAndEnd().ToUpper())
+	{
+		if (FChar::IsAlnum(C))
+		{
+			Clean.AppendChar(C);
+		}
+	}
 	Request(TEXT("GET"), FString::Printf(TEXT("/v1/join/%s"), *Clean), FString(), /*AuthMode=*/1,
 		[Done](int32 RespCode, const FString& Resp)
 		{
@@ -766,12 +776,39 @@ void UPFBackendSubsystem::SendHeartbeat()
 	FString Body;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
 	FJsonSerializer::Serialize(BodyObj, Writer);
+	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
 	Request(TEXT("POST"), TEXT("/v1/servers/heartbeat"), Body, /*AuthMode=*/2,
-		[](int32 Code, const FString&)
+		[WeakThis](int32 Code, const FString&)
 		{
-			if (Code == 409)
+			if (Code != 409)
 			{
-				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: heartbeat says not-registered (409)"));
+				return;
+			}
+			// 409 = the Worker no longer has our row (D1 expiry / wipe / API redeploy). Logging alone left
+			// a LIVE box heartbeating 409 forever and invisible in the server browser (issue #18 ON1):
+			// bFleetRegistered stayed true, so FleetRegisterIfServer early-returned for the rest of the
+			// process lifetime. Recover: drop registered state + the ticker and re-register (which re-arms
+			// the heartbeat and re-sends pending match reports). NO /unregister call — the row is gone.
+			UPFBackendSubsystem* Self = WeakThis.Get();
+			if (Self == nullptr)
+			{
+				return;
+			}
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("Backend: heartbeat says not-registered (409) — re-registering with the directory"));
+			if (Self->HeartbeatTicker.IsValid())
+			{
+				FTSTicker::GetCoreTicker().RemoveTicker(Self->HeartbeatTicker);
+				Self->HeartbeatTicker.Reset();
+			}
+			Self->bFleetRegistered = false;
+			if (UWorld* ReworldWorld = Self->FleetGS.IsValid() ? Self->FleetGS->GetWorld() : nullptr)
+			{
+				Self->FleetRegisterIfServer(ReworldWorld);
+			}
+			else if (UGameInstance* GI = Self->GetGameInstance())
+			{
+				Self->FleetRegisterIfServer(GI->GetWorld());
 			}
 		});
 }

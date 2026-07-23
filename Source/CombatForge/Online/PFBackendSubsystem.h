@@ -60,8 +60,9 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnBackendStatus, const FString& /*HumanRe
  *  NO password ever renders in-game. After login the install GUID is linked (retroactive history).
  *
  *  FLEET (dedicated server with a provisioned key): registers with the directory at boot,
- *  heartbeats every 10 s, and HMAC-signs match reports (SendMatchReport, called by the rating
- *  subsystem at CommitMatchRecord). Key sources, first hit wins: -PFServerKey= on the command
+ *  heartbeats every 10 s (a 409 re-registers — the directory row can expire), and HMAC-signs match
+ *  reports (SendMatchReport, called by the GAME MODE at EmitMatchReport when the match enters
+ *  Results — not by the rating subsystem). Key sources, first hit wins: -PFServerKey= on the command
  *  line, then Saved/CombatForge/ServerKey.txt. No key (every player install) = fleet path is
  *  completely inert — a listen host can never grant XP by design (progression-plan §1).
  *

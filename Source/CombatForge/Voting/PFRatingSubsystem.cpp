@@ -239,7 +239,7 @@ void UPFRatingSubsystem::CommitMatchRecord(const FPFMatchResult& Result)
 	}
 	CurrentRecordJson->SetArrayField(TEXT("votes"), VotesArray);
 
-	if (WriteRecordToDisk())
+	if (WriteRecordToDisk(/*bRequestScreenshot=*/true))
 	{
 		UE_LOG(CombatForgeLog, Warning,
 			TEXT("PFRatingSubsystem: committed match record %s (%s, %d votes) -> %s"),
@@ -577,7 +577,7 @@ bool UPFRatingSubsystem::IsServerContext() const
 	return World != nullptr && World->GetNetMode() != NM_Client;
 }
 
-bool UPFRatingSubsystem::WriteRecordToDisk() const
+bool UPFRatingSubsystem::WriteRecordToDisk(bool bRequestScreenshot) const
 {
 	if (!CurrentRecordJson.IsValid() || CurrentFilePath.IsEmpty())
 	{
@@ -604,6 +604,9 @@ bool UPFRatingSubsystem::WriteRecordToDisk() const
 	// Screenshot-on-publish (#6): capture the arena WITHOUT HUD next to its JSON so the community-map picker
 	// can show a preview. Async (written a frame later); the arena is on screen during the post-match vote when
 	// this runs. No-ops on a headless/dedicated host (no viewport) — those maps just stay preview-less.
+	// COMMIT-only: the record-open write fired this too and the match-start frame stomped nothing useful,
+	// but it wasted a capture and could race the real one (issue #16 V1).
+	if (bRequestScreenshot)
 	{
 		FString ShotPath = CurrentFilePath;
 		ShotPath.RemoveFromEnd(TEXT(".json"));
