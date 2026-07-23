@@ -202,7 +202,7 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	BuildRebindRegistry();
 	ApplySavedKeyOverrides();
 
-	UE_LOG(CombatForgeLog, Log, TEXT("UPFInputConfig built: 25 actions, 3 mapping contexts"));
+	UE_LOG(CombatForgeLog, Log, TEXT("UPFInputConfig built (3 mapping contexts)"));   // no hardcoded action count — it drifted (issue #19 I4)
 }
 
 // ---------------------------------------------------------------- key rebinding
