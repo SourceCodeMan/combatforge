@@ -34,18 +34,18 @@ mat.set_editor_property("two_sided", True)
 
 col = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -450, -50)
 col.set_editor_property("parameter_name", "Color")
-col.set_editor_property("default_value", unreal.LinearColor(0.012, 0.017, 0.03, 1.0))  # dark tint, opaque
+col.set_editor_property("default_value", unreal.LinearColor(0.012, 0.017, 0.03, 1.0))  # dark tint
 
 op = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -450, 250)
 op.set_editor_property("parameter_name", "Opacity")
 op.set_editor_property("default_value", 1.0)
 
-mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -180, 220)
-mel.connect_material_expressions(col, "A", mul, "A")   # Color.A ...
-mel.connect_material_expressions(op, "", mul, "B")     # ... * Opacity
-
+# Opacity comes ONLY from the scalar. Both consumers (midline wall + build ghost) set the "Opacity"
+# scalar every update alongside "Color", so the vector's alpha pin is deliberately unused — a silently
+# failed alpha-pin connection here once multiplied opacity by an unconnected 0 and rendered the wall
+# INVISIBLE in the package. One plain connection cannot fail quietly.
 mel.connect_material_property(col, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_OPACITY)
+mel.connect_material_property(op, "", unreal.MaterialProperty.MP_OPACITY)
 
 mel.recompile_material(mat)
 ok = unreal.EditorAssetLibrary.save_asset(FULL)

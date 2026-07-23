@@ -136,11 +136,15 @@ static TAutoConsoleVariable<float> CVarWeaponAimFromHandsMaxDeg(
 // if +pitch turns out to point the muzzle DOWN on this skeleton, use a negative value — sign conventions
 // on rotated axes have burned us before, so the knob is signed on purpose.
 static TAutoConsoleVariable<float> CVarBotGunPitchDeg(
-	TEXT("pf.BotGunPitchDeg"), 45.f,
+	TEXT("pf.BotGunPitchDeg"), 50.f,   // Tom-dialed live in the alpha-14 package (tried 45, settled 50)
 	TEXT("BOT-only third-person gun correction: rotate about the grip so the muzzle pitches UP this many degrees (negative = down). 0 = off."));
 static TAutoConsoleVariable<float> CVarBotGunRollDeg(
-	TEXT("pf.BotGunRollDeg"), 0.f,
+	TEXT("pf.BotGunRollDeg"), -90.f,   // Tom-dialed live in the alpha-14 package (tried +90, settled -90)
 	TEXT("BOT-only third-person gun correction: roll about the barrel axis, degrees. 0 = off."));
+static TAutoConsoleVariable<float> CVarBotGunDropUU(
+	TEXT("pf.BotGunDropUU"), 0.f,
+	TEXT("BOT-only third-person gun correction: drop the WHOLE gun straight down this many uu (world Z). ")
+	TEXT("Big values pull the gun visibly out of the palms — the hands are animated and do not follow."));
 
 // Computed DEFAULT for the per-weapon third-person grip. This is not the old derived pose coming back:
 // the tick never recomputes anything (ApplyHandWeaponPose still applies plain relative values), rows a
@@ -4706,7 +4710,8 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 		{
 			const float PitchDeg = CVarBotGunPitchDeg.GetValueOnGameThread();
 			const float RollDeg  = CVarBotGunRollDeg.GetValueOnGameThread();
-			if (!FMath::IsNearlyZero(PitchDeg) || !FMath::IsNearlyZero(RollDeg))
+			const float DropUU   = CVarBotGunDropUU.GetValueOnGameThread();
+			if (!FMath::IsNearlyZero(PitchDeg) || !FMath::IsNearlyZero(RollDeg) || !FMath::IsNearlyZero(DropUU))
 			{
 				const FTransform GunXf = WeaponMeshComp->GetComponentTransform();
 				const FVector GripWorld = GunXf.TransformPosition(CachedGripLocalMesh);
@@ -4720,8 +4725,10 @@ void ACombatForgeCharacter::UpdateWeaponHoldPose()
 					{
 						Delta = Delta * FQuat(BarrelDir, FMath::DegreesToRadians(RollDeg));
 					}
+					// Tom 2026-07-23: "the entire [gun] needs to lower towards the floor" — straight
+					// world-Z drop of the whole gun after the rotation (grip drops with it).
 					WeaponMeshComp->SetWorldLocationAndRotation(
-						GripWorld + Delta.RotateVector(GunXf.GetLocation() - GripWorld),
+						GripWorld + Delta.RotateVector(GunXf.GetLocation() - GripWorld) - FVector(0.f, 0.f, DropUU),
 						Delta * GunXf.GetRotation());
 				}
 			}

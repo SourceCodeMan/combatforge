@@ -9,6 +9,7 @@
 
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
+#include "Engine/Texture2D.h"   // force-resident mips on runtime-MID profile textures
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -251,6 +252,22 @@ namespace
 		S.Normal = SoftLoadFirstTexture(S.NormalPaths);
 		S.ORD = SoftLoadFirstTexture(S.OrdPaths);
 		S.bLoaded = (S.BaseColor != nullptr);
+		// FORCE FULL MIPS RESIDENT on profile textures. These are set on RUNTIME-created MIDs driving
+		// ISM components — UE's distance-based texture streaming can't attribute them, so in PACKAGED
+		// builds they can sit at the lowest mip forever: the cone read as shiny BLACK at range and only
+		// resolved white-ish up close (Tom, alpha-14). A handful of surfaces at full res is well inside
+		// the 3000 MB pool. PIE never showed it because the editor pre-streams everything it touches.
+		auto ForceResident = [](UTexture* T)
+		{
+			if (UTexture2D* T2D = Cast<UTexture2D>(T))
+			{
+				T2D->bForceMiplevelsToBeResident = true;
+				T2D->SetForceMipLevelsToBeResident(30.f);
+			}
+		};
+		ForceResident(S.BaseColor);
+		ForceResident(S.Normal);
+		ForceResident(S.ORD);
 	}
 
 	void InitSurfaceProfiles()
