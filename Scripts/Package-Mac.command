@@ -69,8 +69,15 @@ echo ""
 # in the real staged build from Saved/StagedBuilds/Mac. Must run BEFORE the scrub so the scrub
 # cleans the real (swapped-in) app.
 PROJROOT="$(dirname "$PROJ")"
-ARCHIVED_APP="$OUT/CombatForge.app"
-STAGED_APP="$PROJROOT/Saved/StagedBuilds/Mac/CombatForge.app"
+# The app name varies by config — CombatForge.app (Development) vs CombatForge-Mac-Shipping.app —
+# so detect it instead of hardcoding (a hardcoded name made the guard silently skip Shipping bakes).
+APP_NAME="$(basename "$(find "$OUT" -maxdepth 1 -name '*.app' | head -1)" 2>/dev/null)"
+if [ -z "$APP_NAME" ] || [ "$APP_NAME" = ".app" ]; then
+	echo "ERROR: no .app found in $OUT — archive step produced nothing." >&2
+	exit 1
+fi
+ARCHIVED_APP="$OUT/$APP_NAME"
+STAGED_APP="$PROJROOT/Saved/StagedBuilds/Mac/$APP_NAME"
 if [ -d "$ARCHIVED_APP" ] && ! find "$ARCHIVED_APP" -name '*.pak' -o -name '*.ucas' | grep -q .; then
 	if [ -d "$STAGED_APP" ] && find "$STAGED_APP" -name '*.pak' -o -name '*.ucas' | grep -q .; then
 		echo "WARNING: archive step produced a pak-less app — swapping in the real staged build."
