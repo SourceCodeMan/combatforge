@@ -32,9 +32,12 @@ OUT="${OUT:-$(dirname "$PROJ")/Packaged/Mac}"
 
 CONFIG="${1:-Development}"
 
-# Shipping builds are the ones that go to players - mark them for distribution.
+# NOTE: no -distribution flag even for Shipping. On Mac it flips UAT's archive step into
+# ModernXcode .xcarchive mode, which requires an Xcode-produced archive in
+# ~/Library/Developer/Xcode/Archives and dies with DirectoryNotFoundException when none
+# exists (verified 2026-07-24). It only matters for store-style signed submissions —
+# unsigned direct distribution (itch.io) doesn't need it.
 DISTFLAG=""
-if [ "$CONFIG" = "Shipping" ]; then DISTFLAG="-distribution"; fi
 
 # NetProtocol reminder: every public push MUST bump PFBuild::NetProtocol (join-handshake gate).
 grep -n "NetProtocol" "$(dirname "$PROJ")/Source/CombatForge/CombatForge.h" || true
