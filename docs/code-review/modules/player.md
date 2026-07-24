@@ -156,7 +156,7 @@ void ACombatForgeCharacter::ServerRequestResetToSpawn_Implementation()
 | **Listen-host melee cooldown** | Clean — separate client/server timestamps |
 | **Owner TP gun hide vs muzzle** | Clean — `SetVisibility` not `bHiddenInGame` so auth muzzle stays on barrel |
 | **FP arms seating** | Clean — two-anchor similarity; shipping-gated verify harness |
-| **PFChar registry** | Clean — lazy enumerate, weapon-cosmetic strip, legacy PaintForge migrate, pants→hide legs |
+| **PFChar registry** | Clean — lazy enumerate, weapon-cosmetic strip, legacy-prefs migrate, pants→hide legs |
 | **Preview RT aspect** | Clean — 600×800 matches 0.75 UI; modular skin mirrors pawn |
 | **Camera shakes** | Clean — asset-free wave patterns; land single-instance; fire additive |
 

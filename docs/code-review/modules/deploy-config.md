@@ -142,7 +142,7 @@ Playtest host helpers, smoke tests, pilot fleet deploy/export, and Default*.ini 
 | **Deploy-OnBox.ps1** | Auto zip discovery; ServerKey backup/restore; extract layout verification. |
 | **Export-ServerLogs.ps1** | Secret skip + log redaction of PFServerKey/tokens; tail cap; PUT to tunnel. |
 | **serve-and-receive.py** | Localhost bind; PUT /inbox/ only; inbox GET 403; size cap; safe names. |
-| **DefaultEngine.ini** | Maps/GameMode/GI; net tick; collision channels; nav dynamic + invokers; NearClip 4; VT; stream pool; redirects PaintForge→CombatForge; AFS disabled. |
+| **DefaultEngine.ini** | Maps/GameMode/GI; net tick; collision channels; nav dynamic + invokers; NearClip 4; VT; stream pool; AFS disabled. |
 | **DefaultInput.ini** | Enhanced input default classes — required for packaged input. |
 | **DefaultGame.ini cook lists** | Soft-load force-cook for Audio/Bandits/MarketplaceBlockout/etc. well documented. |
 | **DefaultScalability.ini** | Only scalability-flagged cvars; method switches deferred to C++ prefs. |
