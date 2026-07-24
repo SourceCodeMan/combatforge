@@ -593,7 +593,8 @@ void UPFResultsWidget::RefreshArenaId(const ACombatForgeGameState& GS)
 			UGameplayStatics::GetActorOfClass(GetWorld(), APFBuildGrid::StaticClass()));
 		if (Grid)
 		{
-			CachedArenaId = FPFArenaSerialization::ComputeArenaId(Grid->GetPieces());
+			CachedArenaId = FPFArenaSerialization::ComputeArenaId(Grid->GetPieces(),
+				PFGetArenaMapDef(GS.ArenaMap).CellsY);   // P2-BD1: id is per-map now
 			CachedArenaIdMatch = GS.MatchId;
 		}
 	}

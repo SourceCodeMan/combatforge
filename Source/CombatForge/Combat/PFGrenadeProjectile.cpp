@@ -292,6 +292,7 @@ void APFGrenadeProjectile::SpawnFragBurst(const FVector& At, uint32 Seed)
 		{
 			// Distinct high ShotIndex space so frag hitmarkers don't collide with live-fire indices.
 			BB->InitProjectile(At, Dir, TeamId, /*bAuthoritative=*/true, SrcWeapon, Seed + static_cast<uint32>(i) + 1u);
+			BB->UtilityDamageOverride = 1;   // P2-CB2: frag cloud never inherits the thrower's HitValue
 		}
 	}
 }

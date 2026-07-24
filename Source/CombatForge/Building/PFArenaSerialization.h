@@ -18,13 +18,19 @@ struct COMBATFORGE_API FPFArenaSerialization
 	 * arenaId: lowercase SHA1-hex over the grid header + pieces sorted by
 	 * (Type, X, Y, Z, Rot, Team), EXCLUDING PieceId/Owner — identical rebuilds hash identically
 	 * regardless of who placed what (T27).
+	 *
+	 * P2-BD1: the grid header hashes the ACTIVE map's rows (+ its derived level count, same rule
+	 * as BuildLayoutJson) — Warehouse and Yard layouts with identical piece lists used to collide
+	 * on one id. Warehouse ids are unchanged (CellsY 10 is the default header); Yard ids fork.
 	 */
-	static FString ComputeArenaId(const TArray<FPFBuildPieceRec>& Pieces);
+	static FString ComputeArenaId(const TArray<FPFBuildPieceRec>& Pieces,
+	                              int32 GridCellsY = PFGrid::CellsY);
 
 	/**
 	 * halfHashA/B: same algorithm over the team-filtered subset, additionally excluding Team.
 	 */
-	static FString ComputeHalfHash(const TArray<FPFBuildPieceRec>& Pieces, uint8 Team);
+	static FString ComputeHalfHash(const TArray<FPFBuildPieceRec>& Pieces, uint8 Team,
+	                               int32 GridCellsY = PFGrid::CellsY);
 
 	/**
 	 * Builds the ① piece/grid block of the match JSON: schema, game, matchId, createdUtc,

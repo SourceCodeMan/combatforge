@@ -296,6 +296,13 @@ void ACombatForgePlayerState::ServerSetAliveInRound(bool bAlive)
 	{
 		return;
 	}
+	// P2-C2 root fix: the pilot box's phantom can never be "alive" — it has no pawn and cannot
+	// be eliminated, so one alive flag here made its team unwipeable in Elimination. Consumers
+	// (RecountAlive etc.) filter too; this chokes every present and future set site at once.
+	if (bAlive && IsHeadlessServerPhantom())
+	{
+		return;
+	}
 	if (bAliveInRound == bAlive)
 	{
 		return;

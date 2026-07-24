@@ -14,12 +14,18 @@
 | Metric | Value |
 |--------|------:|
 | Modules done | **12 / 12** |
-| Open **blocker** | **2** (same feature: Options reset-to-spawn — Core + Player sides) |
-| Open **major** | **16** |
-| Open minor | **51** |
+| Open **blocker** | **0** — both fixed 2026-07-24 (this branch) |
+| Open **major** | **0** — all 16 fixed 2026-07-24 (this branch) |
+| Open minor | **49** (P2-C9 + P2-I2 fixed alongside their majors) |
 | Open nit | **38** |
-| **Total findings** | **107** |
-| Last updated | 2026-07-23 |
+| **Total findings** | **107** (20 fixed) |
+| Last updated | 2026-07-24 |
+
+> **Fix pass 2026-07-24 (branch `docs/code-review-pass-2`):** both blockers and all 16 majors
+> fixed and compile-verified; P2-C9 and P2-I2 folded in. P2-C2/C3 were largely fixed on `main`
+> by the same-day playtest batch (`7c02585`, replicated `bHeadlessPhantom` + count filters);
+> this branch adds the `ServerSetAliveInRound` root choke. Per-finding notes in the fix-queue
+> tables below; module reports retain the original open write-ups.
 
 ### Counts by module (open)
 
@@ -46,31 +52,31 @@ Prefer this order.
 
 ### Blockers (fix first)
 
-| ID | Title | Module | Notes |
-|----|-------|--------|-------|
-| **P2-C1** | `RequestResetToSpawn` fully revives eliminated pawns (heal + fire) | Core | Same feature as P2-P1 |
-| **P2-P1** | `ServerRequestResetToSpawn` free mid-match heal / ammo / teleport | Player | Gate or disable in Combat; fix both sides together |
+| ID | Title | Module | Status (2026-07-24) |
+|----|-------|--------|--------|
+| **P2-C1** | `RequestResetToSpawn` fully revives eliminated pawns (heal + fire) | Core | ✅ **fixed** — alive/out/bEliminated gates (never a revive), 20 s per-player cooldown, heal+reload suppressed during live rounds (teleport-only unstuck), showdown HP honored (folds P2-C9) |
+| **P2-P1** | `ServerRequestResetToSpawn` free mid-match heal / ammo / teleport | Player | ✅ **fixed** — same server-side gate; the RPC now lands on a hardened handler |
 
 ### Majors
 
-| ID | Title | Module |
-|----|-------|--------|
-| **P2-C2** | Headless pilot phantom stays permanently `bAliveInRound` → Elimination wipe skew | Core |
-| **P2-C3** | Ready + vote early-advance still require headless phantom | Core |
-| **P2-C4** | Armed bombs survive Elimination Intermission / next Freeze | Core |
-| **P2-CB1** | Bomb BB spray inherits planter weapon `HitValue` (sniper multi-lethal) | Combat |
-| **P2-CB2** | Frag grenade BBs inherit thrower `HitValue` | Combat |
-| **P2-CB3** | Every projectile hit → reliable `ClientHitConfirm` (frag/bomb/shotgun spam) | Combat |
-| **P2-CB4** | Bomb detonation spawns up to 1000 authoritative projectile actors | Combat |
-| **P2-CB5** | Weapon swap leaves reload mid-flight (FinishReload fills new gun) | Combat |
-| **P2-P2** | Mid-fight `ServerSetKit` / class cycle can equip new gun full mag | Player |
-| **P2-P3** | `ServerSetKit` does not clamp `CharParts` size / indices | Player |
-| **P2-P4** | `EnforceSingleFirstPersonWeapon` always-on full scan + Warning spam | Player |
-| **P2-BD1** | `ComputeArenaId` grid header ignores per-map CellsY/Levels | Building |
-| **P2-U1** | Key-rebind capture not cancelled when Options closes | UI |
-| **P2-U2** | Fullscreen checkbox vs Window-mode desync / persist fail | UI |
-| **P2-I1** | Rebind conflict check ignores non-rebindable keys (LMB/WASD) | Input |
-| **P2-D1** | Pilot server restart loop uses `&` on GUI exe → spawn storm | Deploy |
+| ID | Title | Module | Status (2026-07-24) |
+|----|-------|--------|--------|
+| **P2-C2** | Headless pilot phantom stays permanently `bAliveInRound` → Elimination wipe skew | Core | ✅ **fixed** — `main` batch filtered RecountAlive/GetTeamCounts + all widgets (replicated `bHeadlessPhantom`); this branch chokes `ServerSetAliveInRound` at the source |
+| **P2-C3** | Ready + vote early-advance still require headless phantom | Core | ✅ **fixed** on `main` (7c02585) — AreAllPlayersReady / CheckAllVotesIn / FinalizeVotePhase all skip the phantom |
+| **P2-C4** | Armed bombs survive Elimination Intermission / next Freeze | Core | ✅ **fixed** — `DestroyBombs()` at EndRound + StartNextRound; detonate piece-removal now requires RoundState==Live |
+| **P2-CB1** | Bomb BB spray inherits planter weapon `HitValue` (sniper multi-lethal) | Combat | ✅ **fixed** — `UtilityDamageOverride = 1` on breach BBs |
+| **P2-CB2** | Frag grenade BBs inherit thrower `HitValue` | Combat | ✅ **fixed** — same override on the frag cloud |
+| **P2-CB3** | Every projectile hit → reliable `ClientHitConfirm` (frag/bomb/shotgun spam) | Combat | ✅ **fixed** — RPC now Unreliable + `SendHitConfirmCoalesced` (≤1 confirm / 50 ms; elims always pass) |
+| **P2-CB4** | Bomb detonation spawns up to 1000 authoritative projectile actors | Combat | ✅ **fixed** — FragBBCount 1000→120, batch 80→40 (proximity paint already covers close range) |
+| **P2-CB5** | Weapon swap leaves reload mid-flight (FinishReload fills new gun) | Combat | ✅ **fixed** — `CancelReload()` (now public) on both the predicting owner and authority swap paths |
+| **P2-P2** | Mid-fight `ServerSetKit` / class cycle can equip new gun full mag | Player | ✅ **fixed** — weapon ids frozen while alive in a live round (cosmetics still apply); client re-push on respawn delivers the new class |
+| **P2-P3** | `ServerSetKit` does not clamp `CharParts` size / indices | Player | ✅ **fixed** — array truncated to SlotCount, each index clamped to the slot's catalog range |
+| **P2-P4** | `EnforceSingleFirstPersonWeapon` always-on full scan + Warning spam | Player | ✅ **fixed** — hide always runs silently (one Warning only when it hides something); FPSCAN dump + world iterator behind `pf.FPWeaponScan 1` |
+| **P2-BD1** | `ComputeArenaId` grid header ignores per-map CellsY/Levels | Building | ✅ **fixed** — hash header takes the active map's CellsY (+derived Levels). Warehouse ids unchanged (default header); Yard ids fork — old Yard favorites re-key |
+| **P2-U1** | Key-rebind capture not cancelled when Options closes | UI | ✅ **fixed** — capture cleared on Open/Close/Destruct + labels refreshed |
+| **P2-U2** | Fullscreen checkbox vs Window-mode desync / persist fail | UI | ✅ **fixed** — checkbox drives WorkingWindowMode (0/2); prefs pull re-derives the flag |
+| **P2-I1** | Rebind conflict check ignores non-rebindable keys (LMB/WASD) | Input | ✅ **fixed** — full fixed-mapping deny-list; own shipped default always allowed (folds P2-I2) |
+| **P2-D1** | Pilot server restart loop uses `&` on GUI exe → spawn storm | Deploy | ✅ **fixed** — OnBox launch pattern (Start-Process + WaitForExit + crash-loop backoff); file normalized to ASCII (its em-dash parsed as a smart quote under ANSI) |
 
 ---
 
