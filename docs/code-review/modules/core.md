@@ -1,96 +1,173 @@
-# Core module review
+# Core module review — Pass 2
 
 | Field | Value |
-|-------|-------|
-| **Date** | 2026-07-17 |
-| **Updated** | 2026-07-18 (independent reviewer re-pass) |
-| **Files** | 21 |
+|---|---|
+| **Date** | 2026-07-23 |
+| **Pass** | 2 |
 | **Status** | done |
-| **GitHub** | [#10](https://github.com/SourceCodeMan/combatforge/issues/10) |
+| **Files** | 21 |
 
 ## Summary
 
-Core’s default play path (Lobby → Build → Combat for **Skirmish**/Elimination round-elim → Vote → Results) is coherent: single phase writer on `ACombatForgeGameMode`, listen-host OnRep manual broadcasts on `ACombatForgeGameState`, join-in-progress GS binding on the PC, and solid leaver/leader/bot fill handling.
+Pass 2 is an independent CURRENT-code audit of `Source/CombatForge/Core/` (all 21 `.h`/`.cpp`). The phase/round state machine, multi-mode combat ends (Elimination / Skirmish / FFA / CTF / Dom / HP), vote sanitization, and listen-host OnRep broadcast pattern are generally solid. The highest-risk defects are all in `ACombatForgeGameMode`: Options “reset to spawn” can fully revive an eliminated round-elim corpse, headless pilot phantoms still count as permanently alive teammates, and armed demolition bombs are not torn down between Elimination rounds so a 15 s fuse can breach the frozen arena during Intermission/Freeze.
 
-Open residual risk is mode-specific correctness: **Respawn** Elimination (B1), Domination HUD target (C1), and **fall-death soft-respawn in Elimination** (C4). An independent reviewer pass (2026-07-18) re-confirmed B1/C1 and added C4; architecture verdict unchanged (production-usable, not a rewrite).
+## Findings
 
-## Open findings
+### P2-C1. `RequestResetToSpawn` fully revives eliminated pawns (heal + fire)
 
-### B1. Respawn mode: every timed round is a draw → match ends 0–0
-- **Severity:** major
-- **Status:** fixed (2026-07-18) — timer resolves by per-round TeamScores; elims credit shooter team
-- **File:** `Source/CombatForge/Core/CombatForgeGameMode.cpp:1967-1985` (also `3353-3356`, `2866-2874`)
-- **Symptom:** With `EPFRespawnMode::Respawn` under Elimination, tags/respawns never decide a round. Equal roster sizes make every Live timer a draw (no round win). After max rounds the series stays 0–0 → sudden death → still equal alive → **match draw 0–0**. Unequal rosters make the **larger** team win every timer regardless of play. Respawn mode is effectively unusable as a competitive mode.
-- **Why:** `NotifyPawnEliminated` Respawn branch only calls `RespawnVictimAtTeamSpawn` and returns **without** clearing `bAliveInRound`. `CheckElimVictory` no-ops when `RespawnMode == Respawn`. `ResolveRoundOnTimer` still uses “more alive wins / equal = draw,” so with everyone kept “alive” the timer cannot score the round by elim performance.
-- **Fix:** Give Respawn Elimination its own resolve path (e.g. team elim counts / score during Live). Mirror Skirmish-style `TeamScores` or a per-round frag tally; do **not** use equal-alive draws as the sole timer rule. Or hide/reject the mode until implemented.
+- **Severity:** blocker
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:1669`
+- **Symptom:** Options → “Reset to spawn” (UI → `ACombatForgeCharacter::ServerRequestResetToSpawn` → GameMode) heals and reloads any authority pawn with no phase / alive / out-state gate.
+- **Why:** `Health->ResetForRound(3)` clears `UPFHealthComponent::bEliminated` and restores collision/appearance. Weapon fire gates only on `IsFireAllowed()` + `bEliminated` (`PFWeaponComponent`), not `bAliveInRound`. Round-elim already left the corpse possessed with `bAliveInRound=false` / `OutKind=2` / elim move-lock — after reset the player is shootable and can shoot while still absent from win/alive bookkeeping. Same call always stamps round HP mode `3`, so even a legitimate live use during sudden death breaks 1-HP showdown.
+- **Fix:** Reject unless `PS->bAliveInRound && PS->OutKind==0` and phase is Lobby/Build/Combat-Live (or whatever product allows). Pass current round HP (`bSuddenDeathRoundActive ? 1 : 3`). Never call `ResetForRound` on an out-for-round / waiting-respawn pawn; if recovery is desired for stuck-alive only, leave elim state untouched.
 - **Confidence:** high
 
-### C1. Domination HUD “first to N” uses Skirmish tag target (50), not Domination score (200)
+### P2-C2. Headless pilot phantom stays permanently `bAliveInRound` and skews Elimination
+
 - **Severity:** major
-- **Status:** fixed (2026-07-18) — `ComputeEffectiveScaling` stamps `DominationTargetScore`
-- **File:** `Source/CombatForge/Core/CombatForgeGameMode.cpp:3788-3804` (`ComputeEffectiveScaling`); contrast `61` (`DominationTargetScore`), `2751-2758` (`TickDominationScoring`)
-- **Symptom:** In Domination, combat HUD / scoreboard / results mode line (all read `GameState->RoundWinsToTake`) show **“first to 50”** while the server ends the match at **`DominationTargetScore` (200)**. Loading-menu copy correctly says 200; in-match UI lies.
-- **Why:** Continuous modes stamp `RoundWinsToTake` from `CaptureFlagTarget` **or** `SkirmishTagTarget`. Domination’s win logic uses `DominationTargetScore`, but scaling never publishes that value to the replicated HUD field.
-- **Fix:** In `ComputeEffectiveScaling`, branch Domination to `DominationTargetScore` (clamp to 255). Keep Hardpoint/Skirmish/FFA on `SkirmishTagTarget` and CTF on `CaptureFlagTarget`.
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:3597`
+- **Symptom:** Fleet pilot boxes (`game` + `?listen` + `-nullrhi`) carry a local human PlayerState with no pawn (`RestartPlayer` correctly early-outs via `IsHeadlessServerPhantom` at `CombatForgeGameMode.cpp:626`). That PS is still team-assigned in `PostLogin`, marked alive every `StartNextRound` (`ServerSetAliveInRound(true)` at `:1539`), and counted by `RecountAlive` (`:3609` only checks `bAliveInRound && TeamId<=1`).
+- **Why:** Phantom cannot be eliminated (no pawn / health). One team always has a free “alive” slot → `CheckElimVictory` / timer alive-compare never wipes that side. `CountHumans` / match-leader correctly exclude the phantom, but alive/ready/vote paths do not.
+- **Fix:** Exclude `IsHeadlessServerPhantom()` from team auto-assign (or force TeamNone + no roster), from `ServerSetAliveInRound` loops, and from `RecountAlive`. Mirror the existing exclusions used in `CountHumans` / `RefreshMatchLeader` / `EmitMatchReport`.
 - **Confidence:** high
 
-### C4. Fall death always soft-respawns — free mid-round reset in Elimination
-- **Severity:** major
-- **Status:** fixed (2026-07-18) — Round Elimination treats fall as out-for-round
-- **File:** `Source/CombatForge/Core/CombatForgeGameMode.cpp:3247-3272`
-- **Symptom:** Falling off (ShooterTeam 255) near-instant respawns in **every** mode and never clears `bAliveInRound` / never goes out-for-round. In Elimination a player can soft-suicide to reposition mid-round without counting as out (still bumps `TimesEliminated`).
-- **Why:** Explicit early branch: fall death → `RespawnVictimAtTeamSpawn` + return, before the Round-Elimination out path.
-- **Fix:** In Round Elimination (`MatchType == Elimination` && `RespawnMode == RoundElimination`), treat fall death as a normal round elim (out, death cam, `CheckElimVictory`). Keep near-instant respawn only for continuous modes (Skirmish/FFA/objectives) and Lobby warmup.
-- **Confidence:** high
-- **Source:** independent reviewer pass 2026-07-18
+### P2-C3. Ready + vote early-advance still require the headless phantom
 
-### C2. Mid-combat join during sudden death gets full round HP (3), not 1
+- **Severity:** major
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:3940`
+- **Symptom:** `AreAllPlayersReady` skips bots/ghosts but not `IsHeadlessServerPhantom`. `CheckAllVotesIn` (`:3690`) similarly treats every non-bot PS as a required voter.
+- **Why:** Phantom never presses Ready/Vote. Lobby all-ready auto-start never fires on pilot listen hosts (host force-start still works). Vote early-advance (T3) never fires; full `VotePhaseDuration` always runs (Finalize will auto-abstain the phantom). Same root class as P2-C2.
+- **Fix:** Treat phantom like a bot in `AreAllPlayersReady`, `CheckAllVotesIn`, and `FinalizeVotePhase` abstain fill.
+- **Confidence:** high
+
+### P2-C4. Armed bombs survive Elimination Intermission / next Freeze
+
+- **Severity:** major
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:3020`
+- **Symptom:** `DestroyBombs()` runs on Combat→Vote (`:1133`) and host force-lobby (`:1325`), but `EndRound` intermission path (`:3096`) and `StartNextRound` / `BeginLiveRound` never clear `ActiveBombs`. Bomb fuse is 15 s (`PFBombActor::FuseSeconds`); Intermission 7 s + Freeze 5 s = 12 s.
+- **Why:** A plant in the last ~15 s of Live can detonate while `Phase==Combat` but `RoundState` is Intermission or Freeze. `APFBombActor::ServerDetonate` only guards `Phase == Combat` (not Live), so `ServerRemovePieceForMatch` still deletes structural pieces mid-intermission — permanent arena change between rounds. Proximity paint can also flip health elim flags outside Live (GameMode then ignores the elim notify).
+- **Fix:** Call `DestroyBombs()` (and ideally defuse without detonate) at Live→Intermission (`EndRound`) and/or at `StartNextRound` before respawns. Optionally harden bomb detonate to require `RoundState==Live`.
+- **Confidence:** high
+
+### P2-C5. Mid-combat joiners always enter the live round alive (Elimination)
+
 - **Severity:** minor
-- **Status:** fixed (optional PR) — PostLogin + RestartPlayer stamp ResetForRound(1) when SD live
-- **File:** `Source/CombatForge/Core/CombatForgeGameMode.cpp:411-415` (`PostLogin` alive flag only); spawn HP from default pawn / `RestartPlayer` without `ResetForRound(1)`
-- **Symptom:** A player who joins while a sudden-death round is Live can enter with 3 HP while everyone else has 1 HP.
-- **Why:** `PostLogin` only stamps `bAliveInRound` for Freeze/Live; it does not call `ResetForRound` with the active round HP. `StartNextRound` already uses `RoundHP = bSuddenDeathRoundActive ? 1 : 3` for the full roster.
-- **Fix:** After mid-combat `RestartPlayer`, if sudden death active, `Health->ResetForRound(1)`. Prefer join-as-spectator until next Freeze for competitive Elimination.
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:413`
+- **Symptom:** `PostLogin` during Combat Freeze/Live sets `bAliveInRound=true` and (on next pawn) full HP, with an explicit CONTRACT-GAP comment.
+- **Why:** Late joiners skip the round’s risk, pad `AliveCounts`, and can flip elim-victory math. Smallest-consistent choice, but still a balance/fairness hole for Elimination.
+- **Fix:** Product call: either spectate-until-next-round (`bAliveInRound=false`, death-cam style) or allow join only in Intermission/Lobby.
+- **Confidence:** high
+
+### P2-C6. `CheckAllVotesIn` ignores inactive/ghost PlayerStates
+
+- **Severity:** minor
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:3690`
+- **Symptom:** Early vote advance iterates raw `PlayerArray` with only `!IsABot() && !bHasVoted`. No `IsActiveRosterMember` filter (unlike Ready).
+- **Why:** A briefly lingering human PS after a dirty disconnect can hold Vote open until the 20 s timer even after `Logout`’s best-effort destroy/scrub. Race is narrower than pre-scrub days but the filter asymmetry remains.
+- **Fix:** Same active-roster (+ phantom) filter as Ready / human counts.
 - **Confidence:** med
 
-### C3. Contract drift: Build duration / lobby countdown vs §3.2 defaults
+### P2-C7. `HostForceReturnToLobby` from Vote skips rating commit + can double-report
+
+- **Severity:** minor
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:1310`
+- **Symptom:** Mid-match quit tears down toys and `SetPhase(Lobby)` without `FinalizeVotePhase` / Results. Empty-server path in `Logout` (`:513`) calls `EmitMatchReport()` then `HostForceReturnToLobby` when last human leaves during Vote.
+- **Why:** Arena JSON may already exist from `BeginMatchRecord` at Build→Combat, but `CommitMatchRecord` (votes/result append) only runs on Vote→Results. Host quit during Vote leaves incomplete community records. Empty-server abandon emits a report without going through Results (OK for progression) but never commits the rating file.
+- **Fix:** On force return from Combat/Vote, call a shared “close match record” path (commit with current tally / draw result) before Lobby wipe; keep abandon `EmitMatchReport` single-shot.
+- **Confidence:** med
+
+### P2-C8. `FindFreeRosterIndex` reuses slot 11 when full
+
+- **Severity:** minor
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:3987`
+- **Symptom:** When all 12 roster slots are taken, the function logs and returns `MaxRosterSlots - 1` instead of failing.
+- **Why:** Two combatants share `OwnerIdx` / FFA TeamId collision risk → build refunds and elim attribution can hit the wrong PS.
+- **Fix:** Refuse join / refuse `AddBot` when no free index; never alias.
+- **Confidence:** high
+
+### P2-C9. `RequestResetToSpawn` sudden-death HP (related to C1)
+
+- **Severity:** minor
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameMode.cpp:1684`
+- **Symptom:** Always `ResetForRound(3)` even when `bSuddenDeathRoundActive`.
+- **Why:** Live (non-elim) use from Options during showdown restores full locational thresholds instead of 1-HP mode.
+- **Fix:** Fold into C1 gate; pass `bSuddenDeathRoundActive ? 1 : 3`.
+- **Confidence:** high
+
+### P2-C10. `PFColors::ForTeam` maps every non-zero team to Team B
+
 - **Severity:** nit
-- **Status:** verified (no code change) — `BuildPhaseDuration` is already **180 s** (matches T2). `LobbyStartCountdown = 0` is intentional (comment: freeze is the single spawn countdown). Contract still lists 5 s pre-match grace; product chose 0.
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeTypes.cpp:47`
+- **Symptom:** `return (Team == 0) ? TeamA : TeamB` — TeamId 255 / unknown → orange.
+- **Why:** Harmless if all callers `% 2` first (pawn tint does); surprising for unassigned roster debug / bomb labels if raw TeamId leaks.
+- **Fix:** Explicit `Team==1` → B, else neutral gray / TeamA.
+- **Confidence:** high
 
-## Hardening (from independent pass — suggestions, not majors)
+### P2-C11. Identity path diverges from contract T24 text
 
-Not on the fix queue; track if polishing multiplayer hygiene:
+- **Severity:** nit
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgeGameInstance.cpp:91`
+- **Symptom:** GUID persists under `UserSettingsDir()/CombatForge/Identity.json`, not `Saved/CombatForge/Identity.json` as written in contract T24.
+- **Why:** Intentional portable-install fix (commented); contract text is stale. Behavior is fine; docs/contract drift only.
+- **Fix:** Update contract / design note; keep UserSettingsDir.
+- **Confidence:** high
 
-| ID | Topic | File (approx) | Status |
-|----|--------|----------------|--------|
-| C5 | `HostSetFormat` clamps any size &lt;6 to 4 — smoke `HostSetFormat(2)` becomes 4v4 | GameMode ~1291 | **fixed** (allow 1–6; UI still 4/6) |
-| C6 | `SetPhase` does not clear objective score/rotate timers | GameMode ~860 | **fixed** |
-| C7 | Pending respawn lambdas not cancelled on match end | GameMode RespawnVictimAtTeamSpawn | **fixed** (gate on Combat+Live / Lobby) |
-| C8 | Raw `bAliveInRound` / elim counts without `ForceNetUpdate` | GameMode + PlayerState | **fixed** (ServerSet* helpers) |
-| C9 | Lobby “Connected” count not filtered like ready roster | GameMode ~1130 | **fixed** (`CountHumans`) |
-| I11 | Early-end `PhaseDuration` not restamped | GameState ServerSetPhaseEndTime | **fixed** |
-| I12 | Warehouse stream not unloaded on map switch | PFWarehouseStreamSubsystem | **fixed** (OnRep_ArenaMap) |
-| I10 | SD `ResetForRound(1)` one-hit semantics | PFHealthComponent | **verified** (`bOneHitMode`) |
-| I8 | Join-as-spectator mid Elimination | GameMode PostLogin | **skipped** (product; C2 is the minimal fix) |
+### P2-C12. Client log ship has size validation only (no rate/volume cap)
 
-Full independent writeup: [core-reviewer-independent.md](./core-reviewer-independent.md).
+- **Severity:** nit
+- **Status:** open
+- **File:** `/home/josh/projects/combatforge/Source/CombatForge/Core/CombatForgePlayerController.cpp:924`
+- **Symptom:** `ServerShipClientLog_Validate` caps chunk length at 4000; client can flush 8 chunks/s indefinitely into host `Saved/ClientLogs/`.
+- **Why:** LAN triage feature; a buggy/malicious client can grow host disk. Low risk for trusted playtest.
+- **Fix:** Per-connection byte budget / drop after N MB / sample only Warning+.
+- **Confidence:** med
 
 ## Subsystems audited clean
 
-- Phase machine ownership; Elimination / Skirmish / FFA / CTF / Dom / HP siblings (aside from C1/C4/B1)
-- GameState listen-host OnRep pattern; fire/build gates; PC phase IMC + join catch-up (no false breakout horn)
-- Death cam → teammate spectate; host RPC guards; leaver/leader/report pipeline
-- GameInstance identity + net protocol; paths/prefs/log ship; lighting; warehouse stream (default off)
+- **GameState replication + R9 host OnRep mirrors** — all listed replicated fields registered in `GetLifetimeReplicatedProps`; setters force host broadcasts where UI binds.
+- **PlayerState budget spend/refund clamps** — double-refund cannot mint past max structural/prop budgets.
+- **Vote ID sanitization (T30)** — range 1–8, dedupe, like∩dislike strip, combined cap 4 before tally.
+- **Skirmish / FFA / objective end double-fire guards** — `EndSkirmish` / `EndFreeForAll` / `EndTeamScoreObjective` require `Phase==Combat` and clear timers.
+- **Respawn timer C7 gate** — pending `RespawnVictimAtTeamSpawn` aborts if no longer Combat-Live.
+- **Lobby→Build community inject + PlayOnly flash** — FFA forces PlayOnly; Improvement loads pieces before freeze.
+- **Bomb plant lobby guard** — `ServerTryPlantBomb` requires explicit Combat phase (not only `IsFireAllowed`) to avoid PieceId recycle across ClearAll.
+- **PFPaths ArenaDir / UserPrefs migration** — ProgramData / `-ArenaDir` / one-time legacy copy paths are coherent.
+- **Lighting / warehouse stream** — dedicated servers skip; map swap unloads stream; no gameplay authority issues in Core.
+- **Death cam → teammate spectate (T5)** — server-side retarget; Fire/ADS cycle gated dead-only; join catch-up does not false-breakout.
 
 ## File checklist
 
-| File pair | Verdict | Notes |
-|-----------|---------|-------|
-| `CombatForgeGameMode.h/.cpp` | **findings** | B1, C1, C4, C2, C3 |
-| `CombatForgeGameState.h/.cpp` | clean | Replication + ServerSet* OnRep |
-| `CombatForgePlayerController.h/.cpp` | clean | GS bind, catch-up, spectate, host RPCs |
-| `CombatForgePlayerState.h/.cpp` | clean | (C8 hygiene optional) |
-| `CombatForgeGameInstance.h/.cpp` | clean | |
-| `CombatForgeTypes.h/.cpp` | clean | |
-| `PFPaths` / `PFUserPrefs` / `PFClientLogShip` | clean | |
-| `PFLightingSubsystem` / `PFWarehouseStreamSubsystem` | clean | stream map-switch nit only |
+| File | Reviewed |
+|---|---|
+| `CombatForgeTypes.h` | yes |
+| `CombatForgeTypes.cpp` | yes |
+| `CombatForgeGameInstance.h` | yes |
+| `CombatForgeGameInstance.cpp` | yes |
+| `CombatForgeGameMode.h` | yes |
+| `CombatForgeGameMode.cpp` | yes |
+| `CombatForgeGameState.h` | yes |
+| `CombatForgeGameState.cpp` | yes |
+| `CombatForgePlayerState.h` | yes |
+| `CombatForgePlayerState.cpp` | yes |
+| `CombatForgePlayerController.h` | yes |
+| `CombatForgePlayerController.cpp` | yes |
+| `PFClientLogShip.h` | yes |
+| `PFPaths.h` | yes |
+| `PFPaths.cpp` | yes |
+| `PFUserPrefs.h` | yes |
+| `PFUserPrefs.cpp` | yes |
+| `PFLightingSubsystem.h` | yes |
+| `PFLightingSubsystem.cpp` | yes |
+| `PFWarehouseStreamSubsystem.h` | yes |
+| `PFWarehouseStreamSubsystem.cpp` | yes |
