@@ -23,12 +23,14 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 15;  // alpha.15 — FIRST-PERSON ARMS (Bandit gloved arms on the viewmodel,
-	                                   // seated per-weapon, fire + reload one-shots) on top of everything
-	                                   // in 14. Bumped off 14 on purpose: 14 was never pushed, but FIVE
-	                                   // local alpha-14 playtest packages exist on disk, and a 14-without-
-	                                   // arms client meeting a 14-with-arms server is exactly the silent
-	                                   // skew this gate exists to prevent.
+	constexpr int32 NetProtocol = 16;  // alpha.16 — the 2026-07-24 batch: multi-server fleet (port-keyed
+	                                   // directory + START NEW MATCH), forced Creative→Remix→RemixSwap
+	                                   // cycle (GS CycleStage), phantom scrub (PS bHeadlessPhantom),
+	                                   // per-player trap/one-way caps, PieceLimit deny reason, walkable
+	                                   // cone, hold-Q wheel, eye-fallback fire origin, Pass-2 blocker+
+	                                   // major fixes (bomb/frag damage-1 balls, kit clamps). Replicated
+	                                   // layout changed in several places — 15↔16 must never mix.
+	                                   // (15 = alpha.15, FIRST-PERSON ARMS on top of everything in 14.)
 	                                   // Carried from 14 (also never pushed): all 35 guns life-size +
 	                                   // hand-tuned FP/ADS, computed TP grip + one-gun calibrate, left palm
 	                                   // on the gun (humans; bots keep the tuned pose), midline tinted wall
