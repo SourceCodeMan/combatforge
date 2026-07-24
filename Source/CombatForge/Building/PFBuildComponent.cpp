@@ -111,13 +111,31 @@ void UPFBuildComponent::BindInput(UEnhancedInputComponent* EIC, const UPFInputCo
 	EIC->BindAction(Cfg->IA_EquipRoof, ETriggerEvent::Started, this, &UPFBuildComponent::OnEquipRoof);
 
 	// HOLD Q = build wheel (Tom 2026-07-24): press opens, hover highlights the slice, release
-	// commits it. The old tap-toggle read as clunky in playtests. Reliability (the reason a hold
-	// was previously rejected) is covered by a DUAL commit path: this Completed/Canceled binding
-	// AND the wheel widget's own Q key-up (it holds keyboard focus while open) — both funnel into
-	// the same idempotent close.
+	// commits it. ⚠️ THE WHEEL MUST NEVER TAKE KEYBOARD FOCUS for this to work: the first hold
+	// version called SetKeyboardFocus() in Open() (digit keys), the viewport's focus loss FLUSHED
+	// every pressed key, Enhanced Input saw a phantom Q-release (Canceled), this binding closed
+	// the wheel, OS key-repeat "re-pressed" Q, and the wheel flashed open/closed at key-repeat
+	// rate — which is also why the pre-2026-07-24 tap design said "hold was unreliable". With no
+	// focus steal the press/release stream is clean; digits arrive via WheelDigitActions below.
 	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Started, this, &UPFBuildComponent::OnWheelPressed);
 	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Completed, this, &UPFBuildComponent::OnWheelReleased);
 	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Canceled, this, &UPFBuildComponent::OnWheelReleased);
+
+	if (Cfg->WheelDigitActions.Num() >= 10)
+	{
+		using FDigitFn = void (UPFBuildComponent::*)();
+		static const FDigitFn DigitFns[10] = {
+			&UPFBuildComponent::OnWheelDigit0, &UPFBuildComponent::OnWheelDigit1,
+			&UPFBuildComponent::OnWheelDigit2, &UPFBuildComponent::OnWheelDigit3,
+			&UPFBuildComponent::OnWheelDigit4, &UPFBuildComponent::OnWheelDigit5,
+			&UPFBuildComponent::OnWheelDigit6, &UPFBuildComponent::OnWheelDigit7,
+			&UPFBuildComponent::OnWheelDigit8, &UPFBuildComponent::OnWheelDigit9
+		};
+		for (int32 Digit = 0; Digit < 10; ++Digit)
+		{
+			EIC->BindAction(Cfg->WheelDigitActions[Digit], ETriggerEvent::Started, this, DigitFns[Digit]);
+		}
+	}
 }
 
 void UPFBuildComponent::OnPlaceStarted()
@@ -212,6 +230,26 @@ void UPFBuildComponent::OnWheelReleased()
 	{
 		bWheelOpenSent = false;
 		OnBuildWheelRequestedEvent.Broadcast(false);
+	}
+}
+
+void UPFBuildComponent::OnWheelDigit0() { HandleWheelDigit(0); }
+void UPFBuildComponent::OnWheelDigit1() { HandleWheelDigit(1); }
+void UPFBuildComponent::OnWheelDigit2() { HandleWheelDigit(2); }
+void UPFBuildComponent::OnWheelDigit3() { HandleWheelDigit(3); }
+void UPFBuildComponent::OnWheelDigit4() { HandleWheelDigit(4); }
+void UPFBuildComponent::OnWheelDigit5() { HandleWheelDigit(5); }
+void UPFBuildComponent::OnWheelDigit6() { HandleWheelDigit(6); }
+void UPFBuildComponent::OnWheelDigit7() { HandleWheelDigit(7); }
+void UPFBuildComponent::OnWheelDigit8() { HandleWheelDigit(8); }
+void UPFBuildComponent::OnWheelDigit9() { HandleWheelDigit(9); }
+
+void UPFBuildComponent::HandleWheelDigit(int32 Digit)
+{
+	// Only meaningful while the wheel is held open — digit keys are otherwise free.
+	if (bWheelOpenSent)
+	{
+		OnBuildWheelDigitEvent.Broadcast(Digit);
 	}
 }
 

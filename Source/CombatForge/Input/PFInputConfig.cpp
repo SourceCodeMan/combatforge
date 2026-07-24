@@ -100,6 +100,12 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IA_EquipRamp   = MakeAction(Outer, TEXT("IA_EquipRamp"),   EInputActionValueType::Boolean);
 	IA_EquipRoof   = MakeAction(Outer, TEXT("IA_EquipRoof"),   EInputActionValueType::Boolean);
 	IA_BuildWheel  = MakeAction(Outer, TEXT("IA_BuildWheel"),  EInputActionValueType::Boolean);
+	WheelDigitActions.Reset();
+	for (int32 Digit = 0; Digit < 10; ++Digit)
+	{
+		WheelDigitActions.Add(MakeAction(Outer,
+			*FString::Printf(TEXT("IA_WheelDigit%d"), Digit), EInputActionValueType::Boolean));
+	}
 
 	// ---- Contexts ----
 	IMC_Common = NewObject<UInputMappingContext>(Outer, TEXT("IMC_Common"));
@@ -196,6 +202,18 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	// Q tap = toggle build wheel (open on first press, commit/cancel on second). No hold threshold —
 	// hold-to-open was unreliable and hid the wheel labels until 0.18s had elapsed.
 	IMC_Build->MapKey(IA_BuildWheel, EKeys::Q);
+	{
+		// Wheel digit hotkeys (sector i = digit i+1, 0 = sector 10). Mapped permanently in
+		// IMC_Build; the component no-ops them unless the wheel is actually open.
+		static const FKey DigitKeys[10] = {
+			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five,
+			EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine, EKeys::Zero
+		};
+		for (int32 Digit = 0; Digit < 10 && Digit < WheelDigitActions.Num(); ++Digit)
+		{
+			IMC_Build->MapKey(WheelDigitActions[Digit], DigitKeys[Digit]);
+		}
+	}
 
 	// Rebindable-action registry, then apply any saved key overrides. Must run INSIDE Build() (which is
 	// idempotent-guarded) after the default MapKey calls, not via a re-run.

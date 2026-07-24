@@ -86,7 +86,12 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_EquipRoof;   // F4
 	// (IA_QuickEquip removed — it was unmapped, unread dead state. If last-piece quick equip returns,
 	// re-add the action AND a mapping AND a handler together.)
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_BuildWheel;  // Q tap → open/commit build wheel
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_BuildWheel;  // Q HELD → wheel open; release commits
+	/** Digits 1-9,0 → instant sector commit while the wheel is held open. Routed through Enhanced
+	 *  Input because the wheel deliberately never takes keyboard focus: stealing focus flushes
+	 *  every pressed key (viewport LostFocus), which fired a phantom Q-release and made the held
+	 *  wheel flash open/closed at key-repeat rate. */
+	UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UInputAction>> WheelDigitActions;
 
 	// ---- Contexts ----
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputMappingContext> IMC_Common;

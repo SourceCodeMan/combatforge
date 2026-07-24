@@ -50,6 +50,9 @@ public:
 	FPFOnEquippedToolChanged  OnEquippedToolChangedEvent;
 	FPFOnPlaceDenied          OnPlaceDeniedEvent;
 	FPFOnBuildWheelRequested  OnBuildWheelRequestedEvent;   // HOLD Q: press=true (open), release=false (commit hovered)
+	/** Digit hotkey (0-9 = sector 1-10) pressed while the wheel is open → RootHUD commits that sector. */
+	DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnBuildWheelDigit, int32);
+	FPFOnBuildWheelDigit      OnBuildWheelDigitEvent;
 
 	/** Called by RootHUD when the wheel closes via digit / Esc / phase change (not via Q). */
 	void NotifyBuildWheelClosed();
@@ -73,6 +76,12 @@ protected:
 	void OnEquipRoof();
 	void OnWheelPressed();
 	void OnWheelReleased();
+	// One UFUNCTION-free handler per digit key (BindAction takes no payload); all funnel into
+	// HandleWheelDigit, which no-ops unless the wheel is open.
+	void OnWheelDigit0(); void OnWheelDigit1(); void OnWheelDigit2(); void OnWheelDigit3();
+	void OnWheelDigit4(); void OnWheelDigit5(); void OnWheelDigit6(); void OnWheelDigit7();
+	void OnWheelDigit8(); void OnWheelDigit9();
+	void HandleWheelDigit(int32 Digit);
 
 private:
 	/** Last snapped slot sent by turbo (dedup: place on slot change OR every 0.15 s — 03 §4). */

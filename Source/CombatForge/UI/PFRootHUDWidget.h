@@ -68,6 +68,7 @@ private:
 	void HandlePhaseChanged(EPFMatchPhase NewPhase);
 	void HandleScoreboardHeldChanged(bool bHeld);
 	void HandleBuildWheelRequested(bool bOpen);
+	void HandleBuildWheelDigit(int32 Digit);
 	void HandleWheelToolSelected(EPFBuildTool Tool);
 	void HandleWheelClosed(bool bUnused);
 

@@ -160,7 +160,10 @@ void UPFBuildWheelWidget::BuildTree()
 void UPFBuildWheelWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
-	SetIsFocusable(true); // digits 1-8 arrive via NativeOnKeyDown while open (T4)
+	// NEVER focusable (2026-07-24): taking keyboard focus flushed every pressed key (viewport
+	// LostFocus) → phantom Q-release → the held wheel flashed open/closed at key-repeat rate.
+	// Digits now arrive via Enhanced Input (WheelDigitActions → RootHUD → CommitSector).
+	SetIsFocusable(false);
 	SetVisibility(ESlateVisibility::Collapsed);
 }
 
@@ -181,7 +184,10 @@ void UPFBuildWheelWidget::Open()
 	AccumDelta = FVector2D::ZeroVector;
 	SetHoveredSector(INDEX_NONE);
 
-	SetVisibility(ESlateVisibility::Visible);
+	// HitTestInvisible + NO SetKeyboardFocus (2026-07-24): the focus steal flushed pressed keys
+	// and broke hold-Q entirely (see class comment). Nothing here needs focus or hit-testing —
+	// hover is mouse-delta math in NativeTick, digits ride Enhanced Input.
+	SetVisibility(ESlateVisibility::HitTestInvisible);
 
 	if (APlayerController* PC = GetOwningPlayer())
 	{
@@ -189,7 +195,6 @@ void UPFBuildWheelWidget::Open()
 		PC->SetIgnoreLookInput(true);
 		bLookInputIgnored = true;
 	}
-	SetKeyboardFocus();
 
 	if (CursorDot)
 	{
@@ -248,10 +253,7 @@ void UPFBuildWheelWidget::CloseInternal()
 		}
 		bLookInputIgnored = false;
 	}
-	if (FSlateApplication::IsInitialized())
-	{
-		FSlateApplication::Get().SetAllUserFocusToGameViewport();
-	}
+	// (No focus restore needed — the wheel never takes focus; see Open().)
 	// Let RootHUD clear BuildComponent's open flag (digit / Esc / phase paths).
 	OnWheelClosedEvent.Broadcast(false);
 }
@@ -301,44 +303,6 @@ void UPFBuildWheelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 	}
 
 	UpdateCenterReadout();
-}
-
-FReply UPFBuildWheelWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
-{
-	if (bWheelOpen)
-	{
-		// Digits 1-9,0 map first 10 sectors; remaining use mouse only.
-		static const FKey DigitKeys[10] =
-		{
-			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four,
-			EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight,
-			EKeys::Nine, EKeys::Zero
-		};
-		const FKey Key = InKeyEvent.GetKey();
-		for (int32 i = 0; i < 10 && i < NumSectors; ++i)
-		{
-			if (Key == DigitKeys[i])
-			{
-				CommitSector(i);
-				return FReply::Handled();
-			}
-		}
-	}
-	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
-}
-
-FReply UPFBuildWheelWidget::NativeOnKeyUp(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
-{
-	// Hold-Q commit, path 1 of 2: the wheel holds keyboard focus while open, so it sees the Q
-	// release FIRST and commits directly. Deliberately UNHANDLED so the release still reaches
-	// PlayerInput — Enhanced Input must see the key go up (a swallowed release leaves IA_BuildWheel
-	// "held" and the next press never fires Started), and the component's Completed binding is the
-	// path 2 backstop when focus wandered. Both paths funnel into the same idempotent close.
-	if (bWheelOpen && InKeyEvent.GetKey() == EKeys::Q)
-	{
-		CloseAndCommit();
-	}
-	return Super::NativeOnKeyUp(InGeometry, InKeyEvent);
 }
 
 int32 UPFBuildWheelWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
