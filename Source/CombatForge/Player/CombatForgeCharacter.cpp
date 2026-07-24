@@ -83,6 +83,14 @@ static TAutoConsoleVariable<int32> CVarFPArmsVerify(
 	TEXT("pf.FPArmsVerify"), 0,
 	TEXT("1 = automated FP-arms verification: equip lmg_01, log seating numbers, screenshot, quit."));
 
+// FPSCAN diagnostics (P2-P4): the per-mesh dump + world-wide TObjectIterator sweep inside
+// EnforceSingleFirstPersonWeapon were always-on Warning spam + a hitch risk on every equip /
+// swap / kit apply. The functional duplicate-HIDE still always runs; the forensics only when
+// hunting a regression of the two-crossed-guns bug.
+static TAutoConsoleVariable<int32> CVarFPWeaponScan(
+	TEXT("pf.FPWeaponScan"), 0,
+	TEXT("1 = verbose FPSCAN dump (per-mesh log + nearby world sweep) in EnforceSingleFirstPersonWeapon."));
+
 // Automatic ADS look-sensitivity reduction (Tom 2026-07-24, CoD-style): while zoomed, mouse
 // input scales toward the focal-length ratio tan(ADSFOV/2)/tan(BaseFOV/2), so a flick covers
 // roughly the same SCREEN distance zoomed as at the hip. 1 = full focal scaling (CoD
@@ -3203,6 +3211,12 @@ void ACombatForgeCharacter::OnWeaponSwapInput()
 		return;   // debounce a multi-notch scroll into a single swap
 	}
 	LastSwapTime = Now;
+	// P2-CB5 (owning-client half): a reload started on the outgoing gun must not survive the
+	// swap — its FinishReload would fill the INCOMING gun's mag and fire stayed gated meanwhile.
+	if (WeaponComponent != nullptr)
+	{
+		WeaponComponent->CancelReload();
+	}
 	ServerSwapWeapon();
 }
 
@@ -3212,6 +3226,11 @@ void ACombatForgeCharacter::ServerSwapWeapon_Implementation()
 	{
 		return;
 	}
+	// P2-CB5 (authority half): abort any reload mid-flight BEFORE the stash — FinishReload on the
+	// swapped-in gun was a cross-weapon mag fill, and the leftover bReloading fire-gated a gun
+	// that never started reloading.
+	WeaponComponent->CancelReload();
+
 	// Stash the outgoing weapon's ammo so a swap never refills.
 	const int32 Cur = bSecondaryActive ? 1 : 0;
 	StashHopper[Cur]  = WeaponComponent->HopperCount;
@@ -3381,6 +3400,39 @@ void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
 			}
 		}
 	}
+
+	// P2-P3: the clothing array is client-supplied — clamp its SIZE (an oversized array still
+	// replicates and drives the apply loops even though LoadPart no-ops OOB) and each part index
+	// to the slot's real catalog range.
+	if (Kit.CharParts.Num() > PFChar::SlotCount())
+	{
+		Kit.CharParts.SetNum(PFChar::SlotCount());
+	}
+	for (int32 SlotIdx = 0; SlotIdx < Kit.CharParts.Num(); ++SlotIdx)
+	{
+		const int32 MaxPart = PFChar::SlotParts(SlotIdx).Num() - 1;
+		Kit.CharParts[SlotIdx] = static_cast<int16>(
+			FMath::Clamp<int32>(Kit.CharParts[SlotIdx], -1, MaxPart));
+	}
+
+	// P2-P2: a class cycled in the Options menu mid-LIVE-round used to hand over the NEW gun with
+	// a FULL mag (ApplyWeaponLoadout's first-draw fill) — a free reload-plus with better stats.
+	// While this pawn is alive in a live round, keep the CURRENT weapon ids; cosmetics may change.
+	// The rejected weapon choice isn't lost: the client re-pushes its kit on the next spawn (and
+	// the death-screen class switch hits this path with bEliminated == true, which stays allowed).
+	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated)
+	{
+		const ACombatForgeGameState* GS = GetWorld()
+			? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
+		if (GS && GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live)
+		{
+			Kit.WeaponCategory    = KitRep.WeaponCategory;
+			Kit.WeaponIndex       = KitRep.WeaponIndex;
+			Kit.SecondaryCategory = KitRep.SecondaryCategory;
+			Kit.SecondaryIndex    = KitRep.SecondaryIndex;
+		}
+	}
+
 	KitRep = Kit;
 	ApplyKit();   // server runs the owner's weapon stats; other clients re-dress via OnRep_Kit
 }
@@ -4178,14 +4230,17 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 		++Seen;
 		// Owner-visible = explicitly owner-only, OR simply not hidden from the owner (the default).
 		const bool bOwnerSees = P->bOnlyOwnerSee || !P->bOwnerNoSee;
-		UE_LOG(CombatForgeLog, Warning,
-			TEXT("FPSCAN pawn: '%s' %s mesh=%s dist=%.0f vis=%d hidden=%d onlyOwnerSee=%d ownerNoSee=%d ownerSees=%d parent=%s socket=%s"),
-			*P->GetName(), SKC ? TEXT("SKEL") : TEXT("STAT"),
-			*GetNameSafe(SMC ? (UObject*)SMC->GetStaticMesh() : (UObject*)(SKC ? SKC->GetSkeletalMeshAsset() : nullptr)),
-			FVector::Dist(EyeLoc, P->GetComponentLocation()),
-			P->IsVisible() ? 1 : 0, P->bHiddenInGame ? 1 : 0,
-			P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0, bOwnerSees ? 1 : 0,
-			*GetNameSafe(P->GetAttachParent()), *P->GetAttachSocketName().ToString());
+		if (CVarFPWeaponScan.GetValueOnGameThread() != 0)
+		{
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("FPSCAN pawn: '%s' %s mesh=%s dist=%.0f vis=%d hidden=%d onlyOwnerSee=%d ownerNoSee=%d ownerSees=%d parent=%s socket=%s"),
+				*P->GetName(), SKC ? TEXT("SKEL") : TEXT("STAT"),
+				*GetNameSafe(SMC ? (UObject*)SMC->GetStaticMesh() : (UObject*)(SKC ? SKC->GetSkeletalMeshAsset() : nullptr)),
+				FVector::Dist(EyeLoc, P->GetComponentLocation()),
+				P->IsVisible() ? 1 : 0, P->bHiddenInGame ? 1 : 0,
+				P->bOnlyOwnerSee ? 1 : 0, P->bOwnerNoSee ? 1 : 0, bOwnerSees ? 1 : 0,
+				*GetNameSafe(P->GetAttachParent()), *P->GetAttachSocketName().ToString());
+		}
 
 		// Only re-hide the two components that are DEFINITELY third-person guns, plus mis-mounted skeletal
 		// character parts. Anything else is merely reported: a carried bomb or some future owner-visible prop
@@ -4204,6 +4259,20 @@ void ACombatForgeCharacter::EnforceSingleFirstPersonWeapon()
 			P->MarkRenderStateDirty();
 			++Hidden;
 		}
+	}
+
+	// The duplicate-hide above is the FIX and always runs; everything below is forensics for the
+	// next two-crossed-guns regression hunt. P2-P4: the world-wide TObjectIterator + per-equip
+	// summary were an always-on cost + log flood — opt in with pf.FPWeaponScan 1.
+	if (Hidden > 0)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("FP weapon: hid %d owner-visible duplicate weapon mesh(es) (pf.FPWeaponScan 1 for the full dump)"),
+			Hidden);
+	}
+	if (CVarFPWeaponScan.GetValueOnGameThread() == 0)
+	{
+		return;
 	}
 
 	// AND SWEEP THE WORLD, not just this pawn. The pawn-only scan has already come back clean once while the

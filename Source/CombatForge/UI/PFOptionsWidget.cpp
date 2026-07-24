@@ -898,6 +898,14 @@ void UPFOptionsWidget::NativeConstruct()
 
 void UPFOptionsWidget::Open()
 {
+	// P2-U1: an in-flight rebind capture must never survive a close/reopen — a stale
+	// bListeningForKey swallows the next keypress as a bind and leaves the row on "press key…".
+	if (bListeningForKey)
+	{
+		bListeningForKey = false;
+		ListeningIndex = -1;
+		RefreshRebindLabels();
+	}
 	PullFromSettings();
 	RefreshLabels();
 	SelectTab(ActiveTab);
@@ -954,6 +962,13 @@ void UPFOptionsWidget::EnterEmbeddedMode()
 
 void UPFOptionsWidget::Close()
 {
+	// P2-U1: cancel any half-finished rebind capture with the menu (see Open()).
+	if (bListeningForKey)
+	{
+		bListeningForKey = false;
+		ListeningIndex = -1;
+		RefreshRebindLabels();
+	}
 	// Changes save on CLOSE, not only on Apply — "set quality, Esc out, next match it's back to Low" was a
 	// real playtest loss: the widget silently dropped unsaved working values.
 	PushToSettings(/*bSave=*/true);
@@ -968,6 +983,8 @@ void UPFOptionsWidget::Close()
 
 void UPFOptionsWidget::NativeDestruct()
 {
+	bListeningForKey = false;   // P2-U1: no capture may outlive the widget
+	ListeningIndex = -1;
 	// The EMBEDDED boot-menu instance is never Close()d — it dies with the menu when the match starts. Save
 	// its working values on the way out so options chosen in the boot menu stick too.
 	if (bEmbedded)
@@ -1021,7 +1038,13 @@ void UPFOptionsWidget::OnApplyClicked()
 
 void UPFOptionsWidget::OnFullscreenChanged(bool bIsChecked)
 {
+	// P2-U2: the checkbox and the WINDOW mode button are ONE control now — checking it selects
+	// Fullscreen (borderless at apply time, see PushToSettings), unchecking selects Windowed.
+	// Before this it only flipped bWorkingFullscreen, so the applied mode and the SAVED
+	// WorkingWindowMode disagreed and "fullscreen" reverted on the next launch.
 	bWorkingFullscreen = bIsChecked;
+	WorkingWindowMode = bIsChecked ? 0 : 2;
+	RefreshLabels();
 }
 
 void UPFOptionsWidget::OnVSyncChanged(bool bIsChecked)
@@ -1338,6 +1361,9 @@ void UPFOptionsWidget::PullFromSettings()
 	bWorkingCrouchToggle = FPFUserPrefs::GetCrouchToggle();
 	WorkingFov = FPFUserPrefs::GetFieldOfView();
 	WorkingWindowMode = FPFUserPrefs::GetWindowModeIndex();
+	// P2-U2: prefs are the mode's source of truth (they overwrite the UGameUserSettings seed
+	// above) — re-derive the fullscreen flag from the SAME source or the checkbox desyncs.
+	bWorkingFullscreen = (WorkingWindowMode == 0);
 
 	// Key binds (current live keys + shipped defaults) from the input config.
 	WorkingBinds.Empty();

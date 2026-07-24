@@ -294,15 +294,27 @@ bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
 	}
 	// Conflict check (issue #19 I1): without it a duplicate bind silently made two actions fire on one
 	// key (or stole a FIXED key like Escape) with no feedback — the classic "my controls broke" report.
-	// Reserved keys stay off-limits; a key held by ANOTHER rebindable entry is rejected too (predictable
-	// beats auto-swap: the player sees the rejection and picks another key).
-	static const FKey ReservedKeys[] = { EKeys::Escape, EKeys::Tab, EKeys::Enter, EKeys::F };
-	for (const FKey& R : ReservedKeys)
+	// P2-I1: the reserved set now covers EVERY fixed (non-rebindable) mapping — fire/ADS, WASD,
+	// crouch, the build hotkeys, the wheel — not just the old menu four; landing a rebind on any
+	// of them double-fired two actions on one key. P2-I2: a key that is THIS entry's shipped
+	// DEFAULT is always legal — the shipped state itself pairs F (Ready + Interact) and Q (wheel
+	// + smoke) across contexts, and rejecting defaults locked players out of restoring them.
+	// A key held by ANOTHER rebindable entry is rejected too (predictable beats auto-swap).
+	static const FKey FixedKeys[] = {
+		EKeys::Escape, EKeys::Tab, EKeys::Enter, EKeys::F,                                // menu/ready
+		EKeys::LeftMouseButton, EKeys::RightMouseButton, EKeys::MiddleMouseButton,        // fire/ADS/drag
+		EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::LeftControl, EKeys::C,             // move/crouch
+		EKeys::F1, EKeys::F2, EKeys::F3, EKeys::F4, EKeys::F5, EKeys::X, EKeys::Q         // build kit
+	};
+	if (NewKey != E->DefaultKey)
 	{
-		if (NewKey == R && E->CurrentKey != R)
+		for (const FKey& R : FixedKeys)
 		{
-			UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is reserved"), *NewKey.GetDisplayName().ToString());
-			return false;
+			if (NewKey == R && E->CurrentKey != R)
+			{
+				UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is reserved"), *NewKey.GetDisplayName().ToString());
+				return false;
+			}
 		}
 	}
 	for (const FRebindEntry& Other : RebindEntries)

@@ -1604,6 +1604,10 @@ void ACombatForgeGameMode::StartNextRound()
 		return;
 	}
 
+	// P2-C4 belt-and-braces: EndRound already kills fuses at Live→Intermission; sweep again at
+	// round start so no path into a fresh Freeze carries an armed bomb.
+	DestroyBombs();
+
 	bSuddenDeathRoundActive = bPendingSuddenDeath;
 	bPendingSuddenDeath = false;
 	if (bSuddenDeathRoundActive)
@@ -1766,19 +1770,45 @@ void ACombatForgeGameMode::RequestResetToSpawn(ACombatForgeCharacter* Pawn)
 		return;
 	}
 	ACombatForgePlayerState* PS = Pawn->GetPlayerState<ACombatForgePlayerState>();
-	if (!PS)
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!PS || !GS)
 	{
 		return;
 	}
-	// The same in-place reset the respawn timer performs (full heal + full loadout), then a teleport to the
-	// current-phase team spawn — with no "out"/death gating, so a stuck or fallen LIVE player can recover.
-	if (UPFHealthComponent* Health = Pawn->GetHealth())
+	// P2-C1 / P2-P1 (Pass-2 blockers): this used to be an ungated full heal + reload + teleport —
+	// any owning client could fire the reliable RPC mid-duel, and a round-elim corpse could
+	// self-REVIVE (ResetForRound clears bEliminated) while staying invisible to alive/win
+	// bookkeeping. The feature exists to rescue a STUCK, LIVE player; gate it to exactly that.
+	// 1) Only players still IN the round — never a revive.
+	if (!PS->bAliveInRound || PS->OutKind != 0)
 	{
-		Health->ResetForRound(3);
+		return;
 	}
-	if (UPFWeaponComponent* Weapon = Pawn->GetWeapon())
+	if (UPFHealthComponent* Health = Pawn->GetHealth(); Health && Health->bEliminated)
 	{
-		Weapon->ServerResetLoadout();
+		return;
+	}
+	// 2) Once per cooldown per player, so it can't be macro-spammed as a combat reset.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (const double* Last = LastResetToSpawnAt.Find(PS); Last && Now - *Last < ResetToSpawnCooldownSec)
+	{
+		return;
+	}
+	LastResetToSpawnAt.Add(PS, Now);
+	// 3) The unstuck rescue is the TELEPORT. Heal + fresh loadout only OUTSIDE a live round —
+	//    inside one they were the exploit body (free mid-fight top-up). P2-C9: when they do run,
+	//    honor the round's HP mode so a showdown pawn stays on 1-HP rules.
+	const bool bLiveRound = GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live;
+	if (!bLiveRound)
+	{
+		if (UPFHealthComponent* Health = Pawn->GetHealth())
+		{
+			Health->ResetForRound(bSuddenDeathRoundActive ? 1 : 3);
+		}
+		if (UPFWeaponComponent* Weapon = Pawn->GetWeapon())
+		{
+			Weapon->ServerResetLoadout();
+		}
 	}
 	TeleportPawnTo(Pawn, GetSpawnTransform(PS));
 }
@@ -3118,6 +3148,11 @@ void ACombatForgeGameMode::EndRound(uint8 WinnerTeam)
 		return;
 	}
 	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
+
+	// P2-C4: armed bombs used to OUTLIVE the round — a plant in the last ~15 s of Live could
+	// detonate during Intermission/Freeze (both shorter than the 15 s fuse) and delete frozen
+	// arena pieces between rounds. The round is decided; kill the fuses with it.
+	DestroyBombs();
 
 	// T18 scoring: survival 25 to everyone still alive, round win 50 to every winning teammate.
 	for (APlayerState* PSBase : GS->PlayerArray)

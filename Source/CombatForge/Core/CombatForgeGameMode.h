@@ -103,6 +103,10 @@ public:
 	// current-phase team spawn. Server-authoritative; routed from the owning client via
 	// ACombatForgeCharacter::ServerRequestResetToSpawn. Safe with a live pawn in any phase.
 	void RequestResetToSpawn(ACombatForgeCharacter* Pawn);
+	/** Per-player last reset-to-spawn time (P2-C1: rate-limits the Options rescue). Weak keys —
+	 *  stale entries from leavers are harmless and tiny. */
+	TMap<TWeakObjectPtr<ACombatForgePlayerState>, double> LastResetToSpawnAt;
+	static constexpr double ResetToSpawnCooldownSec = 20.0;
 
 protected:
 	// ---- Engine overrides ----

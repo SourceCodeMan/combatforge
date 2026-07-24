@@ -377,11 +377,13 @@ void APFBombActor::ServerDetonate()
 	BurstSeed = static_cast<uint32>(FMath::Rand()) ^ (GetUniqueID() * 2654435761u);
 	BurstAxis = Axis;
 	bDetonated = true;
-	// Belt-and-braces phase guard: only remove the piece while the match is still in COMBAT. If a phase
-	// transition raced the fuse (bombs are normally destroyed at Combat exit), detonating into a cleared /
-	// rebuilt grid would delete a recycled-id piece that was never bombed.
+	// Belt-and-braces phase guard: only remove the piece while the match is in COMBAT **and the
+	// round is LIVE** (P2-C4). If a transition raced the fuse (bombs are destroyed at Combat exit
+	// AND now at every round end), detonating into a cleared/rebuilt grid would delete a
+	// recycled-id piece that was never bombed, and an Intermission/Freeze blast would rewrite the
+	// frozen arena between rounds.
 	const ACombatForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
-	if (GS && GS->Phase == EPFMatchPhase::Combat)
+	if (GS && GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live)
 	{
 		if (APFBuildGrid* Grid = GridWeak.Get())
 		{
@@ -537,6 +539,7 @@ void APFBombActor::SpawnFragBurstBatch()
 		{
 			BB->InitProjectile(Origin, Dir, PlanterTeam, /*bAuthoritative=*/true, SrcWeapon,
 				BurstSeed + static_cast<uint32>(i) + 1u, /*bIgnoreShooter=*/false);
+			BB->UtilityDamageOverride = 1;   // P2-CB1: breach spray never inherits the planter's HitValue
 		}
 	}
 	BurstNextIndex = End;

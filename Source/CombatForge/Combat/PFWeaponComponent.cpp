@@ -845,6 +845,22 @@ void UPFWeaponComponent::MulticastImpactSplat_Implementation(FVector_NetQuantize
 	}
 }
 
+void UPFWeaponComponent::SendHitConfirmCoalesced(uint32 ShotIndex, bool bElimHit)
+{
+	// P2-CB3: one shotgun shell / frag / bomb resolves MANY balls in the same instant, and each
+	// used to enqueue its own reliable Client RPC + hitmarker reset — channel pressure for
+	// feedback the eye can't separate anyway. Elim confirms always go through (the one that
+	// matters); plain hits collapse to one per 50 ms.
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetTimeSeconds() : 0.0;
+	if (!bElimHit && Now - LastHitConfirmSentAt < 0.05)
+	{
+		return;
+	}
+	LastHitConfirmSentAt = Now;
+	ClientHitConfirm(ShotIndex, bElimHit);
+}
+
 void UPFWeaponComponent::ClientHitConfirm_Implementation(uint32 ShotIndex, bool bElimHit)
 {
 	// The ONLY source of hitmarkers (B3). UPFCombatFeedbackWidget renders + plays audio.

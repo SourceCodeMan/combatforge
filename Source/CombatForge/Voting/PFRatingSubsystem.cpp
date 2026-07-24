@@ -115,7 +115,8 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 
 	RecordCreatedUtc = FDateTime::UtcNow();
 	CurrentMatchId   = MatchId;
-	CurrentArenaId   = FPFArenaSerialization::ComputeArenaId(FrozenPieces);
+	CurrentArenaId   = FPFArenaSerialization::ComputeArenaId(FrozenPieces,
+		ResolveActiveGridCellsY(GetGameInstance()));   // P2-BD1: id is per-map now
 	CurrentParentArenaId = ParentArenaId;   // BuildLayoutJson drops it when it equals CurrentArenaId (no real remix)
 	CurrentRecordJson = FPFArenaSerialization::BuildLayoutJson(FrozenPieces, MatchId, TeamSize,
 	                                                           RecordCreatedUtc,
@@ -494,7 +495,9 @@ bool UPFRatingSubsystem::PickCommunityArena(TArray<FPFBuildPieceRec>& OutPieces,
 	// The Remix parent id is the CONTENT hash of the base layout — never a filename. It must be computed the
 	// same way the child records its own arenaId so lineage lookups line up and the "unchanged ⇒ no parent"
 	// guard in BuildLayoutJson fires correctly (a filename would never equal the child hash → false lineage).
-	OutArenaId = FPFArenaSerialization::ComputeArenaId(OutPieces);
+	// P2-BD1: hash under the ACTIVE map's grid — the cellsY load gate guarantees file == active here.
+	OutArenaId = FPFArenaSerialization::ComputeArenaId(OutPieces,
+		ResolveActiveGridCellsY(GetGameInstance()));
 	return true;
 }
 
