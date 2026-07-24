@@ -147,6 +147,7 @@ void UPFMusicSubsystem::PlayTrack(EPFMusicTrack Track)
 	}
 
 	MusicComp->SetSound(Sound);
+	bMatchEndDucked = false;   // a fresh track always starts at full pref volume
 	MusicComp->SetVolumeMultiplier(ResolveVolume());
 	MusicComp->Play();
 	UE_LOG(CombatForgeLog, Log, TEXT("Music: playing %s (vol %.2f)"), *Sound->GetName(), ResolveVolume());
@@ -182,9 +183,32 @@ void UPFMusicSubsystem::StopMusic()
 void UPFMusicSubsystem::ApplyVolumeFromPrefs()
 {
 	// Volume 0 just mutes (no stop/restart — avoids a jarring music restart when the slider crosses zero).
-	if (MusicComp && ActiveTrack != EPFMusicTrack::None)
+	// While the final-30s duck holds, the slider must not blast the bed back in — the un-duck restores it.
+	if (MusicComp && ActiveTrack != EPFMusicTrack::None && !bMatchEndDucked)
 	{
 		MusicComp->SetVolumeMultiplier(ResolveVolume());
+	}
+}
+
+void UPFMusicSubsystem::SetMatchEndDucked(bool bDucked)
+{
+	if (bMatchEndDucked == bDucked)
+	{
+		return;
+	}
+	bMatchEndDucked = bDucked;
+	if (!MusicComp || ActiveTrack == EPFMusicTrack::None || !MusicComp->IsPlaying())
+	{
+		return;
+	}
+	if (bDucked)
+	{
+		// Fade to (near) silence — 0 exactly can virtualize/stop the sound on some platforms.
+		MusicComp->AdjustVolume(1.2f, 0.0001f);
+	}
+	else
+	{
+		MusicComp->AdjustVolume(0.8f, FMath::Max(ResolveVolume(), 0.0001f));
 	}
 }
 
@@ -214,19 +238,3 @@ void UPFMusicSubsystem::SetPhaseMusic(EPFMatchPhase Phase)
 	}
 }
 
-void UPFMusicSubsystem::RefreshFromWorld(UWorld* World)
-{
-	if (!World)
-	{
-		return;
-	}
-	const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>();
-	if (GS)
-	{
-		SetPhaseMusic(GS->Phase);
-	}
-	else
-	{
-		StopMusic();
-	}
-}

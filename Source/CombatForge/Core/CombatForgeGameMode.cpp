@@ -120,6 +120,9 @@ void ACombatForgeGameMode::BeginPlay()
 	GetWorldTimerManager().SetTimer(CrashBreadcrumbTimer, this,
 		&ACombatForgeGameMode::LogCrashBreadcrumb, 30.f, /*bLoop=*/true);
 
+	GetWorldTimerManager().SetTimer(EmptyServerSweepTimer, this,
+		&ACombatForgeGameMode::SweepEmptyServer, 30.f, /*bLoop=*/true);
+
 	EffectiveRoundWinsToTake = RoundWinsToTakeMatch;
 	EffectiveMaxRounds = MaxRounds;
 	EffectiveRoundDuration = RoundDuration;
@@ -132,6 +135,7 @@ void ACombatForgeGameMode::BeginPlay()
 		GS->ServerSetMatchType(DefaultMatchType);       // Skirmish default (kids)
 		GS->ServerSetArenaMap(DefaultArenaMap);         // Warehouse default; must match SpawnArenaActors' pick
 		RefreshCommunityMapCatalog();                   // seeds + any already-saved maps for Remix picker
+		ResetMatchCycle();                              // seed the cycle wheel for the default mode
 	}
 
 	// Fleet directory: dedicated boxes with a provisioned key register + heartbeat; everyone
@@ -382,6 +386,13 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 
 	if (PS)
 	{
+		// Stamp the replicated phantom flag once, while the server-only live test is valid, so
+		// every remote widget can filter the pilot box's ghost row (it is NOT a player).
+		if (PS->IsHeadlessServerPhantom())
+		{
+			PS->ServerMarkHeadlessPhantom();
+		}
+
 		SpawnWarmupDummyFor(PS);   // one pen dummy per connected player (T29)
 
 		// Joiners during Combat enter the current round alive at their team spawn.
@@ -980,6 +991,29 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		PendingMatchWinner = TeamNone;
 		PendingMatchResult = FPFMatchResult();
 
+		// ---- Forced 3-match cycle (Tom 2026-07-24): stamp this match's stage; on the Swap
+		// stage, squads switch SIDES. Flipping every human's TeamId moves each squad onto the
+		// other plot; the re-injected pieces keep their Team, so each squad now owns (edits,
+		// defends, wears the color of) the fort the other squad built last match. Runs before
+		// FillBotsToFormat and the respawn loop below, so bots and spawns follow the new sides.
+		const bool bCycleActive = IsCycleActive();
+		if (bCycleActive)
+		{
+			GS->ServerSetCycleStage(NextCycleStage);
+			if (GS->CycleStage == static_cast<uint8>(EPFCycleStage::RemixSwap))
+			{
+				for (APlayerState* PSBase : GS->PlayerArray)
+				{
+					ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+					if (PS && !PS->IsABot() && !PS->IsHeadlessServerPhantom() && PS->TeamId <= 1)
+					{
+						PS->ServerSetTeam(static_cast<uint8>(1 - PS->TeamId), PS->RosterIndex);
+					}
+				}
+				UE_LOG(CombatForgeLog, Log, TEXT("GameMode: cycle Remix Swap — squads switched sides"));
+			}
+		}
+
 		if (BuildGrid)
 		{
 			BuildGrid->ClearAll();
@@ -1038,11 +1072,30 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 			PendingParentArenaId.Reset();
 			if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
 			{
-				if (GS->BuildMode == EPFBuildMode::Improvement || GS->BuildMode == EPFBuildMode::PlayOnly)
+				// Effective build behavior: the cycle stage OVERRIDES the host's mode pick —
+				// stage 1 builds from scratch even when the wheel was entered at Remix, and
+				// stages 2/3 remix even when it was entered at Creative.
+				EPFBuildMode EffectiveMode = GS->BuildMode;
+				if (bCycleActive)
 				{
+					EffectiveMode = (GS->CycleStage == static_cast<uint8>(EPFCycleStage::Creative))
+						? EPFBuildMode::Creative : EPFBuildMode::Improvement;
+				}
+				if (EffectiveMode == EPFBuildMode::Improvement || EffectiveMode == EPFBuildMode::PlayOnly)
+				{
+					// The wheel's Remix / Remix Swap base is the map JUST PLAYED (in-memory
+					// snapshot from Build→Combat). The community-arena pick is the fallback
+					// (fresh server, no match yet) and the whole story for PlayOnly.
 					TArray<FPFBuildPieceRec> Whole;
 					FString BaseArenaId;
-					if (Rating->PickCommunityArena(Whole, BaseArenaId, GS->SelectedCommunityMapFile))
+					if (bCycleActive && LastMatchPieces.Num() > 0)
+					{
+						BuildGrid->ServerInjectPieces(LastMatchPieces);
+						UE_LOG(CombatForgeLog, Log,
+							TEXT("GameMode: cycle %s — remixing the last match's %d pieces"),
+							PFCycleStageLabel(GS->CycleStage), LastMatchPieces.Num());
+					}
+					else if (Rating->PickCommunityArena(Whole, BaseArenaId, GS->SelectedCommunityMapFile))
 					{
 						BuildGrid->ServerInjectPieces(Whole);
 						PendingParentArenaId = BaseArenaId;   // source map this Remix builds on; captured at save
@@ -1116,6 +1169,10 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 					PendingParentArenaId);
 				RefreshCommunityMapCatalog();   // new map available for next Remix pick
 			}
+			// Cycle snapshot: the arena as it will be PLAYED (frozen, pre battle damage) — the
+			// base the next Remix / Remix Swap stage injects. Taken every match so a host
+			// toggling modes mid-session still has the latest map on hand.
+			LastMatchPieces = BuildGrid->GetPieces();
 		}
 		if (ArenaShell)
 		{
@@ -1139,6 +1196,13 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 
 	case EPFMatchPhase::Results:
 	{
+		// A completed match turns the cycle wheel. Advancing HERE (not at Lobby) means the
+		// between-matches Lobby and the server browser already advertise the UPCOMING stage.
+		if (IsCycleActive())
+		{
+			NextCycleStage = static_cast<uint8>((GS->CycleStage + 1) % 3);
+			GS->ServerSetCycleStage(NextCycleStage);
+		}
 		// Vote→Results: the tally is already on GameState; commit the match record to disk.
 		if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
 		{
@@ -1324,8 +1388,31 @@ void ACombatForgeGameMode::HostForceReturnToLobby()
 	DestroyAmmoBarrels();
 	DestroyBombs();
 	RemoveAllBots();
+	// An aborted match rewinds the cycle wheel — the group is starting over, not mid-rotation.
+	ResetMatchCycle();
 	SetPhase(EPFMatchPhase::Lobby);
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: host force-returned to Lobby (quit to menu)"));
+}
+
+bool ACombatForgeGameMode::IsCycleActive() const
+{
+	// FreeForAll is play-only by nature; both sit outside the Creative → Remix → Remix Swap wheel.
+	const ACombatForgeGameState* GS = GetPFGameState();
+	return GS && GS->BuildMode != EPFBuildMode::PlayOnly
+		&& GS->MatchType != EPFMatchType::FreeForAll;
+}
+
+void ACombatForgeGameMode::ResetMatchCycle()
+{
+	ACombatForgeGameState* GS = GetPFGameState();
+	NextCycleStage = (GS && GS->BuildMode == EPFBuildMode::Improvement)
+		? static_cast<uint8>(EPFCycleStage::Remix)
+		: static_cast<uint8>(EPFCycleStage::Creative);
+	LastMatchPieces.Reset();
+	if (GS)
+	{
+		GS->ServerSetCycleStage(NextCycleStage);
+	}
 }
 
 void ACombatForgeGameMode::HostSetFormat(uint8 NewTeamSize)
@@ -1373,6 +1460,12 @@ void ACombatForgeGameMode::HostSetBuildMode(EPFBuildMode NewMode)
 		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: FreeForAll forces PlayOnly build mode"));
 	}
 	GS->ServerSetBuildMode(NewMode);
+	// A mode pick (re)winds the cycle wheel: Creative enters at stage 1, Remix enters at stage 2
+	// (its first match remixes an existing map), PlayOnly leaves the wheel entirely.
+	NextCycleStage = (NewMode == EPFBuildMode::Improvement)
+		? static_cast<uint8>(EPFCycleStage::Remix)
+		: static_cast<uint8>(EPFCycleStage::Creative);
+	GS->ServerSetCycleStage(NextCycleStage);
 	UE_LOG(CombatForgeLog, Log, TEXT("GameMode: host set build mode %d"), static_cast<int32>(NewMode));
 }
 
@@ -1510,6 +1603,10 @@ void ACombatForgeGameMode::StartNextRound()
 	{
 		return;
 	}
+
+	// P2-C4 belt-and-braces: EndRound already kills fuses at Live→Intermission; sweep again at
+	// round start so no path into a fresh Freeze carries an armed bomb.
+	DestroyBombs();
 
 	bSuddenDeathRoundActive = bPendingSuddenDeath;
 	bPendingSuddenDeath = false;
@@ -1673,19 +1770,45 @@ void ACombatForgeGameMode::RequestResetToSpawn(ACombatForgeCharacter* Pawn)
 		return;
 	}
 	ACombatForgePlayerState* PS = Pawn->GetPlayerState<ACombatForgePlayerState>();
-	if (!PS)
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!PS || !GS)
 	{
 		return;
 	}
-	// The same in-place reset the respawn timer performs (full heal + full loadout), then a teleport to the
-	// current-phase team spawn — with no "out"/death gating, so a stuck or fallen LIVE player can recover.
-	if (UPFHealthComponent* Health = Pawn->GetHealth())
+	// P2-C1 / P2-P1 (Pass-2 blockers): this used to be an ungated full heal + reload + teleport —
+	// any owning client could fire the reliable RPC mid-duel, and a round-elim corpse could
+	// self-REVIVE (ResetForRound clears bEliminated) while staying invisible to alive/win
+	// bookkeeping. The feature exists to rescue a STUCK, LIVE player; gate it to exactly that.
+	// 1) Only players still IN the round — never a revive.
+	if (!PS->bAliveInRound || PS->OutKind != 0)
 	{
-		Health->ResetForRound(3);
+		return;
 	}
-	if (UPFWeaponComponent* Weapon = Pawn->GetWeapon())
+	if (UPFHealthComponent* Health = Pawn->GetHealth(); Health && Health->bEliminated)
 	{
-		Weapon->ServerResetLoadout();
+		return;
+	}
+	// 2) Once per cooldown per player, so it can't be macro-spammed as a combat reset.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (const double* Last = LastResetToSpawnAt.Find(PS); Last && Now - *Last < ResetToSpawnCooldownSec)
+	{
+		return;
+	}
+	LastResetToSpawnAt.Add(PS, Now);
+	// 3) The unstuck rescue is the TELEPORT. Heal + fresh loadout only OUTSIDE a live round —
+	//    inside one they were the exploit body (free mid-fight top-up). P2-C9: when they do run,
+	//    honor the round's HP mode so a showdown pawn stays on 1-HP rules.
+	const bool bLiveRound = GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live;
+	if (!bLiveRound)
+	{
+		if (UPFHealthComponent* Health = Pawn->GetHealth())
+		{
+			Health->ResetForRound(bSuddenDeathRoundActive ? 1 : 3);
+		}
+		if (UPFWeaponComponent* Weapon = Pawn->GetWeapon())
+		{
+			Weapon->ServerResetLoadout();
+		}
 	}
 	TeleportPawnTo(Pawn, GetSpawnTransform(PS));
 }
@@ -3026,6 +3149,11 @@ void ACombatForgeGameMode::EndRound(uint8 WinnerTeam)
 	}
 	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
 
+	// P2-C4: armed bombs used to OUTLIVE the round — a plant in the last ~15 s of Live could
+	// detonate during Intermission/Freeze (both shorter than the 15 s fuse) and delete frozen
+	// arena pieces between rounds. The round is decided; kill the fuses with it.
+	DestroyBombs();
+
 	// T18 scoring: survival 25 to everyone still alive, round win 50 to every winning teammate.
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
@@ -3605,7 +3733,9 @@ void ACombatForgeGameMode::RecountAlive()
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-		if (PS && PS->bAliveInRound && PS->TeamId <= 1)
+		// Phantom excluded: it gets a team in PostLogin and bAliveInRound in the phase loops but
+		// never a pawn, so counting it makes its team permanently "alive" and Elimination never ends.
+		if (PS && PS->bAliveInRound && PS->TeamId <= 1 && !PS->IsHeadlessServerPhantom())
 		{
 			++Alive[PS->TeamId];
 		}
@@ -3690,9 +3820,11 @@ void ACombatForgeGameMode::CheckAllVotesIn(const ACombatForgePlayerState* Ignore
 	for (APlayerState* OtherBase : GS->PlayerArray)
 	{
 		const ACombatForgePlayerState* Other = Cast<ACombatForgePlayerState>(OtherBase);
-		if (Other && Other != IgnorePS && !Other->IsABot() && !Other->bHasVoted)
+		if (Other && Other != IgnorePS && !Other->IsABot() && !Other->IsHeadlessServerPhantom() &&
+			!Other->bHasVoted)
 		{
 			return;   // bots don't vote — they don't hold the vote phase open
+			          // (nor does the pilot box's phantom, which used to pin this to the full timer)
 		}
 	}
 	SetPhase(EPFMatchPhase::Results);
@@ -3713,7 +3845,7 @@ void ACombatForgeGameMode::FinalizeVotePhase()
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-		if (!PS || PS->bHasVoted || PS->IsABot())
+		if (!PS || PS->bHasVoted || PS->IsABot() || PS->IsHeadlessServerPhantom())
 		{
 			continue;   // bots don't vote — excluding them here matches CheckAllVotesIn so the
 			            // timeout tally + persisted rating record aren't polluted with bot abstains
@@ -3877,6 +4009,26 @@ void ACombatForgeGameMode::LogCrashBreadcrumb()
 		*Names);
 }
 
+void ACombatForgeGameMode::SweepEmptyServer()
+{
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS || GS->Phase == EPFMatchPhase::Lobby || !HasAuthority())
+	{
+		return;
+	}
+	if (CountHumans() > 0)
+	{
+		return;
+	}
+	// Logout's empty-check covers a clean quit; this sweep covers the ordering it missed
+	// (playtest 2026-07-23: everyone bailed, the box sat mid-match with just the phantom and
+	// nobody could set up a new match without a Ctrl+C).
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("GameMode: no humans connected mid-match (phase %d) - forcing return to Lobby"),
+		static_cast<int32>(GS->Phase));
+	HostForceReturnToLobby();
+}
+
 void ACombatForgeGameMode::ScrubGhostPlayerStates(const ACombatForgePlayerState* KeepPS)
 {
 	ACombatForgeGameState* GS = GetPFGameState();
@@ -3922,7 +4074,7 @@ void ACombatForgeGameMode::GetTeamCounts(int32& OutTeamA, int32& OutTeamB) const
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-		if (!PS || !IsActiveRosterMember(PS))
+		if (!PS || !IsActiveRosterMember(PS) || PS->IsHeadlessServerPhantom())
 		{
 			continue;
 		}
@@ -3948,9 +4100,11 @@ bool ACombatForgeGameMode::AreAllPlayersReady(const ACombatForgePlayerState* Ign
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-		if (!PS || PS == IgnorePS || PS->IsABot() || !IsActiveRosterMember(PS))
+		if (!PS || PS == IgnorePS || PS->IsABot() || PS->IsHeadlessServerPhantom() ||
+			!IsActiveRosterMember(PS))
 		{
-			continue;   // bots never ready; ghosts never block Ready
+			continue;   // bots never ready; ghosts never block Ready; nor the pilot-box phantom
+			            // (it can't press READY, so counting it froze the all-ready auto-start)
 		}
 		if (!PS->bReady)
 		{

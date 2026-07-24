@@ -11,6 +11,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"                 // TActorIterator (pf.MidWall preview)
 #include "GameFramework/GameStateBase.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
@@ -60,11 +61,9 @@ namespace
 	// Map-INVARIANT constants only — FieldX/FieldY (and the Pen*/spacing values derived from them)
 	// moved onto the actor as ctor-initialized members (task #40) so APFYardShell can build the
 	// same shell at 6400×8000. Everything left here is identical on every map by definition.
-	// Perimeter must be taller than HeightCap + jump: players can stand on max-height floors
-	// (~1200) and jump over a wall that only reaches the height cap.
-	constexpr float PerimeterH = static_cast<float>(PFGrid::HeightCapUU) + 600.f;   // 1800
-	// Solid lid just above build cap so you can't leap over the rim from the top deck.
-	constexpr float EscapeLidZ = static_cast<float>(PFGrid::HeightCapUU) + 150.f;   // 1350
+	// PerimeterH / EscapeLidZ moved onto the actor too (issue #12 BD1): they must track the MAP's
+	// HeightCapUU (Warehouse 1200 → 1800/1350, Yard 2100 → 2700/2250) or a player on high Yard decks
+	// jumps the midline barrier / open-field bounds, which were capped at the Warehouse height.
 	constexpr float EscapeLidThickness = 40.f;
 	constexpr float SpawnZ = 100.f;            // capsule half-height + clearance over the Z=0 floor
 
@@ -96,8 +95,12 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	, PenCenterX(InDef.FieldX * 0.5f)
 	, TeamSpawnSpacingY(InDef.FieldY / PFGrid::SpawnPointsPerTeam)
 	, PenSlotStartX(InDef.FieldX * 0.5f - PenSlotSpacingX * (PFGrid::MaxRosterSlots - 1) * 0.5f)
+	, PerimeterH(static_cast<float>(InDef.HeightCapUU) + 600.f)   // taller than the map's cap + jump
+	, EscapeLidZ(static_cast<float>(InDef.HeightCapUU) + 150.f)   // lid just above the map's build cap
 {
-	PrimaryActorTick.bCanEverTick = false;
+	// Ticks so the midline tint-screen can fade opaque->clear over the build phase. The tick early-outs
+	// unless a fade is actively running, so it is free the rest of the match.
+	PrimaryActorTick.bCanEverTick = true;
 
 	// Replicated for existence only — the geometry is constructor-built identically everywhere.
 	bReplicates = true;
@@ -132,6 +135,17 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Tile.M_Tile"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WhDemoMetalFinder(
 		TEXT("/Game/Scene_Warehouse/VisualFramework/DemoRoom/Materials/M_Metal.M_Metal"));
+	// Tinted-glass master for the midline screen. PREFER the project's own /Game/Materials/M_PF_GlassFade
+	// (gen_glass_fade_material.py; /Game/Materials is force-cooked, so it exists in PACKAGED builds) and
+	// only fall back to the engine debug translucent — engine DEBUG content is not guaranteed to cook,
+	// which is the class of "works in PIE, gone in the package" failure the tint screen hit in alpha-14.
+	// Same parameter contract either way: Vector "Color" (RGB+A) + Scalar "Opacity".
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GlassFadeFinder(
+		TEXT("/Game/Materials/M_PF_GlassFade.M_PF_GlassFade"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> MidWallMatFinder(
+		TEXT("/Engine/EngineDebugMaterials/M_SimpleUnlitTranslucent.M_SimpleUnlitTranslucent"));
+	MidWallBaseMaterial = GlassFadeFinder.Succeeded() ? GlassFadeFinder.Object
+		: (MidWallMatFinder.Succeeded() ? MidWallMatFinder.Object : nullptr);
 	// Heavy Megascans prop meshes are NOT hard-loaded here — CDO TryLoad freezes PIE for minutes.
 	// Soft-load in BeginPlay via BuildWarehouseBackdropDrape() instead.
 	CubeMesh = CubeFinder.Object;
@@ -207,9 +221,12 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	{
 		// Open-field maps (The Yard): no visible walls, but bound the playable area so a player can't keep
 		// walking into the infinite desert and leave the match behind. Invisible, pawn-block ONLY — shots and
-		// the build trace pass straight through. Tom 2026-07-17: the old 2000 uu (20 m) margin read as "I can
-		// still run outside the bounds", so hold the edge tight — one build cell (400 uu) off the pad.
-		const float OpenMargin = 400.f;
+		// the build trace pass straight through. Margin history: 2000 uu read as "I can still run outside the
+		// bounds" (Tom 2026-07-17); 400 uu still left a walkable one-cell dead strip beyond the buildable pad
+		// (Tom 2026-07-23: "the player can go beyond the buildable area"). So: margin = the wall's own
+		// half-thickness (10 uu), putting each wall's INNER FACE exactly on the field/buildable edge — the
+		// identical geometry the Warehouse's solid perimeter walls use (FieldY+10 / -10 / -10 / FieldX+10).
+		const float OpenMargin = 10.f;
 		const float BoundZ = PerimeterH * 0.5f;
 		const float SpanX = FieldX / 100.f + OpenMargin * 0.02f + 0.4f;   // field width + both margins
 		const float SpanY = FieldY / 100.f + OpenMargin * 0.02f + 0.4f;
@@ -274,6 +291,10 @@ APFArenaShell::APFArenaShell(const FPFArenaMapDef& InDef)
 	MidlineBarrier->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	MidlineBarrier->SetCollisionResponseToChannel(PF_ECC_Paintball, ECR_Block);
 	MidlineBarrier->SetCollisionEnabled(ECollisionEnabled::NoCollision);   // off outside BuildPhase
+
+	// The VISIBLE tinted-glass midline screen is created at RUNTIME (BeginPlay / first fade), NOT here —
+	// a translucent static-mesh DEFAULT SUBOBJECT set up in the ctor did not render (the build ghost, same
+	// material, works because it is a runtime NewObject + RegisterComponent). See EnsureMidWallScreen.
 
 	// --- Warm-up pen: floor + 4 low walls (players cannot jump 300 uu) ---
 	PenFloor = MakeShapePart(TEXT("PenFloor"),
@@ -1032,6 +1053,10 @@ void APFArenaShell::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Create the midline tint-screen now (runtime component — see EnsureMidWallScreen). Before the phase
+	// bind below, so a match already in Build gets the screen immediately.
+	EnsureMidWallScreen();
+
 	// Cohesion: rebind cube shell surfaces onto the same warehouse triplanar palette as built forts.
 	// Must run before ApplyTint so metal posts still get their gray Color MID on the new master.
 	ApplyCohesivePalette();
@@ -1141,8 +1166,226 @@ void APFArenaShell::BindToGameState(ACombatForgeGameState* GS)
 
 void APFArenaShell::HandlePhaseChanged(EPFMatchPhase NewPhase)
 {
+	// The tint wall rides INSIDE SetMidlineBarrierActive, not here. This delegate does NOT fire on the
+	// host — the GameMode drives the barrier DIRECTLY (SetMidlineBarrierActive at build start/end), which
+	// is why a wall armed from this handler never appeared in any host match or package while the barrier
+	// worked everywhere: the ONE call every machine actually makes is SetMidlineBarrierActive (GameMode
+	// direct on the host, this OnRep-driven handler on remote clients).
 	SetMidlineBarrierActive(NewPhase == EPFMatchPhase::Build);
 }
+
+void APFArenaShell::EnsureMidWallScreen()
+{
+	// RUNTIME creation (idempotent). A translucent static-mesh default subobject built in the ctor did not
+	// render; the build ghost (same M_SimpleUnlitTranslucent) works because it is a runtime NewObject +
+	// RegisterComponent. Mirror that. Called from BeginPlay and lazily from BeginMidWallFade so ordering
+	// against the phase bind never matters.
+	if (MidWallScreen != nullptr)
+	{
+		return;   // already created (idempotent)
+	}
+	if (ShellRoot == nullptr || CubeMesh == nullptr)
+	{
+		// PERMANENT diagnostic, not debug spam: this bail was silent once and cost a full packaged
+		// playtest to discover ("the wall didn't show" with zero log evidence). Cheap — runs at most
+		// once per missing-prereq call.
+		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall: screen NOT created (shellRoot=%d cubeMesh=%d)"),
+			ShellRoot ? 1 : 0, CubeMesh ? 1 : 0);
+		return;
+	}
+	const float MidX = FieldX * 0.5f;
+	MidWallScreen = NewObject<UStaticMeshComponent>(this, TEXT("MidWallScreen"));
+	MidWallScreen->SetupAttachment(ShellRoot);
+	MidWallScreen->SetMobility(EComponentMobility::Movable);
+	MidWallScreen->SetStaticMesh(CubeMesh);
+	// Thin slab on the midline, spanning the play field width and the full perimeter height.
+	MidWallScreen->SetRelativeLocation(FVector(MidX, FieldY * 0.5f, PerimeterH * 0.5f));
+	MidWallScreen->SetRelativeScale3D(FVector(0.12f, FieldY / 100.f, PerimeterH / 100.f));
+	MidWallScreen->SetCollisionEnabled(ECollisionEnabled::NoCollision);   // purely visual
+	MidWallScreen->SetCastShadow(false);
+	MidWallScreen->bReceivesDecals = false;
+	MidWallScreen->SetTranslucentSortPriority(50);   // overlay after opaque world
+	if (MidWallBaseMaterial)
+	{
+		MidWallScreen->SetMaterial(0, MidWallBaseMaterial);
+	}
+	MidWallScreen->RegisterComponent();              // the ghost pattern — makes a runtime translucent comp render
+	MidWallScreen->SetHiddenInGame(true);            // shown only while a build-phase fade is running
+	MidWallScreen->SetVisibility(false);
+}
+
+void APFArenaShell::BeginMidWallFade()
+{
+	EnsureMidWallScreen();   // lazy runtime creation — guarantees the screen exists regardless of ordering
+	UWorld* World = GetWorld();
+	if (World == nullptr || MidWallScreen == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("MidWall: fade NOT armed (world=%d screen=%d)"),
+			World ? 1 : 0, MidWallScreen ? 1 : 0);
+		return;
+	}
+	// Anchor the fade to when THIS machine enters build. Host is exact; a late-joining client restarts the
+	// fade from full (accepted — a 2-minute cosmetic, and joiners mid-build are rare).
+	MidWallFadeStartTime = World->GetTimeSeconds();
+	MidWallScreen->SetHiddenInGame(false);
+	MidWallScreen->SetVisibility(true);
+	ApplyMidWallOpacity(MidWallStartOpacity);
+	const FBoxSphereBounds B = MidWallScreen->Bounds;
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("MidWall: fade armed. screen=%s mat=%s worldLoc=(%.0f,%.0f,%.0f) extent=(%.0f,%.0f,%.0f) startOpacity=%.2f vis=%d"),
+		MidWallScreen ? TEXT("ok") : TEXT("NULL"),
+		MidWallBaseMaterial ? *MidWallBaseMaterial->GetName() : TEXT("NULL"),
+		B.Origin.X, B.Origin.Y, B.Origin.Z, B.BoxExtent.X, B.BoxExtent.Y, B.BoxExtent.Z,
+		MidWallStartOpacity, MidWallScreen->IsVisible() ? 1 : 0);
+}
+
+void APFArenaShell::UpdateMidWallFade()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || MidWallFadeStartTime < 0.0)
+	{
+		return;
+	}
+	const float Elapsed = static_cast<float>(World->GetTimeSeconds() - MidWallFadeStartTime);
+	const float Hold = FMath::Max(0.f, MidWallHoldSeconds);
+	const float Fade = FMath::Max(0.01f, MidWallFadeSeconds);
+	if (Elapsed < Hold)
+	{
+		ApplyMidWallOpacity(MidWallStartOpacity);   // fully opaque, no change (0:00 → 1:30)
+		return;
+	}
+	const float FadeElapsed = Elapsed - Hold;
+	if (FadeElapsed >= Fade)
+	{
+		// Fully clear from here on (build end onward): hide the draw and stop the fade tick.
+		ApplyMidWallOpacity(0.f);
+		if (MidWallScreen)
+		{
+			MidWallScreen->SetHiddenInGame(true);
+			MidWallScreen->SetVisibility(false);
+		}
+		MidWallFadeStartTime = -1.0;
+		return;
+	}
+	ApplyMidWallOpacity(MidWallStartOpacity * (1.f - FadeElapsed / Fade));   // lighten a little each tick (1:30 → 2:30)
+}
+
+void APFArenaShell::ApplyMidWallOpacity(float Alpha01)
+{
+	if (MidWallScreen == nullptr)
+	{
+		return;
+	}
+	Alpha01 = FMath::Clamp(Alpha01, 0.f, 1.f);
+	if (MidWallMID == nullptr && MidWallBaseMaterial != nullptr)
+	{
+		MidWallMID = UMaterialInstanceDynamic::Create(MidWallBaseMaterial, this);
+		MidWallScreen->SetMaterial(0, MidWallMID);
+	}
+	if (MidWallMID != nullptr)
+	{
+		FLinearColor C = MidWallTint;
+		C.A = Alpha01;
+		// M_SimpleUnlitTranslucent reads Color (RGB + A); set the same aliases the build ghost uses so the
+		// alpha lands regardless of which param the material actually wired.
+		MidWallMID->SetVectorParameterValue(TEXT("Color"), C);
+		MidWallMID->SetVectorParameterValue(TEXT("BaseColor"), C);
+		MidWallMID->SetScalarParameterValue(TEXT("Opacity"), Alpha01);
+		MidWallMID->SetScalarParameterValue(TEXT("OpacityMultiplier"), Alpha01);
+	}
+}
+
+void APFArenaShell::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (MidWallFadeStartTime >= 0.0)
+	{
+		UpdateMidWallFade();
+	}
+}
+
+void APFArenaShell::PreviewMidWallFade(float StartOpacity01, float HoldSeconds, float FadeSeconds)
+{
+	if (StartOpacity01 >= 0.f) { MidWallStartOpacity = FMath::Clamp(StartOpacity01, 0.f, 1.f); }
+	if (HoldSeconds    >= 0.f) { MidWallHoldSeconds  = HoldSeconds; }
+	if (FadeSeconds     > 0.f) { MidWallFadeSeconds  = FadeSeconds; }
+	BeginMidWallFade();
+}
+
+void APFArenaShell::SetMidWallMaterial(UMaterialInterface* Mat)
+{
+	if (Mat == nullptr)
+	{
+		return;
+	}
+	MidWallBaseMaterial = Mat;
+	MidWallMID = nullptr;   // force ApplyMidWallOpacity to rebuild the MID from the new base
+	if (MidWallScreen)
+	{
+		MidWallScreen->SetMaterial(0, Mat);
+	}
+	BeginMidWallFade();     // re-arm so the fade re-drives against the new material's params
+}
+
+// Preview the midline fade without sitting through a build phase: re-arms it and lets it run.
+// Args (all optional): pf.MidWall [startOpacity 0..1] [holdSeconds] [fadeSeconds]. e.g. quick test:
+// pf.MidWall 1 5 10 = opaque, hold 5 s, then lighten over 10 s. Real match values default 1 / 90 / 60.
+static void PFMidWallCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+	const float Op   = (Args.Num() >= 1) ? FCString::Atof(*Args[0]) : -1.f;
+	const float Hold = (Args.Num() >= 2) ? FCString::Atof(*Args[1]) : -1.f;
+	const float Fade = (Args.Num() >= 3) ? FCString::Atof(*Args[2]) : -1.f;
+	int32 Count = 0;
+	for (TActorIterator<APFArenaShell> It(World); It; ++It)
+	{
+		It->PreviewMidWallFade(Op, Hold, Fade);
+		++Count;
+	}
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.MidWall: re-armed on %d shell(s)  (startOpacity=%s hold=%s fade=%s)"),
+		Count,
+		Args.Num() >= 1 ? *Args[0] : TEXT("keep"),
+		Args.Num() >= 2 ? *Args[1] : TEXT("keep"),
+		Args.Num() >= 3 ? *Args[2] : TEXT("keep"));
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFMidWallCmd(
+	TEXT("pf.MidWall"),
+	TEXT("Preview/tune the midline tint-screen: pf.MidWall [startOpacity 0..1] [holdSeconds] [fadeSeconds]. Re-arms opaque, holds, then lightens to clear."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFMidWallCmd));
+
+// Test a glass (or any) material on the midline screen live: pf.MidWallMat /Game/Path/To/M_Glass
+// The fade only animates if that material exposes an Opacity/Color param the MID can drive.
+static void PFMidWallMatCmd(const TArray<FString>& Args, UWorld* World)
+{
+	if (World == nullptr || Args.Num() < 1)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("usage: pf.MidWallMat /Game/Path/To/Material   (swaps the midline screen material live)"));
+		return;
+	}
+	UMaterialInterface* Mat = Cast<UMaterialInterface>(FSoftObjectPath(Args[0]).TryLoad());
+	if (Mat == nullptr)
+	{
+		UE_LOG(CombatForgeLog, Warning, TEXT("pf.MidWallMat: could not load material '%s'"), *Args[0]);
+		return;
+	}
+	int32 Count = 0;
+	for (TActorIterator<APFArenaShell> It(World); It; ++It)
+	{
+		It->SetMidWallMaterial(Mat);
+		++Count;
+	}
+	UE_LOG(CombatForgeLog, Warning,
+		TEXT("pf.MidWallMat: applied '%s' to %d shell(s). If it doesn't fade, the material has no drivable Opacity/Color param."),
+		*Mat->GetName(), Count);
+}
+static FAutoConsoleCommandWithWorldAndArgs GPFMidWallMatCmd(
+	TEXT("pf.MidWallMat"),
+	TEXT("Swap the midline tint-screen material live to test a glass material: pf.MidWallMat /Game/Path/To/Material."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFMidWallMatCmd));
 
 void APFArenaShell::SetMidlineBarrierActive(bool bActive)
 {
@@ -1157,6 +1400,20 @@ void APFArenaShell::SetMidlineBarrierActive(bool bActive)
 		MidlineBarrier->SetCollisionEnabled(Wanted);
 		UE_LOG(CombatForgeLog, Log, TEXT("ArenaShell: midline barrier %s"),
 			bActive ? TEXT("ON") : TEXT("OFF"));
+		// THE TINT WALL rides the same switch — this is the one call every machine provably makes at
+		// build start/end (Tom's packaged host logs show it firing while the phase delegate stayed
+		// silent). Cosmetic + per-machine; the collision early-out above makes it edge-triggered, so a
+		// GameMode direct call and a client OnRep can't double-arm in the same transition.
+		if (bActive)
+		{
+			BeginMidWallFade();
+		}
+		else if (MidWallScreen)
+		{
+			MidWallFadeStartTime = -1.0;
+			MidWallScreen->SetHiddenInGame(true);
+			MidWallScreen->SetVisibility(false);
+		}
 	}
 }
 

@@ -23,6 +23,9 @@ namespace
 	// B6 budgets, tuned 4v4. GameMode resets to these at every Lobby→Build.
 	constexpr uint8 MaxStructuralBudget = 30;
 	constexpr uint8 MaxPropBudget = 6;
+	// Per-player per-type caps (Tom 2026-07-24): these two pieces warp a round when spammed.
+	constexpr uint8 MaxTrapFloorsPerPlayer = 1;
+	constexpr uint8 MaxOneWayDoorsPerPlayer = 1;
 }
 
 ACombatForgePlayerState::ACombatForgePlayerState()
@@ -42,6 +45,8 @@ void ACombatForgePlayerState::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 	DOREPLIFETIME(ACombatForgePlayerState, bAliveInRound);
 	DOREPLIFETIME(ACombatForgePlayerState, StructuralBudget);
 	DOREPLIFETIME(ACombatForgePlayerState, PropBudget);
+	DOREPLIFETIME(ACombatForgePlayerState, TrapFloorsPlaced);
+	DOREPLIFETIME(ACombatForgePlayerState, OneWayDoorsPlaced);
 	DOREPLIFETIME(ACombatForgePlayerState, Eliminations);
 	DOREPLIFETIME(ACombatForgePlayerState, TimesEliminated);
 	DOREPLIFETIME(ACombatForgePlayerState, TagCount);
@@ -52,6 +57,17 @@ void ACombatForgePlayerState::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 	DOREPLIFETIME(ACombatForgePlayerState, StandingOnPoint);
 	DOREPLIFETIME(ACombatForgePlayerState, OutKind);
 	DOREPLIFETIME(ACombatForgePlayerState, RespawnAtServerTime);
+	DOREPLIFETIME(ACombatForgePlayerState, bHeadlessPhantom);
+}
+
+void ACombatForgePlayerState::ServerMarkHeadlessPhantom()
+{
+	if (!HasAuthority() || bHeadlessPhantom)
+	{
+		return;
+	}
+	bHeadlessPhantom = true;
+	ForceNetUpdate();
 }
 
 void ACombatForgePlayerState::ServerSetTeam(uint8 NewTeam, uint8 NewRosterIndex)
@@ -89,8 +105,20 @@ void ACombatForgePlayerState::ServerSetBudgets(uint8 Structural, uint8 Props)
 	}
 	StructuralBudget = Structural;
 	PropBudget = Props;
+	TrapFloorsPlaced = 0;      // per-match caps reset with the budgets (every Lobby→Build)
+	OneWayDoorsPlaced = 0;
 	OnRep_Flags();
 	ForceNetUpdate();
+}
+
+bool ACombatForgePlayerState::ServerIsAtPieceLimit(EPFPieceType Type) const
+{
+	switch (Type)
+	{
+	case EPFPieceType::FloorTrap:      return TrapFloorsPlaced >= MaxTrapFloorsPerPlayer;
+	case EPFPieceType::WallDoorOneWay: return OneWayDoorsPlaced >= MaxOneWayDoorsPerPlayer;
+	default:                           return false;
+	}
 }
 
 bool ACombatForgePlayerState::ServerTrySpendBudget(EPFPieceType Type)
@@ -98,6 +126,10 @@ bool ACombatForgePlayerState::ServerTrySpendBudget(EPFPieceType Type)
 	if (!HasAuthority())
 	{
 		return false;
+	}
+	if (ServerIsAtPieceLimit(Type))
+	{
+		return false;   // callers pre-check for the precise deny reason; this is the backstop
 	}
 
 	if (PFIsProp(Type))
@@ -115,6 +147,13 @@ bool ACombatForgePlayerState::ServerTrySpendBudget(EPFPieceType Type)
 			return false;
 		}
 		--StructuralBudget;
+	}
+
+	switch (Type)
+	{
+	case EPFPieceType::FloorTrap:      ++TrapFloorsPlaced; break;
+	case EPFPieceType::WallDoorOneWay: ++OneWayDoorsPlaced; break;
+	default: break;
 	}
 
 	OnRep_Flags();
@@ -148,6 +187,18 @@ void ACombatForgePlayerState::ServerRefundBudget(EPFPieceType Type)
 			return;
 		}
 		++StructuralBudget;
+	}
+
+	switch (Type)
+	{
+	case EPFPieceType::FloorTrap:
+		TrapFloorsPlaced = (TrapFloorsPlaced > 0) ? static_cast<uint8>(TrapFloorsPlaced - 1) : 0;
+		break;
+	case EPFPieceType::WallDoorOneWay:
+		OneWayDoorsPlaced = (OneWayDoorsPlaced > 0) ? static_cast<uint8>(OneWayDoorsPlaced - 1) : 0;
+		break;
+	default:
+		break;
 	}
 
 	OnRep_Flags();
@@ -242,6 +293,13 @@ void ACombatForgePlayerState::ServerClearOutState()
 void ACombatForgePlayerState::ServerSetAliveInRound(bool bAlive)
 {
 	if (!HasAuthority())
+	{
+		return;
+	}
+	// P2-C2 root fix: the pilot box's phantom can never be "alive" — it has no pawn and cannot
+	// be eliminated, so one alive flag here made its team unwipeable in Elimination. Consumers
+	// (RecountAlive etc.) filter too; this chokes every present and future set site at once.
+	if (bAlive && IsHeadlessServerPhantom())
 	{
 		return;
 	}

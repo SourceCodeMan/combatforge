@@ -75,6 +75,19 @@ void UPFCombatVFX::EnsureAssets()
 	}
 }
 
+void UPFCombatVFX::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (VfxHolder != nullptr)
+	{
+		VfxHolder->Destroy();   // takes the pooled comps + muzzle light with it
+		VfxHolder = nullptr;
+	}
+	PoolMeshes.Reset();
+	PoolFlashMIDs.Reset();
+	MuzzleLight = nullptr;
+	Super::EndPlay(EndPlayReason);
+}
+
 void UPFCombatVFX::EnsureMeshPool()
 {
 	UWorld* World = GetWorld();

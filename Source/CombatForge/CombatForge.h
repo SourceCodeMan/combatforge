@@ -23,11 +23,19 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 13;  // alpha.13 — everything in 12 (never shipped) PLUS: the two crossed
-	                                   // rifles fixed, every weapon's shots locked to its barrel (world-space
-	                                   // clearance + dedicated-server clients now fire from their own
-	                                   // viewmodel), the Dorito CONE restored, BB + splat halved, shotgun
-	                                   // burst 3. alpha.10 is still what is live on itch and the box.
+	constexpr int32 NetProtocol = 16;  // alpha.16 — the 2026-07-24 batch: multi-server fleet (port-keyed
+	                                   // directory + START NEW MATCH), forced Creative→Remix→RemixSwap
+	                                   // cycle (GS CycleStage), phantom scrub (PS bHeadlessPhantom),
+	                                   // per-player trap/one-way caps, PieceLimit deny reason, walkable
+	                                   // cone, hold-Q wheel, eye-fallback fire origin, Pass-2 blocker+
+	                                   // major fixes (bomb/frag damage-1 balls, kit clamps). Replicated
+	                                   // layout changed in several places — 15↔16 must never mix.
+	                                   // (15 = alpha.15, FIRST-PERSON ARMS on top of everything in 14.)
+	                                   // Carried from 14 (also never pushed): all 35 guns life-size +
+	                                   // hand-tuned FP/ADS, computed TP grip + one-gun calibrate, left palm
+	                                   // on the gun (humans; bots keep the tuned pose), midline tinted wall
+	                                   // (opaque 1:30 then clears by 2:30), build 2:30, Yard bounds flush
+	                                   // with the buildable pad, cone roof skin, code-review fix batch.
 }
 
 /**

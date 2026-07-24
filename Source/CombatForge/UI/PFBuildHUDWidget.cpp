@@ -36,7 +36,7 @@ const TCHAR* UPFBuildHUDWidget::ToolDisplayName(EPFBuildTool Tool)
 	case EPFBuildTool::Ramp:           return TEXT("Ramp");
 	case EPFBuildTool::Roof:           return TEXT("Ceiling");
 	case EPFBuildTool::PropCan:        return TEXT("Barrel");
-	case EPFBuildTool::PropDorito:     return TEXT("Crate");
+	case EPFBuildTool::PropDorito:     return TEXT("Cone");
 	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
 	case EPFBuildTool::WallWindow:     return TEXT("Window");
 	case EPFBuildTool::WallDoor:       return TEXT("Door");
@@ -63,6 +63,7 @@ const TCHAR* UPFBuildHUDWidget::DenyReasonText(EPFDenyReason Reason)
 
 	case EPFDenyReason::InvalidPiece: return TEXT("INVALID PIECE");
 	case EPFDenyReason::NotFound:     return TEXT("PIECE NOT FOUND");
+	case EPFDenyReason::PieceLimit:   return TEXT("LIMIT 1 PER PLAYER");
 	default:                          return TEXT("DENIED");
 	}
 }
@@ -396,8 +397,9 @@ void UPFBuildHUDWidget::UpdateReadyCounts()
 	{
 		const ACombatForgePlayerState* PFPS = Cast<ACombatForgePlayerState>(PS);
 		// Bots never set bReady (AreAllPlayersReady skips IsABot()), so counting them in Total[]
-		// leaves the display stuck below full ("Ready 1/4") even as the match starts. Humans only.
-		if (PFPS && !PFPS->IsABot() && PFPS->TeamId <= 1)
+		// leaves the display stuck below full ("Ready 1/4") even as the match starts. Humans only —
+		// and never the pilot box's phantom, which can't ready and froze the count on fleet servers.
+		if (PFPS && !PFPS->IsABot() && !PFPS->IsPhantom() && PFPS->TeamId <= 1)
 		{
 			++Total[PFPS->TeamId];
 			if (PFPS->bReady)

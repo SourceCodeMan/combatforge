@@ -14,8 +14,8 @@ namespace PFObjectiveLayout
 {
 	/**
 	 * World Z for objective actor pivots sitting on the Z=0 floor slab.
-	 * Engine Cylinder (h=100) scaled Z=0.15 → height 15 uu → center at 7.5.
-	 * Previous FloorZ=50 left Dom/HP pads floating mid-air.
+	 * Engine Cylinder (h=100) scaled Z=0.12 → pad height 12 uu → center at 6; FloorZ=8 leaves the pad
+	 * bottom ~2 uu above the slab (visually flush at gameplay distance). Previous FloorZ=50 floated it.
 	 */
 	constexpr float FloorZ = 8.f;
 

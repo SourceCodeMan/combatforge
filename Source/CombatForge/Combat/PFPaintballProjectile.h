@@ -45,6 +45,12 @@ public:
 	                    bool bAuthoritative, UPFWeaponComponent* SourceWeapon, uint32 ShotIndex,
 	                    bool bIgnoreShooter = true);
 
+	/** P2-CB1/CB2: utility bursts (bomb breach spray, frag cloud) do FIXED per-ball damage —
+	 *  never the planter's per-gun HitValue rank lever (a sniper primary made every burst ball
+	 *  multi-lethal). 0 = live-fire ball: damage comes from SourceWeapon->HitValue as always.
+	 *  Callers set this right after InitProjectile; hits can only resolve on later ticks. */
+	uint8 UtilityDamageOverride = 0;
+
 	virtual void Tick(float DeltaSeconds) override;
 
 	// ---- Intra pool interface (UPFSplatSubsystem owns the cosmetic pool) ----

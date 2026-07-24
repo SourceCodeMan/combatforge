@@ -15,13 +15,20 @@ class UTextBlock;
 
 /**
  * Build wheel: 12 sectors clockwise from top (wall family first, then floors,
- * ramps, props, delete). Opened on Q tap via UPFRootHUDWidget from
- * UPFBuildComponent::OnBuildWheelRequestedEvent; second Q / digit / click commits
- * the hovered sector (dead zone = cancel). Client-only, zero replication.
+ * ramps, props, delete). HOLD Q (Tom 2026-07-24): opened while Q is held via
+ * UPFRootHUDWidget from UPFBuildComponent::OnBuildWheelRequestedEvent; RELEASING
+ * Q commits the hovered sector (dead zone = keep current tool). Digits 1-9,0
+ * instant-commit mid-hold — routed through Enhanced Input (WheelDigitActions →
+ * RootHUD → CommitSector). Client-only, zero replication.
  *
- * Dead zone r = 90 px; select band 90-300 px; hovered sector 1.08x + brighten;
- * digits 1-9,0 = instant select; selection math = atan2 of accumulated mouse
- * delta in NativeTick.
+ * ⚠️ THIS WIDGET MUST NEVER TAKE KEYBOARD FOCUS. SetKeyboardFocus() in Open()
+ * made the viewport flush every pressed key → Enhanced Input fired a phantom
+ * Q-release → the held wheel flashed open/closed at key-repeat rate (playtest
+ * 2026-07-24, and the true cause of the older "hold was unreliable" note).
+ *
+ * Dead zone r = 90 px; select band 90-300 px; hovered sector = full painted pie
+ * wedge (NativePaint) + 1.08x swatch pop; selection math = atan2 of accumulated
+ * mouse delta in NativeTick.
  */
 UCLASS()
 class COMBATFORGE_API UPFBuildWheelWidget : public UUserWidget
@@ -38,6 +45,9 @@ public:
 	/** Close without committing (phase change / forced teardown / Esc). */
 	void CloseCancel();
 
+	/** Digit hotkey path (RootHUD, via Enhanced Input): commit sector directly while open. */
+	void CommitSector(int32 SectorIndex);
+
 	bool IsWheelOpen() const { return bWheelOpen; }
 
 	/** Fires whenever the wheel fully closes (commit, cancel, digit). RootHUD resets BuildComponent flag. */
@@ -51,12 +61,13 @@ protected:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
-	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId,
+		const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 
 private:
 	void BuildTree();
 	void CloseInternal();
-	void CommitSector(int32 SectorIndex);
 	void SetHoveredSector(int32 NewIndex);
 	void ApplySectorVisual(int32 SectorIndex, bool bHovered);
 	void UpdateCenterReadout();

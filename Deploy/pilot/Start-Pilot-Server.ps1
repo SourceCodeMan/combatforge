@@ -1,8 +1,8 @@
-# CombatForge — free home pilot server (Path C).
+# CombatForge - free home pilot server (Path C).
 #
 # Runs the already-compiled Development build as a headless dedicated server on THIS PC, pointed
 # at the LIVE backend (api.playcombatforge.com). The server key is read automatically from
-# Saved\CombatForge\ServerKey.txt (already placed for you) — nothing secret is in this script.
+# Saved\CombatForge\ServerKey.txt (already placed for you) - nothing secret is in this script.
 #
 # It registers with the live directory + heartbeats, so it shows up in the in-game SERVERS list
 # and QUICK PLAY. Auto-restarts if it ever exits. Close this window (or Ctrl+C) to stop it.
@@ -20,8 +20,8 @@ $UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 $Exe = Join-Path $ProjectRoot "Binaries\Win64\CombatForge.exe"
 $KeyFile = Join-Path $ProjectRoot "Saved\CombatForge\ServerKey.txt"
 
-if (-not (Test-Path $Exe))     { throw "Missing $Exe — build the game first (open the project and compile)." }
-if (-not (Test-Path $KeyFile)) { throw "Missing $KeyFile — the server key. Ask Claude to re-place it." }
+if (-not (Test-Path $Exe))     { throw "Missing $Exe - build the game first (open the project and compile)." }
+if (-not (Test-Path $KeyFile)) { throw "Missing $KeyFile - the server key. Ask Claude to re-place it." }
 
 # Open the Windows Firewall for this port (both UDP for gameplay + the process), best-effort.
 $ruleName = "CombatForge Pilot $Port"
@@ -52,9 +52,26 @@ Write-Host "  Then it appears in the game's SERVERS list. Ctrl+C or close this w
 Write-Host ""
 
 # Restart-on-exit loop (the crude equivalent of systemd Restart=always).
+# P2-D1: CombatForge.exe is a GUI-subsystem app, so "& $Exe" returns INSTANTLY without waiting -
+# this loop then launched a new server every 3s and they piled up fighting over the port (the
+# exact bug Start-Server-OnBox.ps1 fixed). Same cure: Start-Process -PassThru + WaitForExit,
+# single argument string (an ArgumentList ARRAY drops quotes on space-containing args), plus the
+# OnBox crash-loop backoff so a boot-crash cannot hammer restarts.
+$cmdLine = ($args | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }) -join ' '
+$RestartDelay = 3
 while ($true) {
   Write-Host ("[{0}] launching server..." -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor Green
-  & $Exe @args
-  Write-Host ("[{0}] server exited (code {1}) — restarting in 3s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $LASTEXITCODE) -ForegroundColor Yellow
-  Start-Sleep -Seconds 3
+  $LaunchedAt = Get-Date
+  $proc = Start-Process -FilePath $Exe -ArgumentList $cmdLine -PassThru
+  if ($proc) { $proc.WaitForExit() }
+  $code = if ($proc) { $proc.ExitCode } else { "?" }
+  $RanSecs = ((Get-Date) - $LaunchedAt).TotalSeconds
+  if ($RanSecs -lt 60) {
+    $RestartDelay = [Math]::Min($RestartDelay * 2, 300)
+    Write-Host ("[{0}] server exited after only {1:n0}s (code {2}) - CRASH LOOP? backing off {3}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $RanSecs, $code, $RestartDelay) -ForegroundColor Red
+  } else {
+    $RestartDelay = 3
+    Write-Host ("[{0}] server exited (code {1}) - restarting in {2}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $code, $RestartDelay) -ForegroundColor Yellow
+  }
+  Start-Sleep -Seconds $RestartDelay
 }

@@ -94,7 +94,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float SmokeRadius   = 300.f;
 
 	TWeakObjectPtr<UPFWeaponComponent> ThrowerWeak;   // server-only; clients fall back to null (cosmetic ballistics)
-	uint8 TeamId = 0;
+	// Replicated: remote clients rebuild the cosmetic frag burst + splats from this — as a plain member it
+	// was always team 0 on clients, so enemy frag tracers/splats wore the wrong team color (issue #11 CB1).
+	UPROPERTY(Replicated) uint8 TeamId = 0;
 	EPFGrenadeType Kind = EPFGrenadeType::Frag;
 	FTimerHandle FuseTimer;
 	FTimerHandle DestroyTimer;

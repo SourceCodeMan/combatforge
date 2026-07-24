@@ -59,7 +59,7 @@ Picked 3 (not 5): one tall, one mid wedge, one low — the minimal speedball voc
 | Prop | Real-world analog | Dims (uu) | Mesh + scale | Cover role |
 |---|---|---|---|---|
 | **Can** | Stand-up cylinder | r 60, h 220 | Cylinder (1.2, 1.2, 2.2) | Full crouch cover, standing head peek; wrap-around snap shooting. |
-| **Dorito** | Wedge/tetra | r 120, h 200 | Cone (2.4, 2.4, 2.0) | Mid cover, angled edges for lean-style peeks. |
+| **Dorito** | Wedge/tetra | r 120, h 100 | Cone (2.4, 2.4, 1.0) | Mid cover; WALKABLE by design (39.8° slope < 44.8° limit) so players can jump on and hold the top. Was h 200 until 2026-07-24 — too steep to stand on. |
 | **Snake** | Low snake segment | 400 L × 120 W × 120 H | Cube (4.0, 1.2, 1.2) | Slide-behind low cover (crouch eye ≈ 110 uu); chain segments end-to-end for a classic snake run. |
 
 Prop rules: must rest on terrain or a floor top (base Z = support surface); may not overlap any

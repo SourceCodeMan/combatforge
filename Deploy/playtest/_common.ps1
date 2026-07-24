@@ -42,15 +42,20 @@ function Ensure-PlaytestFirewall {
 	param([int]$Port = 7777)
 	$RuleUdp = "CombatForge Playtest $Port UDP"
 	$RuleTcp = "CombatForge Playtest $Port TCP"
-	if (Get-NetFirewallRule -DisplayName $RuleUdp -ErrorAction SilentlyContinue) {
+	# Check each rule independently (issue #21 D3): the old early-return on the UDP rule alone meant a
+	# box that ever got only-UDP created never received the TCP rule on later runs.
+	$NeedUdp = -not (Get-NetFirewallRule -DisplayName $RuleUdp -ErrorAction SilentlyContinue)
+	$NeedTcp = -not (Get-NetFirewallRule -DisplayName $RuleTcp -ErrorAction SilentlyContinue)
+	if (-not ($NeedUdp -or $NeedTcp)) {
 		return
 	}
 	Write-Host "Opening firewall for TCP/UDP $Port (UAC prompt possible)..."
+	$Cmds = @()
+	if ($NeedUdp) { $Cmds += "New-NetFirewallRule -DisplayName '$RuleUdp' -Direction Inbound -Protocol UDP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue" }
+	if ($NeedTcp) { $Cmds += "New-NetFirewallRule -DisplayName '$RuleTcp' -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue" }
 	try {
 		Start-Process powershell -Verb RunAs -Wait -ArgumentList @(
-			"-NoProfile", "-Command",
-			"New-NetFirewallRule -DisplayName '$RuleUdp' -Direction Inbound -Protocol UDP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue; " +
-			"New-NetFirewallRule -DisplayName '$RuleTcp' -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue"
+			"-NoProfile", "-Command", ($Cmds -join "; ")
 		)
 	} catch {
 		Write-Host "Firewall rule skipped - open port $Port manually if friends cannot join."

@@ -152,6 +152,7 @@ void UPFRootHUDWidget::NativeDestruct()
 	if (BoundBuild.IsValid())
 	{
 		BoundBuild->OnBuildWheelRequestedEvent.RemoveAll(this);
+		BoundBuild->OnBuildWheelDigitEvent.RemoveAll(this);
 	}
 	BoundBuild.Reset();
 	WiredPawn.Reset();
@@ -253,6 +254,7 @@ void UPFRootHUDWidget::WirePawn(ACombatForgeCharacter* NewPawn)
 	if (BoundBuild.IsValid())
 	{
 		BoundBuild->OnBuildWheelRequestedEvent.RemoveAll(this);
+		BoundBuild->OnBuildWheelDigitEvent.RemoveAll(this);
 	}
 	BoundBuild.Reset();
 
@@ -267,6 +269,7 @@ void UPFRootHUDWidget::WirePawn(ACombatForgeCharacter* NewPawn)
 		{
 			BoundBuild = Build;
 			Build->OnBuildWheelRequestedEvent.AddUObject(this, &UPFRootHUDWidget::HandleBuildWheelRequested);
+			Build->OnBuildWheelDigitEvent.AddUObject(this, &UPFRootHUDWidget::HandleBuildWheelDigit);
 		}
 	}
 	else if (WheelWidget)
@@ -300,6 +303,16 @@ void UPFRootHUDWidget::HandleBuildWheelRequested(bool bOpen)
 	else
 	{
 		WheelWidget->CloseAndCommit();
+	}
+}
+
+void UPFRootHUDWidget::HandleBuildWheelDigit(int32 Digit)
+{
+	// Digits ride Enhanced Input (the wheel never takes keyboard focus — see PFBuildComponent's
+	// binding comment for the flush story). Digit i commits sector i (1..9,0 = sectors 1..10).
+	if (WheelWidget && WheelWidget->IsWheelOpen())
+	{
+		WheelWidget->CommitSector(Digit);
 	}
 }
 

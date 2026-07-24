@@ -202,7 +202,8 @@ private:
 	TMap<int32, uint16> InstanceToPiece[14]; // per-ISMC instance index → PieceId
 	TMap<uint16, int32> PieceToInstance;     // PieceId → instance index within its ISMC
 
-	TMap<uint8, FPFRateWindow> RateWindows;  // roster index → placements this second (server)
+	TMap<uint8, FPFRateWindow> RateWindows;        // roster index → placements this second (server)
+	TMap<uint8, FPFRateWindow> DeleteRateWindows;  // roster index → deletes this second (server; issue #12 BD3)
 
 	// Server-only: match-stable builder identity per piece. FPFBuildPieceRec::OwnerIdx is a raw
 	// roster index the GameMode may recycle to a later joiner; a refund must never leak to that

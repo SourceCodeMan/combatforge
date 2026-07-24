@@ -42,6 +42,7 @@ void ACombatForgeGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(ACombatForgeGameState, RoundWinsToTake);
 	DOREPLIFETIME(ACombatForgeGameState, BuildMode);
 	DOREPLIFETIME(ACombatForgeGameState, MatchType);
+	DOREPLIFETIME(ACombatForgeGameState, CycleStage);
 	DOREPLIFETIME(ACombatForgeGameState, ArenaMap);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapFile);
 	DOREPLIFETIME(ACombatForgeGameState, SelectedCommunityMapLabel);
@@ -303,7 +304,15 @@ void ACombatForgeGameState::ServerSetRoundWinsToTake(uint8 NewWins)
 	{
 		return;
 	}
+	const bool bChanged = (RoundWinsToTake != NewWins);
 	RoundWinsToTake = NewWins;
+	if (bChanged)
+	{
+		// The pip row sizes itself off this value but only re-renders on the score event; without the
+		// local broadcast the LISTEN HOST kept the Lobby-era pip count until the first score change
+		// (clients get it via the ReplicatedUsing OnRep). Issue #14 U1.
+		OnRep_Score();
+	}
 	ForceNetUpdate();
 }
 
@@ -314,6 +323,16 @@ void ACombatForgeGameState::ServerSetBuildMode(EPFBuildMode NewMode)
 		return;
 	}
 	BuildMode = NewMode;
+	ForceNetUpdate();
+}
+
+void ACombatForgeGameState::ServerSetCycleStage(uint8 NewStage)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	CycleStage = NewStage % 3;
 	ForceNetUpdate();
 }
 

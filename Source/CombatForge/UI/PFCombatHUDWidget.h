@@ -92,6 +92,9 @@ private:
 	/** Contextual interact cue (e.g. door in range). */
 	UPROPERTY() TObjectPtr<UTextBlock> InteractPromptText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundTimerText;
+	/** Final-30-seconds pop: big top-center countdown, visible only while the live round timer
+	 *  is inside 30 s (Tom 2026-07-24 — "so people can see that the game is ending"). */
+	UPROPERTY() TObjectPtr<UTextBlock> FinalCountdownText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundNumberText;
 	UPROPERTY() TObjectPtr<UTextBlock> AliveTextA;
 	UPROPERTY() TObjectPtr<UTextBlock> AliveTextB;

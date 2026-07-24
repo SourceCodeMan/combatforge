@@ -76,6 +76,10 @@ private:
 
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> CountdownText;
+	// Match-rotation strip (PFCycleBar) — the NEXT match's stage while in lobby.
+	UPROPERTY() TObjectPtr<UWidget> CycleBarRoot;
+	UPROPERTY() TArray<TObjectPtr<UBorder>> CycleSegs;
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> CycleTexts;
 	UPROPERTY() TObjectPtr<UTextBlock> FooterText;
 	UPROPERTY() TObjectPtr<UVerticalBox> RosterBox;
 

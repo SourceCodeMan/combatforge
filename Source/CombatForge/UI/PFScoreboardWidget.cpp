@@ -4,6 +4,7 @@
 
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
+#include "UI/PFCycleBar.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -47,6 +48,14 @@ void UPFScoreboardWidget::BuildTree()
 	Panel->SetPadding(FMargin(28.f, 20.f));
 
 	UVerticalBox* Body = WidgetTree->ConstructWidget<UVerticalBox>();
+
+	// Match-rotation strip (Tom 2026-07-24): where the Creative → Remix → Remix Swap wheel is.
+	CycleBarRoot = PFCycleBar::Build(WidgetTree, CycleSegs, CycleTexts);
+	if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(CycleBarRoot))
+	{
+		VSlot->SetHorizontalAlignment(HAlign_Center);
+		VSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+	}
 
 	// Round-win score line: "A 2 — 1 B" in team colors.
 	UHorizontalBox* ScoreRow = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -147,6 +156,8 @@ void UPFScoreboardWidget::RefreshRows()
 		return;
 	}
 
+	PFCycleBar::Update(GS, CycleBarRoot, CycleSegs, CycleTexts);
+
 	// TeamScores modes: Skirmish tags + CTF/Dom/HP objective points. FreeForAll: YOU / LEAD. Else: round wins.
 	const bool bTeamScores = (GS->MatchType == EPFMatchType::Skirmish
 		|| GS->MatchType == EPFMatchType::CaptureFlag
@@ -167,7 +178,8 @@ void UPFScoreboardWidget::RefreshRows()
 		}
 		for (APlayerState* PSBase : GS->PlayerArray)
 		{
-			if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
+			if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+				PS && !PS->IsPhantom())
 			{
 				LeadTags = FMath::Max(LeadTags, PS->TagCount);
 			}
@@ -254,10 +266,12 @@ void UPFScoreboardWidget::RefreshRows()
 	}
 
 	// Stable display order: FFA = tags desc; else team A/B then score/elims.
+	// The pilot box's phantom PlayerState is not a player — never give it a row.
 	TArray<ACombatForgePlayerState*> Roster;
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
-		if (ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
+		if (ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+			PS && !PS->IsPhantom())
 		{
 			Roster.Add(PS);
 		}

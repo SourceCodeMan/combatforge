@@ -24,13 +24,21 @@ if [ "${CF_SKIP_PREFLIGHT:-0}" != 1 ]; then
 	"$(dirname "${BASH_SOURCE[0]:-$0}")/check-mac-env.command" || exit 1
 fi
 
-# --- EDIT THESE for your Mac ---
-UE="/Users/Shared/Epic Games/UE_5.6"
-PROJ="$HOME/projects/combatforge/CombatForge.uproject"
-OUT="$HOME/projects/combatforge/Packaged/Mac"
-# --------------------------------
+# --- Paths: env vars win so a different Mac layout needs no file edit (issue #20 S5) ---
+UE="${UE:-/Users/Shared/Epic Games/UE_5.6}"
+PROJ="${PROJ:-$HOME/projects/combatforge/CombatForge.uproject}"
+OUT="${OUT:-$(dirname "$PROJ")/Packaged/Mac}"
+# ----------------------------------------------------------------------------------------
 
 CONFIG="${1:-Development}"
+
+# Shipping builds are the ones that go to players - mark them for distribution.
+DISTFLAG=""
+if [ "$CONFIG" = "Shipping" ]; then DISTFLAG="-distribution"; fi
+
+# NetProtocol reminder: every public push MUST bump PFBuild::NetProtocol (join-handshake gate).
+grep -n "NetProtocol" "$(dirname "$PROJ")/Source/CombatForge/CombatForge.h" || true
+echo "*** REMINDER: bump PFBuild::NetProtocol (above) if this package ships to players. ***"
 
 echo ""
 echo "=== Packaging Combat Forge (Mac / $CONFIG) ==="
@@ -42,14 +50,21 @@ echo ""
   -project="$PROJ" \
   -noP4 -utf8output -nocompileeditor \
   -platform=Mac \
-  -clientconfig="$CONFIG" \
+  -clientconfig="$CONFIG" $DISTFLAG \
   -build -cook -stage -pak -iostore -compressed \
   -archive -archivedirectory="$OUT"
 
+# --- PRIVACY SCRUB (mirrors Package-Windows.bat) -----------------------------
+# A packaged Saved/ has leaked real data before: hostname, LAN IP, hardware info
+# in logs — and once, the login session token (the alpha-4/5 incident). Debug
+# symbols (.dSYM here, .pdb on Windows) leak build paths. NEVER ship either.
+# This must run as part of this script, not appended after RunUAT elsewhere —
+# and it must be checked before every push.
 echo ""
 # UAT's Mac archive step is unreliable: it has been seen copying the bare 370MB binary wrapper
 # (no pak/iostore files) into the archive dir instead of the staged app. If that happened, swap
-# in the real staged build from Saved/StagedBuilds/Mac.
+# in the real staged build from Saved/StagedBuilds/Mac. Must run BEFORE the scrub so the scrub
+# cleans the real (swapped-in) app.
 PROJROOT="$(dirname "$PROJ")"
 ARCHIVED_APP="$OUT/CombatForge.app"
 STAGED_APP="$PROJROOT/Saved/StagedBuilds/Mac/CombatForge.app"
@@ -64,7 +79,22 @@ if [ -d "$ARCHIVED_APP" ] && ! find "$ARCHIVED_APP" -name '*.pak' -o -name '*.uc
 	fi
 fi
 
-echo "=== Done. App is in $OUT ==="
+echo "=== Scrubbing Saved/ + debug symbols from $OUT ==="
+find "$OUT" -type d -name "Saved" -path "*/CombatForge/*" -prune -exec rm -rf {} + 2>/dev/null || true
+find "$OUT" -type d -name "Saved" -path "*/Engine/*" -prune -exec rm -rf {} + 2>/dev/null || true
+find "$OUT" -name "*.pdb" -delete 2>/dev/null || true
+find "$OUT" -type d -name "*.dSYM" -prune -exec rm -rf {} + 2>/dev/null || true
+
+DIRTY=""
+if find "$OUT" -type d -name "Saved" \( -path "*/CombatForge/*" -o -path "*/Engine/*" \) | grep -q .; then DIRTY=1; fi
+if find "$OUT" \( -name "*.pdb" -o \( -type d -name "*.dSYM" \) \) | grep -q .; then DIRTY=1; fi
+
+echo ""
+if [ -n "$DIRTY" ]; then
+  echo "*** WARNING: Saved/ or debug symbols still present in $OUT - do NOT push until clean. ***"
+else
+  echo "=== Done + scrubbed. App is in $OUT - no Saved/, no symbols - safe to push. ==="
+fi
 echo "NOTE: it's unsigned — first launch needs right-click > Open (Gatekeeper). See packaging.md."
 echo "TIP:  Saved/Cooked + Saved/StagedBuilds hold ~16GB of re-cook cache — delete them if disk is tight"
 echo "      (next package then does a full recook, ~40+ min instead of minutes)."

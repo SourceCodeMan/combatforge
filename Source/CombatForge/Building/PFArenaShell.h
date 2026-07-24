@@ -143,6 +143,11 @@ protected:
 	float PenCenterX = 3200.f;          // FieldX * 0.5 (pen stays south at Y=-3000 on every map)
 	float TeamSpawnSpacingY = 4000.f / PFGrid::SpawnPointsPerTeam;
 	float PenSlotStartX = 0.f;          // derived from PenCenterX in the ctor init list
+	// Vertical extents follow the MAP's build cap, not the Warehouse constant: the Yard builds to 2100 uu,
+	// so a 1800-uu midline barrier / open-field bound was hoppable from high Yard decks (issue #12 BD1).
+	// Warehouse values are numerically identical to the former file-scope constants (1800 / 1350).
+	float PerimeterH = static_cast<float>(PFGrid::HeightCapUU) + 600.f;   // MapDef.HeightCapUU + 600
+	float EscapeLidZ = static_cast<float>(PFGrid::HeightCapUU) + 150.f;   // MapDef.HeightCapUU + 150
 
 	UPROPERTY() TObjectPtr<USceneComponent> ShellRoot;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> FieldFloor;
@@ -153,6 +158,12 @@ protected:
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> MidlinePosts;
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> MidlineStripe;
 	UPROPERTY() TObjectPtr<UBoxComponent> MidlineBarrier;
+	// Tinted-glass midline SCREEN (Tom 2026-07-23): dark near-opaque at build start so teams can't peek
+	// across while building, fading to fully clear over the first MidWallFadeSeconds. Cosmetic only — the
+	// crossing block is MidlineBarrier above; this is what you SEE. Fully transparent + hidden in combat.
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> MidWallScreen;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> MidWallMID;
+	UPROPERTY() TObjectPtr<UMaterialInterface> MidWallBaseMaterial;   // /Engine .../M_SimpleUnlitTranslucent
 	UPROPERTY() TObjectPtr<UStaticMeshComponent> PenFloor;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> PenWalls;
 
@@ -177,8 +188,32 @@ protected:
 	UPROPERTY() TObjectPtr<UMaterialInterface> MarkMaterial;   // Color-driven spawn / hazard lines
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> TintMIDs;
 
+	// ---- Midline tint-screen fade config (build-phase visual). Same on every map (base class). ----
+	// Tom 2026-07-23: start FULLY opaque (can't see across), hold solid for the first 1:30, then lighten a
+	// little each second from 1:30 to 2:30 (build end). So: hold for MidWallHoldSeconds, then fade to clear
+	// over MidWallFadeSeconds. 90 + 60 = 150 s = the 2:30 build phase.
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallStartOpacity = 1.0f;   // fully opaque
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallHoldSeconds  = 90.f;   // solid until 1:30
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float MidWallFadeSeconds  = 60.f;   // then fade to clear over 1:00
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") FLinearColor MidWallTint  = FLinearColor(0.012f, 0.017f, 0.03f, 1.f);
+	double MidWallFadeStartTime = -1.0;   // world seconds when the current build phase began (-1 = idle/hidden)
+
+	void EnsureMidWallScreen();           // runtime: create the screen mesh over the midline (idempotent)
+	void BeginMidWallFade();              // build-phase entered: opaque now, start the clock
+	void UpdateMidWallFade();             // per-tick lerp toward clear; hides + stops when done
+	void ApplyMidWallOpacity(float Alpha01);
+
 	FDelegateHandle GameStateSetHandle;
 	bool bMapBackdropActive = false;
 	bool bWarehouseMeshesLoaded = false;
 	bool bWarehouseDrapeBuilt = false;
+
+public:
+	virtual void Tick(float DeltaSeconds) override;
+	/** Dev preview (pf.MidWall): optionally override the look/timing, then re-arm the fade now.
+	 *  Any arg < 0 means "keep the current value". */
+	void PreviewMidWallFade(float StartOpacity01, float HoldSeconds, float FadeSeconds);
+	/** Dev (pf.MidWallMat): swap the screen's base material live (test a glass material), rebuild the MID,
+	 *  and re-arm the fade so you can see whether its opacity actually drives. */
+	void SetMidWallMaterial(UMaterialInterface* Mat);
 };

@@ -1,117 +1,116 @@
-# Project Code Review Tracker
+# Project Code Review Tracker — Pass 2
 
 | Field | Value |
 |-------|-------|
-| **Started** | 2026-07-17 |
-| **Completed full pass** | 2026-07-17 |
-| **Criteria** | See [RUBRIC.md](./RUBRIC.md) |
-| **Baseline** | [BASELINE.md](./BASELINE.md) |
+| **Pass** | **2** (full inventory re-review) |
+| **Completed** | 2026-07-23 |
+| **GitHub issue** | [#24](https://github.com/SourceCodeMan/combatforge/issues/24) |
+| **Criteria** | [RUBRIC.md](./RUBRIC.md) |
 | **Contract** | `docs/design/05-code-contract.md` |
+| **Prior pass** | Pass 1 (2026-07-17) — superseded; do not use old B/C IDs as open work |
 
 ## Progress summary
 
 | Metric | Value |
 |--------|------:|
 | Modules done | **12 / 12** |
-| Modules in progress | 0 |
-| Open **blocker** | **0** |
-| Open **major** | **9** (see fix queue; Core B1/C1/C4 fixed 2026-07-18; U2 was C1 consumer) |
-| Baseline still open | B6, B7, B8, B9, B10 (B1 fixed) |
-| Last updated | 2026-07-18 |
+| Open **blocker** | **0** — both fixed 2026-07-24 (this branch) |
+| Open **major** | **0** — all 16 fixed 2026-07-24 (this branch) |
+| Open minor | **49** (P2-C9 + P2-I2 fixed alongside their majors) |
+| Open nit | **38** |
+| **Total findings** | **107** (20 fixed) |
+| Last updated | 2026-07-24 |
 
-### Counts by module (open only)
+> **Fix pass 2026-07-24 (branch `docs/code-review-pass-2`):** both blockers and all 16 majors
+> fixed and compile-verified; P2-C9 and P2-I2 folded in. P2-C2/C3 were largely fixed on `main`
+> by the same-day playtest batch (`7c02585`, replicated `bHeadlessPhantom` + count filters);
+> this branch adds the `ServerSetAliveInRound` root choke. Per-finding notes in the fix-queue
+> tables below; module reports retain the original open write-ups.
 
-| Module | Major | Minor | Nit | Report |
-|--------|------:|------:|----:|--------|
-| Core | 0 | 1 | 1 | [core.md](./modules/core.md) |
-| Combat | 0 | 8 | 2 | [combat.md](./modules/combat.md) |
-| Building | 1 | 3 | 2 | [building.md](./modules/building.md) |
-| Player | 1 | 4 | 1 | [player.md](./modules/player.md) |
-| UI | 0* | 1 | 2 | [ui.md](./modules/ui.md) (*U2 tracks Core C1) |
-| Objectives | 1 | 1 | 2 | [objectives.md](./modules/objectives.md) |
-| Voting | 0 | 2 | 2 | [voting.md](./modules/voting.md) |
-| AI | 2 | 1 | 2 | [ai.md](./modules/ai.md) |
-| Online | 1 | 2 | 2 | [online.md](./modules/online.md) |
-| Input+Audio+root | 0 | 3 | 4 | [input-audio-root.md](./modules/input-audio-root.md) |
-| Scripts | 2 | 3 | 3 | [scripts.md](./modules/scripts.md) |
-| Deploy+Config | 1 | 5 | 4 | [deploy-config.md](./modules/deploy-config.md) |
+### Counts by module (open)
+
+| Module | Blocker | Major | Minor | Nit | Report |
+|--------|--------:|------:|------:|----:|--------|
+| Core | 1 | 3 | 5 | 3 | [core.md](./modules/core.md) |
+| Combat | 0 | 5 | 5 | 3 | [combat.md](./modules/combat.md) |
+| Building | 0 | 1 | 6 | 3 | [building.md](./modules/building.md) |
+| Player | 1 | 3 | 4 | 4 | [player.md](./modules/player.md) |
+| UI | 0 | 2 | 7 | 4 | [ui.md](./modules/ui.md) |
+| Objectives | 0 | 0 | 2 | 2 | [objectives.md](./modules/objectives.md) |
+| Voting | 0 | 0 | 2 | 2 | [voting.md](./modules/voting.md) |
+| AI | 0 | 0 | 2 | 3 | [ai.md](./modules/ai.md) |
+| Online | 0 | 0 | 2 | 3 | [online.md](./modules/online.md) |
+| Input+Audio+root | 0 | 1 | 4 | 4 | [input-audio-root.md](./modules/input-audio-root.md) |
+| Scripts | 0 | 0 | 5 | 4 | [scripts.md](./modules/scripts.md) |
+| Deploy+Config | 0 | 1 | 7 | 3 | [deploy-config.md](./modules/deploy-config.md) |
 
 ---
 
 ## Fix queue (blocker + major only)
 
-Root-cause list. Prefer this order for fix passes.
+Prefer this order.
 
-| ID | Title | Module | Status |
+### Blockers (fix first)
+
+| ID | Title | Module | Status (2026-07-24) |
 |----|-------|--------|--------|
-| **B1** | Respawn mode: timed rounds always draw / match 0–0 | Core | **fixed** |
-| **C1** | Domination HUD “first to N” shows 50; match ends at 200 | Core | **fixed** |
-| **C4** | Fall death soft-respawns in Elimination (free mid-round reset) | Core | **fixed** |
-| **P1** | Listen-host melee always rejected (shared `LastMeleeTime`) | Player | open |
-| **BD1** | Yard shell vertical extents use Warehouse HeightCap (short midline/bounds) | Building | open |
-| **O1** | CTF drop/return needs re-overlap (BeginOverlap only) | Objectives | open |
-| **AI1** | Bots keep targeting corpses in continuous modes (`bEliminated` ignored) | AI | open |
-| **AI2** | `ProximityAwareUU` 360° close-sense never used | AI | open |
-| **ON1** | Fleet heartbeat 409 never re-registers → directory ghost | Online | open |
-| **S1** | `Package-Mac.command` no Saved/pdb scrub | Scripts | open |
-| **S2** | `retarget_rifle_to_bandit.py` hard-codes personal Claude temp path | Scripts | open |
-| **D1** | `package-playtest.ps1` no Saved/pdb privacy scrub | Deploy | open |
+| **P2-C1** | `RequestResetToSpawn` fully revives eliminated pawns (heal + fire) | Core | ✅ **fixed** — alive/out/bEliminated gates (never a revive), 20 s per-player cooldown, heal+reload suppressed during live rounds (teleport-only unstuck), showdown HP honored (folds P2-C9) |
+| **P2-P1** | `ServerRequestResetToSpawn` free mid-match heal / ammo / teleport | Player | ✅ **fixed** — same server-side gate; the RPC now lands on a hardened handler |
 
-**Not separate fix items:** U2 (UI correctly reads `RoundWinsToTake`; fix C1).
+### Majors
+
+| ID | Title | Module | Status (2026-07-24) |
+|----|-------|--------|--------|
+| **P2-C2** | Headless pilot phantom stays permanently `bAliveInRound` → Elimination wipe skew | Core | ✅ **fixed** — `main` batch filtered RecountAlive/GetTeamCounts + all widgets (replicated `bHeadlessPhantom`); this branch chokes `ServerSetAliveInRound` at the source |
+| **P2-C3** | Ready + vote early-advance still require headless phantom | Core | ✅ **fixed** on `main` (7c02585) — AreAllPlayersReady / CheckAllVotesIn / FinalizeVotePhase all skip the phantom |
+| **P2-C4** | Armed bombs survive Elimination Intermission / next Freeze | Core | ✅ **fixed** — `DestroyBombs()` at EndRound + StartNextRound; detonate piece-removal now requires RoundState==Live |
+| **P2-CB1** | Bomb BB spray inherits planter weapon `HitValue` (sniper multi-lethal) | Combat | ✅ **fixed** — `UtilityDamageOverride = 1` on breach BBs |
+| **P2-CB2** | Frag grenade BBs inherit thrower `HitValue` | Combat | ✅ **fixed** — same override on the frag cloud |
+| **P2-CB3** | Every projectile hit → reliable `ClientHitConfirm` (frag/bomb/shotgun spam) | Combat | ✅ **fixed** — RPC now Unreliable + `SendHitConfirmCoalesced` (≤1 confirm / 50 ms; elims always pass) |
+| **P2-CB4** | Bomb detonation spawns up to 1000 authoritative projectile actors | Combat | ✅ **fixed** — FragBBCount 1000→120, batch 80→40 (proximity paint already covers close range) |
+| **P2-CB5** | Weapon swap leaves reload mid-flight (FinishReload fills new gun) | Combat | ✅ **fixed** — `CancelReload()` (now public) on both the predicting owner and authority swap paths |
+| **P2-P2** | Mid-fight `ServerSetKit` / class cycle can equip new gun full mag | Player | ✅ **fixed** — weapon ids frozen while alive in a live round (cosmetics still apply); client re-push on respawn delivers the new class |
+| **P2-P3** | `ServerSetKit` does not clamp `CharParts` size / indices | Player | ✅ **fixed** — array truncated to SlotCount, each index clamped to the slot's catalog range |
+| **P2-P4** | `EnforceSingleFirstPersonWeapon` always-on full scan + Warning spam | Player | ✅ **fixed** — hide always runs silently (one Warning only when it hides something); FPSCAN dump + world iterator behind `pf.FPWeaponScan 1` |
+| **P2-BD1** | `ComputeArenaId` grid header ignores per-map CellsY/Levels | Building | ✅ **fixed** — hash header takes the active map's CellsY (+derived Levels). Warehouse ids unchanged (default header); Yard ids fork — old Yard favorites re-key |
+| **P2-U1** | Key-rebind capture not cancelled when Options closes | UI | ✅ **fixed** — capture cleared on Open/Close/Destruct + labels refreshed |
+| **P2-U2** | Fullscreen checkbox vs Window-mode desync / persist fail | UI | ✅ **fixed** — checkbox drives WorkingWindowMode (0/2); prefs pull re-derives the flag |
+| **P2-I1** | Rebind conflict check ignores non-rebindable keys (LMB/WASD) | Input | ✅ **fixed** — full fixed-mapping deny-list; own shipped default always allowed (folds P2-I2) |
+| **P2-D1** | Pilot server restart loop uses `&` on GUI exe → spawn storm | Deploy | ✅ **fixed** — OnBox launch pattern (Start-Process + WaitForExit + crash-loop backoff); file normalized to ASCII (its em-dash parsed as a smart quote under ANSI) |
 
 ---
 
 ## Queue status
 
-| # | Module | Files | Status | Reviewed | GitHub issue | Notes |
-|---|--------|------:|--------|----------|--------------|-------|
-| 1 | Core | 21 | **done** | 2026-07-18 | [#10](https://github.com/SourceCodeMan/combatforge/issues/10) | B1, C1, C4 major **fixed** |
-| 2 | Combat | 26 | **done** | 2026-07-17 | [#11](https://github.com/SourceCodeMan/combatforge/issues/11) | B6 open; minors only |
-| 3 | Building | 17 | **done** | 2026-07-17 | [#12](https://github.com/SourceCodeMan/combatforge/issues/12) | BD1 major; B9 open |
-| 4 | Player | 10 | **done** | 2026-07-17 | [#13](https://github.com/SourceCodeMan/combatforge/issues/13) | P1 major; B7/B8/B10 open |
-| 5 | UI | 22 | **done** | 2026-07-17 | [#14](https://github.com/SourceCodeMan/combatforge/issues/14) | B2/B5 fixed |
-| 6 | Objectives | 5 | **done** | 2026-07-17 | [#15](https://github.com/SourceCodeMan/combatforge/issues/15) | O1 major (CTF) |
-| 7 | Voting | 2 | **done** | 2026-07-17 | [#16](https://github.com/SourceCodeMan/combatforge/issues/16) | minors |
-| 8 | AI | 4 | **done** | 2026-07-17 | [#17](https://github.com/SourceCodeMan/combatforge/issues/17) | AI1, AI2 major |
-| 9 | Online | 2 | **done** | 2026-07-17 | [#18](https://github.com/SourceCodeMan/combatforge/issues/18) | ON1 major (fleet) |
-| 10 | Input+Audio+root | 7 | **done** | 2026-07-17 | [#19](https://github.com/SourceCodeMan/combatforge/issues/19) | minors/nits |
-| 11 | Scripts | 17 | **done** | 2026-07-17 | [#20](https://github.com/SourceCodeMan/combatforge/issues/20) | S1, S2 major |
-| 12 | Deploy+Config | ~20 | **done** | 2026-07-17 | [#21](https://github.com/SourceCodeMan/combatforge/issues/21) | D1 major |
+| # | Module | Status | Reviewed | Report |
+|---|--------|--------|----------|--------|
+| 1 | Core | **done** | 2026-07-23 | [core.md](./modules/core.md) |
+| 2 | Combat | **done** | 2026-07-23 | [combat.md](./modules/combat.md) |
+| 3 | Building | **done** | 2026-07-23 | [building.md](./modules/building.md) |
+| 4 | Player | **done** | 2026-07-23 | [player.md](./modules/player.md) |
+| 5 | UI | **done** | 2026-07-23 | [ui.md](./modules/ui.md) |
+| 6 | Objectives | **done** | 2026-07-23 | [objectives.md](./modules/objectives.md) |
+| 7 | Voting | **done** | 2026-07-23 | [voting.md](./modules/voting.md) |
+| 8 | AI | **done** | 2026-07-23 | [ai.md](./modules/ai.md) |
+| 9 | Online | **done** | 2026-07-23 | [online.md](./modules/online.md) |
+| 10 | Input+Audio+root | **done** | 2026-07-23 | [input-audio-root.md](./modules/input-audio-root.md) |
+| 11 | Scripts | **done** | 2026-07-23 | [scripts.md](./modules/scripts.md) |
+| 12 | Deploy+Config | **done** | 2026-07-23 | [deploy-config.md](./modules/deploy-config.md) |
 
----
+## Pass notes
 
-## File inventory (status = done for all listed)
-
-### 1. Core — done
-`CombatForgeGameMode`, `GameState`, `PlayerController`, `PlayerState`, `GameInstance`, `Types`, `PFPaths`, `PFUserPrefs`, `PFLightingSubsystem`, `PFWarehouseStreamSubsystem`, `PFClientLogShip`
-
-### 2. Combat — done
-`PFAmmoBarrel`, `PFBombActor`, `PFBombPickup`, `PFCombatAudio`, `PFCombatVFX`, `PFGrenadeProjectile`, `PFHealthComponent`, `PFPaintballProjectile`, `PFSmokeSubsystem`, `PFSplatSubsystem`, `PFTargetDummy`, `PFWeaponCatalog`, `PFWeaponComponent`
-
-### 3. Building — done
-`PFArenaSeed`, `PFArenaSerialization`, `PFArenaShell`, `PFBuildComponent`, `PFBuildGrid`, `PFBuildPieceActor`, `PFBuildPieceVisuals`, `PFGridMath`, `PFYardShell`
-
-### 4. Player — done
-`CombatForgeCharacter`, `PFCameraShakes`, `PFCharacterCustomization`, `PFCharacterMovementComponent`, `PFCharacterPreviewActor`
-
-### 5. UI — done
-All 11 widget pairs under `UI/`
-
-### 6–9. Objectives, Voting, AI, Online — done
-
-### 10. Input + Audio + root — done
-`PFInputConfig`, `PFMusicSubsystem`, `CombatForge` module, Target.cs files
-
-### 11–12. Scripts, Deploy, Config — done
-
----
+- Finding IDs use **`P2-*`** prefix so they do not collide with Pass 1.
+- Pass 1 baseline / GitHub issues #10–#21 are **historical** unless you re-open or file new issues.
+- Pass 1 majors that were patched (Respawn, Domination HUD, melee, etc.) were **not** re-listed; this pass only reports what is wrong **now**.
+- Independent of prior reports (agents told not to read old module docs).
 
 ## Recommended next steps
 
-1. **Fix pass A (gameplay majors):** B1, C1, P1, BD1, O1, AI1  
-2. **Fix pass B (ops/privacy):** S1, D1, S2  
-3. **Fix pass C (online/AI polish):** ON1, AI2  
-4. **Re-review** touched modules after fixes  
-5. Optionally grind minors from Combat/Player (prediction, fire predict desync)
+1. **Fix blockers** P2-C1 + P2-P1 together (Options / reset-to-spawn)  
+2. **Combat batch** P2-CB1–CB5 (utility HitValue, confirm spam, bomb actor count, reload cancel)  
+3. **Core pilot/bomb** P2-C2–C4  
+4. **Player kit** P2-P2–P4  
+5. UI / Input / Deploy majors  
+6. Optional: `gh issue create` one issue per module (or one mega-issue)  
 
-Or ask: **“fix majors”** / **“fix P1 C1”** / **“re-review Core after fixes”**.
+Or ask: **“fix blockers”** / **“make GitHub issues for pass 2”**.

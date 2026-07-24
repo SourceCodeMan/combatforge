@@ -53,13 +53,19 @@ UPFBuildComponent::UPFBuildComponent()
 	// is fully opaque so alpha on Color never softens the green overlay.
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicMatFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArtMatFinder(TEXT("/Game/Materials/M_PF_BuildPiece.M_PF_BuildPiece"));
+	// PREFER the project's own cooked translucent (/Game/Materials is force-cooked); the engine DEBUG
+	// material is not guaranteed to exist in packaged builds — if it was missing, the ghost silently fell
+	// back to the OPAQUE BasicShapeMaterial in every alpha (same failure class as the midline tint screen).
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GlassFadeFinder(
+		TEXT("/Game/Materials/M_PF_GlassFade.M_PF_GlassFade"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GhostMatFinder(
 		TEXT("/Engine/EngineDebugMaterials/M_SimpleUnlitTranslucent.M_SimpleUnlitTranslucent"));
 	CubeMesh      = CubeFinder.Object;
 	CylinderMesh  = CylinderFinder.Object;
 	ConeMesh      = ConeFinder.Object;
 	ShapeMaterial = BasicMatFinder.Succeeded() ? BasicMatFinder.Object : ArtMatFinder.Object;
-	GhostMaterial = GhostMatFinder.Succeeded() ? GhostMatFinder.Object : ShapeMaterial;
+	GhostMaterial = GlassFadeFinder.Succeeded() ? GlassFadeFinder.Object
+		: (GhostMatFinder.Succeeded() ? GhostMatFinder.Object : ShapeMaterial);
 }
 
 void UPFBuildComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -104,8 +110,32 @@ void UPFBuildComponent::BindInput(UEnhancedInputComponent* EIC, const UPFInputCo
 	EIC->BindAction(Cfg->IA_EquipRamp, ETriggerEvent::Started, this, &UPFBuildComponent::OnEquipRamp);
 	EIC->BindAction(Cfg->IA_EquipRoof, ETriggerEvent::Started, this, &UPFBuildComponent::OnEquipRoof);
 
-	// Q tap toggles the build wheel (open / commit). No hold threshold — hold was unreliable.
-	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Started, this, &UPFBuildComponent::OnWheelTogglePressed);
+	// HOLD Q = build wheel (Tom 2026-07-24): press opens, hover highlights the slice, release
+	// commits it. ⚠️ THE WHEEL MUST NEVER TAKE KEYBOARD FOCUS for this to work: the first hold
+	// version called SetKeyboardFocus() in Open() (digit keys), the viewport's focus loss FLUSHED
+	// every pressed key, Enhanced Input saw a phantom Q-release (Canceled), this binding closed
+	// the wheel, OS key-repeat "re-pressed" Q, and the wheel flashed open/closed at key-repeat
+	// rate — which is also why the pre-2026-07-24 tap design said "hold was unreliable". With no
+	// focus steal the press/release stream is clean; digits arrive via WheelDigitActions below.
+	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Started, this, &UPFBuildComponent::OnWheelPressed);
+	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Completed, this, &UPFBuildComponent::OnWheelReleased);
+	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Canceled, this, &UPFBuildComponent::OnWheelReleased);
+
+	if (Cfg->WheelDigitActions.Num() >= 10)
+	{
+		using FDigitFn = void (UPFBuildComponent::*)();
+		static const FDigitFn DigitFns[10] = {
+			&UPFBuildComponent::OnWheelDigit0, &UPFBuildComponent::OnWheelDigit1,
+			&UPFBuildComponent::OnWheelDigit2, &UPFBuildComponent::OnWheelDigit3,
+			&UPFBuildComponent::OnWheelDigit4, &UPFBuildComponent::OnWheelDigit5,
+			&UPFBuildComponent::OnWheelDigit6, &UPFBuildComponent::OnWheelDigit7,
+			&UPFBuildComponent::OnWheelDigit8, &UPFBuildComponent::OnWheelDigit9
+		};
+		for (int32 Digit = 0; Digit < 10; ++Digit)
+		{
+			EIC->BindAction(Cfg->WheelDigitActions[Digit], ETriggerEvent::Started, this, DigitFns[Digit]);
+		}
+	}
 }
 
 void UPFBuildComponent::OnPlaceStarted()
@@ -181,18 +211,45 @@ void UPFBuildComponent::OnEquipFloor() { EquipTool(EPFBuildTool::Floor); }
 void UPFBuildComponent::OnEquipRamp()  { EquipTool(EPFBuildTool::Ramp); }
 void UPFBuildComponent::OnEquipRoof()  { EquipTool(EPFBuildTool::Roof); }
 
-void UPFBuildComponent::OnWheelTogglePressed()
+void UPFBuildComponent::OnWheelPressed()
 {
-	// Tap Q: open if closed, commit (or cancel in dead zone) if open.
+	// Hold-Q flow: press opens; a quick tap just flashes the wheel (release with nothing hovered
+	// keeps the current tool — CloseAndCommit broadcasts nothing for the dead zone).
+	if (!bWheelOpenSent)
+	{
+		bWheelOpenSent = true;
+		OnBuildWheelRequestedEvent.Broadcast(true);
+	}
+}
+
+void UPFBuildComponent::OnWheelReleased()
+{
+	// A digit commit / Esc / phase close already synced the flag via NotifyBuildWheelClosed —
+	// then this release is a no-op.
 	if (bWheelOpenSent)
 	{
 		bWheelOpenSent = false;
 		OnBuildWheelRequestedEvent.Broadcast(false);
 	}
-	else
+}
+
+void UPFBuildComponent::OnWheelDigit0() { HandleWheelDigit(0); }
+void UPFBuildComponent::OnWheelDigit1() { HandleWheelDigit(1); }
+void UPFBuildComponent::OnWheelDigit2() { HandleWheelDigit(2); }
+void UPFBuildComponent::OnWheelDigit3() { HandleWheelDigit(3); }
+void UPFBuildComponent::OnWheelDigit4() { HandleWheelDigit(4); }
+void UPFBuildComponent::OnWheelDigit5() { HandleWheelDigit(5); }
+void UPFBuildComponent::OnWheelDigit6() { HandleWheelDigit(6); }
+void UPFBuildComponent::OnWheelDigit7() { HandleWheelDigit(7); }
+void UPFBuildComponent::OnWheelDigit8() { HandleWheelDigit(8); }
+void UPFBuildComponent::OnWheelDigit9() { HandleWheelDigit(9); }
+
+void UPFBuildComponent::HandleWheelDigit(int32 Digit)
+{
+	// Only meaningful while the wheel is held open — digit keys are otherwise free.
+	if (bWheelOpenSent)
 	{
-		bWheelOpenSent = true;
-		OnBuildWheelRequestedEvent.Broadcast(true);
+		OnBuildWheelDigitEvent.Broadcast(Digit);
 	}
 }
 
@@ -209,10 +266,6 @@ void UPFBuildComponent::EquipTool(EPFBuildTool Tool)
 		RampRotOffset = 0;   // ramp offset resets on switch; prop offset persists (§3.5)
 	}
 	EquippedTool = Tool;
-	if (Tool != EPFBuildTool::Delete)
-	{
-		LastUsedPiece = Tool;
-	}
 	OnEquippedToolChangedEvent.Broadcast(EquippedTool);
 }
 
@@ -605,6 +658,12 @@ void UPFBuildComponent::EnsureGhost()
 		// Translucent sort: draw after world so the soft green reads as an overlay.
 		Comp->SetTranslucentSortPriority(100);
 		Comp->SetRenderCustomDepth(false);
+		// Prop previews use the REAL warehouse meshes, which are Nanite (Megascans) — and Nanite does
+		// not render translucent blends, so the GlassFade ghost MID made the engine substitute the
+		// DEFAULT (checker) material on box/barrel previews ("Invalid material ... used on Nanite
+		// static mesh SM_Ind_War_Storage_Box..." in Tom's 2026-07-23 server-join log). Render the
+		// ghost from the mesh's non-Nanite fallback instead; placed instances keep Nanite.
+		Comp->bDisallowNanite = true;
 		Comp->RegisterComponent();
 		return Comp;
 	};

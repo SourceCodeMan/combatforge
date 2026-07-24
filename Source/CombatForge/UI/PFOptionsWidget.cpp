@@ -7,7 +7,6 @@
 #include "Core/CombatForgePlayerController.h"
 #include "Core/PFUserPrefs.h"
 #include "Input/PFInputConfig.h"
-#include "Core/PFUserPrefs.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 #include "InputCoreTypes.h"
@@ -15,7 +14,9 @@
 #include "Player/PFCharacterCustomization.h"   // PFChar active class-slot switch (in-game)
 #include "Audio/PFMusicSubsystem.h"
 #include "Combat/PFCombatAudio.h"
+#include "Core/CombatForgeGameState.h"
 #include "Core/PFLightingSubsystem.h"
+#include "UI/PFCycleBar.h"
 
 #include "AudioDevice.h"
 #include "Blueprint/WidgetTree.h"
@@ -93,7 +94,15 @@ void UPFOptionsWidget::BuildTree()
 	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(TitleText))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+	}
+
+	// Match-rotation strip: Esc mid-match answers "where are we in the 3-match wheel?"
+	CycleBarRoot = PFCycleBar::Build(WidgetTree, CycleSegs, CycleTexts);
+	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(CycleBarRoot))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
 	}
 
 	// Tabs
@@ -852,6 +861,20 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 	AddHowToLine(Box, TEXT("4v4 / 6v6 + bots checkbox fill empty slots. Rate the arena after the match — top maps float up the community list."), 13, false, Dim);
 }
 
+void UPFOptionsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	// Collapsed widgets don't tick, so this only polls while the menu is actually on screen.
+	CycleBarPollAccum += InDeltaTime;
+	if (CycleBarPollAccum >= 0.5f)
+	{
+		CycleBarPollAccum = 0.f;
+		PFCycleBar::Update(
+			GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr,
+			CycleBarRoot, CycleSegs, CycleTexts);
+	}
+}
+
 void UPFOptionsWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -875,6 +898,14 @@ void UPFOptionsWidget::NativeConstruct()
 
 void UPFOptionsWidget::Open()
 {
+	// P2-U1: an in-flight rebind capture must never survive a close/reopen — a stale
+	// bListeningForKey swallows the next keypress as a bind and leaves the row on "press key…".
+	if (bListeningForKey)
+	{
+		bListeningForKey = false;
+		ListeningIndex = -1;
+		RefreshRebindLabels();
+	}
 	PullFromSettings();
 	RefreshLabels();
 	SelectTab(ActiveTab);
@@ -931,6 +962,13 @@ void UPFOptionsWidget::EnterEmbeddedMode()
 
 void UPFOptionsWidget::Close()
 {
+	// P2-U1: cancel any half-finished rebind capture with the menu (see Open()).
+	if (bListeningForKey)
+	{
+		bListeningForKey = false;
+		ListeningIndex = -1;
+		RefreshRebindLabels();
+	}
 	// Changes save on CLOSE, not only on Apply — "set quality, Esc out, next match it's back to Low" was a
 	// real playtest loss: the widget silently dropped unsaved working values.
 	PushToSettings(/*bSave=*/true);
@@ -945,6 +983,8 @@ void UPFOptionsWidget::Close()
 
 void UPFOptionsWidget::NativeDestruct()
 {
+	bListeningForKey = false;   // P2-U1: no capture may outlive the widget
+	ListeningIndex = -1;
 	// The EMBEDDED boot-menu instance is never Close()d — it dies with the menu when the match starts. Save
 	// its working values on the way out so options chosen in the boot menu stick too.
 	if (bEmbedded)
@@ -998,7 +1038,13 @@ void UPFOptionsWidget::OnApplyClicked()
 
 void UPFOptionsWidget::OnFullscreenChanged(bool bIsChecked)
 {
+	// P2-U2: the checkbox and the WINDOW mode button are ONE control now — checking it selects
+	// Fullscreen (borderless at apply time, see PushToSettings), unchecking selects Windowed.
+	// Before this it only flipped bWorkingFullscreen, so the applied mode and the SAVED
+	// WorkingWindowMode disagreed and "fullscreen" reverted on the next launch.
 	bWorkingFullscreen = bIsChecked;
+	WorkingWindowMode = bIsChecked ? 0 : 2;
+	RefreshLabels();
 }
 
 void UPFOptionsWidget::OnVSyncChanged(bool bIsChecked)
@@ -1315,6 +1361,9 @@ void UPFOptionsWidget::PullFromSettings()
 	bWorkingCrouchToggle = FPFUserPrefs::GetCrouchToggle();
 	WorkingFov = FPFUserPrefs::GetFieldOfView();
 	WorkingWindowMode = FPFUserPrefs::GetWindowModeIndex();
+	// P2-U2: prefs are the mode's source of truth (they overwrite the UGameUserSettings seed
+	// above) — re-derive the fullscreen flag from the SAME source or the checkbox desyncs.
+	bWorkingFullscreen = (WorkingWindowMode == 0);
 
 	// Key binds (current live keys + shipped defaults) from the input config.
 	WorkingBinds.Empty();

@@ -37,7 +37,7 @@ public:
 
 	// ---- Config (contract §3.2 / §4.3) ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") EPFRespawnMode RespawnMode = EPFRespawnMode::RoundElimination;   // B1
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float BuildPhaseDuration   = 180.f;  // T2 — 3 minute build window
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float BuildPhaseDuration   = 150.f;  // 2:30 build window (Creative + Remix; PlayOnly is forced to ~0). Was 180 (Tom 2026-07-23).
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float LobbyStartCountdown  = 0.f;     // 0: no pre-match grace — the per-round Freeze ("GET READY") is the single spawn countdown (was a double)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float FreezeDuration       = 5.f;     // T6
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float RoundDuration        = 90.f;    // 60 at ≤2v2 (T15)
@@ -103,6 +103,10 @@ public:
 	// current-phase team spawn. Server-authoritative; routed from the owning client via
 	// ACombatForgeCharacter::ServerRequestResetToSpawn. Safe with a live pawn in any phase.
 	void RequestResetToSpawn(ACombatForgeCharacter* Pawn);
+	/** Per-player last reset-to-spawn time (P2-C1: rate-limits the Options rescue). Weak keys —
+	 *  stale entries from leavers are harmless and tiny. */
+	TMap<TWeakObjectPtr<ACombatForgePlayerState>, double> LastResetToSpawnAt;
+	static constexpr double ResetToSpawnCooldownSec = 20.0;
 
 protected:
 	// ---- Engine overrides ----
@@ -226,6 +230,10 @@ protected:
 	int32 CountHumans(const ACombatForgePlayerState* ExcludePS = nullptr) const;
 	/** Periodic host log line for crash triage (who is connected, phase, scores). */
 	void LogCrashBreadcrumb();
+	/** 30 s sweep: a match with zero humans returns to Lobby. Logout already handles the graceful
+	 *  case; this catches teardown orderings where the last human never reached Logout (client
+	 *  crash / connection drop), which left pilot boxes wedged mid-match with only the phantom. */
+	void SweepEmptyServer();
 	uint8 FindFreeRosterIndex() const;
 	void ComputeEffectiveScaling();
 	FPFMatchResult MakeMatchResult(uint8 MatchWinner) const;
@@ -266,6 +274,7 @@ protected:
 	FTimerHandle ObjectiveScoreTimerHandle;  // Dom/HP periodic scoring
 	FTimerHandle HardpointRotateTimerHandle; // Hardpoint slot rotation
 	FTimerHandle CrashBreadcrumbTimer;       // 30 s host roster dump for crash triage
+	FTimerHandle EmptyServerSweepTimer;      // 30 s no-humans → back to Lobby (SweepEmptyServer)
 
 	UPROPERTY() TArray<TObjectPtr<class APFAmmoBarrel>> AmmoBarrels;
 	UPROPERTY() TArray<TObjectPtr<class APFBombActor>> ActiveBombs;   // live demolition bombs (combat only)
@@ -291,6 +300,18 @@ protected:
 	FPFMatchResult PendingMatchResult;
 	/** Improvement/PlayOnly base map id for BeginMatchRecord parent lineage (empty = from-scratch). */
 	FString PendingParentArenaId;
+
+	// ---- Forced 3-match cycle: Creative → Remix → Remix Swap (Tom 2026-07-24) ----
+	/** Stage the NEXT Lobby→Build will run. Mirrored to GS->CycleStage at Build entry and again
+	 *  when it advances at Results (so Lobby + the server browser advertise the upcoming match). */
+	uint8 NextCycleStage = 0;
+	/** The arena as PLAYED last match (snapshot at Build→Combat freeze, pre battle damage) —
+	 *  the base the Remix / Remix Swap stages inject. */
+	TArray<FPFBuildPieceRec> LastMatchPieces;
+	/** Wheel runs for every mode with a build phase; PlayOnly and FreeForAll sit outside it. */
+	bool IsCycleActive() const;
+	/** Rewind the wheel to its start for the current BuildMode (host abort / empty server). */
+	void ResetMatchCycle();
 
 	float MatchStartServerTime = 0.f;        // stamped at Lobby→Build (matchDurationSec source)
 

@@ -113,7 +113,18 @@ APFBuildGrid::APFBuildGrid()
 
 			UInstancedStaticMeshComponent* ISMC = CreateDefaultSubobject<UInstancedStaticMeshComponent>(CompName);
 			ISMC->SetupAttachment(GridRoot);
-			ISMC->SetMobility(EComponentMobility::Static);
+			// PROPS must be Movable: they swap from these engine placeholders to the real warehouse
+			// meshes at runtime (EnsurePieceVisualsApplied), and the engine REFUSES SetStaticMesh on a
+			// registered Static component once the world has begun play (the AreDynamicDataChangesAllowed
+			// gate). The AUTHORITY dresses the grid during world init — before begin-play — so its swap
+			// sticks; a JOINING client receives this actor mid-match, its swap was silently refused
+			// ("Calling SetStaticMesh on ... ISM_Barrel_Team0 but Mobility is Static", Tom's 2026-07-23
+			// server-join log), and instances stamped with warehouse-FITTED transforms rendered on the
+			// unit engine shapes: the "extra large shapes with no skins" every remote joiner saw while
+			// the host looked perfect. Structural ISMs never change mesh after the ctor and stay Static.
+			ISMC->SetMobility(PFIsProp(static_cast<EPFPieceType>(TypeIdx))
+				? EComponentMobility::Movable
+				: EComponentMobility::Static);
 			ISMC->SetStaticMesh(MeshPerType[TypeIdx]);
 			ISMC->SetMaterial(0, ShapeMaterial);
 			// Built pieces shape the runtime navmesh so bots PATH AROUND player forts instead of running into
@@ -188,7 +199,25 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 				const int32 K = ISMCIndexFor(Type, Team);
 				if (PieceISMCs[K] && PieceISMCs[K]->GetStaticMesh() != PropMesh)
 				{
-					PieceISMCs[K]->SetStaticMesh(PropMesh);
+					// SetStaticMesh RETURNS FALSE when the engine refuses it (registered + Static +
+					// world begun — the remote-join case; see the ctor mobility comment). That refusal
+					// was silent for three alphas: the latch below keyed off CONTENT being loaded, the
+					// content loads fine on clients, so the poll stopped while the ISMs still wore the
+					// engine placeholders. Never trust the call blindly again — flip mobility and
+					// retry once, and if it STILL refuses, log loudly and keep the retry poll alive.
+					if (!PieceISMCs[K]->SetStaticMesh(PropMesh))
+					{
+						PieceISMCs[K]->SetMobility(EComponentMobility::Movable);
+						if (!PieceISMCs[K]->SetStaticMesh(PropMesh))
+						{
+							UE_LOG(CombatForgeLog, Warning,
+								TEXT("BuildGrid: prop mesh swap REFUSED on %s (mobility=%d) — keeping retry alive"),
+								*PieceISMCs[K]->GetName(),
+								static_cast<int32>(PieceISMCs[K]->Mobility));
+							bPieceVisualsReady = false;
+							continue;
+						}
+					}
 					// Warehouse assets keep their own materials (looks like real cover, not neon cubes).
 					if (PFBuildPieceVisuals::UsesNativeMaterials(Type))
 					{
@@ -247,6 +276,27 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 				PFBuildPieceVisuals::ApplyStructuralSurface(MID, Type);
 				PieceISMCs[K]->SetMaterial(0, MID);
 				TeamMIDs[K] = MID;
+			}
+		}
+	}
+
+	// THE DORITO CONE is the ONE prop that wants a STRUCTURAL skin (the roof/ceiling panel) rather than a
+	// native warehouse material — it is always the /Engine Cone, so the prop-skip guard above (which keeps
+	// fallback props neutral and warehouse props on their native mats) leaves it on the ctor's gray. The
+	// role→material was wired for it (RoleForPieceType(PropDorito)=MetalRoof, and CreateStructuralPaletteMID
+	// force-routes the cone through the triplanar+roof profile so the Megascans UVs don't wash it white) —
+	// but nothing CALLED it for the cone until now. Skin it explicitly. Safe: the cone never has a native
+	// or fallback state to protect (it is the engine Cone by design), so there is no wrong-material race.
+	if (UMaterialInstanceDynamic* ConeMID =
+		PFBuildPieceVisuals::CreateStructuralPaletteMID(this, EPFPieceType::PropDorito))
+	{
+		for (uint8 Team = 0; Team < 2; ++Team)
+		{
+			const int32 K = ISMCIndexFor(EPFPieceType::PropDorito, Team);
+			if (PieceISMCs[K])
+			{
+				PieceISMCs[K]->SetMaterial(0, ConeMID);
+				TeamMIDs[K] = ConeMID;
 			}
 		}
 	}
@@ -486,24 +536,35 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		}
 	}
 
-	// --- Height cap (walls: level 0..Levels-2 only — a top-base wall crowns at HeightCap) ---
-	// Strict: top of piece must stay under HeightCap so stacked floors can't form a deck you
-	// jump over the perimeter from. (Perimeter walls + escape lid also block escape.)
-	// Map-specific: Warehouse 4/1200 (3 wall stories under the roof), Yard 7/2100 (6 wall stories).
+	// --- Height cap / top-story rules (reworked 2026-07-24, Tom: "on the third level I should be
+	// able to deploy a wall or window or ceiling tile" — but never a ramp) ---
+	// Per piece family on the TOP base (Warehouse level 3 @ Z900, Yard level 6 @ Z1800):
+	//   * wall-like: ALLOWED — crowns flush at HeightCap. Safe: the escape lid sits cap+150 and
+	//     shell dressing starts ≥ cap+200, so nothing solid is entered ("build volume stays clean").
+	//   * ramps: DENIED one story earlier — a ramp must ascend to a base that exists above it;
+	//     a top-base ramp is a launch surface toward the lid and leads nowhere.
+	//   * floor/roof/trap plates: allowed one level HIGHER than the bases (Level == MapLevels) so a
+	//     lid can cap a top-story room flush at HeightCap.
+	// The cap check itself is now inclusive (deny only when a piece would EXCEED the cap): the
+	// old "-slack" form was the real reason nothing could be built on the third level — every
+	// top-story piece crowns exactly at the cap.
 	const int32 MapLevels = ActiveLevels();
 	const int32 MapHeightCap = ActiveHeightCapUU();
 	const int32 Level = Q.Z / 3;
-	if (PFIsWallLike(Q.Type) && Level > MapLevels - 2)
+	if (Q.Type == EPFPieceType::Ramp && Level > MapLevels - 2)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	if (!bProp && Level > MapLevels - 1)
+	if (PFIsWallLike(Q.Type) && Level > MapLevels - 1)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	// Leave a small air gap under the escape lid / wall rim (no piece crowns at the cap flat).
+	if (!bProp && Level > MapLevels)
+	{
+		return EPFDenyReason::HeightCap;
+	}
 	constexpr float HeightCapSlackUU = 8.f;
-	if (Bounds.Max.Z > static_cast<float>(MapHeightCap) - HeightCapSlackUU)
+	if (Bounds.Max.Z > static_cast<float>(MapHeightCap) + HeightCapSlackUU)
 	{
 		return EPFDenyReason::HeightCap;
 	}
@@ -645,6 +706,13 @@ EPFDenyReason APFBuildGrid::TryPlacePiece(ACombatForgePlayerState* Placer, const
 		return EPFDenyReason::RateLimited;
 	}
 
+	// Precise deny for the per-type caps (trap floor / one-way door: 1 per player per match) —
+	// ServerTrySpendBudget re-checks as a backstop, but from there it's indistinguishable from
+	// an empty pool and would read "OUT OF BUDGET" on the HUD.
+	if (Placer->ServerIsAtPieceLimit(ServerQ.Type))
+	{
+		return EPFDenyReason::PieceLimit;
+	}
 	if (!Placer->ServerTrySpendBudget(ServerQ.Type))
 	{
 		return EPFDenyReason::OutOfBudget;
@@ -687,6 +755,21 @@ EPFDenyReason APFBuildGrid::TryDeletePiece(ACombatForgePlayerState* Requester, u
 	if (!GS || !GS->IsBuildAllowed())
 	{
 		return EPFDenyReason::WrongPhase;
+	}
+
+	// Same 10/s/player window as placement (issue #12 BD3). The only throttle before was the CLIENT-side
+	// self-cap, which a modified client skips — an uncapped delete loop could strip a fort as fast as the
+	// RPCs land. Separate window map so deletes don't eat the placement allowance.
+	const double Now = World ? World->GetTimeSeconds() : 0.0;
+	FPFRateWindow& DelWindow = DeleteRateWindows.FindOrAdd(Requester->RosterIndex);
+	if (Now - DelWindow.WindowStart >= 1.0)
+	{
+		DelWindow.WindowStart = Now;
+		DelWindow.Count = 0;
+	}
+	if (DelWindow.Count >= 10)
+	{
+		return EPFDenyReason::RateLimited;
 	}
 
 	int32 FoundIdx = INDEX_NONE;
@@ -733,6 +816,7 @@ EPFDenyReason APFBuildGrid::TryDeletePiece(ACombatForgePlayerState* Requester, u
 	RemovePieceLocal(Rec);
 	Pieces.Items.RemoveAt(FoundIdx);
 	Pieces.MarkArrayDirty();
+	++DelWindow.Count;   // count only SUCCESSFUL deletes against the window (mirrors placement)
 
 	// Delete attribution — social pressure is the anti-grief enforcement in v1 (03 §5).
 	UE_LOG(CombatForgeLog, Log, TEXT("BuildGrid: %s removed %s's %s #%u"),
@@ -981,9 +1065,11 @@ void APFBuildGrid::SpawnRampUnderfill(const FPFBuildPieceRec& Rec)
 	}
 	DestroyRampUnderfill(Rec.PieceId);
 
-	// Crouch capsule = 2 * 58 = 116uu. Leave generous air under the plank so crouch-crawl isn't sticky.
-	// Standing ≈ 176uu — still taller than this tunnel, so solid steps block standing under-ramp crawls.
-	constexpr float CrouchTunnelUU = 168.f;   // 116 capsule + ~52uu slack (steps, slope, input forgiveness)
+	// Crouch capsule = 2 * 48 = 96uu (was 58/116 — lowered 2026-07-24 precisely because this
+	// tunnel minus the 25uu plank thickness pinched a 116 capsule out of under-ramp crawls and
+	// ramp-base bomb defuses). Standing ≈ 176uu — still taller than this tunnel, so solid steps
+	// keep blocking standing under-ramp crawls.
+	constexpr float CrouchTunnelUU = 168.f;   // 96 capsule + ~72uu slack (steps, slope, input forgiveness)
 	constexpr float CellRunUU = static_cast<float>(PFGrid::CellUU);       // 400
 	constexpr float RiseUU = static_cast<float>(PFGrid::WallHeightUU);    // 300
 	constexpr int32 Steps = 8;

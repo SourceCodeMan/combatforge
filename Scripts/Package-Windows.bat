@@ -11,12 +11,17 @@ REM  build pass "Shipping" as the first argument:  Package-Windows.bat Shipping
 REM ============================================================================
 setlocal
 
-set "UE=C:\Program Files\Epic Games\UE_5.6"
+REM UE root: env var wins so a non-default install doesn't require editing this file (issue #20 S5).
+if not defined UE set "UE=C:\Program Files\Epic Games\UE_5.6"
 set "PROJ=%~dp0..\CombatForge.uproject"
 set "OUT=%~dp0..\Packaged\Windows"
 
 set "CONFIG=%~1"
 if "%CONFIG%"=="" set "CONFIG=Development"
+
+REM Shipping builds are the ones that go to players - mark them for distribution (issue #21 D4).
+set "DISTFLAG="
+if /I "%CONFIG%"=="Shipping" set "DISTFLAG=-distribution"
 
 echo.
 echo === Packaging Combat Forge (Windows / %CONFIG%) ===
@@ -24,11 +29,19 @@ echo     Project: %PROJ%
 echo     Output:  %OUT%
 echo.
 
+REM --- NetProtocol reminder (issue #19 I7) -----------------------------------------
+REM Every itch push MUST bump PFBuild::NetProtocol so stale clients are rejected at the
+REM join handshake instead of silently mis-rendering. Surface the current value here so
+REM the packager can't miss it.
+findstr /C:"NetProtocol" "%~dp0..\Source\CombatForge\CombatForge.h"
+echo *** REMINDER: bump PFBuild::NetProtocol (above) if this package goes to itch. ***
+echo.
+
 call "%UE%\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun ^
   -project="%PROJ%" ^
   -noP4 -utf8output -nocompileeditor ^
   -platform=Win64 ^
-  -clientconfig=%CONFIG% ^
+  -clientconfig=%CONFIG% %DISTFLAG% ^
   -build -cook -stage -pak -iostore -compressed ^
   -nodebuginfo ^
   -prereqs ^
@@ -55,8 +68,8 @@ set "DIRTY="
 if exist "%OUT%\CombatForge\Saved" set "DIRTY=1"
 dir /s /b "%OUT%\*.pdb" >nul 2>&1 && set "DIRTY=1"
 if defined DIRTY (
-  echo *** WARNING: Saved\ or .pdb still present in %OUT% - do NOT push until clean. ***
+  echo *** WARNING: Saved or pdb still present in %OUT% - do NOT push until clean. ***
 ) else (
-  echo === Done + scrubbed. Build is in %OUT% (no Saved/, no .pdb - safe to push). ===
+  echo === Done + scrubbed. Build is in %OUT% - no Saved, no pdb. ===
 )
 endlocal

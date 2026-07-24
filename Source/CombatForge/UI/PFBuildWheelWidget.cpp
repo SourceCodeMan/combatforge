@@ -160,7 +160,10 @@ void UPFBuildWheelWidget::BuildTree()
 void UPFBuildWheelWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
-	SetIsFocusable(true); // digits 1-8 arrive via NativeOnKeyDown while open (T4)
+	// NEVER focusable (2026-07-24): taking keyboard focus flushed every pressed key (viewport
+	// LostFocus) → phantom Q-release → the held wheel flashed open/closed at key-repeat rate.
+	// Digits now arrive via Enhanced Input (WheelDigitActions → RootHUD → CommitSector).
+	SetIsFocusable(false);
 	SetVisibility(ESlateVisibility::Collapsed);
 }
 
@@ -181,7 +184,10 @@ void UPFBuildWheelWidget::Open()
 	AccumDelta = FVector2D::ZeroVector;
 	SetHoveredSector(INDEX_NONE);
 
-	SetVisibility(ESlateVisibility::Visible);
+	// HitTestInvisible + NO SetKeyboardFocus (2026-07-24): the focus steal flushed pressed keys
+	// and broke hold-Q entirely (see class comment). Nothing here needs focus or hit-testing —
+	// hover is mouse-delta math in NativeTick, digits ride Enhanced Input.
+	SetVisibility(ESlateVisibility::HitTestInvisible);
 
 	if (APlayerController* PC = GetOwningPlayer())
 	{
@@ -189,7 +195,6 @@ void UPFBuildWheelWidget::Open()
 		PC->SetIgnoreLookInput(true);
 		bLookInputIgnored = true;
 	}
-	SetKeyboardFocus();
 
 	if (CursorDot)
 	{
@@ -248,10 +253,7 @@ void UPFBuildWheelWidget::CloseInternal()
 		}
 		bLookInputIgnored = false;
 	}
-	if (FSlateApplication::IsInitialized())
-	{
-		FSlateApplication::Get().SetAllUserFocusToGameViewport();
-	}
+	// (No focus restore needed — the wheel never takes focus; see Open().)
 	// Let RootHUD clear BuildComponent's open flag (digit / Esc / phase paths).
 	OnWheelClosedEvent.Broadcast(false);
 }
@@ -303,28 +305,57 @@ void UPFBuildWheelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 	UpdateCenterReadout();
 }
 
-FReply UPFBuildWheelWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+int32 UPFBuildWheelWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId,
+	const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
-	if (bWheelOpen)
+	// Full pie-slice highlight under the labels (Tom 2026-07-24: "highlights like a pie chart,
+	// highlighting that option entirely"). A translucent wedge fan spanning the hovered sector's
+	// whole 30°, from just outside the dead zone to past the swatches.
+	if (bWheelOpen && HoveredSector != INDEX_NONE && FSlateApplication::IsInitialized())
 	{
-		// Digits 1-9,0 map first 10 sectors; remaining use mouse only.
-		static const FKey DigitKeys[10] =
+		const float SectorDeg = 360.f / static_cast<float>(NumSectors);
+		const float StartDeg = HoveredSector * SectorDeg - SectorDeg * 0.5f;
+		constexpr int32 Segs = 8;
+		constexpr float InnerR = DeadZonePx * 0.55f;
+		const float OuterR = SectorRadiusPx + 60.f;
+		const FVector2f Center(AllottedGeometry.GetLocalSize() * 0.5f);
+		const FSlateRenderTransform& RT = AllottedGeometry.ToPaintGeometry().GetAccumulatedRenderTransform();
+		const FColor Fill = FLinearColor(1.f, 0.55f, 0.10f, 0.30f).ToFColor(true);   // translucent accent glass
+
+		TArray<FSlateVertex> Verts;
+		TArray<SlateIndex> Indices;
+		Verts.Reserve((Segs + 1) * 2);
+		Indices.Reserve(Segs * 6);
+		for (int32 SegIdx = 0; SegIdx <= Segs; ++SegIdx)
 		{
-			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four,
-			EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight,
-			EKeys::Nine, EKeys::Zero
-		};
-		const FKey Key = InKeyEvent.GetKey();
-		for (int32 i = 0; i < 10 && i < NumSectors; ++i)
-		{
-			if (Key == DigitKeys[i])
-			{
-				CommitSector(i);
-				return FReply::Handled();
-			}
+			const float Deg = StartDeg + SectorDeg * static_cast<float>(SegIdx) / static_cast<float>(Segs);
+			const float Rad = FMath::DegreesToRadians(Deg);
+			const FVector2f Dir(FMath::Sin(Rad), -FMath::Cos(Rad));   // clockwise from top
+			Verts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+				RT, Center + Dir * InnerR, FVector2f::ZeroVector, Fill));
+			Verts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+				RT, Center + Dir * OuterR, FVector2f::ZeroVector, Fill));
 		}
+		for (int32 SegIdx = 0; SegIdx < Segs; ++SegIdx)
+		{
+			const SlateIndex I0 = static_cast<SlateIndex>(SegIdx * 2);         // inner this spoke
+			const SlateIndex O0 = static_cast<SlateIndex>(SegIdx * 2 + 1);     // outer this spoke
+			const SlateIndex I1 = static_cast<SlateIndex>(SegIdx * 2 + 2);     // inner next spoke
+			const SlateIndex O1 = static_cast<SlateIndex>(SegIdx * 2 + 3);     // outer next spoke
+			Indices.Append({ I0, O0, O1,  I0, O1, I1 });
+		}
+
+		const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush("WhiteBrush");
+		const FSlateResourceHandle Handle =
+			FSlateApplication::Get().GetRenderer()->GetResourceHandle(*WhiteBrush);
+		FSlateDrawElement::MakeCustomVerts(OutDrawElements, LayerId, Handle, Verts, Indices,
+			nullptr, 0, 0);
 	}
-	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+
+	// Children (swatches, labels, cursor dot) paint ABOVE the wedge.
+	return Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId + 1,
+		InWidgetStyle, bParentEnabled);
 }
 
 void UPFBuildWheelWidget::SetHoveredSector(int32 NewIndex)
@@ -361,7 +392,7 @@ void UPFBuildWheelWidget::UpdateCenterReadout()
 	}
 	if (HoveredSector == INDEX_NONE)
 	{
-		CenterReadout->SetText(FText::FromString(TEXT("Q again to cancel · aim a sector")));
+		CenterReadout->SetText(FText::FromString(TEXT("hold Q · aim a slice · release picks")));
 		CenterReadout->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	}
 	else
@@ -376,7 +407,7 @@ FText UPFBuildWheelWidget::SectorReadout(int32 SectorIndex) const
 	const EPFBuildTool Tool = SectorTool(SectorIndex);
 	if (Tool == EPFBuildTool::Delete)
 	{
-		return FText::FromString(TEXT("Delete — full refund · Q to pick"));
+		return FText::FromString(TEXT("Delete — full refund · release Q"));
 	}
 
 	int32 Remaining = -1;
@@ -391,7 +422,7 @@ FText UPFBuildWheelWidget::SectorReadout(int32 SectorIndex) const
 
 	if (Remaining >= 0)
 	{
-		return FText::FromString(FString::Printf(TEXT("%s — %d left · Q to pick"), ToolDisplayName(Tool), Remaining));
+		return FText::FromString(FString::Printf(TEXT("%s — %d left · release Q"), ToolDisplayName(Tool), Remaining));
 	}
-	return FText::FromString(FString::Printf(TEXT("%s · Q to pick"), ToolDisplayName(Tool)));
+	return FText::FromString(FString::Printf(TEXT("%s · release Q"), ToolDisplayName(Tool)));
 }

@@ -286,7 +286,8 @@ void UPFResultsWidget::RefreshScoreboard(const ACombatForgeGameState& GS)
 	TArray<const ACombatForgePlayerState*> Players;
 	for (APlayerState* PSBase : GS.PlayerArray)
 	{
-		if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
+		if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+			PS && !PS->IsPhantom())
 		{
 			Players.Add(PS);
 		}
@@ -364,7 +365,7 @@ void UPFResultsWidget::RefreshResult(const ACombatForgeGameState& GS)
 		for (APlayerState* PSBase : GS.PlayerArray)
 		{
 			const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-			if (!PS) { continue; }
+			if (!PS || PS->IsPhantom()) { continue; }
 			if (PS->TagCount > BestTags)
 			{
 				BestTags = PS->TagCount;
@@ -395,7 +396,8 @@ void UPFResultsWidget::RefreshResult(const ACombatForgeGameState& GS)
 			TArray<const ACombatForgePlayerState*> Ranked;
 			for (APlayerState* PSBase : GS.PlayerArray)
 			{
-				if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
+				if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+					PS && !PS->IsPhantom())
 				{
 					Ranked.Add(PS);
 				}
@@ -477,7 +479,7 @@ void UPFResultsWidget::RefreshMVP(const ACombatForgeGameState& GS)
 	for (APlayerState* PSBase : GS.PlayerArray)
 	{
 		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-		if (!PS)
+		if (!PS || PS->IsPhantom())
 		{
 			continue;
 		}
@@ -591,7 +593,8 @@ void UPFResultsWidget::RefreshArenaId(const ACombatForgeGameState& GS)
 			UGameplayStatics::GetActorOfClass(GetWorld(), APFBuildGrid::StaticClass()));
 		if (Grid)
 		{
-			CachedArenaId = FPFArenaSerialization::ComputeArenaId(Grid->GetPieces());
+			CachedArenaId = FPFArenaSerialization::ComputeArenaId(Grid->GetPieces(),
+				PFGetArenaMapDef(GS.ArenaMap).CellsY);   // P2-BD1: id is per-map now
 			CachedArenaIdMatch = GS.MatchId;
 		}
 	}

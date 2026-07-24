@@ -33,6 +33,10 @@ class COMBATFORGE_API UPFCombatVFX : public UActorComponent
 public:
 	UPFCombatVFX();
 
+	/** Tear down the world-spawned VfxHolder with the owning pawn — it is OWNERLESS in the level, so
+	 *  without this every destroyed pawn leaked a holder actor + its 24 pooled comps (issue #11 CB8). */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/** One-shot muzzle report at world location, aimed along ShotDir. */
 	void PlayMuzzleFX(const FVector& MuzzleLoc, const FVector& ShotDir, bool bFirstPerson);
 

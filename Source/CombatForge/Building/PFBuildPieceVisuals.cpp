@@ -9,6 +9,7 @@
 
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
+#include "Engine/Texture2D.h"   // force-resident mips on runtime-MID profile textures
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -251,6 +252,8 @@ namespace
 		S.Normal = SoftLoadFirstTexture(S.NormalPaths);
 		S.ORD = SoftLoadFirstTexture(S.OrdPaths);
 		S.bLoaded = (S.BaseColor != nullptr);
+		// (A force-mips-resident hack briefly lived here chasing the cone's packaged shiny-black — wrong
+		// theory. The real cause was VT textures through the triplanar's non-VT samplers; see GSurfRoof.)
 	}
 
 	void InitSurfaceProfiles()
@@ -306,18 +309,24 @@ namespace
 		GSurfRamp.OrdPaths[2] = CC0_R;
 		LoadSurface(GSurfRamp);
 
-		// Roof — painted metal (distinct from rusty ramp)
+		// Roof — painted metal (distinct from rusty ramp).
+		// PRIMARY = the NON-VT RoofPanel copies (Scripts-era make_roofpanel_nonvt.py duplicates): every
+		// Megascans source texture is VIRTUAL, and the triplanar master's samplers are regular — a VT
+		// texture through a non-VT sampler renders BLACK in a COOKED build (the editor forgives it, which
+		// is why the cone looked right in PIE and shiny-black in the package, alpha-14). All the surfaces
+		// that render correctly in packages go through the Megascans MIs (proper VT samplers); the CONE is
+		// the one triplanar consumer, so it gets non-VT copies. Originals stay VT for the MIs.
 		GSurfRoof.Label = TEXT("roof-metal");
 		GSurfRoof.WorldTileSize = 200.f;
 		GSurfRoof.AccentBoost = 1.8f;
 		GSurfRoof.AlbedoTint = FLinearColor(0.9f, 0.92f, 0.95f);
-		GSurfRoof.BaseColorPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_D.T_Ind_War_Roof_Painted_01_D");
+		GSurfRoof.BaseColorPaths[0] = TEXT("/Game/Textures/RoofPanel/T_RoofPanel_D.T_RoofPanel_D");
 		GSurfRoof.BaseColorPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_D.T_Ind_War_Sheet_Metal_Rusty_01_D");
 		GSurfRoof.BaseColorPaths[2] = CC0_BC;
-		GSurfRoof.NormalPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_N.T_Ind_War_Roof_Painted_01_N");
+		GSurfRoof.NormalPaths[0] = TEXT("/Game/Textures/RoofPanel/T_RoofPanel_N.T_RoofPanel_N");
 		GSurfRoof.NormalPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_N.T_Ind_War_Sheet_Metal_Rusty_01_N");
 		GSurfRoof.NormalPaths[2] = CC0_N;
-		GSurfRoof.OrdPaths[0] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Roof_Painted_01/T_Ind_War_Roof_Painted_01_ORDp.T_Ind_War_Roof_Painted_01_ORDp");
+		GSurfRoof.OrdPaths[0] = TEXT("/Game/Textures/RoofPanel/T_RoofPanel_ORDp.T_RoofPanel_ORDp");
 		GSurfRoof.OrdPaths[1] = TEXT("/Game/Scene_Warehouse/Assets/MS/Surfaces/Ind_War_Sheet_Metal_Rusty_01/T_Ind_War_Sheet_Metal_Rusty_01_ORDp.T_Ind_War_Sheet_Metal_Rusty_01_ORDp");
 		GSurfRoof.OrdPaths[2] = CC0_R;
 		LoadSurface(GSurfRoof);
@@ -444,7 +453,7 @@ const TCHAR* DisplayName(EPFPieceType Type)
 	case EPFPieceType::Ramp:           return TEXT("Ramp");
 	case EPFPieceType::Roof:           return TEXT("Ceiling");
 	case EPFPieceType::PropCan:        return TEXT("Barrel");
-	case EPFPieceType::PropDorito:     return TEXT("Crate");
+	case EPFPieceType::PropDorito:     return TEXT("Cone");
 	case EPFPieceType::PropSnake:      return TEXT("Boxes");
 	case EPFPieceType::WallWindow:     return TEXT("Window");
 	case EPFPieceType::WallDoor:       return TEXT("Door");
@@ -463,7 +472,7 @@ const TCHAR* DisplayName(EPFBuildTool Tool)
 	case EPFBuildTool::Ramp:           return TEXT("Ramp");
 	case EPFBuildTool::Roof:           return TEXT("Ceiling");
 	case EPFBuildTool::PropCan:        return TEXT("Barrel");
-	case EPFBuildTool::PropDorito:     return TEXT("Crate");
+	case EPFBuildTool::PropDorito:     return TEXT("Cone");
 	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
 	case EPFBuildTool::WallWindow:     return TEXT("Window");
 	case EPFBuildTool::WallDoor:       return TEXT("Door");
@@ -573,8 +582,8 @@ void EnsureLoaded()
 
 	// PropDorito → THE CONE. Restored 2026-07-20 at Tom's request: "the cone shape was working in early
 	// versions, my first big play test and everyone liked it." It is also what the design has always
-	// specified — docs/design/03-build-system.md: "Dorito | Wedge/tetra | r 120, h 200 | Cone
-	// (2.4, 2.4, 2.0) | Mid cover, angled edges for lean-style peeks." Swapping it to a warehouse crate
+	// specified — docs/design/03-build-system.md: "Dorito | Wedge/tetra | r 120, h 100 | Cone
+	// (2.4, 2.4, 1.0) | Mid cover, WALKABLE." Swapping it to a warehouse crate
 	// was an art-pass decision that quietly dropped a piece players liked, and the angled faces are the
 	// point: a box gives you square peeks, a cone gives you the lean-style ones the mode was built around.
 	//
@@ -582,9 +591,10 @@ void EnsureLoaded()
 	// piece is STRUCTURALLY IMMUNE to the whole "one player sees it, another doesn't" class of bug —
 	// there is no /Game asset to miss from a cook, no soft path to lose a race against, nothing a client
 	// can fail to have. Everything below (bWarehouse stays false) then routes it through
-	// BasicShapeTransform, which is where the authored 2.4/2.4/2.0 cone transform already lives in
+	// BasicShapeTransform, which is where the authored 2.4/2.4/1.0 cone transform already lives in
 	// FPFGridMath::PieceLocalTransform — the geometry was never removed, only the look.
-	GCrate.TargetSize = FVector(240.f, 240.f, 200.f);
+	// Height 200→100 on 2026-07-24: the cone must be walkable (players jump on and hold the top).
+	GCrate.TargetSize = FVector(240.f, 240.f, 100.f);
 	FitSlot(GCrate, GCone);
 
 	// PropSnake → cardboard box stack (long low cover).

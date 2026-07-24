@@ -475,9 +475,9 @@ void UPFSplatSubsystem::SpawnImpactPuff(const FVector& Loc, const FVector& Norma
 		PuffBudgetFrame = GFrameCounter;
 		PuffPlacementsThisFrame = 0;
 	}
-	if (PuffPlacementsThisFrame > MaxPuffPlacementsPerFrame)
+	if (PuffPlacementsThisFrame >= MaxPuffPlacementsPerFrame)
 	{
-		return;
+		return;   // >= so the cap is the cap (strict > admitted one extra placement per frame)
 	}
 
 	if (TrySpawnNiagaraImpact(Loc, Normal, Team))

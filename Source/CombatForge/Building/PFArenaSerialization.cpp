@@ -24,15 +24,18 @@ namespace
 		Buffer.Add(static_cast<uint8>((U >> 8) & 0xFF));
 	}
 
-	/** The canonical grid header — hashed ahead of the piece records (T27). */
-	void AppendGridHeader(TArray<uint8>& Buffer)
+	/** The canonical grid header — hashed ahead of the piece records (T27). P2-BD1: rows + the
+	 *  derived level count follow the ACTIVE map (same CellsY→Levels rule as BuildLayoutJson) so
+	 *  same-piece layouts on different maps stop colliding on one arenaId. */
+	void AppendGridHeader(TArray<uint8>& Buffer, int32 GridCellsY)
 	{
+		const int32 GridLevels = (GridCellsY >= PFGrid::MaxCellsY) ? PFGrid::YardLevels : PFGrid::Levels;
 		AppendInt32LE(Buffer, PFGrid::CellUU);
 		AppendInt32LE(Buffer, PFGrid::SubUU);
 		AppendInt32LE(Buffer, PFGrid::WallHeightUU);
 		AppendInt32LE(Buffer, PFGrid::CellsX);
-		AppendInt32LE(Buffer, PFGrid::CellsY);
-		AppendInt32LE(Buffer, PFGrid::Levels);
+		AppendInt32LE(Buffer, GridCellsY);
+		AppendInt32LE(Buffer, GridLevels);
 	}
 
 	/** Deterministic canonical order: (Type, X, Y, Z, Rot, Team) — never PieceId/Owner. */
@@ -69,14 +72,14 @@ namespace
 	}
 }
 
-FString FPFArenaSerialization::ComputeArenaId(const TArray<FPFBuildPieceRec>& Pieces)
+FString FPFArenaSerialization::ComputeArenaId(const TArray<FPFBuildPieceRec>& Pieces, int32 GridCellsY)
 {
 	TArray<FPFBuildPieceRec> Sorted = Pieces;
 	SortCanonical(Sorted);
 
 	TArray<uint8> Buffer;
 	Buffer.Reserve(24 + Sorted.Num() * 9);
-	AppendGridHeader(Buffer);
+	AppendGridHeader(Buffer, GridCellsY);
 	for (const FPFBuildPieceRec& Rec : Sorted)
 	{
 		Buffer.Add(static_cast<uint8>(Rec.Type));
@@ -89,7 +92,8 @@ FString FPFArenaSerialization::ComputeArenaId(const TArray<FPFBuildPieceRec>& Pi
 	return Sha1HexLower(Buffer);
 }
 
-FString FPFArenaSerialization::ComputeHalfHash(const TArray<FPFBuildPieceRec>& Pieces, uint8 Team)
+FString FPFArenaSerialization::ComputeHalfHash(const TArray<FPFBuildPieceRec>& Pieces, uint8 Team,
+	int32 GridCellsY)
 {
 	TArray<FPFBuildPieceRec> Sorted;
 	Sorted.Reserve(Pieces.Num());
@@ -104,7 +108,7 @@ FString FPFArenaSerialization::ComputeHalfHash(const TArray<FPFBuildPieceRec>& P
 
 	TArray<uint8> Buffer;
 	Buffer.Reserve(24 + Sorted.Num() * 8);
-	AppendGridHeader(Buffer);
+	AppendGridHeader(Buffer, GridCellsY);
 	for (const FPFBuildPieceRec& Rec : Sorted)
 	{
 		// Team excluded (T27): mirrored halves hash identically regardless of side.
@@ -146,10 +150,10 @@ TSharedRef<FJsonObject> FPFArenaSerialization::BuildLayoutJson(const TArray<FPFB
 	Grid->SetNumberField(TEXT("levels"), GridLevels);
 	Root->SetObjectField(TEXT("grid"), Grid);
 
-	const FString ArenaId = ComputeArenaId(Pieces);
+	const FString ArenaId = ComputeArenaId(Pieces, GridCellsY);
 	Root->SetStringField(TEXT("arenaId"), ArenaId);
-	Root->SetStringField(TEXT("halfHashA"), ComputeHalfHash(Pieces, 0));
-	Root->SetStringField(TEXT("halfHashB"), ComputeHalfHash(Pieces, 1));
+	Root->SetStringField(TEXT("halfHashA"), ComputeHalfHash(Pieces, 0, GridCellsY));
+	Root->SetStringField(TEXT("halfHashB"), ComputeHalfHash(Pieces, 1, GridCellsY));
 
 	// Remix lineage: record the source map ONLY when this is a genuine fork (the layout actually changed).
 	// Equal ids ⇒ nothing was remixed (or a Play-Only replay) ⇒ no parent; empty ⇒ Creative/from scratch.

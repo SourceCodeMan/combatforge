@@ -5,6 +5,10 @@ d   = unreal.load_asset(TEX + "/T_Rifle_D")
 n   = unreal.load_asset(TEX + "/T_Rifle_Combined_N")
 orm = unreal.load_asset(TEX + "/T_Rifle_AORM")
 print("PF_RIFLE tex loaded: d=%s n=%s orm=%s" % (bool(d), bool(n), bool(orm)))
+# Validate BEFORE the destructive delete below — a missing texture used to nuke the working
+# material and then fail, leaving nothing (issue #20 S4).
+if not (d and n and orm):
+    raise SystemExit("[M_PF_Rifle] missing texture(s) - aborting BEFORE deleting the existing material")
 
 tools = unreal.AssetToolsHelpers.get_asset_tools()
 mel = unreal.MaterialEditingLibrary

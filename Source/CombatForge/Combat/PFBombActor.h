@@ -52,10 +52,13 @@ public:
 	static constexpr float FuseSeconds       = 15.f;
 	static constexpr float DefuseHoldSeconds = 8.f;
 	static constexpr float DefuseRangeUU     = 260.f;   // hold-F reach (slightly over barrel interact range)
-	/** Radial BB count on detonation — same pipeline as the frag grenade (90), dialed way up for a breach charge. */
-	static constexpr int32 FragBBCount       = 1000;
-	/** Spawn this many authoritative BBs per frame (spreads the cost — 1000 in one frame hitch the host). */
-	static constexpr int32 BurstBatchSize    = 80;
+	/** Radial BB count on detonation — same pipeline as the frag grenade (90), scaled up for a breach
+	 *  charge. P2-CB4: was 1000, which cost ~13 frames of 80 SpawnActor each on the listen host for a
+	 *  fantasy ("breach + paint everyone nearby") that ApplyProximityPaint already delivers up close.
+	 *  120 keeps a real LOS spray beyond the paint radius at ~1/8 the actor cost. */
+	static constexpr int32 FragBBCount       = 120;
+	/** Spawn this many authoritative BBs per frame (spreads the cost so detonation never hitches). */
+	static constexpr int32 BurstBatchSize    = 40;
 	/** Seconds between batches (~1 frame at 60 Hz). */
 	static constexpr float BurstBatchInterval = 0.016f;
 	/** Distance past the piece center along the face normal for each side's spawn origin (uu). Puts

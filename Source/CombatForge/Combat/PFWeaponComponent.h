@@ -65,8 +65,19 @@ public:
 	UFUNCTION(NetMulticast, Unreliable)  void MulticastImpactSplat(FVector_NetQuantize100 Loc,
 	                                          FVector_NetQuantizeNormal Normal, uint8 Team);
 		// all clients → UPFSplatSubsystem::SpawnConfirmedSplat (owning client reconciles pending @75 uu)
-	UFUNCTION(Client, Reliable)          void ClientHitConfirm(uint32 ShotIndex, bool bElimHit);
-		// ONLY source of hitmarkers (B3). Broadcasts OnHitConfirmedEvent.
+	UFUNCTION(Client, Unreliable)        void ClientHitConfirm(uint32 ShotIndex, bool bElimHit);
+		// ONLY source of hitmarkers (B3). Broadcasts OnHitConfirmedEvent. Unreliable since P2-CB3:
+		// a lost hitmarker is cosmetic noise; a reliable-channel flood from a frag/bomb burst isn't.
+
+	/** P2-CB3: server-side entry every authoritative ball routes through — coalesces the burst
+	 *  (shotgun volley / frag cloud / bomb spray) to ≤1 hitmarker per 50 ms. Elim confirms always
+	 *  pass. Call this, not ClientHitConfirm, from impact resolves. */
+	void SendHitConfirmCoalesced(uint32 ShotIndex, bool bElimHit);
+
+	/** Abort a reload mid-flight without filling the hopper. Public since P2-CB5: weapon swap
+	 *  must kill the outgoing gun's reload or FinishReload fills the INCOMING gun's mag (and the
+	 *  leftover bReloading fire-gates it). Also the sprint/slide cancel. */
+	void CancelReload();
 
 	// ---- Replicated (owner-only correction of predicted values) ----
 	/** Balls in the current magazine (0..HopperCapacity). */
@@ -198,7 +209,6 @@ private:
 	// ---- Reload internals (run on owner-predicted client AND on authority) ----
 	void BeginReload(double Now);
 	void FinishReload();
-	void CancelReload();                // sprint/slide: restores nothing — hopper only fills on finish
 	void UpdateReload(double Now);
 
 	// ---- Bloom (continuous value + free-shot ramp, clocked by the SHOOTER's stamp — FPFShotPacket.ClientTime) ----
@@ -238,6 +248,8 @@ private:
 	float  RecoilClimbPitch = 0.f;
 	float  RecoilClimbYaw = 0.f;
 	double LastClimbShotTime = -1000.0;
+	/** Server-side hitmarker coalescing window (P2-CB3, see SendHitConfirmCoalesced). */
+	double LastHitConfirmSentAt = -1000.0;
 
 	// Spin-up (minigun) — client gate; server enforces the same def-driven delay via packet spacing + this gate on host.
 	double SpinReadyTime = 0.0;
@@ -257,4 +269,7 @@ private:
 	// inter-shot gap can't exceed the server-observed gap (a forged big gap would be a free accuracy reset).
 	float  LastAcceptedClientTime = -1000.f;
 	double LastServerAcceptTime = -1000.0;
+	// Consecutive accepted shots < 0.3 s apart (client clock) — drives the server-side DMR re-burst gate
+	// (issue #11 CB2). Reset to 1 on any real pause.
+	uint8  ServerBurstRun = 0;
 };

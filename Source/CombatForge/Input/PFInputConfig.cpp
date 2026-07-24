@@ -99,8 +99,13 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	IA_EquipFloor  = MakeAction(Outer, TEXT("IA_EquipFloor"),  EInputActionValueType::Boolean);
 	IA_EquipRamp   = MakeAction(Outer, TEXT("IA_EquipRamp"),   EInputActionValueType::Boolean);
 	IA_EquipRoof   = MakeAction(Outer, TEXT("IA_EquipRoof"),   EInputActionValueType::Boolean);
-	IA_QuickEquip  = MakeAction(Outer, TEXT("IA_QuickEquip"),  EInputActionValueType::Boolean);
 	IA_BuildWheel  = MakeAction(Outer, TEXT("IA_BuildWheel"),  EInputActionValueType::Boolean);
+	WheelDigitActions.Reset();
+	for (int32 Digit = 0; Digit < 10; ++Digit)
+	{
+		WheelDigitActions.Add(MakeAction(Outer,
+			*FString::Printf(TEXT("IA_WheelDigit%d"), Digit), EInputActionValueType::Boolean));
+	}
 
 	// ---- Contexts ----
 	IMC_Common = NewObject<UInputMappingContext>(Outer, TEXT("IMC_Common"));
@@ -136,6 +141,9 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 		{
 			GConfig->GetFloat(TEXT("CombatForge"), TEXT("PFSensitivity"), Sensitivity, FPFPaths::UserPrefsIni());
 		}
+		// A hand-edited/corrupt INI value must not produce an unusable (0 or absurd) look scale — same
+		// clamp SetLookSensitivity applies (issue #19 I2).
+		Sensitivity = FMath::Clamp(Sensitivity, 0.2f, 6.f);
 		const float Scale = BaseDegreesPerMouseUnit * Sensitivity;
 
 		FEnhancedActionKeyMapping& Look = IMC_Common->MapKey(IA_Look, EKeys::Mouse2D);
@@ -194,13 +202,25 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	// Q tap = toggle build wheel (open on first press, commit/cancel on second). No hold threshold —
 	// hold-to-open was unreliable and hid the wheel labels until 0.18s had elapsed.
 	IMC_Build->MapKey(IA_BuildWheel, EKeys::Q);
+	{
+		// Wheel digit hotkeys (sector i = digit i+1, 0 = sector 10). Mapped permanently in
+		// IMC_Build; the component no-ops them unless the wheel is actually open.
+		static const FKey DigitKeys[10] = {
+			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five,
+			EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine, EKeys::Zero
+		};
+		for (int32 Digit = 0; Digit < 10 && Digit < WheelDigitActions.Num(); ++Digit)
+		{
+			IMC_Build->MapKey(WheelDigitActions[Digit], DigitKeys[Digit]);
+		}
+	}
 
 	// Rebindable-action registry, then apply any saved key overrides. Must run INSIDE Build() (which is
 	// idempotent-guarded) after the default MapKey calls, not via a re-run.
 	BuildRebindRegistry();
 	ApplySavedKeyOverrides();
 
-	UE_LOG(CombatForgeLog, Log, TEXT("UPFInputConfig built: 25 actions, 3 mapping contexts"));
+	UE_LOG(CombatForgeLog, Log, TEXT("UPFInputConfig built (3 mapping contexts)"));   // no hardcoded action count — it drifted (issue #19 I4)
 }
 
 // ---------------------------------------------------------------- key rebinding
@@ -289,6 +309,40 @@ bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
 	if (E == nullptr || E->Action == nullptr || E->Context == nullptr || !NewKey.IsValid())
 	{
 		return false;
+	}
+	// Conflict check (issue #19 I1): without it a duplicate bind silently made two actions fire on one
+	// key (or stole a FIXED key like Escape) with no feedback — the classic "my controls broke" report.
+	// P2-I1: the reserved set now covers EVERY fixed (non-rebindable) mapping — fire/ADS, WASD,
+	// crouch, the build hotkeys, the wheel — not just the old menu four; landing a rebind on any
+	// of them double-fired two actions on one key. P2-I2: a key that is THIS entry's shipped
+	// DEFAULT is always legal — the shipped state itself pairs F (Ready + Interact) and Q (wheel
+	// + smoke) across contexts, and rejecting defaults locked players out of restoring them.
+	// A key held by ANOTHER rebindable entry is rejected too (predictable beats auto-swap).
+	static const FKey FixedKeys[] = {
+		EKeys::Escape, EKeys::Tab, EKeys::Enter, EKeys::F,                                // menu/ready
+		EKeys::LeftMouseButton, EKeys::RightMouseButton, EKeys::MiddleMouseButton,        // fire/ADS/drag
+		EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::LeftControl, EKeys::C,             // move/crouch
+		EKeys::F1, EKeys::F2, EKeys::F3, EKeys::F4, EKeys::F5, EKeys::X, EKeys::Q         // build kit
+	};
+	if (NewKey != E->DefaultKey)
+	{
+		for (const FKey& R : FixedKeys)
+		{
+			if (NewKey == R && E->CurrentKey != R)
+			{
+				UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is reserved"), *NewKey.GetDisplayName().ToString());
+				return false;
+			}
+		}
+	}
+	for (const FRebindEntry& Other : RebindEntries)
+	{
+		if (Other.Id != E->Id && Other.CurrentKey == NewKey)
+		{
+			UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is already bound to %s"),
+				*NewKey.GetDisplayName().ToString(), *Other.Label);
+			return false;
+		}
 	}
 	E->Context->UnmapKey(E->Action, E->CurrentKey);
 	E->Context->MapKey(E->Action, NewKey);

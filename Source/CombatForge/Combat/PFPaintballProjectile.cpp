@@ -279,7 +279,13 @@ void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 		// resolved in ApplyPaintHit; Damage is the shooter's per-weapon HitValue (server resolve).
 		PaintHit.HitBone = Hit.BoneName;
 		PaintHit.ServerTime = static_cast<float>(GetWorld()->GetTimeSeconds());
-		if (Weapon != nullptr)
+		if (UtilityDamageOverride > 0)
+		{
+			// P2-CB1/CB2: bomb/frag balls carry their own fixed damage — the planter's equipped
+			// weapon rides along only as the hitmarker/splat channel.
+			PaintHit.Damage = UtilityDamageOverride;
+		}
+		else if (Weapon != nullptr)
 		{
 			PaintHit.Damage = Weapon->HitValue;
 		}
@@ -290,7 +296,7 @@ void APFPaintballProjectile::ResolveAuthoritativeImpact(const FHitResult& Hit)
 		// recycled) still apply damage above so nearby players get painted.
 		if (Weapon != nullptr)
 		{
-			Weapon->ClientHitConfirm(ShotIndexStored, VictimHealth->bEliminated);
+			Weapon->SendHitConfirmCoalesced(ShotIndexStored, VictimHealth->bEliminated);
 			Weapon->MulticastImpactSplat(ImpactPoint, ImpactNormal, TeamId);
 		}
 		return;
