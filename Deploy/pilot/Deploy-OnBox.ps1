@@ -15,7 +15,8 @@ param(
     [string]$Tunnel = "",                                   # full URL or just the random words
     [string]$Root   = "C:\Users\Administrator\Desktop",     # folder that CONTAINS the game folder
     [string]$GameFolderName = "Windows",                    # the extracted build folder
-    [string]$ZipName = ""                                   # blank = auto-discover from the tunnel
+    [string]$ZipName = "",                                  # blank = auto-discover from the tunnel
+    [int]$Instances = 1                                     # >1 = launch a fleet (see Start-Fleet-OnBox.ps1)
 )
 
 $ErrorActionPreference = "Stop"
@@ -132,7 +133,7 @@ Say "Extracting..." Cyan
 if ($LASTEXITCODE -ne 0) { throw "Extract failed (tar exit $LASTEXITCODE)." }
 Say "  Extracted." Green
 
-# ---- 7. Refresh the launcher ----
+# ---- 7. Refresh the launcher(s) ----
 Say ""
 Say "Updating the launcher script..." Gray
 & curl.exe -L --fail -s -o (Join-Path $GameDir "Start-Server-OnBox.ps1") "$Tunnel/Start-Server-OnBox.ps1"
@@ -140,6 +141,14 @@ if ($LASTEXITCODE -ne 0) {
     Say "  WARNING: launcher download failed; keeping the existing one." Yellow
 } else {
     Say "  Launcher updated." Green
+}
+# Fleet launcher rides along when the serve folder has it (optional - single-server boxes skip it).
+& curl.exe -L --fail -s -o (Join-Path $GameDir "Start-Fleet-OnBox.ps1") "$Tunnel/Start-Fleet-OnBox.ps1"
+if ($LASTEXITCODE -ne 0) {
+    Remove-Item (Join-Path $GameDir "Start-Fleet-OnBox.ps1") -Force -ErrorAction SilentlyContinue
+    Say "  (No fleet launcher in the serve folder - single-instance only.)" DarkGray
+} else {
+    Say "  Fleet launcher updated." Green
 }
 
 # ---- 8. Verify ----
@@ -167,4 +176,10 @@ Say "Watch for:  Backend: fleet registered (port 7777)" Yellow
 Say "You can close the python and cloudflared windows on the PC now." DarkGray
 Say ""
 Set-Location $GameDir
-& (Join-Path $GameDir "Start-Server-OnBox.ps1")
+$FleetScript = Join-Path $GameDir "Start-Fleet-OnBox.ps1"
+if ($Instances -gt 1 -and (Test-Path $FleetScript)) {
+    & $FleetScript -Instances $Instances
+} else {
+    if ($Instances -gt 1) { Say "  Fleet launcher missing - starting a single instance." Yellow }
+    & (Join-Path $GameDir "Start-Server-OnBox.ps1")
+}

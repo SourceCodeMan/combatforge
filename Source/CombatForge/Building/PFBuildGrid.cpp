@@ -536,24 +536,35 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		}
 	}
 
-	// --- Height cap (walls: level 0..Levels-2 only — a top-base wall crowns at HeightCap) ---
-	// Strict: top of piece must stay under HeightCap so stacked floors can't form a deck you
-	// jump over the perimeter from. (Perimeter walls + escape lid also block escape.)
-	// Map-specific: Warehouse 4/1200 (3 wall stories under the roof), Yard 7/2100 (6 wall stories).
+	// --- Height cap / top-story rules (reworked 2026-07-24, Tom: "on the third level I should be
+	// able to deploy a wall or window or ceiling tile" — but never a ramp) ---
+	// Per piece family on the TOP base (Warehouse level 3 @ Z900, Yard level 6 @ Z1800):
+	//   * wall-like: ALLOWED — crowns flush at HeightCap. Safe: the escape lid sits cap+150 and
+	//     shell dressing starts ≥ cap+200, so nothing solid is entered ("build volume stays clean").
+	//   * ramps: DENIED one story earlier — a ramp must ascend to a base that exists above it;
+	//     a top-base ramp is a launch surface toward the lid and leads nowhere.
+	//   * floor/roof/trap plates: allowed one level HIGHER than the bases (Level == MapLevels) so a
+	//     lid can cap a top-story room flush at HeightCap.
+	// The cap check itself is now inclusive (deny only when a piece would EXCEED the cap): the
+	// old "-slack" form was the real reason nothing could be built on the third level — every
+	// top-story piece crowns exactly at the cap.
 	const int32 MapLevels = ActiveLevels();
 	const int32 MapHeightCap = ActiveHeightCapUU();
 	const int32 Level = Q.Z / 3;
-	if (PFIsWallLike(Q.Type) && Level > MapLevels - 2)
+	if (Q.Type == EPFPieceType::Ramp && Level > MapLevels - 2)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	if (!bProp && Level > MapLevels - 1)
+	if (PFIsWallLike(Q.Type) && Level > MapLevels - 1)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	// Leave a small air gap under the escape lid / wall rim (no piece crowns at the cap flat).
+	if (!bProp && Level > MapLevels)
+	{
+		return EPFDenyReason::HeightCap;
+	}
 	constexpr float HeightCapSlackUU = 8.f;
-	if (Bounds.Max.Z > static_cast<float>(MapHeightCap) - HeightCapSlackUU)
+	if (Bounds.Max.Z > static_cast<float>(MapHeightCap) + HeightCapSlackUU)
 	{
 		return EPFDenyReason::HeightCap;
 	}
@@ -695,6 +706,13 @@ EPFDenyReason APFBuildGrid::TryPlacePiece(ACombatForgePlayerState* Placer, const
 		return EPFDenyReason::RateLimited;
 	}
 
+	// Precise deny for the per-type caps (trap floor / one-way door: 1 per player per match) —
+	// ServerTrySpendBudget re-checks as a backstop, but from there it's indistinguishable from
+	// an empty pool and would read "OUT OF BUDGET" on the HUD.
+	if (Placer->ServerIsAtPieceLimit(ServerQ.Type))
+	{
+		return EPFDenyReason::PieceLimit;
+	}
 	if (!Placer->ServerTrySpendBudget(ServerQ.Type))
 	{
 		return EPFDenyReason::OutOfBudget;
@@ -1047,9 +1065,11 @@ void APFBuildGrid::SpawnRampUnderfill(const FPFBuildPieceRec& Rec)
 	}
 	DestroyRampUnderfill(Rec.PieceId);
 
-	// Crouch capsule = 2 * 58 = 116uu. Leave generous air under the plank so crouch-crawl isn't sticky.
-	// Standing ≈ 176uu — still taller than this tunnel, so solid steps block standing under-ramp crawls.
-	constexpr float CrouchTunnelUU = 168.f;   // 116 capsule + ~52uu slack (steps, slope, input forgiveness)
+	// Crouch capsule = 2 * 48 = 96uu (was 58/116 — lowered 2026-07-24 precisely because this
+	// tunnel minus the 25uu plank thickness pinched a 116 capsule out of under-ramp crawls and
+	// ramp-base bomb defuses). Standing ≈ 176uu — still taller than this tunnel, so solid steps
+	// keep blocking standing under-ramp crawls.
+	constexpr float CrouchTunnelUU = 168.f;   // 96 capsule + ~72uu slack (steps, slope, input forgiveness)
 	constexpr float CellRunUU = static_cast<float>(PFGrid::CellUU);       // 400
 	constexpr float RiseUU = static_cast<float>(PFGrid::WallHeightUU);    // 300
 	constexpr int32 Steps = 8;

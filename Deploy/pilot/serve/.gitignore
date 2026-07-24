@@ -8,3 +8,4 @@ __pycache__/
 # folder is exactly what deployed alpha-8 over alpha-10 on 2026-07-18. One source of truth.
 Deploy-OnBox.ps1
 Start-Server-OnBox.ps1
+Start-Fleet-OnBox.ps1

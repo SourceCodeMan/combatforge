@@ -46,6 +46,10 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_Score)      uint8  RoundWinsToTake = 4;        // resolved first-to-N (3 at ≤2v2); HUD pip count re-renders via OnRep_Score (issue #14 U1)
 	UPROPERTY(Replicated)                       EPFBuildMode BuildMode = EPFBuildMode::Creative;  // build style
 	UPROPERTY(Replicated)                       EPFMatchType MatchType = EPFMatchType::Skirmish; // objective (Skirmish = respawn default)
+	/** Forced 3-match rotation position (EPFCycleStage values). During Lobby/Results it already
+	 *  advertises the UPCOMING match's stage; during Build/Combat/Vote, the one being played.
+	 *  Meaningless while BuildMode == PlayOnly or MatchType == FreeForAll (wheel inactive). */
+	UPROPERTY(Replicated)                       uint8 CycleStage = 0;
 	/** Host-picked arena map. Geometry itself travels as the shell's ACTOR CLASS (GameMode respawns
 	 *  it on change) — this enum exists for UI seeding/labels only. */
 	UPROPERTY(ReplicatedUsing=OnRep_ArenaMap)   EPFArenaMap ArenaMap = EPFArenaMap::Warehouse;
@@ -95,6 +99,7 @@ public:
 	void ServerSetRoundWinsToTake(uint8 NewWins);            // resolved at Lobby→Build from the format
 	void ServerSetBuildMode(EPFBuildMode NewMode);           // Lobby only (GameMode gates)
 	void ServerSetMatchType(EPFMatchType NewType);           // Lobby only (GameMode gates)
+	void ServerSetCycleStage(uint8 NewStage);                // GameMode-driven (cycle wheel)
 	void ServerSetArenaMap(EPFArenaMap NewMap);              // Lobby only (GameMode gates + respawns shell)
 	void ServerSetSelectedCommunityMap(const FString& FileName, const FString& Label);
 	void ServerSetCommunityMapCatalog(const TArray<FPFCommunityMapInfo>& Maps); // host disk → all clients

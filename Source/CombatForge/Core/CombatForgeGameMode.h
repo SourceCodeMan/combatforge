@@ -226,6 +226,10 @@ protected:
 	int32 CountHumans(const ACombatForgePlayerState* ExcludePS = nullptr) const;
 	/** Periodic host log line for crash triage (who is connected, phase, scores). */
 	void LogCrashBreadcrumb();
+	/** 30 s sweep: a match with zero humans returns to Lobby. Logout already handles the graceful
+	 *  case; this catches teardown orderings where the last human never reached Logout (client
+	 *  crash / connection drop), which left pilot boxes wedged mid-match with only the phantom. */
+	void SweepEmptyServer();
 	uint8 FindFreeRosterIndex() const;
 	void ComputeEffectiveScaling();
 	FPFMatchResult MakeMatchResult(uint8 MatchWinner) const;
@@ -266,6 +270,7 @@ protected:
 	FTimerHandle ObjectiveScoreTimerHandle;  // Dom/HP periodic scoring
 	FTimerHandle HardpointRotateTimerHandle; // Hardpoint slot rotation
 	FTimerHandle CrashBreadcrumbTimer;       // 30 s host roster dump for crash triage
+	FTimerHandle EmptyServerSweepTimer;      // 30 s no-humans → back to Lobby (SweepEmptyServer)
 
 	UPROPERTY() TArray<TObjectPtr<class APFAmmoBarrel>> AmmoBarrels;
 	UPROPERTY() TArray<TObjectPtr<class APFBombActor>> ActiveBombs;   // live demolition bombs (combat only)
@@ -291,6 +296,18 @@ protected:
 	FPFMatchResult PendingMatchResult;
 	/** Improvement/PlayOnly base map id for BeginMatchRecord parent lineage (empty = from-scratch). */
 	FString PendingParentArenaId;
+
+	// ---- Forced 3-match cycle: Creative → Remix → Remix Swap (Tom 2026-07-24) ----
+	/** Stage the NEXT Lobby→Build will run. Mirrored to GS->CycleStage at Build entry and again
+	 *  when it advances at Results (so Lobby + the server browser advertise the upcoming match). */
+	uint8 NextCycleStage = 0;
+	/** The arena as PLAYED last match (snapshot at Build→Combat freeze, pre battle damage) —
+	 *  the base the Remix / Remix Swap stages inject. */
+	TArray<FPFBuildPieceRec> LastMatchPieces;
+	/** Wheel runs for every mode with a build phase; PlayOnly and FreeForAll sit outside it. */
+	bool IsCycleActive() const;
+	/** Rewind the wheel to its start for the current BuildMode (host abort / empty server). */
+	void ResetMatchCycle();
 
 	float MatchStartServerTime = 0.f;        // stamped at Lobby→Build (matchDurationSec source)
 

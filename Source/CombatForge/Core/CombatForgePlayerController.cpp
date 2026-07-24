@@ -304,6 +304,11 @@ void ACombatForgePlayerController::ApplyInputForPhase()
 		break;
 	case EPFMatchPhase::Vote:
 	case EPFMatchPhase::Results:
+		// Keep IMC_Common mapped: Tab (scoreboard) and Esc (options) live there, and players
+		// asked to check scores / open the menu while the vote runs. Movement stays dead —
+		// move/fire actions are in IMC_Combat/IMC_Build, which stay unmapped here, plus the
+		// explicit move lock below.
+		bWantCommon = true;
 		bUIOnly = true;
 		bLocalMoveLock = true;
 		break;
@@ -329,7 +334,13 @@ void ACombatForgePlayerController::ApplyInputForPhase()
 	// MODE/TYPE/FORMAT without knowing Tab; combat stays GameOnly for look capture.
 	if (bUIOnly)
 	{
-		SetInputMode(FInputModeUIOnly());
+		// GameAndUI, not UIOnly: UIOnly routed every key to Slate, which ate Tab/Esc during the
+		// vote (scoreboard + options were dead until the timer ran out). The vote panel still
+		// gets the cursor + clicks; game-side actions are limited to what IMC_Common maps.
+		FInputModeGameAndUI Mode;
+		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(Mode);
 		SetShowMouseCursor(true);
 	}
 	else if (GS->Phase == EPFMatchPhase::Lobby)

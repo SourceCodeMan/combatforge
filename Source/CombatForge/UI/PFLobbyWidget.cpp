@@ -9,6 +9,8 @@
 #include "Core/PFUserPrefs.h"
 #include "Player/CombatForgeCharacter.h"
 
+#include "UI/PFCycleBar.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -153,6 +155,16 @@ void UPFLobbyWidget::BuildTree()
 		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
 		CSlot->SetAlignment(FVector2D(0.5f, 0.f));
 		CSlot->SetPosition(FVector2D(0.f, 96.f));
+		CSlot->SetAutoSize(true);
+	}
+
+	// Match-rotation strip: which stage of Creative → Remix → Remix Swap the NEXT match runs.
+	CycleBarRoot = PFCycleBar::Build(WidgetTree, CycleSegs, CycleTexts);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(CycleBarRoot))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
+		CSlot->SetAlignment(FVector2D(0.5f, 0.f));
+		CSlot->SetPosition(FVector2D(0.f, 132.f));
 		CSlot->SetAutoSize(true);
 	}
 
@@ -579,6 +591,9 @@ void UPFLobbyWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		PollAccum = 0.f;
 		RefreshRoster();
 		RefreshConfig();
+		PFCycleBar::Update(
+			GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr,
+			CycleBarRoot, CycleSegs, CycleTexts);
 
 		// Footer hints follow a migrating match leader (dedicated: crown can arrive/move mid-lobby).
 		const bool bHostNow = IsLocalHost();
@@ -661,7 +676,7 @@ void UPFLobbyWidget::RefreshRoster()
 	for (APlayerState* PS : GS->PlayerArray)
 	{
 		ACombatForgePlayerState* PFPS = Cast<ACombatForgePlayerState>(PS);
-		if (!PFPS)
+		if (!PFPS || PFPS->IsPhantom())   // the pilot box's phantom is not a player — no row
 		{
 			continue;
 		}

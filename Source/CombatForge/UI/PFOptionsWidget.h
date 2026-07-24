@@ -7,6 +7,7 @@
 #include "InputCoreTypes.h"   // FKey
 #include "PFOptionsWidget.generated.h"
 
+class UBorder;
 class UButton;
 class UCheckBox;
 class UImage;
@@ -37,6 +38,7 @@ protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;   // embedded instance saves working settings on teardown
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;   // cycle-bar poll
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 	// One click handler per rebind row (UButton::OnClicked takes no payload). Each begins key capture.
@@ -157,6 +159,11 @@ private:
 	UPROPERTY() TObjectPtr<USlider> FovSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> FovValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
+	// Match-rotation strip (PFCycleBar) under the title; polls GameState in NativeTick.
+	UPROPERTY() TObjectPtr<UWidget> CycleBarRoot;
+	UPROPERTY() TArray<TObjectPtr<UBorder>> CycleSegs;
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> CycleTexts;
+	float CycleBarPollAccum = 0.f;
 	UPROPERTY() TObjectPtr<UTextBlock> HintText;
 
 	int32  WorkingQuality = 2;

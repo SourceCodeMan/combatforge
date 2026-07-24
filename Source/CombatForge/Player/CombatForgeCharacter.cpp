@@ -83,6 +83,15 @@ static TAutoConsoleVariable<int32> CVarFPArmsVerify(
 	TEXT("pf.FPArmsVerify"), 0,
 	TEXT("1 = automated FP-arms verification: equip lmg_01, log seating numbers, screenshot, quit."));
 
+// Automatic ADS look-sensitivity reduction (Tom 2026-07-24, CoD-style): while zoomed, mouse
+// input scales toward the focal-length ratio tan(ADSFOV/2)/tan(BaseFOV/2), so a flick covers
+// roughly the same SCREEN distance zoomed as at the hip. 1 = full focal scaling (CoD
+// "Relative"), 0 = no reduction. 0.75 lands "reduced a little" on irons (~0.57x at 58° ADS on
+// a 105° base) and heavily on sniper glass (~0.34x at 18°). Multiplies the global sensitivity.
+static TAutoConsoleVariable<float> CVarADSSensScale(
+	TEXT("pf.ADSSensScale"), 0.75f,
+	TEXT("ADS sensitivity reduction strength: 0 = off, 1 = full focal-length (CoD Relative) scaling."));
+
 // Dev pose-tuning drag: hold MIDDLE MOUSE.
 //   plain MMB = translate  |  Shift = depth  |  Ctrl = pitch/yaw the MUZZLE  |  Alt = roll
 // Off by default; hip pose vs ADS pose depends on whether you're aiming.
@@ -833,9 +842,14 @@ void ACombatForgeCharacter::DumpFirstPersonArmsVerify() const
 	}
 
 	// Both hand targets, measured where they actually landed. These are the pass/fail numbers: each hand
-	// should sit within a palm-width (~5uu) of its anchor.
+	// should sit within a palm-width (~5uu) of its anchor. Measure against the SOLVED anchors when the
+	// seating ran (they include the reach clamp — the point the hand is actually asked to hold); the raw
+	// recompute is the fallback for a dump before any seat.
 	FVector GripVM, ForeVM;
-	if (ComputeFPGunHandAnchors(GripVM, ForeVM) && ViewModelRoot != nullptr)
+	const bool bHaveAnchors = bFPArmsSolvedValid
+		? (GripVM = FPArmsSolvedGripVM, ForeVM = FPArmsSolvedForeVM, true)
+		: ComputeFPGunHandAnchors(GripVM, ForeVM);
+	if (bHaveAnchors && ViewModelRoot != nullptr)
 	{
 		const FTransform VMXf = ViewModelRoot->GetComponentTransform();
 		const FVector GripW = VMXf.TransformPosition(GripVM);
@@ -1183,8 +1197,21 @@ void ACombatForgeCharacter::OnLookInput(const FInputActionValue& Value)
 		return;
 	}
 	const FVector2D Axis = Value.Get<FVector2D>();
-	AddControllerYawInput(Axis.X);
-	AddControllerPitchInput(Axis.Y); // Y already negated + scaled by the mapping modifiers
+	// Automatic ADS slowdown (pf.ADSSensScale): blend toward the focal-length ratio as the zoom
+	// eases in, using the SAME ease-out cubic as the camera FOV so the hand feel tracks what the
+	// eye sees. On top of (not instead of) the global sensitivity option.
+	float SensScale = 1.f;
+	if (ADSAlpha > 0.f && ADSFOV > 1.f && ADSFOV < BaseFOV)
+	{
+		const float FocalRatio = FMath::Tan(FMath::DegreesToRadians(ADSFOV) * 0.5f) /
+		                         FMath::Tan(FMath::DegreesToRadians(BaseFOV) * 0.5f);
+		const float Strength = FMath::Clamp(CVarADSSensScale.GetValueOnGameThread(), 0.f, 1.f);
+		const float ZoomedScale = FMath::Lerp(1.f, FocalRatio, Strength);
+		const float Eased = 1.f - FMath::Cube(1.f - ADSAlpha);
+		SensScale = FMath::Lerp(1.f, ZoomedScale, Eased);
+	}
+	AddControllerYawInput(Axis.X * SensScale);
+	AddControllerPitchInput(Axis.Y * SensScale); // Y already negated + scaled by the mapping modifiers
 }
 
 void ACombatForgeCharacter::OnWeaponDragPressed()
@@ -5006,13 +5033,6 @@ void ACombatForgeCharacter::UpdateFirstPersonArmsPose()
 	{
 		return;
 	}
-	const FVector GunHandVec = ForeVM - GripVM;
-	const float   GunHandDist = GunHandVec.Size();
-	const FVector GunHandDir  = GunHandVec.GetSafeNormal();
-	if (GunHandDist < 1.f || GunHandDir.IsNearlyZero())
-	{
-		return;
-	}
 
 	// Sample the HOLD clip specifically: a weapon swap can land mid fire/reload one-shot, and seating
 	// solved against those clips' hand positions would stick the arms in a fire/reload pose. Re-assert
@@ -5052,6 +5072,33 @@ void ACombatForgeCharacter::UpdateFirstPersonArmsPose()
 		return;
 	}
 
+	// REACH CLAMP (2026-07-24; pf.FPArmsVerify on lmg_01: handR->grip 1.3uu but handL->foregrip
+	// 19.7uu with armsScale pinned at 1.15): when the gun's grip->handguard span exceeds what the
+	// hold clip's hands can cover even at max arms scale, the support hand used to eat the ENTIRE
+	// residual and float behind the handguard. Grab where the arms can actually REACH instead:
+	// pull the foregrip anchor back along the grip->handguard line to the max reachable span. The
+	// anchor stays on the gun's centerline, so the palm still rides the barrel — just nearer the
+	// receiver on very long guns (which is how a human shoulders an LMG anyway). Inside reach,
+	// nothing changes.
+	constexpr float MaxArmsScale = 1.15f;
+	FVector GunHandVec = ForeVM - GripVM;
+	float   GunHandDist = GunHandVec.Size();
+	if (const float MaxReachSpan = AnimHandDist * MaxArmsScale;
+		GunHandDist > MaxReachSpan && GunHandDist > 1.f)
+	{
+		ForeVM = GripVM + GunHandVec * (MaxReachSpan / GunHandDist);
+		GunHandVec = ForeVM - GripVM;
+		GunHandDist = MaxReachSpan;
+	}
+	const FVector GunHandDir = GunHandVec.GetSafeNormal();
+	if (GunHandDist < 1.f || GunHandDir.IsNearlyZero())
+	{
+		return;
+	}
+	FPArmsSolvedGripVM = GripVM;
+	FPArmsSolvedForeVM = ForeVM;
+	bFPArmsSolvedValid = true;
+
 	// BOTH hands on the gun, not just the trigger hand. Aligning only the hand-pair DIRECTION (what the
 	// first pass did) leaves the support hand wherever the clip's own hand spacing puts it — Tom, first
 	// look: "it's not mounted to the gun. At least the left hand is not." A rifle hold is two point
@@ -5060,8 +5107,9 @@ void ACombatForgeCharacter::UpdateFirstPersonArmsPose()
 	// translate hand_r onto the grip. hand_l then lands ON the handguard by construction.
 	const FQuat ArmsQ = FQuat::FindBetweenNormals(AnimHandVec / AnimHandDist, GunHandDir) * BaseQ;
 	// Clamped: arm length is a character trait, not a weapon trait. Inside the clamp both hands are exact;
-	// at the clamp the support hand takes the residual (a stubby SMG can't stretch arms 40%).
-	const float ArmsScale = FMath::Clamp(GunHandDist / AnimHandDist, 0.85f, 1.15f);
+	// at the clamp the support hand takes the residual (a stubby SMG can't stretch arms 40%). The upper
+	// bound can only pin against SHORT guns now — the reach clamp above caps long spans to exactly 1.15.
+	const float ArmsScale = FMath::Clamp(GunHandDist / AnimHandDist, 0.85f, MaxArmsScale);
 	const FVector ArmsLoc = GripVM - ArmsQ.RotateVector(HandR) * ArmsScale;
 
 	FirstPersonArms->SetRelativeScale3D(FVector(ArmsScale));

@@ -36,9 +36,13 @@ UPFCharacterMovementComponent::UPFCharacterMovementComponent()
 	MaxDepenetrationWithPawnAsProxy = 10.f;
 
 	NavAgentProps.bCanCrouch = true;
-	SetCrouchedHalfHeight(58.f);
+	// 58 → 48 (Tom 2026-07-24): at 58 (116 tall) the crouch could not actually fit through the
+	// wall/ramp triangle gap or deep enough under a ramp to defuse a bomb — the ramp underfill's
+	// 168uu tunnel minus the 25uu plank thickness left only ~143uu of stepped, capsule-pinching
+	// air. 48 (96 tall) crawls the tunnel with real margin while standing (176) stays blocked.
+	SetCrouchedHalfHeight(48.f);
 	bCanWalkOffLedgesWhenCrouching = true;
-	// Crouch camera smoothing (88->58 over 0.2 s) is composed on the character's
+	// Crouch camera smoothing (88->48 over 0.2 s) is composed on the character's
 	// camera — UE capsule resize itself is instant and must stay instant for
 	// prediction determinism.
 

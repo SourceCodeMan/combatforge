@@ -243,6 +243,15 @@ private:
 	UFUNCTION() void OnServerRow3Clicked();
 	UFUNCTION() void OnServerRow4Clicked();
 	UFUNCTION() void OnServerRow5Clicked();
+	UFUNCTION() void OnServerRow6Clicked();
+	UFUNCTION() void OnServerRow7Clicked();
+	UFUNCTION() void OnServerRow8Clicked();
+	UFUNCTION() void OnServerRow9Clicked();
+	UFUNCTION() void OnServerRow10Clicked();
+	UFUNCTION() void OnServerRow11Clicked();
+	/** NEW MATCH: fetch the directory and join the first EMPTY compatible official server —
+	 *  an idle fleet instance IS a fresh match waiting for its first players (Tom 2026-07-24). */
+	UFUNCTION() void OnNewMatchClicked();
 	void JoinBrowserRow(int32 Index);
 	void JoinBackendServer(const struct FPFBackendServerInfo& Info);
 	void RebuildServerRows();
@@ -262,12 +271,14 @@ private:
 	UPROPERTY() TObjectPtr<UButton> JoinLanButton;
 
 	// ONLINE panel (accounts required for all listed/matchmade play — Tom 2026-07-17)
-	static constexpr int32 BrowserRowCount = 6;
+	/** Up to a 10-instance fleet + headroom; the rows live in a ~3.5-row scroll box (Tom 2026-07-24). */
+	static constexpr int32 BrowserRowCount = 12;
 	UPROPERTY() TObjectPtr<UTextBlock> AccountStatusText;
 	UPROPERTY() TObjectPtr<UButton> LoginButton;
 	UPROPERTY() TObjectPtr<UTextBlock> LoginLabel;
 	UPROPERTY() TObjectPtr<UButton> QuickPlayButton;
 	UPROPERTY() TObjectPtr<UButton> ServerListButton;
+	UPROPERTY() TObjectPtr<UButton> NewMatchButton;
 	UPROPERTY() TObjectPtr<class UEditableTextBox> JoinCodeBox;
 	UPROPERTY() TObjectPtr<UButton> JoinCodeButton;
 	UPROPERTY() TObjectPtr<UVerticalBox> ServerRowsBox;

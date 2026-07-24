@@ -327,6 +327,73 @@ FReply UPFBuildWheelWidget::NativeOnKeyDown(const FGeometry& InGeometry, const F
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
 
+FReply UPFBuildWheelWidget::NativeOnKeyUp(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	// Hold-Q commit, path 1 of 2: the wheel holds keyboard focus while open, so it sees the Q
+	// release FIRST and commits directly. Deliberately UNHANDLED so the release still reaches
+	// PlayerInput — Enhanced Input must see the key go up (a swallowed release leaves IA_BuildWheel
+	// "held" and the next press never fires Started), and the component's Completed binding is the
+	// path 2 backstop when focus wandered. Both paths funnel into the same idempotent close.
+	if (bWheelOpen && InKeyEvent.GetKey() == EKeys::Q)
+	{
+		CloseAndCommit();
+	}
+	return Super::NativeOnKeyUp(InGeometry, InKeyEvent);
+}
+
+int32 UPFBuildWheelWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId,
+	const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	// Full pie-slice highlight under the labels (Tom 2026-07-24: "highlights like a pie chart,
+	// highlighting that option entirely"). A translucent wedge fan spanning the hovered sector's
+	// whole 30°, from just outside the dead zone to past the swatches.
+	if (bWheelOpen && HoveredSector != INDEX_NONE && FSlateApplication::IsInitialized())
+	{
+		const float SectorDeg = 360.f / static_cast<float>(NumSectors);
+		const float StartDeg = HoveredSector * SectorDeg - SectorDeg * 0.5f;
+		constexpr int32 Segs = 8;
+		constexpr float InnerR = DeadZonePx * 0.55f;
+		const float OuterR = SectorRadiusPx + 60.f;
+		const FVector2f Center(AllottedGeometry.GetLocalSize() * 0.5f);
+		const FSlateRenderTransform& RT = AllottedGeometry.ToPaintGeometry().GetAccumulatedRenderTransform();
+		const FColor Fill = FLinearColor(1.f, 0.55f, 0.10f, 0.30f).ToFColor(true);   // translucent accent glass
+
+		TArray<FSlateVertex> Verts;
+		TArray<SlateIndex> Indices;
+		Verts.Reserve((Segs + 1) * 2);
+		Indices.Reserve(Segs * 6);
+		for (int32 SegIdx = 0; SegIdx <= Segs; ++SegIdx)
+		{
+			const float Deg = StartDeg + SectorDeg * static_cast<float>(SegIdx) / static_cast<float>(Segs);
+			const float Rad = FMath::DegreesToRadians(Deg);
+			const FVector2f Dir(FMath::Sin(Rad), -FMath::Cos(Rad));   // clockwise from top
+			Verts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+				RT, Center + Dir * InnerR, FVector2f::ZeroVector, Fill));
+			Verts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(
+				RT, Center + Dir * OuterR, FVector2f::ZeroVector, Fill));
+		}
+		for (int32 SegIdx = 0; SegIdx < Segs; ++SegIdx)
+		{
+			const SlateIndex I0 = static_cast<SlateIndex>(SegIdx * 2);         // inner this spoke
+			const SlateIndex O0 = static_cast<SlateIndex>(SegIdx * 2 + 1);     // outer this spoke
+			const SlateIndex I1 = static_cast<SlateIndex>(SegIdx * 2 + 2);     // inner next spoke
+			const SlateIndex O1 = static_cast<SlateIndex>(SegIdx * 2 + 3);     // outer next spoke
+			Indices.Append({ I0, O0, O1,  I0, O1, I1 });
+		}
+
+		const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush("WhiteBrush");
+		const FSlateResourceHandle Handle =
+			FSlateApplication::Get().GetRenderer()->GetResourceHandle(*WhiteBrush);
+		FSlateDrawElement::MakeCustomVerts(OutDrawElements, LayerId, Handle, Verts, Indices,
+			nullptr, 0, 0);
+	}
+
+	// Children (swatches, labels, cursor dot) paint ABOVE the wedge.
+	return Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId + 1,
+		InWidgetStyle, bParentEnabled);
+}
+
 void UPFBuildWheelWidget::SetHoveredSector(int32 NewIndex)
 {
 	if (NewIndex == HoveredSector)
@@ -361,7 +428,7 @@ void UPFBuildWheelWidget::UpdateCenterReadout()
 	}
 	if (HoveredSector == INDEX_NONE)
 	{
-		CenterReadout->SetText(FText::FromString(TEXT("Q again to cancel · aim a sector")));
+		CenterReadout->SetText(FText::FromString(TEXT("hold Q · aim a slice · release picks")));
 		CenterReadout->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	}
 	else
@@ -376,7 +443,7 @@ FText UPFBuildWheelWidget::SectorReadout(int32 SectorIndex) const
 	const EPFBuildTool Tool = SectorTool(SectorIndex);
 	if (Tool == EPFBuildTool::Delete)
 	{
-		return FText::FromString(TEXT("Delete — full refund · Q to pick"));
+		return FText::FromString(TEXT("Delete — full refund · release Q"));
 	}
 
 	int32 Remaining = -1;
@@ -391,7 +458,7 @@ FText UPFBuildWheelWidget::SectorReadout(int32 SectorIndex) const
 
 	if (Remaining >= 0)
 	{
-		return FText::FromString(FString::Printf(TEXT("%s — %d left · Q to pick"), ToolDisplayName(Tool), Remaining));
+		return FText::FromString(FString::Printf(TEXT("%s — %d left · release Q"), ToolDisplayName(Tool), Remaining));
 	}
-	return FText::FromString(FString::Printf(TEXT("%s · Q to pick"), ToolDisplayName(Tool)));
+	return FText::FromString(FString::Printf(TEXT("%s · release Q"), ToolDisplayName(Tool)));
 }

@@ -763,11 +763,21 @@ void UPFBackendSubsystem::SendHeartbeat()
 			? EnumShortName(TEXT("/Script/CombatForge.EPFArenaMap"), (int64)GS->ArenaMap)
 			: GS->SelectedCommunityMapLabel;
 		ModeStr  = EnumShortName(TEXT("/Script/CombatForge.EPFMatchType"), (int64)GS->MatchType);
+		// Cycle position rides the mode label so the browser row shows where the wheel is
+		// ("Skirmish · Remix Swap") with zero directory-schema changes. During Lobby the stage
+		// already advertises the UPCOMING match (advanced at Results).
+		if (GS->BuildMode != EPFBuildMode::PlayOnly && GS->MatchType != EPFMatchType::FreeForAll)
+		{
+			ModeStr = FString::Printf(TEXT("%s · %s"), *ModeStr, PFCycleStageLabel(GS->CycleStage));
+		}
 		FormatStr = FString::Printf(TEXT("%dv%d"), GS->TargetTeamSize, GS->TargetTeamSize);
 	}
 	// Proper JSON serialization: community-map labels are free text (quotes/backslashes would
 	// silently 400 a Printf-built body and drop us off the directory).
 	const TSharedRef<FJsonObject> BodyObj = MakeShared<FJsonObject>();
+	// Port identifies WHICH instance of a multi-instance fleet box this beat belongs to — the
+	// directory keys per-instance rows as <serverId>#<port> when several share one fleet key.
+	BodyObj->SetNumberField(TEXT("port"), FleetPort);
 	BodyObj->SetNumberField(TEXT("players"), Humans);
 	BodyObj->SetStringField(TEXT("phase"), PhaseStr);
 	BodyObj->SetStringField(TEXT("map"), MapStr);
@@ -826,7 +836,8 @@ void UPFBackendSubsystem::FleetUnregister()
 	}
 	bFleetRegistered = false;
 	FleetGS.Reset();
-	Request(TEXT("POST"), TEXT("/v1/servers/unregister"), TEXT("{}"), /*AuthMode=*/2, nullptr);
+	Request(TEXT("POST"), TEXT("/v1/servers/unregister"),
+		FString::Printf(TEXT("{\"port\":%d}"), FleetPort), /*AuthMode=*/2, nullptr);
 }
 
 void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FString& PendingFilePath)

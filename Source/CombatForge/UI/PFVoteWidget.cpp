@@ -7,6 +7,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
@@ -333,6 +334,7 @@ void UPFVoteWidget::HandleThumbUpClicked()
 		StatusText->SetText(FText::FromString(TEXT("Optional: tag what stood out, then SUBMIT")));
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.5f)));
 	}
+	ReturnFocusToGame();
 }
 
 void UPFVoteWidget::HandleThumbDownClicked()
@@ -350,6 +352,18 @@ void UPFVoteWidget::HandleThumbDownClicked()
 	{
 		StatusText->SetText(FText::FromString(TEXT("Optional: tag what stood out, then SUBMIT")));
 		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.5f)));
+	}
+	ReturnFocusToGame();
+}
+
+void UPFVoteWidget::ReturnFocusToGame()
+{
+	// Vote runs in GameAndUI mode so Tab/Esc reach the input mappings — but a clicked UButton
+	// keeps Slate keyboard focus, turning Tab into widget focus-navigation. Hand focus back to
+	// the viewport after every click (same pattern as the build wheel's close).
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
 }
 
@@ -375,6 +389,7 @@ void UPFVoteWidget::NotifyChipClicked(int32 ChipIndex)
 	ChipStates[ChipIndex] = Next;
 	UpdateChipVisual(ChipIndex);
 	UpdateSelectionCount();
+	ReturnFocusToGame();
 }
 
 int32 UPFVoteWidget::CountSelections() const
@@ -438,6 +453,7 @@ void UPFVoteWidget::SubmitVote()
 		return;
 	}
 	bSubmitted = true;
+	ReturnFocusToGame();
 
 	TArray<uint8> LikedIds;
 	TArray<uint8> DislikedIds;
