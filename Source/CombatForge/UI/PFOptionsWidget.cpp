@@ -865,6 +865,12 @@ void UPFOptionsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	// Collapsed widgets don't tick, so this only polls while the menu is actually on screen.
+	// Embedded (boot-menu tab) instances never show the rotation strip — ApplyEmbeddedChrome
+	// collapsed it, and updating here would flip it visible again.
+	if (bEmbedded)
+	{
+		return;
+	}
 	CycleBarPollAccum += InDeltaTime;
 	if (CycleBarPollAccum >= 0.5f)
 	{
@@ -944,6 +950,11 @@ void UPFOptionsWidget::ApplyEmbeddedChrome()
 	if (TabHowTo)          { TabHowTo->SetVisibility(ESlateVisibility::Collapsed); }
 	// The boot menu has its own CHARACTER tab for class selection, so hide the in-game CLASS tab here.
 	if (TabClass)          { TabClass->SetVisibility(ESlateVisibility::Collapsed); }
+	// The match-rotation strip is an IN-MATCH readout ("where is the wheel right now") — on the
+	// boot menu's embedded options tab it floated over the tab content (Tom, alpha-16 playtest).
+	// The in-game pause overlay (bEmbedded=false) keeps it; NativeTick's poll is gated the same
+	// way so it can't re-show itself here.
+	if (CycleBarRoot)      { CycleBarRoot->SetVisibility(ESlateVisibility::Collapsed); }
 }
 
 void UPFOptionsWidget::EnterEmbeddedMode()
