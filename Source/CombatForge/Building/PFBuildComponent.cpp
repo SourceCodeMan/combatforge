@@ -110,8 +110,14 @@ void UPFBuildComponent::BindInput(UEnhancedInputComponent* EIC, const UPFInputCo
 	EIC->BindAction(Cfg->IA_EquipRamp, ETriggerEvent::Started, this, &UPFBuildComponent::OnEquipRamp);
 	EIC->BindAction(Cfg->IA_EquipRoof, ETriggerEvent::Started, this, &UPFBuildComponent::OnEquipRoof);
 
-	// Q tap toggles the build wheel (open / commit). No hold threshold — hold was unreliable.
-	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Started, this, &UPFBuildComponent::OnWheelTogglePressed);
+	// HOLD Q = build wheel (Tom 2026-07-24): press opens, hover highlights the slice, release
+	// commits it. The old tap-toggle read as clunky in playtests. Reliability (the reason a hold
+	// was previously rejected) is covered by a DUAL commit path: this Completed/Canceled binding
+	// AND the wheel widget's own Q key-up (it holds keyboard focus while open) — both funnel into
+	// the same idempotent close.
+	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Started, this, &UPFBuildComponent::OnWheelPressed);
+	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Completed, this, &UPFBuildComponent::OnWheelReleased);
+	EIC->BindAction(Cfg->IA_BuildWheel, ETriggerEvent::Canceled, this, &UPFBuildComponent::OnWheelReleased);
 }
 
 void UPFBuildComponent::OnPlaceStarted()
@@ -187,18 +193,25 @@ void UPFBuildComponent::OnEquipFloor() { EquipTool(EPFBuildTool::Floor); }
 void UPFBuildComponent::OnEquipRamp()  { EquipTool(EPFBuildTool::Ramp); }
 void UPFBuildComponent::OnEquipRoof()  { EquipTool(EPFBuildTool::Roof); }
 
-void UPFBuildComponent::OnWheelTogglePressed()
+void UPFBuildComponent::OnWheelPressed()
 {
-	// Tap Q: open if closed, commit (or cancel in dead zone) if open.
+	// Hold-Q flow: press opens; a quick tap just flashes the wheel (release with nothing hovered
+	// keeps the current tool — CloseAndCommit broadcasts nothing for the dead zone).
+	if (!bWheelOpenSent)
+	{
+		bWheelOpenSent = true;
+		OnBuildWheelRequestedEvent.Broadcast(true);
+	}
+}
+
+void UPFBuildComponent::OnWheelReleased()
+{
+	// A digit commit / Esc / phase close already synced the flag via NotifyBuildWheelClosed —
+	// then this release is a no-op.
 	if (bWheelOpenSent)
 	{
 		bWheelOpenSent = false;
 		OnBuildWheelRequestedEvent.Broadcast(false);
-	}
-	else
-	{
-		bWheelOpenSent = true;
-		OnBuildWheelRequestedEvent.Broadcast(true);
 	}
 }
 
@@ -607,6 +620,12 @@ void UPFBuildComponent::EnsureGhost()
 		// Translucent sort: draw after world so the soft green reads as an overlay.
 		Comp->SetTranslucentSortPriority(100);
 		Comp->SetRenderCustomDepth(false);
+		// Prop previews use the REAL warehouse meshes, which are Nanite (Megascans) — and Nanite does
+		// not render translucent blends, so the GlassFade ghost MID made the engine substitute the
+		// DEFAULT (checker) material on box/barrel previews ("Invalid material ... used on Nanite
+		// static mesh SM_Ind_War_Storage_Box..." in Tom's 2026-07-23 server-join log). Render the
+		// ghost from the mesh's non-Nanite fallback instead; placed instances keep Nanite.
+		Comp->bDisallowNanite = true;
 		Comp->RegisterComponent();
 		return Comp;
 	};

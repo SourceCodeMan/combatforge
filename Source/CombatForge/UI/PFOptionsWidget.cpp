@@ -14,7 +14,9 @@
 #include "Player/PFCharacterCustomization.h"   // PFChar active class-slot switch (in-game)
 #include "Audio/PFMusicSubsystem.h"
 #include "Combat/PFCombatAudio.h"
+#include "Core/CombatForgeGameState.h"
 #include "Core/PFLightingSubsystem.h"
+#include "UI/PFCycleBar.h"
 
 #include "AudioDevice.h"
 #include "Blueprint/WidgetTree.h"
@@ -92,7 +94,15 @@ void UPFOptionsWidget::BuildTree()
 	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(TitleText))
 	{
 		V->SetHorizontalAlignment(HAlign_Center);
-		V->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+	}
+
+	// Match-rotation strip: Esc mid-match answers "where are we in the 3-match wheel?"
+	CycleBarRoot = PFCycleBar::Build(WidgetTree, CycleSegs, CycleTexts);
+	if (UVerticalBoxSlot* V = Card->AddChildToVerticalBox(CycleBarRoot))
+	{
+		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
 	}
 
 	// Tabs
@@ -849,6 +859,20 @@ void UPFOptionsWidget::BuildHowToPlayPage(UWidget* ParentBox)
 	AddHowToLine(Box, TEXT("Creative / Remix / Play-Only = what happens in Build. Remix & Play-Only load a community map — hosts can star up to 5 favorites."), 13, false, Body);
 	AddHowToLine(Box, TEXT("Elimination · Skirmish · FFA · CTF · Domination · Hardpoint = how you win combat."), 13, false, Body);
 	AddHowToLine(Box, TEXT("4v4 / 6v6 + bots checkbox fill empty slots. Rate the arena after the match — top maps float up the community list."), 13, false, Dim);
+}
+
+void UPFOptionsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	// Collapsed widgets don't tick, so this only polls while the menu is actually on screen.
+	CycleBarPollAccum += InDeltaTime;
+	if (CycleBarPollAccum >= 0.5f)
+	{
+		CycleBarPollAccum = 0.f;
+		PFCycleBar::Update(
+			GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr,
+			CycleBarRoot, CycleSegs, CycleTexts);
+	}
 }
 
 void UPFOptionsWidget::NativeConstruct()

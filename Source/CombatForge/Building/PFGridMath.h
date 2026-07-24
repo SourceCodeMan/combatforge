@@ -144,9 +144,11 @@ struct COMBATFORGE_API FPFGridMath
 				FVector(Wx, Wy, Wz + 110.f), FVector(1.2f, 1.2f, 2.2f));
 
 		case EPFPieceType::PropDorito:
-			// Cone (2.4, 2.4, 2.0) = r120 h200.
+			// Cone (2.4, 2.4, 1.0) = r120 h100. Height halved from the original h200 (Tom 2026-07-24):
+			// players must be able to JUMP ON and WALK ON the cone. Slope atan(100/120) = 39.8°, under
+			// CharacterMovement's default 44.765° walkable limit; at h200 the 59° face shed the player.
 			return FTransform(FRotator(0.f, Rot * 90.f, 0.f),
-				FVector(Wx, Wy, Wz + 100.f), FVector(2.4f, 2.4f, 2.f));
+				FVector(Wx, Wy, Wz + 50.f), FVector(2.4f, 2.4f, 1.f));
 
 		case EPFPieceType::PropSnake:
 			// Cube (4.0, 1.2, 1.2) = 400×120×120.
@@ -205,7 +207,7 @@ struct COMBATFORGE_API FPFGridMath
 			return true;
 
 		case EPFPieceType::PropDorito:
-			Out = FBox(FVector(Wx - 120.f, Wy - 120.f, Wz), FVector(Wx + 120.f, Wy + 120.f, Wz + 200.f));
+			Out = FBox(FVector(Wx - 120.f, Wy - 120.f, Wz), FVector(Wx + 120.f, Wy + 120.f, Wz + 100.f));
 			return true;
 
 		case EPFPieceType::PropSnake:

@@ -453,7 +453,7 @@ const TCHAR* DisplayName(EPFPieceType Type)
 	case EPFPieceType::Ramp:           return TEXT("Ramp");
 	case EPFPieceType::Roof:           return TEXT("Ceiling");
 	case EPFPieceType::PropCan:        return TEXT("Barrel");
-	case EPFPieceType::PropDorito:     return TEXT("Crate");
+	case EPFPieceType::PropDorito:     return TEXT("Cone");
 	case EPFPieceType::PropSnake:      return TEXT("Boxes");
 	case EPFPieceType::WallWindow:     return TEXT("Window");
 	case EPFPieceType::WallDoor:       return TEXT("Door");
@@ -472,7 +472,7 @@ const TCHAR* DisplayName(EPFBuildTool Tool)
 	case EPFBuildTool::Ramp:           return TEXT("Ramp");
 	case EPFBuildTool::Roof:           return TEXT("Ceiling");
 	case EPFBuildTool::PropCan:        return TEXT("Barrel");
-	case EPFBuildTool::PropDorito:     return TEXT("Crate");
+	case EPFBuildTool::PropDorito:     return TEXT("Cone");
 	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
 	case EPFBuildTool::WallWindow:     return TEXT("Window");
 	case EPFBuildTool::WallDoor:       return TEXT("Door");
@@ -582,8 +582,8 @@ void EnsureLoaded()
 
 	// PropDorito → THE CONE. Restored 2026-07-20 at Tom's request: "the cone shape was working in early
 	// versions, my first big play test and everyone liked it." It is also what the design has always
-	// specified — docs/design/03-build-system.md: "Dorito | Wedge/tetra | r 120, h 200 | Cone
-	// (2.4, 2.4, 2.0) | Mid cover, angled edges for lean-style peeks." Swapping it to a warehouse crate
+	// specified — docs/design/03-build-system.md: "Dorito | Wedge/tetra | r 120, h 100 | Cone
+	// (2.4, 2.4, 1.0) | Mid cover, WALKABLE." Swapping it to a warehouse crate
 	// was an art-pass decision that quietly dropped a piece players liked, and the angled faces are the
 	// point: a box gives you square peeks, a cone gives you the lean-style ones the mode was built around.
 	//
@@ -591,9 +591,10 @@ void EnsureLoaded()
 	// piece is STRUCTURALLY IMMUNE to the whole "one player sees it, another doesn't" class of bug —
 	// there is no /Game asset to miss from a cook, no soft path to lose a race against, nothing a client
 	// can fail to have. Everything below (bWarehouse stays false) then routes it through
-	// BasicShapeTransform, which is where the authored 2.4/2.4/2.0 cone transform already lives in
+	// BasicShapeTransform, which is where the authored 2.4/2.4/1.0 cone transform already lives in
 	// FPFGridMath::PieceLocalTransform — the geometry was never removed, only the look.
-	GCrate.TargetSize = FVector(240.f, 240.f, 200.f);
+	// Height 200→100 on 2026-07-24: the cone must be walkable (players jump on and hold the top).
+	GCrate.TargetSize = FVector(240.f, 240.f, 100.f);
 	FitSlot(GCrate, GCone);
 
 	// PropSnake → cardboard box stack (long low cover).

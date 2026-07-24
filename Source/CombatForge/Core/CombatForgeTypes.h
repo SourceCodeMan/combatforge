@@ -70,7 +70,8 @@ UENUM()
 enum class EPFDenyReason : uint8
 {
 	None = 0, WrongPhase, OutOfBudget, SlotOccupied, Overlapping, OutOfPlot,
-	NoAnchor, HeightCap, RateLimited, NotYourTeam, InvalidPiece, NotFound
+	NoAnchor, HeightCap, RateLimited, NotYourTeam, InvalidPiece, NotFound,
+	PieceLimit   // per-player per-type cap (trap floor / one-way door: 1 each) — appended, wire-stable
 	// SealsMap removed: full wall-off allowed; breach with the mid-field bomb.
 };
 
@@ -81,6 +82,23 @@ enum class EPFBodyRegion : uint8 { Chest = 0, Head = 1, Limbs = 2 };
 
 UENUM()
 enum class EPFRespawnMode : uint8 { RoundElimination = 0, Respawn = 1 };  // RoundElimination is v1 default; Respawn scores rounds by team tags
+
+/** Forced 3-match rotation (Tom 2026-07-24): every non-PlayOnly, non-FFA server loops
+ *  Creative → Remix (improve the map just played) → Remix Swap (same map, squads switch sides),
+ *  then starts over. Joiners drop in wherever the wheel is; the GameMode advances the stage at
+ *  each Results and mirrors it onto GameState + the fleet heartbeat's mode label. */
+UENUM()
+enum class EPFCycleStage : uint8 { Creative = 0, Remix = 1, RemixSwap = 2 };
+
+inline const TCHAR* PFCycleStageLabel(uint8 Stage)
+{
+	switch (Stage)
+	{
+	case static_cast<uint8>(EPFCycleStage::Remix):     return TEXT("Remix");
+	case static_cast<uint8>(EPFCycleStage::RemixSwap): return TEXT("Remix Swap");
+	default:                                           return TEXT("Creative");
+	}
+}
 
 // Build Mode = what the BUILD phase does (independent of the match type below).
 UENUM(BlueprintType)

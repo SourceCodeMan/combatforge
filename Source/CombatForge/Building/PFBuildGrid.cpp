@@ -113,7 +113,18 @@ APFBuildGrid::APFBuildGrid()
 
 			UInstancedStaticMeshComponent* ISMC = CreateDefaultSubobject<UInstancedStaticMeshComponent>(CompName);
 			ISMC->SetupAttachment(GridRoot);
-			ISMC->SetMobility(EComponentMobility::Static);
+			// PROPS must be Movable: they swap from these engine placeholders to the real warehouse
+			// meshes at runtime (EnsurePieceVisualsApplied), and the engine REFUSES SetStaticMesh on a
+			// registered Static component once the world has begun play (the AreDynamicDataChangesAllowed
+			// gate). The AUTHORITY dresses the grid during world init — before begin-play — so its swap
+			// sticks; a JOINING client receives this actor mid-match, its swap was silently refused
+			// ("Calling SetStaticMesh on ... ISM_Barrel_Team0 but Mobility is Static", Tom's 2026-07-23
+			// server-join log), and instances stamped with warehouse-FITTED transforms rendered on the
+			// unit engine shapes: the "extra large shapes with no skins" every remote joiner saw while
+			// the host looked perfect. Structural ISMs never change mesh after the ctor and stay Static.
+			ISMC->SetMobility(PFIsProp(static_cast<EPFPieceType>(TypeIdx))
+				? EComponentMobility::Movable
+				: EComponentMobility::Static);
 			ISMC->SetStaticMesh(MeshPerType[TypeIdx]);
 			ISMC->SetMaterial(0, ShapeMaterial);
 			// Built pieces shape the runtime navmesh so bots PATH AROUND player forts instead of running into
@@ -188,7 +199,25 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 				const int32 K = ISMCIndexFor(Type, Team);
 				if (PieceISMCs[K] && PieceISMCs[K]->GetStaticMesh() != PropMesh)
 				{
-					PieceISMCs[K]->SetStaticMesh(PropMesh);
+					// SetStaticMesh RETURNS FALSE when the engine refuses it (registered + Static +
+					// world begun — the remote-join case; see the ctor mobility comment). That refusal
+					// was silent for three alphas: the latch below keyed off CONTENT being loaded, the
+					// content loads fine on clients, so the poll stopped while the ISMs still wore the
+					// engine placeholders. Never trust the call blindly again — flip mobility and
+					// retry once, and if it STILL refuses, log loudly and keep the retry poll alive.
+					if (!PieceISMCs[K]->SetStaticMesh(PropMesh))
+					{
+						PieceISMCs[K]->SetMobility(EComponentMobility::Movable);
+						if (!PieceISMCs[K]->SetStaticMesh(PropMesh))
+						{
+							UE_LOG(CombatForgeLog, Warning,
+								TEXT("BuildGrid: prop mesh swap REFUSED on %s (mobility=%d) — keeping retry alive"),
+								*PieceISMCs[K]->GetName(),
+								static_cast<int32>(PieceISMCs[K]->Mobility));
+							bPieceVisualsReady = false;
+							continue;
+						}
+					}
 					// Warehouse assets keep their own materials (looks like real cover, not neon cubes).
 					if (PFBuildPieceVisuals::UsesNativeMaterials(Type))
 					{
@@ -507,24 +536,35 @@ EPFDenyReason APFBuildGrid::QueryPlacement(const FPFPlacementQuery& Q) const
 		}
 	}
 
-	// --- Height cap (walls: level 0..Levels-2 only — a top-base wall crowns at HeightCap) ---
-	// Strict: top of piece must stay under HeightCap so stacked floors can't form a deck you
-	// jump over the perimeter from. (Perimeter walls + escape lid also block escape.)
-	// Map-specific: Warehouse 4/1200 (3 wall stories under the roof), Yard 7/2100 (6 wall stories).
+	// --- Height cap / top-story rules (reworked 2026-07-24, Tom: "on the third level I should be
+	// able to deploy a wall or window or ceiling tile" — but never a ramp) ---
+	// Per piece family on the TOP base (Warehouse level 3 @ Z900, Yard level 6 @ Z1800):
+	//   * wall-like: ALLOWED — crowns flush at HeightCap. Safe: the escape lid sits cap+150 and
+	//     shell dressing starts ≥ cap+200, so nothing solid is entered ("build volume stays clean").
+	//   * ramps: DENIED one story earlier — a ramp must ascend to a base that exists above it;
+	//     a top-base ramp is a launch surface toward the lid and leads nowhere.
+	//   * floor/roof/trap plates: allowed one level HIGHER than the bases (Level == MapLevels) so a
+	//     lid can cap a top-story room flush at HeightCap.
+	// The cap check itself is now inclusive (deny only when a piece would EXCEED the cap): the
+	// old "-slack" form was the real reason nothing could be built on the third level — every
+	// top-story piece crowns exactly at the cap.
 	const int32 MapLevels = ActiveLevels();
 	const int32 MapHeightCap = ActiveHeightCapUU();
 	const int32 Level = Q.Z / 3;
-	if (PFIsWallLike(Q.Type) && Level > MapLevels - 2)
+	if (Q.Type == EPFPieceType::Ramp && Level > MapLevels - 2)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	if (!bProp && Level > MapLevels - 1)
+	if (PFIsWallLike(Q.Type) && Level > MapLevels - 1)
 	{
 		return EPFDenyReason::HeightCap;
 	}
-	// Leave a small air gap under the escape lid / wall rim (no piece crowns at the cap flat).
+	if (!bProp && Level > MapLevels)
+	{
+		return EPFDenyReason::HeightCap;
+	}
 	constexpr float HeightCapSlackUU = 8.f;
-	if (Bounds.Max.Z > static_cast<float>(MapHeightCap) - HeightCapSlackUU)
+	if (Bounds.Max.Z > static_cast<float>(MapHeightCap) + HeightCapSlackUU)
 	{
 		return EPFDenyReason::HeightCap;
 	}
@@ -666,6 +706,13 @@ EPFDenyReason APFBuildGrid::TryPlacePiece(ACombatForgePlayerState* Placer, const
 		return EPFDenyReason::RateLimited;
 	}
 
+	// Precise deny for the per-type caps (trap floor / one-way door: 1 per player per match) —
+	// ServerTrySpendBudget re-checks as a backstop, but from there it's indistinguishable from
+	// an empty pool and would read "OUT OF BUDGET" on the HUD.
+	if (Placer->ServerIsAtPieceLimit(ServerQ.Type))
+	{
+		return EPFDenyReason::PieceLimit;
+	}
 	if (!Placer->ServerTrySpendBudget(ServerQ.Type))
 	{
 		return EPFDenyReason::OutOfBudget;
@@ -1018,9 +1065,11 @@ void APFBuildGrid::SpawnRampUnderfill(const FPFBuildPieceRec& Rec)
 	}
 	DestroyRampUnderfill(Rec.PieceId);
 
-	// Crouch capsule = 2 * 58 = 116uu. Leave generous air under the plank so crouch-crawl isn't sticky.
-	// Standing ≈ 176uu — still taller than this tunnel, so solid steps block standing under-ramp crawls.
-	constexpr float CrouchTunnelUU = 168.f;   // 116 capsule + ~52uu slack (steps, slope, input forgiveness)
+	// Crouch capsule = 2 * 48 = 96uu (was 58/116 — lowered 2026-07-24 precisely because this
+	// tunnel minus the 25uu plank thickness pinched a 116 capsule out of under-ramp crawls and
+	// ramp-base bomb defuses). Standing ≈ 176uu — still taller than this tunnel, so solid steps
+	// keep blocking standing under-ramp crawls.
+	constexpr float CrouchTunnelUU = 168.f;   // 96 capsule + ~72uu slack (steps, slope, input forgiveness)
 	constexpr float CellRunUU = static_cast<float>(PFGrid::CellUU);       // 400
 	constexpr float RiseUU = static_cast<float>(PFGrid::WallHeightUU);    // 300
 	constexpr int32 Steps = 8;

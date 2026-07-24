@@ -49,7 +49,7 @@ public:
 	// ---- UI subscription points ----
 	FPFOnEquippedToolChanged  OnEquippedToolChangedEvent;
 	FPFOnPlaceDenied          OnPlaceDeniedEvent;
-	FPFOnBuildWheelRequested  OnBuildWheelRequestedEvent;   // Q tap → RootHUD toggles wheel open/commit
+	FPFOnBuildWheelRequested  OnBuildWheelRequestedEvent;   // HOLD Q: press=true (open), release=false (commit hovered)
 
 	/** Called by RootHUD when the wheel closes via digit / Esc / phase change (not via Q). */
 	void NotifyBuildWheelClosed();
@@ -71,7 +71,8 @@ protected:
 	void OnEquipFloor();
 	void OnEquipRamp();
 	void OnEquipRoof();
-	void OnWheelTogglePressed();
+	void OnWheelPressed();
+	void OnWheelReleased();
 
 private:
 	/** Last snapped slot sent by turbo (dedup: place on slot change OR every 0.15 s — 03 §4). */

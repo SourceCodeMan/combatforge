@@ -345,6 +345,51 @@ static FVector PFConvergedShotDir(UWorld* World, ACombatForgeCharacter* Char, co
 	return (AimPoint - Origin).GetSafeNormal();
 }
 
+// Shot-origin adjudication (playtest 2026-07-24: "rounds couldn't leave the barrel" at windows —
+// a sweet spot where you had to poke the gun all the way through or stand back). The ball must be
+// able to LEAVE from where the player believes they are shooting, which is the crosshair line.
+// Two muzzle-parallax failures both re-originate the shot at the EYE:
+//   1. barrel embedded — the eye→muzzle-tip path is blocked (muzzle poked into a frame/wall);
+//   2. near-lip clip — the muzzle's first stretch toward the aim point hits geometry the eye's
+//      line does not (window sills, ledges: the eye sees over the lip, the lower muzzle doesn't).
+// Distant cover still blocks: case 2 only fires inside NearLipUU. Traces run on the paintball
+// channel (what actually stops the ball), ignoring the shooter. The server accepts an origin near
+// EITHER candidate — muzzle or eye — see the tolerance gate in ServerFire.
+static FVector PFAdjudicateShotOrigin(UWorld* World, ACombatForgeCharacter* Char, const FVector& Muzzle)
+{
+	if (World == nullptr)
+	{
+		return Muzzle;
+	}
+	const FVector Eye = Char->GetEyeWorldLocation();
+	FCollisionQueryParams Q(FName(TEXT("PFShotOrigin")), /*bTraceComplex=*/false, Char);
+
+	FHitResult EmbedHit;
+	if (World->LineTraceSingleByChannel(EmbedHit, Eye, Muzzle, PF_ECC_Paintball, Q))
+	{
+		return Eye;   // case 1: the barrel tip is on the far side of something solid
+	}
+
+	constexpr float NearLipUU = 250.f;
+	const FVector AimPoint = PFAimConvergePoint(World, Char);
+	FHitResult MuzzleHit;
+	const bool bMuzzleClippedNear =
+		World->LineTraceSingleByChannel(MuzzleHit, Muzzle, AimPoint, PF_ECC_Paintball, Q) &&
+		MuzzleHit.Distance < NearLipUU;
+	if (bMuzzleClippedNear)
+	{
+		FHitResult EyeHit;
+		const bool bEyeClippedNear =
+			World->LineTraceSingleByChannel(EyeHit, Eye, AimPoint, PF_ECC_Paintball, Q) &&
+			EyeHit.Distance < NearLipUU;
+		if (!bEyeClippedNear)
+		{
+			return Eye;   // case 2: the crosshair clears the lip, only the muzzle doesn't
+		}
+	}
+	return Muzzle;
+}
+
 void UPFWeaponComponent::FireOneShot(double Now)
 {
 	ACombatForgeCharacter* Char = GetPFCharacter();
@@ -376,8 +421,10 @@ void UPFWeaponComponent::FireOneShot(double Now)
 	// IsPlayerControlled excludes bots: an AI controller is "locally controlled" too, but a bot has no real
 	// FP viewmodel — it must keep the TP hand muzzle its own LOS/fire checks use.
 	const bool bUseOwnViewmodelMuzzle = Char->IsLocallyControlled() && Char->IsPlayerControlled();
-	const FVector ShotOrigin = bUseOwnViewmodelMuzzle
+	const FVector RawMuzzle = bUseOwnViewmodelMuzzle
 		? Char->GetMuzzleLocation(true) : Char->GetMuzzleLocation(false);
+	// Windows/ledges: fall back to the eye when the muzzle itself can't clear (see the helper).
+	const FVector ShotOrigin = PFAdjudicateShotOrigin(GetWorld(), Char, RawMuzzle);
 	// Converge on the crosshair: the muzzle sits below/right of the camera, so flying PARALLEL to the aim (the
 	// old BaseDir = camera forward) splatted low-right of the reticle. Aim from the muzzle THROUGH the
 	// crosshair's world target so shots land on the reticle regardless of the muzzle offset.
@@ -410,7 +457,11 @@ void UPFWeaponComponent::FireOneShot(double Now)
 			0.f, 1.f);
 		MagMult = FMath::Lerp(RecoilRampLowMult, RecoilRampHighMult, A);
 	}
-	const float RecoilMult = ADSMult * MagMult;
+	// Shotguns read soft on the screen relative to their blast (playtest 2026-07-24): +25% on the
+	// VISIBLE kick only — viewmodel spring + camera shake below. Aim climb stays per-catalog so
+	// the balance tuning (sg climb is already the hottest in the catalog) is untouched.
+	const float ShotgunVisualKick = (Pellets > 1) ? 1.25f : 1.f;
+	const float RecoilMult = ADSMult * MagMult * ShotgunVisualKick;
 	++ShotsThisMag;
 
 	// FP recoil kick (pure feel). NOTE: this must never move/re-parent the TP rifle — the muzzle is sampled a
@@ -592,11 +643,18 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 	// shots, so treat that number as load-bearing.
 	const bool bLocalAuth = Char->HasAuthority() && Char->IsLocallyControlled() && Char->IsPlayerControlled();
 	const FVector ServerMuzzle = bLocalAuth ? Char->GetMuzzleLocation(true) : Char->GetMuzzleLocation(false);
-	if (FVector::DistSquared(FVector(Shot.Origin), ServerMuzzle) >
-		FMath::Square(ServerOriginToleranceUU))
+	// The client may legally re-originate a shot at its EYE when the muzzle can't clear a window
+	// lip / frame (PFAdjudicateShotOrigin). Accept an origin near EITHER candidate: the eye sits
+	// well inside the same ~1m trust bubble the muzzle gate already grants, so this widens the
+	// honest-shot acceptance without meaningfully widening the cheat surface.
+	const FVector ServerEye = Char->GetEyeWorldLocation();
+	const float MuzzleDistSq = FVector::DistSquared(FVector(Shot.Origin), ServerMuzzle);
+	const float EyeDistSq = FVector::DistSquared(FVector(Shot.Origin), ServerEye);
+	if (FMath::Min(MuzzleDistSq, EyeDistSq) > FMath::Square(ServerOriginToleranceUU))
 	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("ServerFire reject (%s): origin %.0f uu from muzzle"),
-			*GetNameSafe(Char), FVector::Dist(FVector(Shot.Origin), ServerMuzzle));
+		UE_LOG(CombatForgeLog, Warning, TEXT("ServerFire reject (%s): origin %.0f uu from muzzle / %.0f uu from eye"),
+			*GetNameSafe(Char), FVector::Dist(FVector(Shot.Origin), ServerMuzzle),
+			FVector::Dist(FVector(Shot.Origin), ServerEye));
 		return;
 	}
 

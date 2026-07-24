@@ -387,6 +387,11 @@ public:
 	int32 FPArmsVerifyStep = 0;
 	int32 FPArmsVerifyTicks = 0;
 #endif
+	/** The hand anchors the last arms seat actually solved against (ViewModelRoot space, AFTER the
+	 *  reach clamp) — what pf.FPArmsVerify measures hand error against. */
+	FVector FPArmsSolvedGripVM = FVector::ZeroVector;
+	FVector FPArmsSolvedForeVM = FVector::ZeroVector;
+	bool bFPArmsSolvedValid = false;
 private:
 	/** Session-only pose overrides while tuning (key = WeaponId). Survives cycle; cleared on EndPlay. */
 	struct FPFSessionWeaponPose

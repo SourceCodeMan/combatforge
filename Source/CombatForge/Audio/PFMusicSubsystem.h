@@ -35,6 +35,11 @@ public:
 	/** Live volume update from Options slider (0..1 ambient pref). */
 	void ApplyVolumeFromPrefs();
 
+	/** Final-30-seconds drama (Tom 2026-07-24): true fades the bed to silence (~1.2 s), false
+	 *  restores it. Driven every frame by the combat HUD off the round timer, so a new round or
+	 *  phase naturally un-ducks. Uses UAudioComponent::AdjustVolume — no tick needed here. */
+	void SetMatchEndDucked(bool bDucked);
+
 	void StopMusic();
 
 private:
@@ -53,4 +58,6 @@ private:
 	UPROPERTY() TObjectPtr<USoundBase> CombatMusic;
 
 	EPFMusicTrack ActiveTrack = EPFMusicTrack::None;
+	/** Final-30s duck latch — cleared whenever a track (re)starts. */
+	bool bMatchEndDucked = false;
 };

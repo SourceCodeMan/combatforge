@@ -15,8 +15,14 @@
 
 param(
   [int]$Port = 7777,
-  [string]$Map = "L_Graybox"
+  [string]$Map = "L_Graybox",
+  # Fleet slot number (1..N). Instance 1 keeps the legacy data dir + log name so an existing
+  # single-server box upgrades in place (built maps + unsent XP reports survive). Instances 2+
+  # get their own data dir (maps/PendingReports/JoinCode are per-match-instance state).
+  [int]$InstanceIndex = 1
 )
+
+try { $Host.UI.RawUI.WindowTitle = "CombatForge server #$InstanceIndex (port $Port)" } catch {}
 
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -86,7 +92,8 @@ if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue))
 # runs Verbose (gameplay detail) while net stays at Log so the file doesn't drown in per-packet spam.
 $LogDir = Join-Path $Here "Logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
-$LogFile = Join-Path $LogDir "server.log"
+$LogName = if ($InstanceIndex -le 1) { "server.log" } else { "server$InstanceIndex.log" }
+$LogFile = Join-Path $LogDir $LogName
 
 # --- PERSISTENT data dir (built maps + un-sent XP reports) - MUST live OUTSIDE the extracted build ---
 # The build runs with -NOHOMEDIR, so UE's UserSettingsDir() (where maps + PendingReports would otherwise land)
@@ -94,6 +101,7 @@ $LogFile = Join-Path $LogDir "server.log"
 # dropped built maps AND un-minted XP on every redeploy (#8/#9). Passing -ArenaDir pins them to ProgramData
 # (survives re-extraction). The game derives PendingReports/JoinCode/ServerKey.txt from this dir's parent too.
 $DataDir = Join-Path $env:ProgramData "CombatForge"
+if ($InstanceIndex -gt 1) { $DataDir = Join-Path $DataDir "Instance$InstanceIndex" }
 $ArenaDir = Join-Path $DataDir "Arenas"
 New-Item -ItemType Directory -Force -Path $ArenaDir | Out-Null
 

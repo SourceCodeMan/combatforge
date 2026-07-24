@@ -1082,15 +1082,28 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 	RefreshSaveSlotHighlight();
 }
 
+/** Rank the account needs before class save-slot N is selectable: class 2 = rank 2 … class 5 =
+ *  rank 5 (slot 0 always free). One ladder for the gate AND the slot-row lock display. */
+static int32 RequiredRankForSaveSlot(int32 SaveSlot)
+{
+	return SaveSlot <= 0 ? 0 : SaveSlot + 1;
+}
+
 void UPFLoadingMenuWidget::RefreshSaveSlotHighlight()
 {
 	const FLinearColor Hot(1.f, 0.92f, 0.35f, 0.95f);
 	const FLinearColor Cold(0.12f, 0.13f, 0.16f, 1.f);
+	const FLinearColor Locked(0.08f, 0.08f, 0.10f, 1.f);
+	UPFBackendSubsystem* Backend = GetBackend();
+	const int32 Rank = Backend ? Backend->EffectiveRank() : 0;
+	const bool bLoggedIn = Backend && Backend->IsLoggedIn();
 	for (int32 i = 0; i < SaveSlotButtons.Num(); ++i)
 	{
 		if (SaveSlotButtons[i] != nullptr)
 		{
-			SaveSlotButtons[i]->SetBackgroundColor(i == ActiveSaveSlot ? Hot : Cold);
+			const bool bLocked = i > 0 && (!bLoggedIn || Rank < RequiredRankForSaveSlot(i));
+			SaveSlotButtons[i]->SetBackgroundColor(
+				i == ActiveSaveSlot ? Hot : (bLocked ? Locked : Cold));
 		}
 	}
 }
@@ -1105,12 +1118,24 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 	// require a (free) logged-in account. This is deliberately enforced even offline — the whole point is to
 	// nudge account creation (weapon rank-locks stay ungated offline; classes do NOT). A logged-out click on a
 	// locked class falls back to the free class 0 with a nudge.
+	// RANK GATE (Tom 2026-07-24, "all classes lock for all people unless they have ranked up"):
+	// on top of the login, class N unlocks at rank N (class 2 = rank 2 … class 5 = rank 5). The
+	// rank ladder is the account Level from the backend profile (EffectiveRank honors pf.SetRank
+	// for testing). Server-side enforcement rides the existing per-weapon rank clamp in
+	// ServerSetKit — the class slot itself is a client-local loadout container.
 	if (SaveSlot > 0)
 	{
 		UPFBackendSubsystem* Backend = GetBackend();
 		if (Backend != nullptr && !Backend->IsLoggedIn())
 		{
 			SetStatus(TEXT("Classes 2-5 need a free account — log in on the ONLINE panel to unlock all five soldiers."));
+			SaveSlot = 0;
+		}
+		else if (Backend != nullptr && Backend->EffectiveRank() < RequiredRankForSaveSlot(SaveSlot))
+		{
+			SetStatus(FString::Printf(
+				TEXT("Class %d unlocks at rank %d — you're rank %d. Play online matches to rank up."),
+				SaveSlot + 1, RequiredRankForSaveSlot(SaveSlot), Backend->EffectiveRank()));
 			SaveSlot = 0;
 		}
 	}
@@ -1658,6 +1683,24 @@ void UPFLoadingMenuWidget::BuildTree()
 			// the field + GO button when there's a reason to type a code.
 			CodeRow->SetVisibility(ESlateVisibility::Collapsed);
 
+			// NEW MATCH: joins the first EMPTY compatible official server — with the fleet, an
+			// idle instance IS a fresh match waiting for its first players to set it up.
+			NewMatchButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("NewMatchBtn"));
+			NewMatchButton->SetBackgroundColor(FLinearColor(0.55f, 0.30f, 0.08f, 1.f));
+			NewMatchButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnNewMatchClicked);
+			{
+				UTextBlock* NewMatchLab = WidgetTree->ConstructWidget<UTextBlock>();
+				NewMatchLab->SetText(FText::FromString(TEXT("  START NEW MATCH (empty server)  ")));
+				NewMatchLab->SetFont(PFLoadFont(12, true));
+				NewMatchLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				NewMatchButton->AddChild(NewMatchLab);
+			}
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(NewMatchButton))
+			{
+				V->SetHorizontalAlignment(HAlign_Fill);
+				V->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			}
+
 			// Collapsible server-browser rows (SERVERS toggles; rows fill from GET /v1/servers).
 			ServerRowsBox = WidgetTree->ConstructWidget<UVerticalBox>();
 			ServerRowButtons.Reset();
@@ -1674,7 +1717,13 @@ void UPFLoadingMenuWidget::BuildTree()
 				case 2: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow2Clicked); break;
 				case 3: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow3Clicked); break;
 				case 4: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow4Clicked); break;
-				default: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow5Clicked); break;
+				case 5: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow5Clicked); break;
+				case 6: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow6Clicked); break;
+				case 7: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow7Clicked); break;
+				case 8: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow8Clicked); break;
+				case 9: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow9Clicked); break;
+				case 10: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow10Clicked); break;
+				default: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow11Clicked); break;
 				}
 				UTextBlock* RowLab = WidgetTree->ConstructWidget<UTextBlock>();
 				RowLab->SetFont(PFLoadFont(11, false));
@@ -1691,7 +1740,16 @@ void UPFLoadingMenuWidget::BuildTree()
 				ServerRowButtons.Add(Row);
 				ServerRowLabels.Add(RowLab);
 			}
-			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(ServerRowsBox))
+			// Scroll box sized to ~3.5 rows: the fleet can list up to BrowserRowCount servers
+			// without the ONLINE panel growing past the screen (Tom 2026-07-24 — "see maybe three
+			// server lines ... with a scroll box, so you can see all ten").
+			UScrollBox* ServerScroll = WidgetTree->ConstructWidget<UScrollBox>();
+			ServerScroll->SetScrollBarVisibility(ESlateVisibility::Visible);
+			ServerScroll->AddChild(ServerRowsBox);
+			USizeBox* ServerScrollSizer = WidgetTree->ConstructWidget<USizeBox>();
+			ServerScrollSizer->SetMaxDesiredHeight(132.f);
+			ServerScrollSizer->SetContent(ServerScroll);
+			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(ServerScrollSizer))
 			{
 				V->SetHorizontalAlignment(HAlign_Fill);
 				V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
@@ -3034,6 +3092,48 @@ void UPFLoadingMenuWidget::OnServerRow2Clicked() { JoinBrowserRow(2); }
 void UPFLoadingMenuWidget::OnServerRow3Clicked() { JoinBrowserRow(3); }
 void UPFLoadingMenuWidget::OnServerRow4Clicked() { JoinBrowserRow(4); }
 void UPFLoadingMenuWidget::OnServerRow5Clicked() { JoinBrowserRow(5); }
+void UPFLoadingMenuWidget::OnServerRow6Clicked() { JoinBrowserRow(6); }
+void UPFLoadingMenuWidget::OnServerRow7Clicked() { JoinBrowserRow(7); }
+void UPFLoadingMenuWidget::OnServerRow8Clicked() { JoinBrowserRow(8); }
+void UPFLoadingMenuWidget::OnServerRow9Clicked() { JoinBrowserRow(9); }
+void UPFLoadingMenuWidget::OnServerRow10Clicked() { JoinBrowserRow(10); }
+void UPFLoadingMenuWidget::OnServerRow11Clicked() { JoinBrowserRow(11); }
+
+void UPFLoadingMenuWidget::OnNewMatchClicked()
+{
+	UPFBackendSubsystem* Backend = GetBackend();
+	if (!Backend || !Backend->IsLoggedIn())
+	{
+		SetStatus(TEXT("Log in on the ONLINE panel first, then START NEW MATCH."));
+		return;
+	}
+	SetStatus(TEXT("Looking for an empty server…"));
+	TWeakObjectPtr<UPFLoadingMenuWidget> WeakThis(this);
+	Backend->FetchServers([WeakThis](bool bOk, const TArray<FPFBackendServerInfo>& Servers)
+	{
+		UPFLoadingMenuWidget* Self = WeakThis.Get();
+		if (!Self)
+		{
+			return;
+		}
+		if (!bOk)
+		{
+			Self->SetStatus(TEXT("Couldn't reach the server directory — try again."));
+			return;
+		}
+		// First EMPTY compatible instance = a fresh match: the joiner becomes match leader and
+		// sets it up. Directory orders by players DESC, so empties are at the tail — scan all.
+		for (const FPFBackendServerInfo& Info : Servers)
+		{
+			if (Info.NetProtocol == PFBuild::NetProtocol && Info.Players == 0)
+			{
+				Self->JoinBackendServer(Info);
+				return;
+			}
+		}
+		Self->SetStatus(TEXT("Every server has a match going — join one from SERVERS, or try again soon."));
+	});
+}
 
 void UPFLoadingMenuWidget::JoinBrowserRow(int32 Index)
 {

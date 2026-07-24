@@ -27,6 +27,10 @@ public:
 	UPROPERTY(Replicated)                  bool   bAliveInRound = false;
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  StructuralBudget = 30;  // B6; server-mutated only
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  PropBudget = 6;
+	// Per-player per-type caps (Tom 2026-07-24): 1 trap floor + 1 one-way door each, per match.
+	// Counters ride the budget lifecycle: spend ++, refund --, ServerSetBudgets (Lobby→Build) resets.
+	UPROPERTY(Replicated) uint8 TrapFloorsPlaced = 0;
+	UPROPERTY(Replicated) uint8 OneWayDoorsPlaced = 0;
 	UPROPERTY(Replicated)                  uint16 Eliminations = 0;
 	UPROPERTY(Replicated)                  uint16 TimesEliminated = 0;
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint16 TagCount = 0;         // FreeForAll per-player tags (also useful HUD)
@@ -57,6 +61,8 @@ public:
 	void ServerSetBudgets(uint8 Structural, uint8 Props);
 	bool ServerTrySpendBudget(EPFPieceType Type);      // false if empty; decrements correct pool
 	void ServerRefundBudget(EPFPieceType Type);        // T19: called with the ORIGINAL builder's PS
+	/** True when this player already placed their per-match allowance of Type (trap/one-way). */
+	bool ServerIsAtPieceLimit(EPFPieceType Type) const;
 	void ServerAddScore(int32 Delta);
 	void ServerAddTag();                               // FreeForAll: ++TagCount + flags refresh
 	void ServerSetFlagCarry(bool bCarrying, uint8 FlagTeam); // CTF: set/clear carrier
@@ -75,6 +81,14 @@ public:
 	 *  assignment, human counts, and heartbeat player counts (multiplayer-plan Phase 0). Always
 	 *  false on rendering machines and on true dedicated servers (no local players there). */
 	bool IsHeadlessServerPhantom() const;
+
+	/** Replicated mirror of IsHeadlessServerPhantom(), stamped once in PostLogin. The live test
+	 *  reads FApp::CanEverRender() + the local-controller owner — state that only exists on the
+	 *  server process — so remote widgets (scoreboard/results/lobby) MUST use this flag instead.
+	 *  IsPhantom() is the one call safe on every machine. */
+	UPROPERTY(Replicated) bool bHeadlessPhantom = false;
+	void ServerMarkHeadlessPhantom();
+	bool IsPhantom() const { return bHeadlessPhantom || IsHeadlessServerPhantom(); }
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void PostInitializeComponents() override;

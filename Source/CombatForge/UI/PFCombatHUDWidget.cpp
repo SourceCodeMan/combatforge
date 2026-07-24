@@ -2,6 +2,7 @@
 
 #include "UI/PFCombatHUDWidget.h"
 
+#include "Audio/PFMusicSubsystem.h"
 #include "Core/PFUserPrefs.h"
 
 #include "Combat/PFHealthComponent.h"
@@ -225,6 +226,23 @@ void UPFCombatHUDWidget::BuildTree()
 	{
 		VSlot->SetHorizontalAlignment(HAlign_Center);
 		VSlot->SetPadding(FMargin(0.f, 2.f));
+	}
+
+	// Final-30s countdown: its own canvas slot (not TopBox) so the per-second scale pop never
+	// reflows the pips/alive strip. Hidden until the live round timer crosses 30 s.
+	FinalCountdownText = WidgetTree->ConstructWidget<UTextBlock>();
+	FinalCountdownText->SetFont(PFCombatFont(54, true));
+	FinalCountdownText->SetColorAndOpacity(FSlateColor(FLinearColor(0.98f, 0.25f, 0.12f)));
+	FinalCountdownText->SetJustification(ETextJustify::Center);
+	FinalCountdownText->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+	FinalCountdownText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(FinalCountdownText))
+	{
+		CSlot->SetAnchors(FAnchors(0.5f, 0.f));
+		CSlot->SetAlignment(FVector2D(0.5f, 0.f));
+		CSlot->SetPosition(FVector2D(0.f, 148.f));   // clear of the pips/timer/alive strip
+		CSlot->SetAutoSize(true);
+		CSlot->SetZOrder(30);
 	}
 
 	UHorizontalBox* AliveRow = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -592,7 +610,8 @@ void UPFCombatHUDWidget::HandleScoreChanged()
 		}
 		for (APlayerState* PSBase : GS->PlayerArray)
 		{
-			if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase))
+			if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+				PS && !PS->IsPhantom())
 			{
 				LeadTags = FMath::Max(LeadTags, PS->TagCount);
 			}
@@ -1373,14 +1392,41 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 
 	if (const ACombatForgeGameState* GS = BoundGameState.Get())
 	{
+		const float RoundRemain = GS->GetRoundTimeRemaining();
+		const int32 Secs = FMath::Max(0, FMath::CeilToInt(RoundRemain));
 		if (RoundTimerText)
 		{
-			const int32 Secs = FMath::Max(0, FMath::CeilToInt(GS->GetRoundTimeRemaining()));
 			RoundTimerText->SetText(FText::FromString(FString::Printf(TEXT("%d:%02d"), Secs / 60, Secs % 60)));
 			RoundTimerText->SetColorAndOpacity(FSlateColor(
 				(GS->RoundState == EPFRoundState::Live && Secs <= 10)
 					? FLinearColor(0.95f, 0.15f, 0.1f)
 					: FLinearColor::White));
+		}
+
+		// FINAL 30 SECONDS (Tom 2026-07-24): unmissable top-center countdown + the music drops
+		// out. Keyed to the live round timer — the deciding clock in every timed mode; a fresh
+		// round or phase flips it back off (the music un-ducks through the same call).
+		const bool bFinal30 = GS->RoundState == EPFRoundState::Live && Secs > 0 && Secs <= 30;
+		if (FinalCountdownText)
+		{
+			FinalCountdownText->SetVisibility(
+				bFinal30 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+			if (bFinal30)
+			{
+				FinalCountdownText->SetText(FText::FromString(FString::Printf(TEXT("0:%02d"), Secs)));
+				// Per-second pop: the fractional remainder counts DOWN inside each displayed
+				// second, so scale 1+0.3*frac lands big right as the digit changes and eases out.
+				const float Pop = 1.f + 0.3f * FMath::Clamp(FMath::Frac(FMath::Max(RoundRemain, 0.f)), 0.f, 1.f);
+				FinalCountdownText->SetRenderTransform(
+					FWidgetTransform(FVector2D::ZeroVector, FVector2D(Pop, Pop), FVector2D::ZeroVector, 0.f));
+			}
+		}
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UPFMusicSubsystem* Music = GI->GetSubsystem<UPFMusicSubsystem>())
+			{
+				Music->SetMatchEndDucked(bFinal30);
+			}
 		}
 		// FreeForAll TagCount rides PlayerState OnRep (no GameState score event) — refresh the
 		// YOU/LEAD strip here so clients stay live without a dedicated multicast.

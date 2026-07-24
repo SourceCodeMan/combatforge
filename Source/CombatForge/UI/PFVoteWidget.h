@@ -76,6 +76,8 @@ private:
 	void SubmitVote();
 	void UpdateChipVisual(int32 ChipIndex);
 	void UpdateSelectionCount();
+	/** Hand Slate keyboard focus back to the viewport after a click so Tab/Esc keep working. */
+	void ReturnFocusToGame();
 	int32 CountSelections() const;
 
 	UPROPERTY() TObjectPtr<UWidgetSwitcher> StepSwitcher;

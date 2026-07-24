@@ -7,6 +7,7 @@
 #include "PFScoreboardWidget.generated.h"
 
 class ACombatForgePlayerState;
+class UBorder;
 class UTextBlock;
 class UVerticalBox;
 
@@ -38,6 +39,10 @@ private:
 
 	UPROPERTY() TObjectPtr<UTextBlock> WinsAText;
 	UPROPERTY() TObjectPtr<UTextBlock> WinsBText;
+	// Match-rotation strip (PFCycleBar): 1 CREATIVE | 2 REMIX | 3 REMIX SWAP.
+	UPROPERTY() TObjectPtr<UWidget> CycleBarRoot;
+	UPROPERTY() TArray<TObjectPtr<UBorder>> CycleSegs;
+	UPROPERTY() TArray<TObjectPtr<UTextBlock>> CycleTexts;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundText;
 	/** "TAGS" / "CAPTURES" / "POINTS" / "ROUND WINS" under the big score numbers. */
 	UPROPERTY() TObjectPtr<UTextBlock> ScoreUnitText;
