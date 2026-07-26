@@ -29,11 +29,14 @@ public class CombatForge : ModuleRules
 			"AssetRegistry",                 // UObjectLibrary part enumeration (PFCharacterCustomization)
 			"Niagara",                       // muzzle / impact VFX (soft-ref systems + mesh fallback)
 			"HTTP",                          // combatforge-api client (accounts / server browser / reports)
-			"OpenSSL",                       // HMAC-SHA256 match-report signing (fleet mode only)
-			"MediaAssets",                   // phase BGM from Content/Audio/Music/*.mp3 (Suno tracks)
-			"AudioMixer"                     // UMediaSoundComponent volume (USynthComponent)
+			"OpenSSL"                        // HMAC-SHA256 match-report signing (fleet mode only)
 		});
 		// No private-only deps. NOT needed: OnlineSubsystem (02 D12) — the backend is plain REST
 		// against api.playcombatforge.com (docs/multiplayer-plan.md), GameplayAbilities (overkill).
+		// ALSO not needed: MediaAssets + AudioMixer. Both were added for the Media Framework phase-BGM
+		// path (UMediaSoundComponent over the loose .mp3s), which was DROPPED — PFMusicSubsystem plays
+		// cooked SoundWave assets through the normal audio engine and touches neither module. The
+		// MediaPlate + WmfMedia plugins went with them (WmfMedia is Windows-only, so it was also dead
+		// weight on the Mac build). Removed 2026-07-26 before the store beta.
 	}
 }
