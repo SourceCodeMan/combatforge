@@ -26,14 +26,6 @@
 		{
 			"Name": "Niagara",
 			"Enabled": true
-		},
-		{
-			"Name": "MediaPlate",
-			"Enabled": true
-		},
-		{
-			"Name": "WmfMedia",
-			"Enabled": true
 		}
 	]
 }
