@@ -360,7 +360,19 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 	// Assign team + roster slot BEFORE Super::PostLogin so the initial pawn spawn already
 	// knows its side (RestartPlayer → GetSpawnTransform reads TeamId).
 	ACombatForgePlayerState* PS = NewPlayer ? NewPlayer->GetPlayerState<ACombatForgePlayerState>() : nullptr;
-	if (PS && PS->TeamId == TeamNone)
+
+	// Stamp the phantom FIRST. The dedicated box's own local controller is not a player: it must
+	// never take a team, never burn a roster slot, and never get a warmup dummy. Stamping used to
+	// happen after the team block below, so on every fleet box the phantom claimed roster 0 (a
+	// 12-slot server seated 11 humans), sat on team 0, and spawned an ownerless target dummy in
+	// pen slot 0. Same family as the 2026-07-24 phantom scrub — these were the two sites it missed.
+	const bool bPhantom = PS && PS->IsHeadlessServerPhantom();
+	if (bPhantom)
+	{
+		PS->ServerMarkHeadlessPhantom();
+	}
+
+	if (PS && !bPhantom && PS->TeamId == TeamNone)
 	{
 		const ACombatForgeGameState* PreGS = GetPFGameState();
 		if (PreGS && PreGS->MatchType == EPFMatchType::FreeForAll)
@@ -384,15 +396,8 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 
 	Super::PostLogin(NewPlayer);
 
-	if (PS)
+	if (PS && !bPhantom)
 	{
-		// Stamp the replicated phantom flag once, while the server-only live test is valid, so
-		// every remote widget can filter the pilot box's ghost row (it is NOT a player).
-		if (PS->IsHeadlessServerPhantom())
-		{
-			PS->ServerMarkHeadlessPhantom();
-		}
-
 		SpawnWarmupDummyFor(PS);   // one pen dummy per connected player (T29)
 
 		// Joiners during Combat enter the current round alive at their team spawn.
@@ -1793,6 +1798,19 @@ void ACombatForgeGameMode::RequestResetToSpawn(ACombatForgeCharacter* Pawn)
 	if (const double* Last = LastResetToSpawnAt.Find(PS); Last && Now - *Last < ResetToSpawnCooldownSec)
 	{
 		return;
+	}
+	// Drop entries whose PlayerState is gone before adding. A fleet box runs for weeks, so an
+	// add-only map here is a slow leak that never stops growing; the cooldown only ever needs the
+	// players currently connected. Cheap — this runs at most once per player per 20 s.
+	if (LastResetToSpawnAt.Num() > PFGrid::MaxRosterSlots)
+	{
+		for (auto It = LastResetToSpawnAt.CreateIterator(); It; ++It)
+		{
+			if (!It.Key().IsValid())
+			{
+				It.RemoveCurrent();
+			}
+		}
 	}
 	LastResetToSpawnAt.Add(PS, Now);
 	// 3) The unstuck rescue is the TELEPORT. Heal + fresh loadout only OUTSIDE a live round —
