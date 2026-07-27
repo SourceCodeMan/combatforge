@@ -64,7 +64,13 @@ Content/NiagaraExamples/
 
 # parked non-cookable content packs (moved out of Content/ so the cooker skips them)
 _parked_content/
-# Shooter Rifle Animations Fab pack (local paid content, like Bandits)
-Content/RifleAnims/
+# Shooter Rifle Animations Fab pack: TRACKED via LFS as of 2026-07-26 (private repo, same as
+# Bandits/Scene_Warehouse/MarketplaceBlockout). It was ignored, which made it the ONLY force-cooked
+# content dir missing from git — so a fresh clone (the Mac) cooked T-posing characters with broken
+# weapon poses AND broken first-person arms, since the TP hold pose and the whole FP arms solve both
+# derive from AS_Rifle_Aim / AS_Rifle_Fire_Aim here. 48 MB; cheap to carry, expensive to omit.
+# ⚠️ The RETARGETED clips are the ones at the ROOT of Content/RifleAnims/. The same-named copies
+# under Animations/BlendSpaces/Standing_IdleWalkJogRun/ are the UE4-mannequin originals and ELONGATE
+# the torso — never "tidy" the two folders together.
 # Modern Weapons MarketplaceBlockout pack: TRACKED via LFS (private repo, same as Bandits/Scene_Warehouse)
 
