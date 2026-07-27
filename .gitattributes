@@ -12,3 +12,8 @@ Content/Bandits/** filter=lfs diff=lfs merge=lfs -text
 
 # Modern Weapons pack (Fab paid content — private repo only)
 Content/MarketplaceBlockout/** filter=lfs diff=lfs merge=lfs -text
+
+# Shooter Rifle Animations pack (Fab paid content — private repo only). Load-bearing: the TP weapon
+# hold pose and the first-person arms both solve against AS_Rifle_Aim / AS_Rifle_Fire_Aim here, and
+# DefaultGame.ini force-cooks /Game/RifleAnims. Without it a build ships T-posing characters.
+Content/RifleAnims/** filter=lfs diff=lfs merge=lfs -text
