@@ -254,8 +254,9 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 		{
 			continue;
 		}
-		// One MID per type (team tint dropped for texture readability — accepted tradeoff).
-		UMaterialInstanceDynamic* PaletteMID = PFBuildPieceVisuals::CreateStructuralPaletteMID(this, Type);
+		// One MID PER TEAM: same warehouse surface either way, with a subtle albedo accent so you can
+		// tell your fort from theirs. The old shared-MID version had no team read on structure at
+		// all (Tom 2026-07-28 chose the accent over both no-tint and full per-team colour). (P2-BD5)
 		for (uint8 Team = 0; Team < 2; ++Team)
 		{
 			const int32 K = ISMCIndexFor(Type, Team);
@@ -263,8 +264,10 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 			{
 				continue;
 			}
+			UMaterialInstanceDynamic* PaletteMID = PFBuildPieceVisuals::CreateStructuralPaletteMID(this, Type);
 			if (PaletteMID != nullptr)
 			{
+				PFBuildPieceVisuals::ApplyTeamAccent(PaletteMID, Team);
 				PieceISMCs[K]->SetMaterial(0, PaletteMID);
 				TeamMIDs[K] = PaletteMID;
 			}

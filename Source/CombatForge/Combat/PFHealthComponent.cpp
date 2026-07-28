@@ -247,6 +247,21 @@ void UPFHealthComponent::ResetForRound(uint8 RoundHP)
 	OnHPChangedEvent.Broadcast(NearestRemaining());   // manual host broadcast (§5.9)
 }
 
+void UPFHealthComponent::ServerBenchUntilNextRound()
+{
+	if (GetOwnerRole() != ROLE_Authority || bEliminated)
+	{
+		return;
+	}
+	// Everything an eliminated body does — hidden, no collision, no interacts, no fire — WITHOUT
+	// broadcasting OnEliminatedEvent, so nobody is credited a tag and no respawn is scheduled.
+	// Used for a mid-round joiner who sits the round out; ResetForRound at StartNextRound undoes
+	// all of it (HP, collision, appearance). (P2-C5)
+	bEliminated = true;
+	ApplyEliminatedAppearance(true);
+	ArmCorpseCollisionOff();
+}
+
 EPFBodyRegion UPFHealthComponent::ComputeRegion(const FVector& ImpactPoint) const
 {
 	const AActor* Owner = GetOwner();

@@ -30,6 +30,10 @@ namespace
 	constexpr float ServerDirToleranceDeg = 9.f;       // 04 §5.1 — ADS micro-desync + jitter; wider since crosshair
 	                                                   // convergence amplifies small client/server aim skew at close range
 	constexpr float FireTokenCap = 3.f;                // 04 §2.1 token bucket
+	// Sustained shots/sec the server will accept on a Single/Burst selector. Set above any tap rate
+	// a human can hold (a very fast tapper peaks near 8/s and cannot sustain it), so honest play is
+	// never rejected, while a modified client can no longer run a Mode_S gun at its internal ROF.
+	constexpr float NonAutoSustainedBps = 10.f;        // P2-CB6
 }
 
 UPFWeaponComponent::UPFWeaponComponent()
@@ -596,14 +600,28 @@ void UPFWeaponComponent::ServerFire_Implementation(const FPFShotPacket& Shot)
 	}
 
 	// Token bucket: cap 3, refill 12/s — tolerates jitter bursts, rejects macros (04 §2.1).
-	const float RefillRate = FMath::Max(1.f, FireRateBps);
-	FireTokens = FMath::Min(FireTokenCap,
+	//
+	// FIRE-MODE CADENCE (P2-CB6): on Single or Burst the SUSTAINED rate a player can physically
+	// produce is their trigger-finger, not the weapon's internal ROF. Before this the server had no
+	// idea what the selector said, so a modified client on a Mode_S weapon could stream at the
+	// weapon's full FireRateBps — full-auto sniper/shotgun cadence, with only the honest client's
+	// own ShotsThisPull latch stopping it. Cap the REFILL at a human tap ceiling for non-Auto
+	// modes; the bucket CAP is raised to BurstCount so a legitimate burst still leaves in one go.
+	// No pull-boundary detection, so nothing here can reject a genuine fast tapper.
+	float RefillRate = FMath::Max(1.f, FireRateBps);
+	float TokenCap = FireTokenCap;
+	if (ServerFireMode != EPFFireMode::Auto)
+	{
+		RefillRate = FMath::Min(RefillRate, NonAutoSustainedBps);
+		TokenCap = FMath::Max(TokenCap, static_cast<float>(FMath::Max<uint8>(BurstCount, 1)));
+	}
+	FireTokens = FMath::Min(TokenCap,
 		FireTokens + static_cast<float>(Now - LastTokenRefillTime) * RefillRate);
 	LastTokenRefillTime = Now;
 	if (FireTokens < 1.f)
 	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("ServerFire reject (%s): ROF token bucket empty"),
-			*GetNameSafe(Char));
+		UE_LOG(CombatForgeLog, Warning, TEXT("ServerFire reject (%s): ROF token bucket empty (mode %u)"),
+			*GetNameSafe(Char), static_cast<uint32>(ServerFireMode));
 		return;
 	}
 
@@ -1255,6 +1273,12 @@ void UPFWeaponComponent::SetAllowedFireModes(uint8 Mask, EPFFireMode Default)
 {
 	AllowedFireModeMask = (Mask == 0) ? static_cast<uint8>(1 << 2) : Mask;   // never leave zero (would strand the selector)
 	SetFireMode(Default);
+	// Authority also re-seats its own copy: a weapon swap must not leave the server enforcing the
+	// PREVIOUS gun's cadence on the new one. (P2-CB6)
+	if (GetOwnerRole() == ROLE_Authority)
+	{
+		ServerFireMode = CurrentFireMode;
+	}
 }
 
 void UPFWeaponComponent::SetFireMode(EPFFireMode Mode)
@@ -1268,6 +1292,38 @@ void UPFWeaponComponent::SetFireMode(EPFFireMode Mode)
 	}
 	CurrentFireMode = Mode;
 	OnFireModeChangedEvent.Broadcast(CurrentFireMode);
+	PushFireModeToServer();
+}
+
+void UPFWeaponComponent::PushFireModeToServer()
+{
+	// The selector is client-local feel, but the SERVER needs it to know which cadence to enforce.
+	// Authority already has the value; a remote owner ships it up. (P2-CB6)
+	const ACombatForgeCharacter* Char = GetPFCharacter();
+	if (Char == nullptr || !Char->IsLocallyControlled())
+	{
+		return;
+	}
+	if (GetOwnerRole() == ROLE_Authority)
+	{
+		ServerFireMode = CurrentFireMode;
+		return;
+	}
+	ServerSetFireMode(CurrentFireMode);
+}
+
+void UPFWeaponComponent::ServerSetFireMode_Implementation(EPFFireMode Mode)
+{
+	// Clamp to what the CATALOG allows for the equipped weapon — AllowedFireModeMask is set
+	// server-side in ApplyWeaponLoadout, so a client cannot claim a mode this gun does not have.
+	if (!IsFireModeAllowed(Mode))
+	{
+		for (uint8 m = 0; m < 3; ++m)
+		{
+			if (AllowedFireModeMask & (1u << m)) { Mode = static_cast<EPFFireMode>(m); break; }
+		}
+	}
+	ServerFireMode = Mode;
 }
 
 void UPFWeaponComponent::CycleFireMode()
@@ -1283,6 +1339,7 @@ void UPFWeaponComponent::CycleFireMode()
 		}
 	}
 	OnFireModeChangedEvent.Broadcast(CurrentFireMode);
+	PushFireModeToServer();
 	if (ACombatForgeCharacter* Char = GetPFCharacter())
 	{
 		if (Char->IsLocallyControlled())

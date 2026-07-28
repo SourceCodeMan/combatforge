@@ -62,6 +62,10 @@ public:
 		// OnEliminatedEvent broadcast, corpse blocks paintballs 0.5 s then collision off (04 §2.4).
 	/** Instant lethal elim (fall from height, etc.). ShooterTeam=255, no shooter credit. */
 	void ApplyFallDeath();
+	/** Sit out the rest of the round: hidden, no collision, no fire/interact, but NO elimination
+	 *  broadcast — nobody is credited and no respawn is scheduled. Mid-round joiners only; the
+	 *  next ResetForRound restores everything. (P2-C5) */
+	void ServerBenchUntilNextRound();
 	void ResetForRound(uint8 RoundHP);   // server: zero counters, un-eliminate, restore collision/
 	                                     // appearance; RoundHP<=1 → one-hit mode (showdown)
 	EPFBodyRegion ComputeRegion(const FVector& ImpactPoint) const;  // legacy Z-band: Head iff Z ≥ capsule-top − 35 uu

@@ -1120,8 +1120,8 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 	// locked class falls back to the free class 0 with a nudge.
 	// RANK GATE (Tom 2026-07-24, "all classes lock for all people unless they have ranked up"):
 	// on top of the login, class N unlocks at rank N (class 2 = rank 2 … class 5 = rank 5). The
-	// rank ladder is the account Level from the backend profile (EffectiveRank honors pf.SetRank
-	// for testing). Server-side enforcement rides the existing per-weapon rank clamp in
+	// rank ladder is the account Level from the backend profile (EffectiveRank; the alpha-only
+	// pf.SetRank override was removed 2026-07-28). Server-side enforcement rides the per-weapon clamp in
 	// ServerSetKit — the class slot itself is a client-local loadout container.
 	if (SaveSlot > 0)
 	{

@@ -444,16 +444,46 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 		{
 			const bool bAlive = (JoinGS->RoundState == EPFRoundState::Freeze ||
 			                     JoinGS->RoundState == EPFRoundState::Live);
-			PS->ServerSetAliveInRound(bAlive);
-			// Mid-combat joiners miss StartNextRound's RoundHP stamp — apply sudden-death
-			// one-hit mode if the live round is showdown (C2).
-			if (bAlive && bSuddenDeathRoundActive)
+
+			// Round-elimination: a joiner SPECTATES the round in progress instead of materialising
+			// alive in the middle of a firefight (Tom 2026-07-28; the old behaviour was flagged in
+			// code as a contract gap). Continuous-respawn modes are unaffected — there is nothing
+			// to wait for there. StartNextRound clears OutKind, re-alives, and respawns everyone,
+			// so no extra bookkeeping is needed to bring them back in. (P2-C5)
+			if (bAlive && RespawnMode == EPFRespawnMode::RoundElimination)
 			{
+				PS->ServerSetAliveInRound(false);
+				PS->ServerSetOutForRound();   // HUD: out until the next round
 				if (ACombatForgeCharacter* JoinPawn = Cast<ACombatForgeCharacter>(PS->GetPawn()))
 				{
-					if (UPFHealthComponent* Health = JoinPawn->GetHealth())
+					if (UPFHealthComponent* JoinHealth = JoinPawn->GetHealth())
 					{
-						Health->ResetForRound(1);
+						JoinHealth->ServerBenchUntilNextRound();   // hidden + no collision, no elim credit
+					}
+				}
+				if (ACombatForgePlayerController* JoinPC =
+					Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
+				{
+					JoinPC->SetEliminatedMoveLock(true);
+					JoinPC->StartDeathCamera();   // 0.5 s at own body, then spectate a teammate
+				}
+				UE_LOG(CombatForgeLog, Log,
+					TEXT("GameMode: %s joined mid-round - spectating until the next round"),
+					*PS->GetPlayerName());
+			}
+			else
+			{
+				PS->ServerSetAliveInRound(bAlive);
+				// Mid-combat joiners miss StartNextRound's RoundHP stamp — apply sudden-death
+				// one-hit mode if the live round is showdown (C2).
+				if (bAlive && bSuddenDeathRoundActive)
+				{
+					if (ACombatForgeCharacter* JoinPawn = Cast<ACombatForgeCharacter>(PS->GetPawn()))
+					{
+						if (UPFHealthComponent* Health = JoinPawn->GetHealth())
+						{
+							Health->ResetForRound(1);
+						}
 					}
 				}
 			}
