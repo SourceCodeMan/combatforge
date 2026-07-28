@@ -310,7 +310,13 @@ void APFGrenadeProjectile::SpawnCosmeticFragBurst(const FVector& At, uint32 Seed
 		return;   // dedicated/non-rendering world
 	}
 	// SAME seed + SAME bias as SpawnFragBurst so cosmetic tracers line up with the authoritative BBs.
+	// Only POOL-SIZE of them are spawned though: asking for 90 out of a 64-slot pool recycles the
+	// oldest mid-burst, so a quarter of the tracers vanished a frame after they appeared while the
+	// host saw the full spray. Stride the sample across the whole burst (the bomb already does this)
+	// and keep advancing the stream on every index so the chosen directions still match. (P2-CB8)
+	const int32 CosmeticCount = FMath::Min(UPFSplatSubsystem::CosmeticProjectilePoolSize, FragBBCount);
 	FRandomStream Stream(Seed);
+	int32 NextSample = 0;
 	for (int32 i = 0; i < FragBBCount; ++i)
 	{
 		FVector Dir = Stream.VRand();
@@ -319,6 +325,11 @@ void APFGrenadeProjectile::SpawnCosmeticFragBurst(const FVector& At, uint32 Seed
 			Dir.Z = -Dir.Z * 0.5f;
 		}
 		Dir = Dir.GetSafeNormal();
+		if (NextSample >= CosmeticCount || i != (NextSample * FragBBCount) / CosmeticCount)
+		{
+			continue;
+		}
+		++NextSample;
 		if (APFPaintballProjectile* Ball = Splats->AcquireCosmeticProjectile())
 		{
 			// SourceWeapon null on remote clients -> InitProjectile falls back to default BB ballistics (fine

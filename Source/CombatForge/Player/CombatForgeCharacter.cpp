@@ -3416,13 +3416,36 @@ void ACombatForgeCharacter::ServerRequestResetToSpawn_Implementation()
 
 void ACombatForgeCharacter::ServerSetPlayerName_Implementation(const FString& Name)
 {
-	if (APlayerState* PS = GetPlayerState())
+	APlayerState* PS = GetPlayerState();
+	if (!PS)
 	{
-		const FString Clean = Name.TrimStartAndEnd().Left(24);   // backend already validated the name; clamp length
-		if (!Clean.IsEmpty())
+		return;
+	}
+	// One accepted name change per second. The owning client normally sends this exactly once on
+	// possess; without a limit it could spam the scoreboard into a flicker. (P2-P12)
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetTimeSeconds() : 0.0;
+	if (LastNameSetAt > 0.0 && Now - LastNameSetAt < 1.0)
+	{
+		return;
+	}
+
+	FString Clean = Name.TrimStartAndEnd().Left(24);   // backend already validated the name; clamp length
+	// Strip control characters — they render as boxes or break the scoreboard's layout.
+	FString Printable;
+	Printable.Reserve(Clean.Len());
+	for (const TCHAR C : Clean)
+	{
+		if (C >= 0x20 && C != 0x7F)
 		{
-			PS->SetPlayerName(Clean);
+			Printable.AppendChar(C);
 		}
+	}
+	Clean = Printable.TrimStartAndEnd();
+	if (!Clean.IsEmpty())
+	{
+		LastNameSetAt = Now;
+		PS->SetPlayerName(Clean);
 	}
 }
 

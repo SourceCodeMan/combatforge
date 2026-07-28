@@ -301,6 +301,10 @@ void UPFBackendSubsystem::PollDeviceToken()
 	{
 		return;
 	}
+	if (bTokenPollInFlight)
+	{
+		return;   // a previous poll is still out on a slow link — don't stack another (P2-ON2)
+	}
 	if (FPlatformTime::Seconds() > DeviceExpiresAtSec)
 	{
 		StopDevicePolling();
@@ -311,12 +315,23 @@ void UPFBackendSubsystem::PollDeviceToken()
 		TEXT("{\"grant_type\":\"urn:ietf:params:oauth:grant-type:device_code\",")
 		TEXT("\"device_code\":\"%s\",\"client_id\":\"%s\"}"), *PendingDeviceCode, GameClientId);
 	const int32 Gen = DeviceFlowGeneration;
+	bTokenPollInFlight = true;
 	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
 	Request(TEXT("POST"), TEXT("/api/auth/device/token"), Body, /*AuthMode=*/0,
 		[WeakThis, Gen](int32 Code, const FString& Resp)
 		{
 			UPFBackendSubsystem* Self = WeakThis.Get();
-			if (!Self || Self->DeviceFlowGeneration != Gen || Self->PendingDeviceCode.IsEmpty())
+			if (!Self)
+			{
+				return;
+			}
+			// Clear the in-flight latch for THIS generation only; a StopDevicePolling that already
+			// bumped the generation has cleared it, and a newer poll may own it now.
+			if (Self->DeviceFlowGeneration == Gen)
+			{
+				Self->bTokenPollInFlight = false;
+			}
+			if (Self->DeviceFlowGeneration != Gen || Self->PendingDeviceCode.IsEmpty())
 			{
 				return;   // canceled/superseded while this poll was in flight
 			}
@@ -356,6 +371,7 @@ void UPFBackendSubsystem::StopDevicePolling()
 {
 	++DeviceFlowGeneration;   // invalidate every in-flight code/token callback
 	bDeviceCodeRequestInFlight = false;
+	bTokenPollInFlight = false;
 	if (DevicePollTicker.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(DevicePollTicker);
@@ -363,6 +379,9 @@ void UPFBackendSubsystem::StopDevicePolling()
 	}
 	PendingDeviceCode.Reset();
 	PendingUserCode.Reset();
+	// Otherwise a UI that reads GetVerificationUri() after a cancel keeps showing the previous
+	// approval URL until the next successful code response. (P2-ON3)
+	VerificationUri.Reset();
 }
 
 void UPFBackendSubsystem::HandleLoginSucceeded(const FString& Token)

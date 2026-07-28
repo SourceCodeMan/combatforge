@@ -128,6 +128,11 @@ public:
 	/** Called by the GameMode once the world is up: registers + starts the heartbeat. */
 	void FleetRegisterIfServer(UWorld* World);
 	bool IsFleetActive() const { return bFleetRegistered; }
+	/** True whenever this box HOLDS a fleet key, registered or not. Match reporting must use this,
+	 *  not IsFleetActive(): during a heartbeat-409 re-register (or before the first register lands)
+	 *  bFleetRegistered is false, and a match that ended in that window would silently skip the
+	 *  fleet XP path and fall through to casual reporting. Queue always, send when able. (P2-ON1) */
+	bool HasFleetKey() const { return !ServerKey.IsEmpty(); }
 	/** POST /v1/match-report with the HMAC headers. Body is the frozen wire-format JSON the
 	 *  GameMode archives locally either way (progression-plan "build now"). A non-empty
 	 *  PendingFilePath is deleted on a 200 (the crash-retry queue under Saved/PendingReports/). */
@@ -164,6 +169,9 @@ private:
 	double  DeviceExpiresAtSec = 0.0;        // FPlatformTime::Seconds deadline
 	FTSTicker::FDelegateHandle DevicePollTicker;
 	bool    bDeviceCodeRequestInFlight = false;
+	/** One /device/token call at a time. On a slow link the fixed poll interval used to stack
+	 *  overlapping requests, spamming the API and racing two success handlers. (P2-ON2) */
+	bool    bTokenPollInFlight = false;
 	/** Bumped by Begin/Cancel/Stop: any async callback carrying a stale generation bails, so a
 	 *  canceled flow can never resurrect itself when its in-flight response lands (review 2cf97f2). */
 	int32   DeviceFlowGeneration = 0;

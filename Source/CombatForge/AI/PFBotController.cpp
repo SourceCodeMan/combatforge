@@ -1174,6 +1174,17 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 			OutGoal = MyHome;   // run it home to score
 			return true;
 		}
+		// Our own flag lying in the field used to be returned only if a bot happened to walk over
+		// it — the AI never went and got it, so an enemy could park a stolen flag anywhere and the
+		// bot team would ignore it all match. Send half the roster (parity split, same trick
+		// Domination uses) to touch it home; the other half keeps hunting the enemy flag. (P2-AI1)
+		if (HomeFlag && !HomeFlag->IsAtHome() && !HomeFlag->IsCarried()
+			&& (MyPS->RosterIndex % 2) == 0)
+		{
+			OutGoal = HomeFlag->GetActorLocation();
+			return true;
+		}
+
 		// Not carrying: go grab the nearest grabbable (not-carried) enemy flag.
 		APFFlagActor* BestFlag = nullptr;
 		float BestSq = TNumericLimits<float>::Max();

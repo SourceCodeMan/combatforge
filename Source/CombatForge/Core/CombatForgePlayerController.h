@@ -152,6 +152,11 @@ private:
 	TUniquePtr<FPFClientLogCapture> ClientLogCapture;
 	/** Server: append path for this connection's shipped client log. */
 	FString ServerClientLogPath;
+	/** Server: bytes accepted from this connection, capped so a bad client can't fill the host disk
+	 *  8 chunks/s forever. A real crash-log ship is a few hundred KB. (P2-C12) */
+	int64 ServerClientLogBytes = 0;
+	bool  bServerClientLogCapped = false;
+	static constexpr int64 ServerClientLogByteBudget = 8 * 1024 * 1024;   // 8 MB
 
 	bool bGameStateBound = false;
 	bool bGuidHashSent = false;

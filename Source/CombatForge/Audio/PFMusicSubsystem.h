@@ -46,7 +46,11 @@ private:
 	enum class EPFMusicTrack : uint8 { None = 0, Build, Combat };
 
 	void EnsurePlayer();
+	/** Restarts the bed if a track ever runs to its end (editor loop backstop — see PlayTrack). */
+	UFUNCTION() void HandleMusicFinished();
 	void PlayTrack(EPFMusicTrack Track);
+	/** Start/stop the wind bed on every pawn owned by THIS game instance's local players. */
+	void SetLocalAmbientBed(bool bOn);
 	USoundBase* TrackSound(EPFMusicTrack Track);   // soft-loads + caches the SoundWave asset
 	float ResolveVolume() const;
 

@@ -3449,7 +3449,11 @@ void ACombatForgeGameMode::EmitMatchReport() const
 	if (UPFBackendSubsystem* Backend = GetGameInstance()
 		? GetGameInstance()->GetSubsystem<UPFBackendSubsystem>() : nullptr)
 	{
-		if (Backend->IsFleetActive())
+		// Key presence, NOT registration state (P2-ON1). During a heartbeat-409 re-register, or
+		// before the first register lands, IsFleetActive() is false — a match ending in that window
+		// used to skip the fleet path entirely and fall through to casual XP. SendMatchReport is
+		// already key-gated and the queue file survives, so queue always and let it re-send.
+		if (Backend->HasFleetKey())
 		{
 			// PERSISTENT queue dir (FPFPaths::ServerDataDir honors -ArenaDir on the box) so a redeploy mid-unsent
 			// report doesn't drop that match's XP. MUST match the re-send path in PFBackendSubsystem (#8).

@@ -477,6 +477,8 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> FirstPersonArmsReloadAnim = nullptr;
 	// Pending return-to-hold after a one-shot arm clip (fire kick / reload) finishes.
 	FTimerHandle FPArmsReturnTimer;
+	/** Server: world time of the last accepted ServerSetPlayerName, rate-limiting the next. (P2-P12) */
+	double LastNameSetAt = 0.0;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
 	// Grip in hand_r bone space (SM_Rifle family: local +Y = barrel-forward).

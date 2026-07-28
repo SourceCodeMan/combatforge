@@ -21,7 +21,6 @@
 #include "Materials/MaterialInterface.h"
 #include "UObject/SoftObjectPath.h"
 #include "Net/UnrealNetwork.h"
-#include "UObject/ConstructorHelpers.h"
 
 // ---------------------------------------------------------------------------
 // FPFBuildPieceArray — client mirror hooks (§5.11: visuals ONLY from these)
@@ -1219,6 +1218,36 @@ void APFBuildGrid::SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec)
 
 void APFBuildGrid::DestroySpecialPieceActor(uint16 PieceId)
 {
+	// Non-authority NEVER destroys a replicated actor. The server closes the channel and the client
+	// tears the actor down for us; calling Destroy() here races that and produces "attempted to
+	// destroy non-authority actor" noise or a brief double-teardown under load. Drop the local
+	// bookkeeping and hide it so the piece disappears immediately either way. (P2-BD6)
+	if (!HasAuthority())
+	{
+		if (TObjectPtr<APFBuildPieceActor>* Found = SpecialPieces.Find(PieceId))
+		{
+			if (IsValid(*Found))
+			{
+				(*Found)->SetActorHiddenInGame(true);
+				(*Found)->SetActorEnableCollision(false);
+			}
+			SpecialPieces.Remove(PieceId);
+		}
+		if (GetWorld())
+		{
+			for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
+			{
+				if (*It && (*It)->GetPieceId() == PieceId)
+				{
+					(*It)->SetActorHiddenInGame(true);
+					(*It)->SetActorEnableCollision(false);
+					break;
+				}
+			}
+		}
+		return;
+	}
+
 	if (TObjectPtr<APFBuildPieceActor>* Found = SpecialPieces.Find(PieceId))
 	{
 		if (IsValid(*Found))
@@ -1226,18 +1255,6 @@ void APFBuildGrid::DestroySpecialPieceActor(uint16 PieceId)
 			(*Found)->Destroy();
 		}
 		SpecialPieces.Remove(PieceId);
-	}
-	// Clients: actor may only exist via replication — also scan by id.
-	if (!HasAuthority() && GetWorld())
-	{
-		for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
-		{
-			if (*It && (*It)->GetPieceId() == PieceId)
-			{
-				(*It)->Destroy();
-				break;
-			}
-		}
 	}
 }
 
