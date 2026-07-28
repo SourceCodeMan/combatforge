@@ -91,6 +91,8 @@ FString UCombatForgeGameInstance::GetIdentityFilePath() const
 {
 	// Per-user location (NOT ProjectSavedDir, which is inside a portable/packaged build) so the install GUID is
 	// never shipped and each machine gets its own. Matches Auth.json + arenas under %LOCALAPPDATA%/CombatForge.
+	// NOTE: contract T24 still writes this as Saved/CombatForge/Identity.json. UserSettingsDir is correct and
+	// deliberate (the Saved/ path leaked a session token in alpha-4/5); the contract text is the stale one. (P2-C11)
 	return FPaths::Combine(FString(FPlatformProcess::UserSettingsDir()), TEXT("CombatForge"), TEXT("Identity.json"));
 }
 

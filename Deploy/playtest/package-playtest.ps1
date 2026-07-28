@@ -45,6 +45,11 @@ if ($TryServer) {
 	Write-Host "==> Client-only package (Launcher-engine friendly)"
 }
 
+# COOK-FLAG DELTA vs Scripts/Package-Windows.bat, on purpose (P2-D11): that script adds
+# -iostore -compressed -nodebuginfo -prereqs for a shipping-shaped package. This one is the
+# fast local playtest loop - a lighter cook that iterates quicker and keeps symbols for triage.
+# Anything that goes to itch goes through Package-Windows.bat, so the shipped layout is the
+# bat's, not this one's. Align the flags here only if a playtest needs a byte-identical cook.
 Write-Host "==> BuildCookRun -> $ArchiveDir"
 Write-Host "    Config=$Config  (editor must be closed)"
 

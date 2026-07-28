@@ -82,7 +82,8 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_VisualState) bool bCarried = false;
 	UPROPERTY(Replicated) FVector_NetQuantize HomeLocation = FVector::ZeroVector;
 
-	/** Server-only carrier; clients see attach via follow-tick when bCarried. */
+	/** Server-only carrier. Clients do NOT tick-follow: the SERVER's follow-tick moves the actor and
+	 *  ordinary movement replication carries it to them. (P2-OBJ3) */
 	TWeakObjectPtr<ACombatForgePlayerState> CarrierPS;
 	FTimerHandle DropReturnTimer;
 

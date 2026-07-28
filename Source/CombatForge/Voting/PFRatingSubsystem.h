@@ -52,7 +52,7 @@ public:
 
 	/**
 	 * Picks a saved community arena from Saved/Arenas/, takes its more-developed half, and remaps that
-	 * half into TargetTeam's plot (X translation between plots) so it can be injected for an all-bot
+	 * half by MIRROR-REFLECTING it into TargetTeam's plot (not a plain X translation) so it can be injected for an all-bot
 	 * team. Server-only; returns false if no saved arena exists. (v1 picks the most-recent file; vote
 	 * ranking can refine the pick later.)
 	 */

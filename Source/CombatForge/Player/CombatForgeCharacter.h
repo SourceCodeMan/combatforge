@@ -56,7 +56,7 @@ public:
 	// ---- ADS (owned here; CMC + weapon read through these) ----
 	void  SetADS(bool bWantsADS);          // input entry; respects slide rule (queue during slide — 04 §1.2)
 	bool  IsADS() const;                   // target state
-	float GetADSAlpha() const;             // 0..1 transition alpha (0.18 in / 0.14 out) — weapon spread lerp input
+	float GetADSAlpha() const;             // 0..1 transition alpha (0.14 in / 0.14 out) — weapon spread lerp input
 	void  SetPreferredBaseFOV(float Fov);  // options menu hip FOV (80..110)
 	/** Reload begin/end pushes the current ADS intent into the movement stream (IsADS() self-suppresses
 	 *  while WeaponComponent->bReloading). Called by UPFWeaponComponent so a mid-reload aim release is honored. */

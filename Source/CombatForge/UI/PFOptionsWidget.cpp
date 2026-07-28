@@ -1585,7 +1585,3 @@ void UPFOptionsWidget::ApplyFieldOfView(float Fov)
 	}
 }
 
-void UPFOptionsWidget::ApplyWindowAndResolution()
-{
-	// Handled inside PushToSettings via UGameUserSettings.
-}

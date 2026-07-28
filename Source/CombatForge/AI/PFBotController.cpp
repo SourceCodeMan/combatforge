@@ -1120,9 +1120,20 @@ void APFBotController::EnsureObjectivesCached()
 {
 	// Objectives are spawned once per match; only (re)scan while our cache is empty/stale — this covers a
 	// bot that existed before the objective actors spawned, and a fresh match. Counts are tiny (<=3 CP, <=2 flag).
+	//
+	// Only the cache the ACTIVE MODE needs counts as "done". The old `bHavePoints || bHaveFlags` meant a
+	// partial first scan (say control points resolved, flags had not spawned yet) latched forever, and a
+	// CTF match would then run with an empty FlagsCache and no way to refill it. (P2-AI3)
 	const bool bHavePoints = ControlPointsCache.Num() > 0 && ControlPointsCache[0].IsValid();
 	const bool bHaveFlags  = FlagsCache.Num() > 0 && FlagsCache[0].IsValid();
-	if (bHavePoints || bHaveFlags)
+	const ACombatForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
+	const bool bNeedFlags  = GS && GS->MatchType == EPFMatchType::CaptureFlag;
+	const bool bNeedPoints = GS && (GS->MatchType == EPFMatchType::Domination
+	                             || GS->MatchType == EPFMatchType::Hardpoint);
+	const bool bSatisfied = GS
+		? ((!bNeedFlags || bHaveFlags) && (!bNeedPoints || bHavePoints) && (bHaveFlags || bHavePoints))
+		: (bHavePoints || bHaveFlags);   // no GameState yet: fall back to the old test
+	if (bSatisfied)
 	{
 		return;
 	}

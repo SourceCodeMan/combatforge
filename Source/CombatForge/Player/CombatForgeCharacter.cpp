@@ -918,7 +918,12 @@ void ACombatForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Audio->StopAmbientBed();
 	}
+	// Both session pose maps and both cosmetic timers, so a recycled pawn can never come back
+	// wearing a previous session's tuning or a pending arms/death callback. (P2-P9)
 	SessionWeaponPoses.Empty();
+	SessionWeaponTPs.Empty();
+	GetWorldTimerManager().ClearTimer(FPArmsReturnTimer);
+	GetWorldTimerManager().ClearTimer(DeathHideTimer);
 
 	Super::EndPlay(EndPlayReason);
 }

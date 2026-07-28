@@ -32,7 +32,10 @@ namespace
 APFFlagActor::APFFlagActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.bStartWithTickEnabled = true;
+	// Tick is ONLY needed to follow a carrier; enabled in ServerGiveTo and disabled again on
+	// drop/return, mirroring the control point's pulse pattern. It used to run every frame for
+	// the whole match while the flag sat at home doing nothing. (P2-OBJ4)
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	bReplicates = true;
 	SetReplicateMovement(true);
@@ -155,6 +158,7 @@ void APFFlagActor::ServerInit(uint8 InOwnerTeam, const FVector& InHomeLocation)
 	// A re-init while a drop timer is still armed would let HandleDropReturnTimer fire against the
 	// fresh home state. Clear it before writing anything. (P2-OBJ1)
 	GetWorldTimerManager().ClearTimer(DropReturnTimer);
+	SetActorTickEnabled(false);   // (P2-OBJ4)
 	OwnerTeam = InOwnerTeam;
 	HomeLocation = InHomeLocation;
 	bAtHome = true;
@@ -174,6 +178,7 @@ void APFFlagActor::ServerGiveTo(ACombatForgePlayerState* Carrier)
 		return;
 	}
 	GetWorldTimerManager().ClearTimer(DropReturnTimer);
+	SetActorTickEnabled(true);   // follow the carrier (P2-OBJ4)
 	CarrierPS = Carrier;
 	bCarried = true;
 	bAtHome = false;
@@ -188,6 +193,7 @@ void APFFlagActor::ServerReturnHome()
 		return;
 	}
 	GetWorldTimerManager().ClearTimer(DropReturnTimer);
+	SetActorTickEnabled(false);   // parked at home, nothing to follow (P2-OBJ4)
 	CarrierPS.Reset();
 	bCarried = false;
 	bAtHome = true;
@@ -203,6 +209,7 @@ void APFFlagActor::ServerDropAt(const FVector& WorldLoc)
 	{
 		return;
 	}
+	SetActorTickEnabled(false);   // nothing to follow while it lies on the floor (P2-OBJ4)
 	CarrierPS.Reset();
 	bCarried = false;
 	bAtHome = false;
