@@ -1384,6 +1384,16 @@ void UPFWeaponComponent::StartThrow(EPFGrenadeType Type)
 	{
 		Audio->PlayGrenadeThrow();   // instant local feel; world detonation FX comes from the grenade
 	}
+	// Predict the count down locally, exactly like ammo already does. On a remote client the HUD
+	// used to wait a full round trip for COND_OwnerOnly rep, so a double-tap of G before it landed
+	// fired a second RPC against a count the player had already spent. The server stays law: its
+	// own decrement OnReps back and corrects this if it disagrees. (P2-CB7)
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		uint8& LocalCount = (Type == EPFGrenadeType::Frag) ? FragCount : SmokeCount;
+		LocalCount = (LocalCount > 0) ? static_cast<uint8>(LocalCount - 1) : 0;
+		OnGrenadeCountChangedEvent.Broadcast(FragCount, SmokeCount);
+	}
 	ServerThrowGrenade(Origin, AimDir, static_cast<uint8>(Type));
 }
 

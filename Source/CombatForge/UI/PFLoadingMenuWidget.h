@@ -177,7 +177,6 @@ protected:
 private:
 	void BuildTree();
 	void BuildHowToPlayPage(UVerticalBox* Box);
-	void BuildLoadoutPage(UVerticalBox* Col);
 	void RefreshLoadoutLabels();
 	void BuildCharacterPage(UVerticalBox* Col);
 	void RefreshCharacterLabels();
@@ -219,7 +218,6 @@ private:
 	UFUNCTION() void OnBotsChanged(bool bIsChecked);
 	UFUNCTION() void OnTabSetup();
 	UFUNCTION() void OnTabHowTo();
-	UFUNCTION() void OnTabLoadout();
 	UFUNCTION() void OnTabCharacter();
 	UFUNCTION() void OnOptionsClicked();   // opens the options overlay above the boot menu
 	UFUNCTION() void OnCrosshairCycle();
@@ -305,7 +303,6 @@ private:
 	// Top-level menu tabs: 0 = Match Setup, 1 = How to Play, 2 = Loadout
 	UPROPERTY() TObjectPtr<UButton> TabSetup;
 	UPROPERTY() TObjectPtr<UButton> TabHowTo;
-	UPROPERTY() TObjectPtr<UButton> TabLoadout;
 	UPROPERTY() TObjectPtr<UButton> TabCharacter;
 	UPROPERTY() TObjectPtr<UButton> OptionsTabButton;
 	UPROPERTY() TObjectPtr<UPFOptionsWidget> BootOptions;   // options overlay opened from the boot menu
@@ -316,7 +313,6 @@ private:
 	UPROPERTY() TArray<TObjectPtr<UPFCharSaveSlotButton>> SaveSlotButtons;   // the 5 create-a-class slots
 	int32 ActiveSaveSlot = 0;
 	UPROPERTY() TObjectPtr<UImage> CharPreviewImage;                       // CHARACTER tab: live 3D render target
-	UPROPERTY() TObjectPtr<UImage> LoadoutPreviewImage;                    // LOADOUT tab: same studio (gun in hand)
 	UPROPERTY() TObjectPtr<APFCharacterPreviewActor> CharPreviewActor;     // off-screen studio (lazy-spawned)
 	FPFCharacterConfig CharConfig;
 	bool bPreviewDragging = false;   // left-drag on the preview rotates the character

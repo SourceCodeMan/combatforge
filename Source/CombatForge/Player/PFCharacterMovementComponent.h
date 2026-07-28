@@ -139,10 +139,10 @@ private:
 	float MantleElapsed = 0.f;
 
 	// Slide simulation state. Advanced only inside the movement simulation
-	// (PhysSlide / OnMovementUpdated) so client and server stay in step; not
-	// part of saved moves — a server correction mid-slide replays with the
-	// current timers, which is within v1 tolerance (entry/exit conditions are
-	// flag+speed-derived and deterministic).
+	// (PhysSlide / OnMovementUpdated) so client and server stay in step, and — like the mantle
+	// state above — carried in FSavedMove_PF so a correction replay re-runs each move with the
+	// timers it ORIGINALLY had. Replaying with the CURRENT elapsed under packet loss let friction
+	// and the slide's end condition drift out of step with the server. (P2-P8)
 	float SlideElapsed = 0.f;
 	float SlideRampStartElapsed = 0.f;
 	float SlideCooldownRemaining = 0.f;
@@ -164,6 +164,12 @@ public:
 	FVector SavedMantleStart = FVector::ZeroVector;
 	FVector SavedMantleTarget = FVector::ZeroVector;
 	float SavedMantleElapsed = 0.f;
+
+	// Slide sim state snapshot, same contract as the mantle fields above. (P2-P8)
+	float SavedSlideElapsed = 0.f;
+	float SavedSlideRampStartElapsed = 0.f;
+	float SavedSlideCooldownRemaining = 0.f;
+	uint8 bSavedSlideGlideActive : 1;
 
 	FSavedMove_PF();
 

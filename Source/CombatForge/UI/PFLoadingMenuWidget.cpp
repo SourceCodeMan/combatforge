@@ -468,7 +468,10 @@ UTexture2D* UPFLoadingMenuWidget::GetMapPreview(const FString& JsonFileName)
 
 void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 {
-	ActiveMenuTab = FMath::Clamp(Index, 0, 4);
+	// 0 SETUP, 1 HOW TO, 2 CHARACTER, 3 OPTIONS. The old index-2 LOADOUT page was merged into
+	// CLASS long ago and left behind an empty switcher slot, an unbuilt TabLoadout button, and a
+	// never-called BuildLoadoutPage - all removed. (P2-U7)
+	ActiveMenuTab = FMath::Clamp(Index, 0, 3);
 	if (MenuSwitcher)
 	{
 		MenuSwitcher->SetActiveWidgetIndex(ActiveMenuTab);
@@ -478,12 +481,11 @@ void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 	const FLinearColor Cold(0.14f, 0.15f, 0.18f, 0.95f);
 	if (TabSetup)         { TabSetup->SetBackgroundColor(ActiveMenuTab == 0 ? Hot : Cold); }
 	if (TabHowTo)         { TabHowTo->SetBackgroundColor(ActiveMenuTab == 1 ? Hot : Cold); }
-	if (TabLoadout)       { TabLoadout->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
-	if (TabCharacter)     { TabCharacter->SetBackgroundColor(ActiveMenuTab == 3 ? Hot : Cold); }
-	if (OptionsTabButton) { OptionsTabButton->SetBackgroundColor(ActiveMenuTab == 4 ? Hot : Cold); }
+	if (TabCharacter)     { TabCharacter->SetBackgroundColor(ActiveMenuTab == 2 ? Hot : Cold); }
+	if (OptionsTabButton) { OptionsTabButton->SetBackgroundColor(ActiveMenuTab == 3 ? Hot : Cold); }
 
-	// Live character+gun studio while CHARACTER (or LOADOUT) is open — same preview model both places.
-	if (ActiveMenuTab == 2 || ActiveMenuTab == 3)
+	// Live character+gun studio while CHARACTER is open.
+	if (ActiveMenuTab == 2)
 	{
 		EnsureCharPreview();
 		if (CharPreviewActor != nullptr)
@@ -501,10 +503,9 @@ void UPFLoadingMenuWidget::SelectMenuTab(int32 Index)
 
 void UPFLoadingMenuWidget::OnTabSetup() { SelectMenuTab(0); }
 void UPFLoadingMenuWidget::OnTabHowTo() { SelectMenuTab(1); }
-void UPFLoadingMenuWidget::OnTabLoadout() { SelectMenuTab(2); }
-void UPFLoadingMenuWidget::OnTabCharacter() { SelectMenuTab(3); }
+void UPFLoadingMenuWidget::OnTabCharacter() { SelectMenuTab(2); }
 
-void UPFLoadingMenuWidget::OnOptionsClicked() { SelectMenuTab(4); }
+void UPFLoadingMenuWidget::OnOptionsClicked() { SelectMenuTab(3); }
 
 const TCHAR* UPFLoadingMenuWidget::CrosshairStyleName(int32 Idx)
 {
@@ -529,94 +530,6 @@ void UPFLoadingMenuWidget::OnCrosshairCycle()
 	WorkingCrosshairStyle = (WorkingCrosshairStyle + 1) % 3;
 	FPFUserPrefs::SetCrosshairStyle(WorkingCrosshairStyle);
 	FPFUserPrefs::Flush();
-	RefreshLoadoutLabels();
-}
-
-void UPFLoadingMenuWidget::BuildLoadoutPage(UVerticalBox* Col)
-{
-	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
-	Sub->SetText(FText::FromString(TEXT("Pick a weapon — live preview on the right. Saved to this class slot.")));
-	Sub->SetFont(PFLoadFont(13, false));
-	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
-	Sub->SetJustification(ETextJustify::Center);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Sub))
-	{
-		V->SetPadding(FMargin(0.f, 4.f, 0.f, 12.f));
-		V->SetHorizontalAlignment(HAlign_Center);
-	}
-
-	// Same 3D studio as CHARACTER: character + selected gun. Drag on the image to turn.
-	UHorizontalBox* Body = WidgetTree->ConstructWidget<UHorizontalBox>();
-	LoadoutPreviewImage = WidgetTree->ConstructWidget<UImage>();
-	LoadoutPreviewImage->SetColorAndOpacity(FLinearColor::White);
-	LoadoutPreviewImage->SetVisibility(ESlateVisibility::Visible);
-	USizeBox* PreviewSizer = WidgetTree->ConstructWidget<USizeBox>();
-	PreviewSizer->SetWidthOverride(280.f);
-	PreviewSizer->SetHeightOverride(360.f);
-	PreviewSizer->SetContent(LoadoutPreviewImage);
-	if (UHorizontalBoxSlot* H = Body->AddChildToHorizontalBox(PreviewSizer))
-	{
-		H->SetPadding(FMargin(4.f, 0.f, 12.f, 0.f));
-		H->SetVerticalAlignment(VAlign_Center);
-	}
-	UVerticalBox* Right = WidgetTree->ConstructWidget<UVerticalBox>();
-	if (UHorizontalBoxSlot* H = Body->AddChildToHorizontalBox(Right))
-	{
-		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		H->SetVerticalAlignment(VAlign_Center);
-	}
-	BuildWeaponPicker(Right);
-
-	// Crosshair row (local pref, not per-weapon)
-	{
-		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
-		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
-		Lab->SetText(FText::FromString(TEXT("CROSSHAIR")));
-		Lab->SetFont(PFLoadFont(13, true));
-		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
-		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
-		Sizer->SetWidthOverride(110.f);
-		Sizer->SetContent(Lab);
-		Row->AddChildToHorizontalBox(Sizer);
-		LoadoutCrosshairButton = WidgetTree->ConstructWidget<UButton>();
-		LoadoutCrosshairButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
-		LoadoutCrosshairButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnCrosshairCycle);
-		LoadoutCrosshairValueText = WidgetTree->ConstructWidget<UTextBlock>();
-		LoadoutCrosshairValueText->SetFont(PFLoadFont(12, false));
-		LoadoutCrosshairValueText->SetJustification(ETextJustify::Center);
-		LoadoutCrosshairValueText->SetClipping(EWidgetClipping::ClipToBounds);
-		LoadoutCrosshairValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		LoadoutCrosshairButton->AddChild(LoadoutCrosshairValueText);
-		if (UHorizontalBoxSlot* H = Row->AddChildToHorizontalBox(LoadoutCrosshairButton))
-		{
-			H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-			H->SetPadding(FMargin(8.f, 0.f));
-		}
-		if (UVerticalBoxSlot* V = Right->AddChildToVerticalBox(Row))
-		{
-			V->SetPadding(FMargin(24.f, 8.f, 8.f, 0.f));
-			V->SetHorizontalAlignment(HAlign_Fill);
-		}
-	}
-
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Body))
-	{
-		V->SetPadding(FMargin(0.f, 4.f));
-		V->SetHorizontalAlignment(HAlign_Fill);
-	}
-
-	UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
-	Hint->SetText(FText::FromString(TEXT("Drag the preview to rotate · weapon saved to this class slot")));
-	Hint->SetFont(PFLoadFont(12, false));
-	Hint->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
-	Hint->SetJustification(ETextJustify::Center);
-	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Hint))
-	{
-		V->SetPadding(FMargin(0.f, 12.f, 0.f, 0.f));
-		V->SetHorizontalAlignment(HAlign_Center);
-	}
-
-	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
 	RefreshLoadoutLabels();
 }
 
@@ -873,7 +786,7 @@ void UPFLoadingMenuWidget::NotifyWeaponStep(int32 Kind, int32 Dir)
 	if (CharPreviewActor != nullptr)
 	{
 		CharPreviewActor->ApplyWeapon(WeaponConfig);   // show the browsed gun (even if locked — aspirational)
-		if (ActiveMenuTab == 2 || ActiveMenuTab == 3)
+		if (ActiveMenuTab == 2)
 		{
 			CharPreviewActor->SetPreviewActive(true);
 		}
@@ -1231,7 +1144,6 @@ void UPFLoadingMenuWidget::EnsureCharPreview()
 		Img->SetBrush(Brush);
 	};
 	BindPreview(CharPreviewImage, 300.f, 400.f);
-	BindPreview(LoadoutPreviewImage, 280.f, 360.f);
 }
 
 void UPFLoadingMenuWidget::NotifyCharSlotStep(int32 SlotIdx, int32 Dir)
@@ -1958,13 +1870,10 @@ void UPFLoadingMenuWidget::BuildTree()
 	UVerticalBox* HowToCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	BuildHowToPlayPage(HowToCol);
 
-	UVerticalBox* LoadoutCol = WidgetTree->ConstructWidget<UVerticalBox>();
-	// (Loadout page merged into the CLASS tab — page 2 kept as an empty switcher placeholder.)
-
 	UVerticalBox* CharacterCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	BuildCharacterPage(CharacterCol);
 
-	// Page 4 — full options embedded inline as a tab (not a pop-up overlay).
+	// Page 3 — full options embedded inline as a tab (not a pop-up overlay).
 	UVerticalBox* OptionsCol = WidgetTree->ConstructWidget<UVerticalBox>();
 	if (APlayerController* PC = GetOwningPlayer())
 	{
@@ -1983,11 +1892,10 @@ void UPFLoadingMenuWidget::BuildTree()
 		}
 	}
 
-	MenuSwitcher->AddChild(SetupCol);
-	MenuSwitcher->AddChild(HowToCol);
-	MenuSwitcher->AddChild(LoadoutCol);      // index 2
-	MenuSwitcher->AddChild(CharacterCol);    // index 3
-	MenuSwitcher->AddChild(OptionsCol);      // index 4
+	MenuSwitcher->AddChild(SetupCol);        // index 0
+	MenuSwitcher->AddChild(HowToCol);        // index 1
+	MenuSwitcher->AddChild(CharacterCol);    // index 2
+	MenuSwitcher->AddChild(OptionsCol);      // index 3
 
 	if (UVerticalBoxSlot* V = LeftCol->AddChildToVerticalBox(MenuSizer))
 	{
@@ -2282,10 +2190,10 @@ void UPFLoadingMenuWidget::HandleCommunityMapCatalogChanged()
 FReply UPFLoadingMenuWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
 	// Start a rotate-drag only if the press lands on the character preview.
-	if ((ActiveMenuTab == 2 || ActiveMenuTab == 3) && CharPreviewActor != nullptr
+	if (ActiveMenuTab == 2 && CharPreviewActor != nullptr
 		&& InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
-		UImage* Img = (ActiveMenuTab == 2) ? LoadoutPreviewImage.Get() : CharPreviewImage.Get();
+		UImage* Img = CharPreviewImage.Get();
 		if (Img != nullptr)
 		{
 			const FGeometry& ImgGeo = Img->GetCachedGeometry();

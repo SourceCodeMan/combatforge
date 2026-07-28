@@ -1428,6 +1428,27 @@ void ACombatForgeGameMode::HostForceReturnToLobby()
 	{
 		return;
 	}
+	// Close the arena record BEFORE the Lobby wipe. Only SetPhase(Results) commits it, and this path
+	// jumps straight to Lobby — so an abandoned match left bRecordActive open and the NEXT
+	// BeginMatchRecord discarded it, taking the built map and every vote already cast with it. Commit
+	// with whatever the tally holds (winner 255 = draw/abandoned). CommitMatchRecord no-ops when no
+	// record is open, so a Build/Lobby-phase abort is unaffected. (P2-C7)
+	// Results is excluded on purpose: SetPhase(Results) already committed, and a second call would
+	// just log "no active match record".
+	if (GS->Phase == EPFMatchPhase::Combat || GS->Phase == EPFMatchPhase::Vote)
+	{
+		if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
+		{
+			// Logout's empty-server path already staged a result before calling us; don't overwrite
+			// a real winner with a draw. EmitMatchReport stays single-shot — it is NOT called here.
+			if (PendingMatchResult.WinnerTeam == 255)
+			{
+				PendingMatchResult = MakeMatchResult(255);
+			}
+			Rating->CommitMatchRecord(PendingMatchResult);
+		}
+	}
+
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
 	GetWorldTimerManager().ClearTimer(LobbyCountdownHandle);
