@@ -11,6 +11,15 @@
 #   UnrealEditor-Cmd.exe "<uproject>" -run=pythonscript -script="<abs>" -unattended -nosplash -nopause -stdout
 import unreal
 
+# PF_DRY_RUN=1: report and exit BEFORE anything destructive. These commandlets delete and
+# recreate live content assets and there is no undo in a headless run, so an accidental
+# re-run has no preview step without this. Same gate create_build_material.py already had.
+# (P2-S1)
+import os as _os
+if _os.environ.get("PF_DRY_RUN") == "1":
+    unreal.log_warning("[PFArena] DRY RUN: would DELETE and recreate /Game/Materials/M_PF_Arena{Floor,Wall,Metal,Mark}. Exiting without changes.")
+    raise SystemExit(0)
+
 MEL = unreal.MaterialEditingLibrary
 MP = unreal.MaterialProperty
 tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -179,6 +188,12 @@ def make_triplanar_surface(name, tile_size, base_tint, roughness, roughness_add,
     MEL.connect_material_expressions(z, "", em, "B")
     MEL.connect_material_property(em, "", MP.MP_EMISSIVE_COLOR)
 
+    # These masters are NOT shell-only: PFBuildGrid's cohesion palette applies M_PF_Arena* MIDs to
+    # the build-piece ISMCs. A material used on ISMs must advertise the usage flag or UE recompiles
+    # it on the fly at runtime - meshes flash then vanish, shaders never settle. Same flag
+    # create_build_material.py already bakes in. (P2-S5)
+    mat.set_editor_property("used_with_instanced_static_meshes", True)
+
     MEL.recompile_material(mat)
     unreal.EditorAssetLibrary.save_asset(full)
     log("saved " + full)
@@ -222,6 +237,12 @@ def make_metal(name):
     MEL.connect_material_expressions(col, "", emul, "A")
     MEL.connect_material_property(emul, "", MP.MP_EMISSIVE_COLOR)
 
+    # These masters are NOT shell-only: PFBuildGrid's cohesion palette applies M_PF_Arena* MIDs to
+    # the build-piece ISMCs. A material used on ISMs must advertise the usage flag or UE recompiles
+    # it on the fly at runtime - meshes flash then vanish, shaders never settle. Same flag
+    # create_build_material.py already bakes in. (P2-S5)
+    mat.set_editor_property("used_with_instanced_static_meshes", True)
+
     MEL.recompile_material(mat)
     unreal.EditorAssetLibrary.save_asset(full)
     log("saved " + full)
@@ -251,6 +272,12 @@ def make_mark(name):
     rough = MEL.create_material_expression(mat, unreal.MaterialExpressionConstant, -350, 320)
     try_set(rough, "r", 0.7)
     MEL.connect_material_property(rough, "", MP.MP_ROUGHNESS)
+
+    # These masters are NOT shell-only: PFBuildGrid's cohesion palette applies M_PF_Arena* MIDs to
+    # the build-piece ISMCs. A material used on ISMs must advertise the usage flag or UE recompiles
+    # it on the fly at runtime - meshes flash then vanish, shaders never settle. Same flag
+    # create_build_material.py already bakes in. (P2-S5)
+    mat.set_editor_property("used_with_instanced_static_meshes", True)
 
     MEL.recompile_material(mat)
     unreal.EditorAssetLibrary.save_asset(full)

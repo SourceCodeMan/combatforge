@@ -12,10 +12,20 @@ import os
 import unreal
 
 # Project-relative result file (overridable): the old value was a machine- and SESSION-specific
-# temp path that silently vanished for anyone else (issue #20 S2).
-OUT = os.environ.get(
-    "PF_RETARGET_OUT",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "retarget_result.txt"))
+# temp path that silently vanished for anyone else (issue #20 S2). Default now lands in Saved/,
+# not beside the sources under Scripts/ where it reads as repo noise and can be committed by
+# accident. (P2-S6)
+def _default_out():
+    try:
+        saved = unreal.Paths.project_saved_dir()
+        if saved:
+            return os.path.join(saved, "retarget_result.txt")
+    except Exception:
+        pass
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "retarget_result.txt")
+
+
+OUT = os.environ.get("PF_RETARGET_OUT", _default_out())
 L = []
 def log(m):
     L.append(str(m)); unreal.log("RETARGET: " + str(m))
