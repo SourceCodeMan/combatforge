@@ -47,6 +47,9 @@ APFTargetDummy::APFTargetDummy()
 
 	Health = CreateDefaultSubobject<UPFHealthComponent>(TEXT("Health"));
 	Health->DefaultRoundHP = 1;   // one splat "eliminates" a dummy
+	// A dummy HIDES the instant it is splatted, so the character corpse-block window would leave
+	// half a second of invisible geometry eating warm-up shots. (P2-CB10)
+	Health->bSkipCorpseBlock = true;
 }
 
 void APFTargetDummy::BeginPlay()

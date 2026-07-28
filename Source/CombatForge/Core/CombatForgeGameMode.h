@@ -203,6 +203,7 @@ protected:
 	void RemoveAllBots();                              // despawn every bot (controller + pawn + PlayerState)
 	ACombatForgePlayerState* AddBot(uint8 Team);        // spawn a bot controller + PlayerState on Team
 	void TrimOneBotFromTeam(uint8 Team);               // free a slot for a joining human
+	bool TrimOneBotAnyTeam();                          // same, when the whole roster is full
 	int32 GetTeamCountByKind(uint8 Team, bool bBotsOnly) const;
 	void ApplyServerMoveLocks();
 	void ResetPlayerMatchStats();
@@ -234,7 +235,10 @@ protected:
 	 *  case; this catches teardown orderings where the last human never reached Logout (client
 	 *  crash / connection drop), which left pilot boxes wedged mid-match with only the phantom. */
 	void SweepEmptyServer();
+	/** First unclaimed roster slot, or 255 when every slot is taken — never aliases. (P2-C8) */
 	uint8 FindFreeRosterIndex() const;
+	/** FindFreeRosterIndex, but drops a bot first if the board is full. 255 = genuinely no room. */
+	uint8 AcquireRosterIndexForJoin();
 	void ComputeEffectiveScaling();
 	FPFMatchResult MakeMatchResult(uint8 MatchWinner) const;
 	/** Frozen match-report wire format (combatforge-api /v1/match-report; progression-plan §1).

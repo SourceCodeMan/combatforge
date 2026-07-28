@@ -18,14 +18,14 @@ bool ACombatForgePlayerState::IsHeadlessServerPhantom() const
 	return PC && PC->IsLocalController();
 }
 
+// B6 budgets and per-type caps now live in PFBudget (CombatForgePlayerState.h) so the GameMode
+// reset and the build HUD readout share them. Local aliases keep the call sites below unchanged.
 namespace
 {
-	// B6 budgets, tuned 4v4. GameMode resets to these at every Lobby→Build.
-	constexpr uint8 MaxStructuralBudget = 30;
-	constexpr uint8 MaxPropBudget = 6;
-	// Per-player per-type caps (Tom 2026-07-24): these two pieces warp a round when spammed.
-	constexpr uint8 MaxTrapFloorsPerPlayer = 1;
-	constexpr uint8 MaxOneWayDoorsPerPlayer = 1;
+	constexpr uint8 MaxStructuralBudget = PFBudget::MaxStructural;
+	constexpr uint8 MaxPropBudget = PFBudget::MaxProps;
+	constexpr uint8 MaxTrapFloorsPerPlayer = PFBudget::MaxTrapFloorsPerPlayer;
+	constexpr uint8 MaxOneWayDoorsPerPlayer = PFBudget::MaxOneWayDoorsPerPlayer;
 }
 
 ACombatForgePlayerState::ACombatForgePlayerState()

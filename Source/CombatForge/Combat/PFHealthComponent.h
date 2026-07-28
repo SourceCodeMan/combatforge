@@ -35,6 +35,11 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 DefaultRoundHP = 3;   // legacy knob: <=1 → one-hit mode
 
+	/** Owners that VANISH on elimination (warm-up dummies) skip the 0.5 s corpse-block window —
+	 *  otherwise warm-up shots hit invisible air for half a second after the target disappears.
+	 *  Characters leave this false: their corpse is still visible for that window. (P2-CB10) */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Health") bool bSkipCorpseBlock = false;
+
 	// Out thresholds (Tom 2026-07-15): whichever is crossed first eliminates.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 HeadOut  = 3;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 ChestOut = 5;
@@ -91,6 +96,8 @@ private:
 	// client-predicted movement agrees with authority about walking through corpses.
 	void DisableCorpseCollision();
 	void RestoreCorpseCollision();
+	/** Arms the 0.5 s corpse-block window, or drops collision now when the owner hides instantly. */
+	void ArmCorpseCollisionOff();
 	// Applies/clears the eliminated look on a character owner (no-op for dummies).
 	void ApplyEliminatedAppearance(bool bNewEliminated);
 

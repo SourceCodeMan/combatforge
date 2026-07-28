@@ -152,6 +152,9 @@ void APFFlagActor::ServerInit(uint8 InOwnerTeam, const FVector& InHomeLocation)
 	{
 		return;
 	}
+	// A re-init while a drop timer is still armed would let HandleDropReturnTimer fire against the
+	// fresh home state. Clear it before writing anything. (P2-OBJ1)
+	GetWorldTimerManager().ClearTimer(DropReturnTimer);
 	OwnerTeam = InOwnerTeam;
 	HomeLocation = InHomeLocation;
 	bAtHome = true;
@@ -246,10 +249,18 @@ void APFFlagActor::Tick(float DeltaSeconds)
 		ServerReturnHome();
 		return;
 	}
-	if (APawn* Pawn = PS->GetPawn())
+	APawn* Pawn = PS->GetPawn();
+	if (!Pawn)
 	{
-		SetActorLocation(Pawn->GetActorLocation() + FVector(0.f, 0.f, 80.f));
+		// Carrier's PlayerState is alive but its pawn is gone (eliminated / destroyed before the
+		// GameMode's drop ran). Without this the flag hangs in mid-air at the last carried spot and
+		// nobody can retake it. Drop it where it is, clearing the carry flag exactly like the
+		// GameMode's elimination path does, so the round stays playable. (P2-OBJ2)
+		PS->ServerSetFlagCarry(false, 255);
+		ServerDropAt(GetActorLocation());
+		return;
 	}
+	SetActorLocation(Pawn->GetActorLocation() + FVector(0.f, 0.f, 80.f));
 }
 
 void APFFlagActor::OnPickupOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,

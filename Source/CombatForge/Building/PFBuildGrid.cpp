@@ -942,6 +942,7 @@ void APFBuildGrid::ClearAll()
 	BuilderByPieceId.Empty();
 	BombedPieceIds.Empty();
 	RateWindows.Empty();
+	DeleteRateWindows.Empty();   // else a heavy deleter stays rate-limited into the next Build (P2-BD3)
 	NextPieceId = 0;
 	bBuildFrozen = false;
 	UE_LOG(CombatForgeLog, Log, TEXT("BuildGrid: cleared"));

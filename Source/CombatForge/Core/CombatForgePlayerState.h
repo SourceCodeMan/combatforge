@@ -8,6 +8,20 @@
 #include "CombatForgePlayerState.generated.h"
 
 /**
+ * Per-match build allowances (contract B6, tuned 4v4). Single source of truth: the PlayerState
+ * ctor, the GameMode's Lobby->Build reset, and the build HUD's "N/max" readout all read these,
+ * so a balance change lands everywhere at once. (P2-U5)
+ */
+namespace PFBudget
+{
+	constexpr uint8 MaxStructural = 30;
+	constexpr uint8 MaxProps = 6;
+	// Per-player per-type caps (Tom 2026-07-24): these two pieces warp a round when spammed.
+	constexpr uint8 MaxTrapFloorsPerPlayer = 1;
+	constexpr uint8 MaxOneWayDoorsPerPlayer = 1;
+}
+
+/**
  * Per-player replicated truth (contract §3.2): team, roster slot, ready flag, build budgets,
  * round-alive state, and match scoring (T18). Server-mutated only, through the ServerSet*
  * mutators — each one broadcasts OnFlagsChangedEvent on the host too (R9).
@@ -25,8 +39,8 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_Flags) bool   bReady = false;      // Lobby + BuildPhase (reset each phase)
 	UPROPERTY(Replicated)                  bool   bHasVoted = false;
 	UPROPERTY(Replicated)                  bool   bAliveInRound = false;
-	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  StructuralBudget = 30;  // B6; server-mutated only
-	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  PropBudget = 6;
+	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  StructuralBudget = PFBudget::MaxStructural;  // B6; server-mutated only
+	UPROPERTY(ReplicatedUsing=OnRep_Flags) uint8  PropBudget = PFBudget::MaxProps;
 	// Per-player per-type caps (Tom 2026-07-24): 1 trap floor + 1 one-way door each, per match.
 	// Counters ride the budget lifecycle: spend ++, refund --, ServerSetBudgets (Lobby→Build) resets.
 	UPROPERTY(Replicated) uint8 TrapFloorsPlaced = 0;

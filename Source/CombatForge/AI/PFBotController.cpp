@@ -1322,6 +1322,10 @@ void APFBotController::SetFiring(bool bFire)
 			if (bFire)
 			{
 				Weapon->StartFire();
+				// This press IS the first pull. Charge the re-pull cadence now, or a timer left at
+				// <=0 from the previous engagement cycles the trigger again on this same frame and
+				// the bot opens with a double shot. (P2-AI2)
+				TriggerPullTimer = (Weapon->GetFireMode() == EPFFireMode::Single) ? 0.45f : 0.85f;
 			}
 			else
 			{

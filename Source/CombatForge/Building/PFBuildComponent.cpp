@@ -7,6 +7,7 @@
 #include "Building/PFBuildPieceVisuals.h"
 #include "Building/PFGridMath.h"
 #include "Combat/PFCombatAudio.h"
+#include "Combat/PFHealthComponent.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
 #include "Input/PFInputConfig.h"
@@ -141,6 +142,7 @@ void UPFBuildComponent::BindInput(UEnhancedInputComponent* EIC, const UPFInputCo
 void UPFBuildComponent::OnPlaceStarted()
 {
 	bPlaceHeld = true;
+	bPlaceTapPending = true;   // survives a press+release inside one frame (P2-BD2)
 }
 
 void UPFBuildComponent::OnPlaceReleased()
@@ -283,6 +285,11 @@ void UPFBuildComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	{
 		return;
 	}
+
+	// Consume the tap latch here, before any early-out, so a click swallowed by the wheel / a
+	// non-build phase can't fire a stale placement on some later tick. (P2-BD2)
+	bPlaceActiveThisTick = bPlaceHeld || bPlaceTapPending;
+	bPlaceTapPending = false;
 
 	const ACombatForgeGameState* GS = World->GetGameState<ACombatForgeGameState>();
 	// Play-only matches pass through a REAL (replicated) 0.1s Build phase for the community-arena inject, which
@@ -459,7 +466,7 @@ void UPFBuildComponent::UpdatePlacementGhostAndTurbo(const FVector& CamLoc, cons
 	SetGhostVisible(true);
 
 	// Turbo (03 §4): place on snapped-slot change OR every 0.15 s; client self-cap 8 RPC/s.
-	if (bPlaceHeld && Reason == EPFDenyReason::None)
+	if (bPlaceActiveThisTick && Reason == EPFDenyReason::None)
 	{
 		const bool bSlotChanged = !LastSentSlot.bValid
 			|| LastSentSlot.Type != static_cast<uint8>(Type)
@@ -522,7 +529,7 @@ void UPFBuildComponent::UpdateDeleteToolAndTurbo(bool bTraceHit, const FHitResul
 	SetGhostVisible(true);
 
 	// Turbo-delete, same cadence as turbo-build (03 §4).
-	if (bPlaceHeld)
+	if (bPlaceActiveThisTick)
 	{
 		if (Now - LastSendTime >= MinSendIntervalSec &&
 			(TargetId != LastDeleteSentId || Now - LastSendTime >= TurboIntervalSec))
@@ -822,6 +829,16 @@ void UPFBuildComponent::EjectOverlappedPawns(const FBox& PieceBox) const
 		if (!Capsule)
 		{
 			continue;
+		}
+		// Corpses are scenery until cleanup — shoving one out of a new piece just looks like a body
+		// twitching across the plot. Only living combatants get ejected. (P2-BD7)
+		if (const ACombatForgeCharacter* PFPawn = Cast<ACombatForgeCharacter>(Pawn))
+		{
+			const UPFHealthComponent* Health = PFPawn->GetHealth();
+			if (Health && Health->bEliminated)
+			{
+				continue;
+			}
 		}
 		const FVector Loc = Pawn->GetActorLocation();
 		const float Radius = Capsule->GetScaledCapsuleRadius();
