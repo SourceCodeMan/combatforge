@@ -97,10 +97,17 @@ echo ""
 # cleans the real (swapped-in) app.
 PROJROOT="$(dirname "$PROJ")"
 # The app name varies by config — CombatForge.app (Development) vs CombatForge-Mac-Shipping.app —
-# so detect it instead of hardcoding (a hardcoded name made the guard silently skip Shipping bakes).
-APP_NAME="$(basename "$(find "$OUT" -maxdepth 1 -name '*.app' | head -1)" 2>/dev/null)"
-if [ -z "$APP_NAME" ] || [ "$APP_NAME" = ".app" ]; then
-	echo "ERROR: no .app found in $OUT — archive step produced nothing." >&2
+# so derive it from the config being built. Picking the first .app in $OUT instead (`find | head -1`)
+# inspects a LEFTOVER app from an earlier bake when both are present — alphabetically
+# CombatForge.app sorts first — so the guard passed on the old build's paks and left this bake's
+# 248MB pak-less wrapper in place (hit 2026-07-28 on the alpha-17 bake).
+if [ "$CONFIG" = "Development" ]; then
+	APP_NAME="CombatForge.app"
+else
+	APP_NAME="CombatForge-Mac-$CONFIG.app"
+fi
+if [ ! -d "$OUT/$APP_NAME" ]; then
+	echo "ERROR: no $APP_NAME in $OUT — archive step produced nothing." >&2
 	exit 1
 fi
 ARCHIVED_APP="$OUT/$APP_NAME"
