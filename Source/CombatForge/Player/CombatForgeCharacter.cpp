@@ -1127,6 +1127,7 @@ void ACombatForgeCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 
 	EIC->BindAction(Cfg->IA_Move, ETriggerEvent::Triggered, this, &ACombatForgeCharacter::OnMoveInput);
 	EIC->BindAction(Cfg->IA_Look, ETriggerEvent::Triggered, this, &ACombatForgeCharacter::OnLookInput);
+	EIC->BindAction(Cfg->IA_LookStick, ETriggerEvent::Triggered, this, &ACombatForgeCharacter::OnLookStickInput);
 	EIC->BindAction(Cfg->IA_Jump, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnJumpPressed);
 	EIC->BindAction(Cfg->IA_Jump, ETriggerEvent::Completed, this, &ACombatForgeCharacter::OnJumpReleased);
 	EIC->BindAction(Cfg->IA_Sprint, ETriggerEvent::Started, this, &ACombatForgeCharacter::OnSprintPressed);
@@ -1196,15 +1197,8 @@ void ACombatForgeCharacter::OnMoveInput(const FInputActionValue& Value)
 	AddMovementInput(FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y), Axis.X);
 }
 
-void ACombatForgeCharacter::OnLookInput(const FInputActionValue& Value)
+float ACombatForgeCharacter::ComputeADSLookScale() const
 {
-	// While dragging the weapon pose, the mouse moves the GUN, not the camera (TickWeaponDrag reads the raw
-	// mouse delta). Swallow the look input so the view doesn't spin under the drag.
-	if (bWeaponDragging)
-	{
-		return;
-	}
-	const FVector2D Axis = Value.Get<FVector2D>();
 	// Automatic ADS slowdown (pf.ADSSensScale): blend toward the focal-length ratio as the zoom
 	// eases in, using the SAME ease-out cubic as the camera FOV so the hand feel tracks what the
 	// eye sees. On top of (not instead of) the global sensitivity option.
@@ -1218,8 +1212,52 @@ void ACombatForgeCharacter::OnLookInput(const FInputActionValue& Value)
 		const float Eased = 1.f - FMath::Cube(1.f - ADSAlpha);
 		SensScale = FMath::Lerp(1.f, ZoomedScale, Eased);
 	}
+	return SensScale;
+}
+
+void ACombatForgeCharacter::OnLookInput(const FInputActionValue& Value)
+{
+	// While dragging the weapon pose, the mouse moves the GUN, not the camera (TickWeaponDrag reads the raw
+	// mouse delta). Swallow the look input so the view doesn't spin under the drag.
+	if (bWeaponDragging)
+	{
+		return;
+	}
+	const FVector2D Axis = Value.Get<FVector2D>();
+	const float SensScale = ComputeADSLookScale();
 	AddControllerYawInput(Axis.X * SensScale);
 	AddControllerPitchInput(Axis.Y * SensScale); // Y already negated + scaled by the mapping modifiers
+}
+
+void ACombatForgeCharacter::OnLookStickInput(const FInputActionValue& Value)
+{
+	if (bWeaponDragging)
+	{
+		return;
+	}
+	// Deadzone is on the mapping; square the deflection here (fine aim near center, fast
+	// snap at full tilt — the genre-standard stick response).
+	FVector2D Axis = Value.Get<FVector2D>();
+	const float Mag = FMath::Min(Axis.Size(), 1.f);
+	if (Mag <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	Axis = Axis.GetSafeNormal() * (Mag * Mag);
+
+	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
+	// Base turn rates at full deflection; GamepadLookScale (options slider) multiplies both.
+	// GConfig-backed pref reads are two hash lookups — fine at input-event rate.
+	constexpr float YawDegPerSec = 220.f;
+	constexpr float PitchDegPerSec = 150.f;
+	const float UserScale = FPFUserPrefs::GetGamepadLookScale();
+	const float SensScale = ComputeADSLookScale();
+	// Stick-up (+Y) looks up unless Invert Y — the same convention the mouse path bakes
+	// into its Negate-Y mapping modifier (AddControllerPitchInput: negative = look up).
+	const float PitchSign = FPFUserPrefs::GetInvertY() ? 1.f : -1.f;
+
+	AddControllerYawInput(Axis.X * YawDegPerSec * UserScale * SensScale * DeltaSeconds);
+	AddControllerPitchInput(Axis.Y * PitchSign * PitchDegPerSec * UserScale * SensScale * DeltaSeconds);
 }
 
 void ACombatForgeCharacter::OnWeaponDragPressed()

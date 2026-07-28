@@ -299,6 +299,36 @@ void FPFUserPrefs::ApplyQualityMethodCVars(int32 QualityLevel)
 	SetCVar(TEXT("r.AntiAliasingMethod"), AAMethod[Q]);
 }
 
+float FPFUserPrefs::GetGamepadLookScale()
+{
+	return FMath::Clamp(ReadFloat(TEXT("GamepadLookScale"), 1.f), 0.2f, 3.f);
+}
+
+void FPFUserPrefs::SetGamepadLookScale(float Scale)
+{
+	WriteFloat(TEXT("GamepadLookScale"), FMath::Clamp(Scale, 0.2f, 3.f));
+}
+
+float FPFUserPrefs::GetUIScale()
+{
+	return FMath::Clamp(ReadFloat(TEXT("UIScale"), 1.f), 0.85f, 1.3f);
+}
+
+void FPFUserPrefs::SetUIScale(float Scale)
+{
+	WriteFloat(TEXT("UIScale"), FMath::Clamp(Scale, 0.85f, 1.3f));
+}
+
+int32 FPFUserPrefs::GetHandheldPresetApplied()
+{
+	return ReadInt(TEXT("HandheldPresetApplied"), 0);
+}
+
+void FPFUserPrefs::SetHandheldPresetApplied(int32 Version)
+{
+	WriteInt(TEXT("HandheldPresetApplied"), Version);
+}
+
 FKey FPFUserPrefs::GetKeyOverride(FName ActionId)
 {
 	if (GConfig)

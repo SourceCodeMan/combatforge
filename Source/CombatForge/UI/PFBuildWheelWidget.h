@@ -97,4 +97,7 @@ private:
 	static constexpr float SectorRadiusPx = 200.f;
 	/** Raw mouse-delta units -> wheel-cursor pixels. */
 	static constexpr float MouseToCursorScale = 1.5f;
+	/** Gamepad right stick -> wheel-cursor pixels per second at full deflection. */
+	static constexpr float StickCursorPxPerSec = 900.f;
+	static constexpr float StickDeadZone = 0.25f;
 };

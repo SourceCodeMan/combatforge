@@ -122,6 +122,12 @@ protected:
 	// ---- Enhanced Input handlers ----
 	void OnMoveInput(const FInputActionValue& Value);
 	void OnLookInput(const FInputActionValue& Value);
+	/** Gamepad right stick: deflection is a turn RATE (deg/sec × frame time), unlike the
+	 *  absolute mouse deltas of OnLookInput. Square response curve, PFUserPrefs speed +
+	 *  shared invert-Y, and the same ADS focal-length slowdown as the mouse path. */
+	void OnLookStickInput(const FInputActionValue& Value);
+	/** ADS sensitivity multiplier (pf.ADSSensScale focal-length blend) — shared by mouse + stick look. */
+	float ComputeADSLookScale() const;
 	void OnJumpPressed();
 	void OnJumpReleased();
 	void OnSprintPressed();

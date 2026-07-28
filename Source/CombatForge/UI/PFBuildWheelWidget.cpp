@@ -18,6 +18,7 @@
 #include "Brushes/SlateColorBrush.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/PlayerController.h"
+#include "Input/PFGamepadCursor.h"   // FPFInputDevice — gamepad-aware hint text
 #include "InputCoreTypes.h"
 #include "Styling/CoreStyle.h"
 
@@ -275,6 +276,19 @@ void UPFBuildWheelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 		PC->GetInputMouseDelta(DeltaX, DeltaY);
 		// Mouse up = positive DeltaY; screen space Y grows downward.
 		AccumDelta += FVector2D(DeltaX, -DeltaY) * MouseToCursorScale;
+
+		// Gamepad: right stick steers the wheel cursor too (camera is already frozen —
+		// Open()'s SetIgnoreLookInput makes the stick's look handler a no-op). Raw key
+		// state, not an action: IA_LookStick stays camera-only.
+		float StickX = 0.f;
+		float StickY = 0.f;
+		PC->GetInputAnalogStickState(EControllerAnalogStick::CAS_RightStick, StickX, StickY);
+		const FVector2D Stick(StickX, StickY);
+		if (Stick.Size() > StickDeadZone)
+		{
+			// Stick up = +Y; screen Y grows downward.
+			AccumDelta += FVector2D(Stick.X, -Stick.Y) * StickCursorPxPerSec * InDeltaTime;
+		}
 	}
 
 	if (AccumDelta.SizeSquared() > FMath::Square(SelectMaxPx))
@@ -392,7 +406,9 @@ void UPFBuildWheelWidget::UpdateCenterReadout()
 	}
 	if (HoveredSector == INDEX_NONE)
 	{
-		CenterReadout->SetText(FText::FromString(TEXT("hold Q · aim a slice · release picks")));
+		CenterReadout->SetText(FText::FromString(FPFInputDevice::IsGamepadPrimary()
+			? TEXT("hold LB · aim with stick · release picks")
+			: TEXT("hold Q · aim a slice · release picks")));
 		CenterReadout->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	}
 	else

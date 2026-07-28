@@ -79,6 +79,9 @@ public:
 	void ToggleOptionsMenu();
 	bool IsOptionsMenuOpen() const;
 
+	/** True while the full-screen boot loading menu is still up (gamepad cursor gating). */
+	bool IsBootMenuActive() const;
+
 	/** Quit entire process (main menu). */
 	void QuitToDesktop();
 	/**
