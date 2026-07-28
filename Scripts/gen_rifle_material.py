@@ -1,4 +1,14 @@
+# Copyright (c) 2026 Tom Chapman. All rights reserved.
 import unreal
+
+# PF_DRY_RUN=1: report and exit BEFORE anything destructive. These commandlets delete and
+# recreate live content assets and there is no undo in a headless run, so an accidental
+# re-run has no preview step without this. Same gate create_build_material.py already had.
+# (P2-S1)
+import os as _os
+if _os.environ.get("PF_DRY_RUN") == "1":
+    unreal.log_warning("[PFRifle] DRY RUN: would DELETE and recreate /Game/Weapons/Rifle/M_PF_Rifle. Exiting without changes.")
+    raise SystemExit(0)
 
 TEX = "/Game/Weapons/Rifle/Textures"
 d   = unreal.load_asset(TEX + "/T_Rifle_D")

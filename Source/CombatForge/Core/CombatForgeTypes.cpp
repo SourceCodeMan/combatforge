@@ -46,6 +46,14 @@ namespace PFColors
 {
 	FLinearColor ForTeam(uint8 Team)
 	{
+		// 255 is the "unassigned / environment" sentinel (a fall death stamps ShooterTeam 255), and
+		// it used to fall through to orange, i.e. it read as a team-B kill. Every other id keeps its
+		// existing mapping ON PURPOSE: FreeForAll gives each player TeamId == RosterIndex, so ids 2+
+		// are real combat teams whose paint must stay readable, not neutral. (P2-C10)
+		if (Team == 255)
+		{
+			return TeamUnknown;
+		}
 		return (Team == 0) ? TeamA : TeamB;
 	}
 }

@@ -108,7 +108,6 @@ private:
 	void ApplyADSToggle(bool bToggle);
 	void ApplyCrouchToggle(bool bToggle);
 	void ApplyFieldOfView(float Fov);
-	void ApplyWindowAndResolution();
 
 	static const TCHAR* QualityName(int32 Level);
 	static const TCHAR* WindowModeName(int32 Idx);

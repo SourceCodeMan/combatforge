@@ -77,6 +77,8 @@ private:
 	static const TCHAR* ToolDisplayName(EPFBuildTool Tool);
 	/** Sector layout matches mouse-wheel cycle (wall family contiguous). */
 	static EPFBuildTool SectorTool(int32 SectorIndex);
+	/** Digit that actually commits this sector ("1".."9", "0"), or empty when it has no hotkey. */
+	static FString SectorHotkeyLabel(int32 SectorIndex);
 
 	UPROPERTY() TObjectPtr<UCanvasPanel> RootCanvas;
 	UPROPERTY() TObjectPtr<UTextBlock> CenterReadout;

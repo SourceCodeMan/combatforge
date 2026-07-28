@@ -35,6 +35,11 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 DefaultRoundHP = 3;   // legacy knob: <=1 → one-hit mode
 
+	/** Owners that VANISH on elimination (warm-up dummies) skip the 0.5 s corpse-block window —
+	 *  otherwise warm-up shots hit invisible air for half a second after the target disappears.
+	 *  Characters leave this false: their corpse is still visible for that window. (P2-CB10) */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Health") bool bSkipCorpseBlock = false;
+
 	// Out thresholds (Tom 2026-07-15): whichever is crossed first eliminates.
 	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 HeadOut  = 3;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Health") uint8 ChestOut = 5;
@@ -57,6 +62,10 @@ public:
 		// OnEliminatedEvent broadcast, corpse blocks paintballs 0.5 s then collision off (04 §2.4).
 	/** Instant lethal elim (fall from height, etc.). ShooterTeam=255, no shooter credit. */
 	void ApplyFallDeath();
+	/** Sit out the rest of the round: hidden, no collision, no fire/interact, but NO elimination
+	 *  broadcast — nobody is credited and no respawn is scheduled. Mid-round joiners only; the
+	 *  next ResetForRound restores everything. (P2-C5) */
+	void ServerBenchUntilNextRound();
 	void ResetForRound(uint8 RoundHP);   // server: zero counters, un-eliminate, restore collision/
 	                                     // appearance; RoundHP<=1 → one-hit mode (showdown)
 	EPFBodyRegion ComputeRegion(const FVector& ImpactPoint) const;  // legacy Z-band: Head iff Z ≥ capsule-top − 35 uu
@@ -91,6 +100,8 @@ private:
 	// client-predicted movement agrees with authority about walking through corpses.
 	void DisableCorpseCollision();
 	void RestoreCorpseCollision();
+	/** Arms the 0.5 s corpse-block window, or drops collision now when the owner hides instantly. */
+	void ArmCorpseCollisionOff();
 	// Applies/clears the eliminated look on a character owner (no-op for dummies).
 	void ApplyEliminatedAppearance(bool bNewEliminated);
 

@@ -33,6 +33,7 @@
 #include "Engine/Engine.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
+#include "GameFramework/GameSession.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/WorldSettings.h"
 #include "HAL/FileManager.h"
@@ -52,9 +53,9 @@ namespace
 	constexpr int32 ScoreRoundSurvive = 25;
 	constexpr int32 ScoreRoundWin     = 50;
 
-	// B6 budgets, reset each Lobby→Build.
-	constexpr uint8 BudgetStructural = 30;
-	constexpr uint8 BudgetProps      = 6;
+	// B6 budgets, reset each Lobby→Build. Values live in PFBudget so the HUD readout matches.
+	constexpr uint8 BudgetStructural = PFBudget::MaxStructural;
+	constexpr uint8 BudgetProps      = PFBudget::MaxProps;
 
 	// T15 small-format scaling (≤2v2).
 	constexpr uint8 SmallRoundWinsToTake = 3;
@@ -62,6 +63,7 @@ namespace
 	constexpr float SmallRoundDuration   = 60.f;
 
 	constexpr uint8 TeamNone = 255;
+	constexpr uint8 RosterSlotNone = 255;   // FindFreeRosterIndex "no slot" sentinel (P2-C8)
 }
 
 ACombatForgeGameMode::ACombatForgeGameMode()
@@ -374,11 +376,23 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 
 	if (PS && !bPhantom && PS->TeamId == TeamNone)
 	{
+		const uint8 Roster = AcquireRosterIndexForJoin();
+		if (Roster == RosterSlotNone)
+		{
+			// Every slot held by a human. Refuse rather than alias onto someone else's build
+			// ownership / spawn slot — the joiner gets a clear "server is full". (P2-C8)
+			if (GameSession)
+			{
+				GameSession->KickPlayer(NewPlayer,
+					NSLOCTEXT("CombatForge", "ServerFull", "Server is full."));
+			}
+			return;
+		}
+
 		const ACombatForgeGameState* PreGS = GetPFGameState();
 		if (PreGS && PreGS->MatchType == EPFMatchType::FreeForAll)
 		{
 			// Unique combat id (= roster) so B12 never treats two FFA players as teammates.
-			const uint8 Roster = FindFreeRosterIndex();
 			PS->ServerSetTeam(Roster, Roster);
 		}
 		else
@@ -390,7 +404,7 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 			const int32 HumansA = TeamA - GetTeamCountByKind(0, /*bBotsOnly=*/true);
 			const int32 HumansB = TeamB - GetTeamCountByKind(1, /*bBotsOnly=*/true);
 			const uint8 NewTeam = (HumansB < HumansA) ? 1 : 0;   // fewer real players; tie → A
-			PS->ServerSetTeam(NewTeam, FindFreeRosterIndex());
+			PS->ServerSetTeam(NewTeam, Roster);
 		}
 	}
 
@@ -430,16 +444,46 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 		{
 			const bool bAlive = (JoinGS->RoundState == EPFRoundState::Freeze ||
 			                     JoinGS->RoundState == EPFRoundState::Live);
-			PS->ServerSetAliveInRound(bAlive);
-			// Mid-combat joiners miss StartNextRound's RoundHP stamp — apply sudden-death
-			// one-hit mode if the live round is showdown (C2).
-			if (bAlive && bSuddenDeathRoundActive)
+
+			// Round-elimination: a joiner SPECTATES the round in progress instead of materialising
+			// alive in the middle of a firefight (Tom 2026-07-28; the old behaviour was flagged in
+			// code as a contract gap). Continuous-respawn modes are unaffected — there is nothing
+			// to wait for there. StartNextRound clears OutKind, re-alives, and respawns everyone,
+			// so no extra bookkeeping is needed to bring them back in. (P2-C5)
+			if (bAlive && RespawnMode == EPFRespawnMode::RoundElimination)
 			{
+				PS->ServerSetAliveInRound(false);
+				PS->ServerSetOutForRound();   // HUD: out until the next round
 				if (ACombatForgeCharacter* JoinPawn = Cast<ACombatForgeCharacter>(PS->GetPawn()))
 				{
-					if (UPFHealthComponent* Health = JoinPawn->GetHealth())
+					if (UPFHealthComponent* JoinHealth = JoinPawn->GetHealth())
 					{
-						Health->ResetForRound(1);
+						JoinHealth->ServerBenchUntilNextRound();   // hidden + no collision, no elim credit
+					}
+				}
+				if (ACombatForgePlayerController* JoinPC =
+					Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
+				{
+					JoinPC->SetEliminatedMoveLock(true);
+					JoinPC->StartDeathCamera();   // 0.5 s at own body, then spectate a teammate
+				}
+				UE_LOG(CombatForgeLog, Log,
+					TEXT("GameMode: %s joined mid-round - spectating until the next round"),
+					*PS->GetPlayerName());
+			}
+			else
+			{
+				PS->ServerSetAliveInRound(bAlive);
+				// Mid-combat joiners miss StartNextRound's RoundHP stamp — apply sudden-death
+				// one-hit mode if the live round is showdown (C2).
+				if (bAlive && bSuddenDeathRoundActive)
+				{
+					if (ACombatForgeCharacter* JoinPawn = Cast<ACombatForgeCharacter>(PS->GetPawn()))
+					{
+						if (UPFHealthComponent* Health = JoinPawn->GetHealth())
+						{
+							Health->ResetForRound(1);
+						}
 					}
 				}
 			}
@@ -1384,6 +1428,27 @@ void ACombatForgeGameMode::HostForceReturnToLobby()
 	{
 		return;
 	}
+	// Close the arena record BEFORE the Lobby wipe. Only SetPhase(Results) commits it, and this path
+	// jumps straight to Lobby — so an abandoned match left bRecordActive open and the NEXT
+	// BeginMatchRecord discarded it, taking the built map and every vote already cast with it. Commit
+	// with whatever the tally holds (winner 255 = draw/abandoned). CommitMatchRecord no-ops when no
+	// record is open, so a Build/Lobby-phase abort is unaffected. (P2-C7)
+	// Results is excluded on purpose: SetPhase(Results) already committed, and a second call would
+	// just log "no active match record".
+	if (GS->Phase == EPFMatchPhase::Combat || GS->Phase == EPFMatchPhase::Vote)
+	{
+		if (UPFRatingSubsystem* Rating = GetRatingSubsystem())
+		{
+			// Logout's empty-server path already staged a result before calling us; don't overwrite
+			// a real winner with a draw. EmitMatchReport stays single-shot — it is NOT called here.
+			if (PendingMatchResult.WinnerTeam == 255)
+			{
+				PendingMatchResult = MakeMatchResult(255);
+			}
+			Rating->CommitMatchRecord(PendingMatchResult);
+		}
+	}
+
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 	GetWorldTimerManager().ClearTimer(RoundTimerHandle);
 	GetWorldTimerManager().ClearTimer(LobbyCountdownHandle);
@@ -1972,6 +2037,13 @@ ACombatForgePlayerState* ACombatForgeGameMode::AddBot(uint8 Team)
 
 	PS->SetIsABot(true);
 	const uint8 Roster = FindFreeRosterIndex();
+	if (Roster == RosterSlotNone)
+	{
+		// Roster full — refuse rather than alias slot 11 onto an existing player. (P2-C8)
+		Bot->Destroy();
+		UE_LOG(CombatForgeLog, Warning, TEXT("GameMode: AddBot refused (roster full)"));
+		return nullptr;
+	}
 	// FFA: unique combat TeamId (= roster) so projectile B12 never treats two players as teammates.
 	PS->ServerSetTeam(bFFA ? Roster : Team, Roster);
 	PS->SetPlayerName(FString::Printf(TEXT("Bot %d"), PS->RosterIndex + 1));
@@ -3428,7 +3500,11 @@ void ACombatForgeGameMode::EmitMatchReport() const
 	if (UPFBackendSubsystem* Backend = GetGameInstance()
 		? GetGameInstance()->GetSubsystem<UPFBackendSubsystem>() : nullptr)
 	{
-		if (Backend->IsFleetActive())
+		// Key presence, NOT registration state (P2-ON1). During a heartbeat-409 re-register, or
+		// before the first register lands, IsFleetActive() is false — a match ending in that window
+		// used to skip the fleet path entirely and fall through to casual XP. SendMatchReport is
+		// already key-gated and the queue file survives, so queue always and let it re-send.
+		if (Backend->HasFleetKey())
 		{
 			// PERSISTENT queue dir (FPFPaths::ServerDataDir honors -ArenaDir on the box) so a redeploy mid-unsent
 			// report doesn't drop that match's XP. MUST match the re-send path in PFBackendSubsystem (#8).
@@ -3839,10 +3915,11 @@ void ACombatForgeGameMode::CheckAllVotesIn(const ACombatForgePlayerState* Ignore
 	{
 		const ACombatForgePlayerState* Other = Cast<ACombatForgePlayerState>(OtherBase);
 		if (Other && Other != IgnorePS && !Other->IsABot() && !Other->IsHeadlessServerPhantom() &&
-			!Other->bHasVoted)
+			IsActiveRosterMember(Other) && !Other->bHasVoted)
 		{
 			return;   // bots don't vote — they don't hold the vote phase open
-			          // (nor does the pilot box's phantom, which used to pin this to the full timer)
+			          // (nor does the pilot box's phantom, which used to pin this to the full timer,
+			          //  nor a controller-less ghost PlayerState — same filter Ready uses, P2-C6)
 		}
 	}
 	SetPhase(EPFMatchPhase::Results);
@@ -4156,8 +4233,45 @@ uint8 ACombatForgeGameMode::FindFreeRosterIndex() const
 			return Candidate;
 		}
 	}
-	UE_LOG(CombatForgeLog, Error, TEXT("GameMode: roster full (12) - reusing slot 11"));
-	return PFGrid::MaxRosterSlots - 1;
+	// No aliasing. RosterIndex is the owner key for build pieces, budgets, and spawn slots, so two
+	// players sharing slot 11 lets each delete/refund the other's fort. Callers must handle the
+	// sentinel by freeing a bot slot or refusing the join. (P2-C8)
+	return RosterSlotNone;
+}
+
+bool ACombatForgeGameMode::TrimOneBotAnyTeam()
+{
+	const ACombatForgeGameState* GS = GetPFGameState();
+	if (!GS)
+	{
+		return false;
+	}
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+		if (PS && PS->IsABot() && PS->TeamId <= 1)
+		{
+			TrimOneBotFromTeam(PS->TeamId);
+			return true;
+		}
+	}
+	return false;
+}
+
+uint8 ACombatForgeGameMode::AcquireRosterIndexForJoin()
+{
+	uint8 Roster = FindFreeRosterIndex();
+	if (Roster == RosterSlotNone && TrimOneBotAnyTeam())
+	{
+		// A full board is nearly always bot-fill, not 12 humans — drop a bot so the human gets in.
+		Roster = FindFreeRosterIndex();
+	}
+	if (Roster == RosterSlotNone)
+	{
+		UE_LOG(CombatForgeLog, Error, TEXT("GameMode: roster full (%d humans) - refusing join"),
+			static_cast<int32>(PFGrid::MaxRosterSlots));
+	}
+	return Roster;
 }
 
 void ACombatForgeGameMode::ComputeEffectiveScaling()

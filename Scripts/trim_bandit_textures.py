@@ -36,3 +36,10 @@ for p in paths:
 
 unreal.log("trim_bandit_textures: capped %d textures to <= %d (%d already capped, %d non-textures)"
            % (capped, CAP, already, skipped_nontex))
+
+# A machine without Content/Bandits reports all zeros and exit 0, which reads as "trim applied"
+# when nothing was even looked at. Fail loudly instead. (P2-S8)
+if capped == 0 and already == 0:
+    unreal.log_error("trim_bandit_textures: found NO textures under %s - is the Bandits content "
+                     "present on this machine? Nothing was trimmed." % FOLDER)
+    raise SystemExit(1)

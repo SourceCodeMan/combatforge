@@ -19,6 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /server
 COPY server-linux/ /server/
 
+# Fail the BUILD, not the container, when server-linux/ is still the empty placeholder. Without
+# this, `docker compose up --build` reports a successful build and then the container exits 1 on
+# every restart, which reads as a runtime fault rather than a missing cook. (P2-D7)
+RUN if [ -z "$(find /server -type f -name CombatForgeServer -print -quit)" ]; then \
+		echo "ERROR: no CombatForgeServer binary in Deploy/playtest/docker/server-linux/."; \
+		echo "       Cook a LINUX dedicated server build and stage it there first — this image"; \
+		echo "       cannot run Win64 binaries. For a Windows host playtest use ../run-server.ps1."; \
+		exit 1; \
+	fi
+
 # UE often needs execute bit on the binary and any .sh wrapper
 RUN chmod +x /server/CombatForgeServer 2>/dev/null || true; \
 	chmod +x /server/*.sh 2>/dev/null || true; \

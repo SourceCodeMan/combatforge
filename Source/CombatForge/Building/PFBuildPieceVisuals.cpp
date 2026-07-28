@@ -792,6 +792,26 @@ UMaterialInstanceDynamic* CreateStructuralPaletteMID(UObject* Outer, EPFPieceTyp
 	return CreatePaletteMID(Outer, RoleForPieceType(Type));
 }
 
+void ApplyTeamAccent(UMaterialInstanceDynamic* MID, uint8 Team)
+{
+	if (!MID || Team > 1)
+	{
+		return;
+	}
+	// Deliberately SUBTLE. T8 originally wanted flat per-team structure colour; the warehouse
+	// cohesion pass dropped it because a solid blue/orange cube destroyed the texture. A small
+	// multiply on the albedo tint keeps every surface detail and still answers "is this my wall?"
+	// at combat range. Multiplies whatever ApplyProfileToMID already set, so each surface keeps
+	// its own authored lift. (P2-BD5)
+	static const FLinearColor TeamAccent[2] = {
+		FLinearColor(0.88f, 0.95f, 1.12f),   // team A: cooled toward the blue paint
+		FLinearColor(1.12f, 0.95f, 0.88f),   // team B: warmed toward the orange paint
+	};
+	FLinearColor Base(FLinearColor::White);
+	MID->GetVectorParameterValue(FMaterialParameterInfo(TEXT("Tint")), Base);
+	MID->SetVectorParameterValue(TEXT("Tint"), Base * TeamAccent[Team]);
+}
+
 const TCHAR* StructuralSurfaceName(EPFPieceType Type)
 {
 	EnsureLoaded();

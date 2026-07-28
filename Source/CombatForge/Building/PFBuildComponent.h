@@ -142,6 +142,10 @@ private:
 	int32  CurrentGhostMeshType = -1;
 
 	bool   bPlaceHeld = false;
+	// A tap that presses AND releases inside one frame leaves bPlaceHeld false by the time Tick runs,
+	// so the press would place nothing. Started latches here; Tick consumes it exactly once. (P2-BD2)
+	bool   bPlaceTapPending = false;
+	bool   bPlaceActiveThisTick = false;   // bPlaceHeld || a consumed tap, for this tick only
 	bool   bWheelOpenSent = false;   // true while the build wheel UI is open
 	double LastSendTime = -100.0;
 	double DenyFlashUntil = 0.0;

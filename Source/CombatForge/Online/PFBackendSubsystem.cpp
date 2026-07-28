@@ -301,6 +301,10 @@ void UPFBackendSubsystem::PollDeviceToken()
 	{
 		return;
 	}
+	if (bTokenPollInFlight)
+	{
+		return;   // a previous poll is still out on a slow link — don't stack another (P2-ON2)
+	}
 	if (FPlatformTime::Seconds() > DeviceExpiresAtSec)
 	{
 		StopDevicePolling();
@@ -311,12 +315,23 @@ void UPFBackendSubsystem::PollDeviceToken()
 		TEXT("{\"grant_type\":\"urn:ietf:params:oauth:grant-type:device_code\",")
 		TEXT("\"device_code\":\"%s\",\"client_id\":\"%s\"}"), *PendingDeviceCode, GameClientId);
 	const int32 Gen = DeviceFlowGeneration;
+	bTokenPollInFlight = true;
 	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
 	Request(TEXT("POST"), TEXT("/api/auth/device/token"), Body, /*AuthMode=*/0,
 		[WeakThis, Gen](int32 Code, const FString& Resp)
 		{
 			UPFBackendSubsystem* Self = WeakThis.Get();
-			if (!Self || Self->DeviceFlowGeneration != Gen || Self->PendingDeviceCode.IsEmpty())
+			if (!Self)
+			{
+				return;
+			}
+			// Clear the in-flight latch for THIS generation only; a StopDevicePolling that already
+			// bumped the generation has cleared it, and a newer poll may own it now.
+			if (Self->DeviceFlowGeneration == Gen)
+			{
+				Self->bTokenPollInFlight = false;
+			}
+			if (Self->DeviceFlowGeneration != Gen || Self->PendingDeviceCode.IsEmpty())
 			{
 				return;   // canceled/superseded while this poll was in flight
 			}
@@ -356,6 +371,7 @@ void UPFBackendSubsystem::StopDevicePolling()
 {
 	++DeviceFlowGeneration;   // invalidate every in-flight code/token callback
 	bDeviceCodeRequestInFlight = false;
+	bTokenPollInFlight = false;
 	if (DevicePollTicker.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(DevicePollTicker);
@@ -363,6 +379,9 @@ void UPFBackendSubsystem::StopDevicePolling()
 	}
 	PendingDeviceCode.Reset();
 	PendingUserCode.Reset();
+	// Otherwise a UI that reads GetVerificationUri() after a cancel keeps showing the previous
+	// approval URL until the next successful code response. (P2-ON3)
+	VerificationUri.Reset();
 }
 
 void UPFBackendSubsystem::HandleLoginSucceeded(const FString& Token)
@@ -464,9 +483,8 @@ bool UPFBackendSubsystem::IsWeaponUnlocked(const FString& WeaponId) const
 	// rank-10 player "LOCKED - Rank 1" on the default rifle and pistol (Tom 2026-07-20). If you have the
 	// rank, you have the gun.
 	//
-	// EffectiveRank() folds in the ⚠️ ALPHA-ONLY `pf.SetRank` override (DevRankOverride) — delete that
-	// member and this comment together before beta. Client-side only: a fleet server re-checks the real
-	// profile in ServerSetKit::ClampSlot, so an override cannot carry a locked gun on an official server.
+	// Client-side gate only: a fleet server re-checks the real profile in ServerSetKit::ClampSlot,
+	// so what this menu allows can never carry a locked gun onto an official server.
 	{
 		const FString Bare = WeaponId.StartsWith(TEXT("wpn.")) ? WeaponId.RightChop(4) : WeaponId;
 		const FPFWeaponConfig C = PFWeapon::FindById(Bare);
@@ -474,12 +492,6 @@ bool UPFBackendSubsystem::IsWeaponUnlocked(const FString& WeaponId) const
 			&& static_cast<int32>(PFWeapon::UnlockRankOf(C.Category, C.Index)) <= EffectiveRank())
 		{
 			return true;
-		}
-		// An explicit override LOWER than your real rank is a deliberate "show me what a new player sees",
-		// so it must be able to re-lock things the id list would otherwise grant below.
-		if (DevRankOverride >= 0)
-		{
-			return false;
 		}
 	}
 	const FString Prefixed = WeaponId.StartsWith(TEXT("wpn."))
@@ -914,42 +926,3 @@ void UPFBackendSubsystem::SendCasualReport(const FString& MatchId, const FString
 		});
 }
 
-// ---------------------------------------------------------------------------
-// ⚠️ ALPHA ONLY — DELETE THIS WHOLE BLOCK BEFORE BETA (Tom 2026-07-20)
-// ---------------------------------------------------------------------------
-// `pf.SetRank <n>` unlocks everything up to rank n locally so the catalog can be exercised without
-// grinding. It is CLIENT-SIDE ONLY and cannot be used to cheat on an official server: a fleet server
-// re-checks the real profile in ACombatForgeCharacter::ServerSetKit (ClampSlot), so a claimed-but-
-// locked gun still spawns as the category starter. It only changes what this menu lets you equip.
-// `pf.SetRank -1` returns to the real profile rank.
-static void PFSetRankCmd(const TArray<FString>& Args, UWorld* World)
-{
-	if (World == nullptr)
-	{
-		return;
-	}
-	UGameInstance* GI = World->GetGameInstance();
-	UPFBackendSubsystem* Backend = GI ? GI->GetSubsystem<UPFBackendSubsystem>() : nullptr;
-	if (Backend == nullptr)
-	{
-		UE_LOG(CombatForgeLog, Warning, TEXT("pf.SetRank: backend subsystem unavailable"));
-		return;
-	}
-	if (Args.Num() < 1)
-	{
-		UE_LOG(CombatForgeLog, Log,
-			TEXT("pf.SetRank <n>   (alpha: unlock everything up to rank n; -1 = back to your real rank). Now: %d (real %d)"),
-			Backend->DevRankOverride, Backend->GetProfile().Level);
-		return;
-	}
-	const int32 Rank = FCString::Atoi(*Args[0]);
-	Backend->DevRankOverride = (Rank < 0) ? -1 : Rank;
-	UE_LOG(CombatForgeLog, Warning,
-		TEXT("pf.SetRank: rank override = %d (real rank %d). ALPHA ONLY - local menu unlocks; fleet servers still clamp."),
-		Backend->DevRankOverride, Backend->GetProfile().Level);
-}
-static FAutoConsoleCommandWithWorldAndArgs GPFSetRankCmd(
-	TEXT("pf.SetRank"),
-	TEXT("ALPHA ONLY: unlock every weapon up to rank <n> locally (-1 = off). Client-side; fleet servers still clamp."),
-	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&PFSetRankCmd),
-	ECVF_Cheat);

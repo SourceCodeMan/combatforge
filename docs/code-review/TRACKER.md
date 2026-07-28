@@ -14,12 +14,12 @@
 | Metric | Value |
 |--------|------:|
 | Modules done | **12 / 12** |
-| Open **blocker** | **0** — both fixed 2026-07-24 (this branch) |
-| Open **major** | **0** — all 16 fixed 2026-07-24 (this branch) |
-| Open minor | **49** (P2-C9 + P2-I2 fixed alongside their majors) |
-| Open nit | **38** |
-| **Total findings** | **107** (20 fixed) |
-| Last updated | 2026-07-24 |
+| Open **blocker** | **0** — both fixed 2026-07-24 |
+| Open **major** | **0** — all 16 fixed 2026-07-24 |
+| Open minor | **1** (P2-U9 only) |
+| Open nit | **13** |
+| **Total findings** | **107** (93 fixed) |
+| Last updated | 2026-07-28 |
 
 > **Fix pass 2026-07-24 (branch `docs/code-review-pass-2`):** both blockers and all 16 majors
 > fixed and compile-verified; P2-C9 and P2-I2 folded in. P2-C2/C3 were largely fixed on `main`
@@ -27,22 +27,33 @@
 > this branch adds the `ServerSetAliveInRound` root choke. Per-finding notes in the fix-queue
 > tables below; module reports retain the original open write-ups.
 
-### Counts by module (open)
+### Counts by module (open, after the 2026-07-28 minors+nits pass)
 
-| Module | Blocker | Major | Minor | Nit | Report |
-|--------|--------:|------:|------:|----:|--------|
-| Core | 1 | 3 | 5 | 3 | [core.md](./modules/core.md) |
-| Combat | 0 | 5 | 5 | 3 | [combat.md](./modules/combat.md) |
-| Building | 0 | 1 | 6 | 3 | [building.md](./modules/building.md) |
-| Player | 1 | 3 | 4 | 4 | [player.md](./modules/player.md) |
-| UI | 0 | 2 | 7 | 4 | [ui.md](./modules/ui.md) |
-| Objectives | 0 | 0 | 2 | 2 | [objectives.md](./modules/objectives.md) |
-| Voting | 0 | 0 | 2 | 2 | [voting.md](./modules/voting.md) |
-| AI | 0 | 0 | 2 | 3 | [ai.md](./modules/ai.md) |
-| Online | 0 | 0 | 2 | 3 | [online.md](./modules/online.md) |
-| Input+Audio+root | 0 | 1 | 4 | 4 | [input-audio-root.md](./modules/input-audio-root.md) |
-| Scripts | 0 | 0 | 5 | 4 | [scripts.md](./modules/scripts.md) |
-| Deploy+Config | 0 | 1 | 7 | 3 | [deploy-config.md](./modules/deploy-config.md) |
+The module reports below retain the ORIGINAL write-ups; this table and the per-module GitHub
+issues (#27-#38, checkboxes ticked) are the current status.
+
+| Module | Blocker | Major | Minor | Nit | Still open | Report |
+|--------|--------:|------:|------:|----:|------------|--------|
+| Core | 0 | 0 | 0 | 0 | — | [core.md](./modules/core.md) |
+| Combat | 0 | 0 | 0 | 3 | P2-CB11/12/13 (contract errata, belongs in 05) | [combat.md](./modules/combat.md) |
+| Building | 0 | 0 | 0 | 0 | — | [building.md](./modules/building.md) |
+| Player | 0 | 0 | 0 | 0 | — | [player.md](./modules/player.md) |
+| UI | 0 | 0 | 1 | 2 | P2-U9 (elim feed by id, core change), U11 (ring brush), U12 (howto copy: wording call) | [ui.md](./modules/ui.md) |
+| Objectives | 0 | 0 | 0 | 0 | — | [objectives.md](./modules/objectives.md) |
+| Voting | 0 | 0 | 0 | 0 | — | [voting.md](./modules/voting.md) |
+| AI | 0 | 0 | 0 | 2 | P2-AI4/AI5 (both "optional / not required at current roster sizes") | [ai.md](./modules/ai.md) |
+| Online | 0 | 0 | 0 | 1 | P2-ON4 (plaintext token — also an open item in docs/legal/privacy-policy.md) | [online.md](./modules/online.md) |
+| Input+Audio+root | 0 | 0 | 0 | 3 | P2-I7 (doc), I8/I9 (both "no change required") | [input-audio-root.md](./modules/input-audio-root.md) |
+| Scripts | 0 | 0 | 0 | 0 | — | [scripts.md](./modules/scripts.md) |
+| Deploy+Config | 0 | 0 | 0 | 2 | P2-D9 (rated acceptable in its own finding), D10 (editor ini) | [deploy-config.md](./modules/deploy-config.md) |
+
+> **Minors + nits pass 2026-07-28 (branch `fix/review-pass-2-minors`, 7 commits):** 93 of 107
+> findings closed, editor target compile-verified after every batch. Four items were Tom's product
+> calls: P2-C5 mid-round joiners now spectate until the next round; P2-BD5 structural pieces get a
+> subtle per-team accent tint; P2-ON5 `pf.SetRank`/DevRankOverride stripped; P2-CB6 fire mode is
+> now enforced server-side. **P2-CB6 adds a ServerSetFireMode RPC, so `PFBuild::NetProtocol` went
+> 16 -> 17** — NOT packaged, it rides the next itch push (client + server together).
+> Nothing here has been playtested; it is code-verified only.
 
 ---
 

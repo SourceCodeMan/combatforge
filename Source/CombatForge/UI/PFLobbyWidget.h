@@ -54,25 +54,16 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
-	UFUNCTION() void OnLoadoutClicked();
-	UFUNCTION() void OnLoadoutClose();
-	UFUNCTION() void OnLoadoutApply();
-	UFUNCTION() void OnCrosshairCycle();
 	UFUNCTION() void OnOptionsClicked();
 
 private:
 	void BuildTree();
 	void BuildConfigPanel(UCanvasPanel* RootCanvas);
-	void BuildLoadoutOverlay(UCanvasPanel* RootCanvas);
 	UButton* MakeConfigButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText);
 	void AddReadOnlyRow(UVerticalBox* Box, const FString& Label, TObjectPtr<UTextBlock>& OutValueText);
 	void RefreshRoster();
 	void RefreshConfig();
-	void RefreshLoadoutLabels();
-	void ApplyLoadoutPrefs();
 	bool IsLocalHost() const;
-
-	static const TCHAR* CrosshairStyleName(int32 Idx);
 
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> CountdownText;
@@ -89,14 +80,7 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> BotsValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> MapValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> ConfigHintText;
-	UPROPERTY() TObjectPtr<UBorder> LoadoutOverlay;
 
-	UPROPERTY() TObjectPtr<UButton> CrosshairButton;
-	UPROPERTY() TObjectPtr<UTextBlock> CrosshairValueText;
-	UPROPERTY() TObjectPtr<UTextBlock> LoadoutHintText;
-	UPROPERTY() TObjectPtr<UTextBlock> LoadoutSummaryText;
-
-	int32 WorkingCrosshairStyle = 0;
 
 	float PollAccum = 0.f;
 	bool bFooterShowsHostHints = false;   // re-styled when the match leader migrates (dedicated)

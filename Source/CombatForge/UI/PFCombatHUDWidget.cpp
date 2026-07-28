@@ -1436,7 +1436,36 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 			|| GS->MatchType == EPFMatchType::Domination
 			|| GS->MatchType == EPFMatchType::Hardpoint)
 		{
-			HandleScoreChanged();
+			// Only rebuild when a value the strip shows actually moved. These modes have no score
+			// multicast, so the poll has to live here — but rebuilding every frame re-set the same
+			// strings and re-invalidated Slate ~60x/s for the whole match. (P2-U4)
+			uint16 MyTags = 0;
+			uint16 LeadTags = 0;
+			if (GS->MatchType == EPFMatchType::FreeForAll)
+			{
+				if (const ACombatForgePlayerState* LocalPS =
+					GetOwningPlayer() ? GetOwningPlayer()->GetPlayerState<ACombatForgePlayerState>() : nullptr)
+				{
+					MyTags = LocalPS->TagCount;
+				}
+				for (APlayerState* PSBase : GS->PlayerArray)
+				{
+					if (const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+						PS && !PS->IsPhantom())
+					{
+						LeadTags = FMath::Max(LeadTags, PS->TagCount);
+					}
+				}
+			}
+			const FPFScoreStripKey Key{
+				static_cast<uint8>(GS->MatchType), GS->RoundWinsToTake,
+				GS->TeamScores[0], GS->TeamScores[1], MyTags, LeadTags };
+			if (!bScoreStripKeyValid || !(Key == LastScoreStripKey))
+			{
+				LastScoreStripKey = Key;
+				bScoreStripKeyValid = true;
+				HandleScoreChanged();
+			}
 		}
 	}
 

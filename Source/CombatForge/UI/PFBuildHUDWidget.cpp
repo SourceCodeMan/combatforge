@@ -3,6 +3,7 @@
 #include "UI/PFBuildHUDWidget.h"
 
 #include "Building/PFBuildComponent.h"
+#include "Building/PFBuildPieceVisuals.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
 #include "Player/CombatForgeCharacter.h"
@@ -29,22 +30,9 @@ namespace
 
 const TCHAR* UPFBuildHUDWidget::ToolDisplayName(EPFBuildTool Tool)
 {
-	switch (Tool)
-	{
-	case EPFBuildTool::Wall:           return TEXT("Wall");
-	case EPFBuildTool::Floor:          return TEXT("Floor");
-	case EPFBuildTool::Ramp:           return TEXT("Ramp");
-	case EPFBuildTool::Roof:           return TEXT("Ceiling");
-	case EPFBuildTool::PropCan:        return TEXT("Barrel");
-	case EPFBuildTool::PropDorito:     return TEXT("Cone");
-	case EPFBuildTool::PropSnake:      return TEXT("Boxes");
-	case EPFBuildTool::WallWindow:     return TEXT("Window");
-	case EPFBuildTool::WallDoor:       return TEXT("Door");
-	case EPFBuildTool::WallDoorOneWay: return TEXT("1-Way Door");
-	case EPFBuildTool::FloorTrap:      return TEXT("Trap Floor");
-	case EPFBuildTool::Delete:         return TEXT("Delete");
-	default:                           return TEXT("?");
-	}
+	// One owner of piece names (the wheel already reads this), so renaming a piece can't leave the
+	// wheel and the bottom reel disagreeing. (P2-U8)
+	return PFBuildPieceVisuals::DisplayName(Tool);
 }
 
 const TCHAR* UPFBuildHUDWidget::DenyReasonText(EPFDenyReason Reason)
@@ -342,9 +330,10 @@ void UPFBuildHUDWidget::UpdateBudgetText()
 		Structural = PS->StructuralBudget;
 		Props = PS->PropBudget;
 	}
-	// Caps are contract constants (B6): 30 structural + 6 props per player.
-	BudgetText->SetText(FText::FromString(
-		FString::Printf(TEXT("▦ %d/30   ◆ %d/6"), Structural, Props)));
+	// Caps come from PFBudget (B6) so a balance change moves the readout with it. (P2-U5)
+	BudgetText->SetText(FText::FromString(FString::Printf(TEXT("▦ %d/%d   ◆ %d/%d"),
+		Structural, static_cast<int32>(PFBudget::MaxStructural),
+		Props,      static_cast<int32>(PFBudget::MaxProps))));
 }
 
 void UPFBuildHUDWidget::UpdateReadyCounts()

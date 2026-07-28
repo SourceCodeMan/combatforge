@@ -14,8 +14,8 @@ class UInputModifierNegate;
 class UInputModifierScalar;
 
 /**
- * Owns every native-constructed Enhanced Input object (25 UInputActions + 3
- * UInputMappingContexts). All objects are reachable from UPROPERTY members so
+ * Owns every native-constructed Enhanced Input object (all native IA_* actions + 3
+ * UInputMappingContexts; the count is deliberately not written down here, it drifted). (P2-I6) All objects are reachable from UPROPERTY members so
  * GC never collects them mid-match (02 R1). Built once by
  * ACombatForgePlayerController::SetupInputComponent with the PC as outer.
  *

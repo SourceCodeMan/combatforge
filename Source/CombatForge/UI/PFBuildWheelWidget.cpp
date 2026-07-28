@@ -45,6 +45,15 @@ const TCHAR* UPFBuildWheelWidget::ToolDisplayName(EPFBuildTool Tool)
 	return PFBuildPieceVisuals::DisplayName(Tool);
 }
 
+FString UPFBuildWheelWidget::SectorHotkeyLabel(int32 SectorIndex)
+{
+	// UPFBuildComponent::HandleWheelDigit maps digit 1..9 -> sector 0..8 and digit 0 -> sector 9.
+	// Anything past that is reachable by mouse only, so it gets no digit at all.
+	if (SectorIndex >= 0 && SectorIndex <= 8) { return FString::Printf(TEXT("%d"), SectorIndex + 1); }
+	if (SectorIndex == 9)                     { return TEXT("0"); }
+	return FString();
+}
+
 EPFBuildTool UPFBuildWheelWidget::SectorTool(int32 SectorIndex)
 {
 	if (SectorIndex < 0 || SectorIndex >= UE_ARRAY_COUNT(GSectorTools))
@@ -91,8 +100,10 @@ void UPFBuildWheelWidget::BuildTree()
 
 		UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>();
 
+		// Digit label must match the key that actually commits this sector: 1-9 -> sectors 0-8,
+		// 0 -> sector 9, and sectors 10+ have no digit binding at all (mouse-select only). (P2-U3)
 		UTextBlock* Digit = WidgetTree->ConstructWidget<UTextBlock>();
-		Digit->SetText(FText::FromString(FString::Printf(TEXT("%d"), i + 1)));
+		Digit->SetText(FText::FromString(SectorHotkeyLabel(i)));
 		Digit->SetFont(PFWheelFont(10, false));
 		Digit->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
 		Digit->SetJustification(ETextJustify::Center);

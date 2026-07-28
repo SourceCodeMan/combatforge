@@ -89,9 +89,23 @@ void UPFMusicSubsystem::EnsurePlayer()
 	{
 		MusicComp = NewObject<UAudioComponent>(MusicAnchor, TEXT("PFMusicComp"));
 		MusicComp->bAutoActivate = false;
+		MusicComp->bAutoDestroy = false;
 		MusicComp->bIsUISound = true;             // survives gameplay pause + plays in menus
 		MusicComp->bAllowSpatialization = false;  // 2D bed
+		// Loop backstop: cooked builds loop via the wave's own flag and never reach this, but the
+		// editor path deliberately does not touch the asset, so restart on finish there. (P2-I4)
+		MusicComp->OnAudioFinished.AddDynamic(this, &UPFMusicSubsystem::HandleMusicFinished);
 		MusicComp->RegisterComponent();
+	}
+}
+
+void UPFMusicSubsystem::HandleMusicFinished()
+{
+	// Only meaningful when a track is still meant to be playing — StopMusic clears ActiveTrack
+	// first, so a deliberate stop never restarts here.
+	if (ActiveTrack != EPFMusicTrack::None && MusicComp && !MusicComp->IsPlaying())
+	{
+		MusicComp->Play();
 	}
 }
 
@@ -124,27 +138,20 @@ void UPFMusicSubsystem::PlayTrack(EPFMusicTrack Track)
 		return;
 	}
 
-	// Loop the bed. The wave's own loop flag is the seamless path; harmless if the asset already loops.
+	// Loop the bed. The wave's own loop flag is the seamless path — but writing a UAsset field at
+	// runtime dirties the asset in-editor and would leak looping to any other consumer of the same
+	// wave, so the write is cooked-build only. In the editor the OnAudioFinished restart bound in
+	// EnsurePlayer carries the loop instead (one buffer-boundary gap, editor only). (P2-I4)
+#if !WITH_EDITOR
 	if (USoundWave* Wave = Cast<USoundWave>(Sound))
 	{
 		Wave->bLooping = true;
 	}
+#endif
 
 	ActiveTrack = Track;
 	// Duck the soft wind bed so phase tracks aren't muddy.
-	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
-	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
-		{
-			if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
-			{
-				if (UPFCombatAudio* Audio = Char->GetCombatAudio())
-				{
-					Audio->StopAmbientBed();
-				}
-			}
-		}
-	}
+	SetLocalAmbientBed(false);
 
 	MusicComp->SetSound(Sound);
 	bMatchEndDucked = false;   // a fresh track always starts at full pref volume
@@ -164,19 +171,31 @@ void UPFMusicSubsystem::StopMusic()
 	// Lobby / vote: restore quiet wind bed on the local pawn if present.
 	if (bWasPlaying)
 	{
-		if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
+		SetLocalAmbientBed(true);
+	}
+}
+
+void UPFMusicSubsystem::SetLocalAmbientBed(bool bOn)
+{
+	// GetFirstPlayerController is whichever PC the world lists first, which is not necessarily the
+	// one that owns THIS game instance's local pawn — on those setups the wind bed was never ducked
+	// or never came back. Walk this instance's own local players instead. (P2-I5)
+	const UGameInstance* GI = GetGameInstance();
+	if (!GI)
+	{
+		return;
+	}
+	for (const ULocalPlayer* LP : GI->GetLocalPlayers())
+	{
+		APlayerController* PC = LP ? LP->GetPlayerController(GI->GetWorld()) : nullptr;
+		ACombatForgeCharacter* Char = PC ? Cast<ACombatForgeCharacter>(PC->GetPawn()) : nullptr;
+		UPFCombatAudio* Audio = Char ? Char->GetCombatAudio() : nullptr;
+		if (!Audio)
 		{
-			if (APlayerController* PC = World->GetFirstPlayerController())
-			{
-				if (ACombatForgeCharacter* Char = Cast<ACombatForgeCharacter>(PC->GetPawn()))
-				{
-					if (UPFCombatAudio* Audio = Char->GetCombatAudio())
-					{
-						Audio->StartAmbientBed();
-					}
-				}
-			}
+			continue;
 		}
+		if (bOn) { Audio->StartAmbientBed(); }
+		else     { Audio->StopAmbientBed(); }
 	}
 }
 

@@ -9,7 +9,7 @@ REM
 REM  Build config: Development (console + pf.* debug cvars). For a clean release
 REM  build pass "Shipping" as the first argument:  Package-Windows.bat Shipping
 REM ============================================================================
-setlocal
+setlocal enabledelayedexpansion
 
 REM UE root: env var wins so a non-default install doesn't require editing this file (issue #20 S5).
 if not defined UE set "UE=C:\Program Files\Epic Games\UE_5.6"
@@ -37,6 +37,26 @@ findstr /C:"NetProtocol" "%~dp0..\Source\CombatForge\CombatForge.h"
 echo *** REMINDER: bump PFBuild::NetProtocol (above) if this package goes to itch. ***
 echo.
 
+REM --- Optional HARD GATE: set PF_REQUIRE_PROTOCOL_BUMP=1 to refuse packaging at a protocol
+REM that was already packaged. The reminder above is advisory and easy to scroll past; this
+REM compares against the value recorded by the last successful package and stops. (P2-S4)
+set "PROTO="
+for /f "tokens=2 delims==;" %%P in ('findstr /R /C:"NetProtocol *= *[0-9]" "%~dp0..\Source\CombatForge\CombatForge.h"') do (
+  if not defined PROTO for /f "tokens=1" %%Q in ("%%P") do set "PROTO=%%Q"
+)
+set "PROTOSTAMP=%~dp0..\Packaged\.last-packaged-protocol"
+set "LASTPROTO="
+if exist "%PROTOSTAMP%" set /p LASTPROTO=<"%PROTOSTAMP%"
+if "%PF_REQUIRE_PROTOCOL_BUMP%"=="1" if defined PROTO if defined LASTPROTO (
+  if "!PROTO!"=="!LASTPROTO!" (
+    echo.
+    echo *** REFUSING TO PACKAGE: NetProtocol is still !PROTO!, the value already packaged.
+    echo *** Bump PFBuild::NetProtocol in Source\CombatForge\CombatForge.h, or unset
+    echo *** PF_REQUIRE_PROTOCOL_BUMP to package anyway.
+    exit /b 2
+  )
+)
+
 call "%UE%\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun ^
   -project="%PROJ%" ^
   -noP4 -utf8output -nocompileeditor ^
@@ -52,6 +72,14 @@ if %ERRORLEVEL% NEQ 0 (
   echo *** PACKAGE FAILED (exit %ERRORLEVEL%) - see the UAT log above. ***
   endlocal
   exit /b 1
+)
+
+REM Success only: record the protocol this package shipped at, so PF_REQUIRE_PROTOCOL_BUMP can
+REM detect a re-package at the same value next time. Must stay BELOW the failure check - mkdir
+REM and echo reset ERRORLEVEL, so writing the stamp above it would mask a failed package. (P2-S4)
+if defined PROTO (
+  if not exist "%~dp0..\Packaged" mkdir "%~dp0..\Packaged"
+  >"%PROTOSTAMP%" echo %PROTO%
 )
 
 REM --- Privacy scrub (Adam/Benj alpha, 2026-07-15) --------------------------------

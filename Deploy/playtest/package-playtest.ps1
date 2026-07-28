@@ -45,6 +45,32 @@ if ($TryServer) {
 	Write-Host "==> Client-only package (Launcher-engine friendly)"
 }
 
+# THIS SCRIPT IS THE SHIP PATH, despite the "playtest" name. alpha-15, alpha-16 and alpha-17 were
+# all cooked here and butler-pushed from Packaged\Playtest\Windows; Packaged\Windows (the
+# Scripts\Package-Windows.bat output) does not even exist on the build machine. The stale
+# "run Scripts\Package-Windows.bat" line in docs/itch-deploy.md is the wrong one, not this.
+#
+# COOK-FLAG DELTA vs Scripts/Package-Windows.bat (P2-D11): the bat adds -iostore -compressed
+# -nodebuginfo -prereqs. Since the shipped build comes from HERE, that delta means shipped builds
+# are NOT iostore/compressed and DO carry debug info (the scrub below still strips *.pdb). If a
+# future release wants the smaller shipping-shaped cook, add those flags to $UatArgs above rather
+# than switching scripts - switching would also change the archive dir butler pushes from.
+# Optional HARD GATE (P2-S4). PF_REQUIRE_PROTOCOL_BUMP=1 refuses to cook at a NetProtocol value
+# a previous successful package already shipped at. The gate originally went on
+# Scripts\Package-Windows.bat, which turned out NOT to be the path that ships - so it lives here
+# too, on the one that does.
+$ProtoStamp = Join-Path $ProjectRoot "Packaged\.last-packaged-protocol"
+$ProtoMatch = Select-String -Path (Join-Path $ProjectRoot "Source\CombatForge\CombatForge.h") `
+    -Pattern 'constexpr\s+int32\s+NetProtocol\s*=\s*(\d+)\s*;'
+$Proto = if ($ProtoMatch) { $ProtoMatch.Matches[0].Groups[1].Value } else { "" }
+Write-Host "==> NetProtocol $Proto  (itch userversion would be 0.1.0-alpha.$Proto)"
+if ($env:PF_REQUIRE_PROTOCOL_BUMP -eq "1" -and $Proto -and (Test-Path $ProtoStamp)) {
+	$LastProto = (Get-Content $ProtoStamp -Raw).Trim()
+	if ($Proto -eq $LastProto) {
+		throw "REFUSING TO PACKAGE: NetProtocol is still $Proto, the value already packaged. Bump PFBuild::NetProtocol in Source\CombatForge\CombatForge.h, or unset PF_REQUIRE_PROTOCOL_BUMP."
+	}
+}
+
 Write-Host "==> BuildCookRun -> $ArchiveDir"
 Write-Host "    Config=$Config  (editor must be closed)"
 
@@ -54,7 +80,7 @@ if ($LASTEXITCODE -ne 0) { throw "Package failed ($LASTEXITCODE)" }
 $ClientDir = Join-Path $ArchiveDir "Windows"
 
 # SECURITY SCRUB (durable fix for the 2026-07-17 token leak): a packaged build run from a writable folder
-# writes runtime data into <package>\CombatForge\Saved — INCLUDING a logged-in session token on pre-fix
+# writes runtime data into <package>\CombatForge\Saved - INCLUDING a logged-in session token on pre-fix
 # builds. That must NEVER be distributed. Also drop debug PDBs (size). The per-user auth-path fix already
 # keeps fresh logins out of the package, but this guarantees a stray login or crash dump can't ship.
 $SavedDir = Join-Path $ClientDir "CombatForge\Saved"
@@ -69,6 +95,11 @@ if ((Test-Path $ClientDir) -and (Test-Path $ConnectSrc)) {
 		Copy-Item $ConnectSrc (Join-Path $_.FullName "connect.ps1") -Force -ErrorAction SilentlyContinue
 	}
 	Write-Host "Copied connect.ps1 into client package"
+}
+
+if ($Proto) {
+	New-Item -ItemType Directory -Force -Path (Split-Path $ProtoStamp) | Out-Null
+	Set-Content -Path $ProtoStamp -Value $Proto -Encoding ascii
 }
 
 Write-Host "OK: packaged under $ArchiveDir"

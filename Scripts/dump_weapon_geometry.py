@@ -9,15 +9,48 @@
 import json
 import unreal
 
-MESHES = {
-    "Rifle":       "/Game/Weapons/Rifle/Mesh/SM_Rifle.SM_Rifle",
-    "Rifle_Olive": "/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive",
-    "AK_Black":    "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black",
-    "AK_Wood":     "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood",
-    "AKSU_Black":  "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black",
-    "AKSU_Wood":   "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood",
-    "Pistol":      "/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol",
-}
+# Mesh list is DRIVEN BY THE CATALOG, not hand-maintained. The old hardcoded seven covered only a
+# fraction of the shipping guns (every MarketplaceBlockout / modern weapon was missing), so the FP
+# pose tooling that reads this dump was silently under-covering the catalog it exists to serve.
+# (P2-S3)
+import os
+import re
+
+
+def _catalog_meshes():
+    """Every static-mesh object path quoted in PFWeaponCatalog.cpp, keyed by asset name."""
+    try:
+        proj = unreal.Paths.project_dir()
+    except Exception:
+        proj = ""
+    cat = os.path.join(proj, "Source", "CombatForge", "Combat", "PFWeaponCatalog.cpp")
+    if not os.path.isfile(cat):
+        unreal.log_warning("[WeaponGeom] catalog not found at %s" % cat)
+        return {}
+    with open(cat, "r", encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    found = {}
+    # "/Game/<dirs>/SM_Foo.SM_Foo" - the ObjectPath form the catalog stores in MeshPath.
+    for path in re.findall(r'"(/Game/[^"]*?/(SM_[A-Za-z0-9_]+)\.)"', text):
+        full, asset = path
+        found.setdefault(asset[3:], full)   # strip the SM_ prefix for a readable key
+    return found
+
+
+MESHES = _catalog_meshes()
+if not MESHES:
+    # Fallback so the tool still produces something on a tree where the catalog moved.
+    unreal.log_warning("[WeaponGeom] falling back to the legacy hand-written mesh list")
+    MESHES = {
+        "Rifle":       "/Game/Weapons/Rifle/Mesh/SM_Rifle.SM_Rifle",
+        "Rifle_Olive": "/Game/QuantumCharacter/Mesh/Rifle/SM_Rifle_Olive.SM_Rifle_Olive",
+        "AK_Black":    "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Black.SM_AK_Black",
+        "AK_Wood":     "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AK_Wood.SM_AK_Wood",
+        "AKSU_Black":  "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Black.SM_AKSU_Black",
+        "AKSU_Wood":   "/Game/Bandits/Mesh/Weapon/Rifle_AK/SM_AKSU_Wood.SM_AKSU_Wood",
+        "Pistol":      "/Game/Bandits/Mesh/Weapon/Pistol/SM_Pistol.SM_Pistol",
+    }
+unreal.log("[WeaponGeom] dumping %d catalog meshes" % len(MESHES))
 
 out = {}
 for name, path in MESHES.items():

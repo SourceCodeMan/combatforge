@@ -134,11 +134,29 @@ private:
 	float BannerHoldRemaining = 0.f;
 	EPFRoundState LastRoundState = EPFRoundState::None;
 
+	/** Everything the FFA / objective score strip renders. Modes without a score multicast poll in
+	 *  NativeTick, so the strip is only rebuilt when one of these actually moves. (P2-U4) */
+	struct FPFScoreStripKey
+	{
+		uint8  MatchType = 255;
+		uint8  RoundWinsToTake = 0;
+		uint16 TeamScoreA = 0;
+		uint16 TeamScoreB = 0;
+		uint16 MyTags = 0;
+		uint16 LeadTags = 0;
+
+		bool operator==(const FPFScoreStripKey& Other) const
+		{
+			return MatchType == Other.MatchType && RoundWinsToTake == Other.RoundWinsToTake
+				&& TeamScoreA == Other.TeamScoreA && TeamScoreB == Other.TeamScoreB
+				&& MyTags == Other.MyTags && LeadTags == Other.LeadTags;
+		}
+	};
+	FPFScoreStripKey LastScoreStripKey;
+	bool bScoreStripKeyValid = false;
+
 	/** Pips are built at the first-to-4 max; small formats (T15) collapse the extras. */
 	static constexpr int32 MaxPips = 4;
-	/** <=2v2 (<=4 players) plays first-to-3 (T15) — GameMode config isn't replicated, so infer. */
-	static constexpr int32 SmallFormatPips = 3;
-	static constexpr int32 SmallFormatMaxPlayers = 4;
 	// Locational hit model: 10 total-hit pips (out at 10 anywhere; 3 head / 5 chest / 8 limbs first).
 	static constexpr int32 MaxHitPips = 10;
 	static constexpr int32 FeedLineCount = 4;

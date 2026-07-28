@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Tom Chapman. All rights reserved.
 import unreal
 import json
 import os

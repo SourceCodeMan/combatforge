@@ -322,6 +322,7 @@ namespace PFColors
 {
 	inline const FLinearColor TeamA{0.05f, 0.35f, 1.0f};   // blue paint
 	inline const FLinearColor TeamB{1.0f, 0.25f, 0.05f};   // orange paint
+	inline const FLinearColor TeamUnknown{0.55f, 0.55f, 0.55f};   // unassigned / environment (255)
 	// Ghosts are 50% opaque so you can still read the grid / one-way door facing under them.
 	inline const FLinearColor GhostValid{0.15f, 0.95f, 0.25f, 0.5f};
 	inline const FLinearColor GhostInvalid{0.95f, 0.12f, 0.12f, 0.5f};

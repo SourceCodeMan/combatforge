@@ -1231,7 +1231,9 @@ void APFArenaShell::BeginMidWallFade()
 	MidWallScreen->SetVisibility(true);
 	ApplyMidWallOpacity(MidWallStartOpacity);
 	const FBoxSphereBounds B = MidWallScreen->Bounds;
-	UE_LOG(CombatForgeLog, Warning,
+	// Log, not Warning: this fires on EVERY Build entry and the material path has been trusted
+	// since alpha-14. Failure paths below stay at Warning. (P2-BD8)
+	UE_LOG(CombatForgeLog, Log,
 		TEXT("MidWall: fade armed. screen=%s mat=%s worldLoc=(%.0f,%.0f,%.0f) extent=(%.0f,%.0f,%.0f) startOpacity=%.2f vis=%d"),
 		MidWallScreen ? TEXT("ok") : TEXT("NULL"),
 		MidWallBaseMaterial ? *MidWallBaseMaterial->GetName() : TEXT("NULL"),

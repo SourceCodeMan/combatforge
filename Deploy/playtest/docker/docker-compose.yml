@@ -14,5 +14,15 @@ services:
       PF_MAP: /Game/Maps/L_Graybox
       PF_PORT: "7777"
     restart: unless-stopped
+    volumes:
+      # PFPaths.cpp resolves arena records to /var/lib/combatforge/Arenas on a Linux dedicated
+      # server (-server / -nullrhi / -NOHOMEDIR all set here). Without this volume that lives only
+      # in the container's writable layer, so every `down`, `up --build`, or image update silently
+      # destroys every community-built arena and its preview .png. `restart: unless-stopped` hides
+      # it in normal operation — the data survives restarts and only dies when you rebuild. (#26)
+      - combatforge-data:/var/lib/combatforge
     # Uncomment if you want host networking on Linux Docker (not supported the same on Docker Desktop Mac/Win):
     # network_mode: host
+
+volumes:
+  combatforge-data:

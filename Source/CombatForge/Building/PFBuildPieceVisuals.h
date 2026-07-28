@@ -82,6 +82,13 @@ namespace PFBuildPieceVisuals
 	/** Convenience: CreatePaletteMID(Outer, RoleForPieceType(Type)). */
 	UMaterialInstanceDynamic* CreateStructuralPaletteMID(UObject* Outer, EPFPieceType Type);
 
+	/**
+	 * Multiply a structural MID's albedo tint by a subtle team accent, so you can read whose wall
+	 * you are looking at without the warehouse texture turning into a flat blue/orange box. Team 0
+	 * cools, team 1 warms; anything else is left alone. (P2-BD5)
+	 */
+	void ApplyTeamAccent(UMaterialInstanceDynamic* MID, uint8 Team);
+
 	/** Short label for logging / debug (e.g. "wall-concrete", "ramp-metal"). */
 	const TCHAR* StructuralSurfaceName(EPFPieceType Type);
 

@@ -1120,9 +1120,20 @@ void APFBotController::EnsureObjectivesCached()
 {
 	// Objectives are spawned once per match; only (re)scan while our cache is empty/stale — this covers a
 	// bot that existed before the objective actors spawned, and a fresh match. Counts are tiny (<=3 CP, <=2 flag).
+	//
+	// Only the cache the ACTIVE MODE needs counts as "done". The old `bHavePoints || bHaveFlags` meant a
+	// partial first scan (say control points resolved, flags had not spawned yet) latched forever, and a
+	// CTF match would then run with an empty FlagsCache and no way to refill it. (P2-AI3)
 	const bool bHavePoints = ControlPointsCache.Num() > 0 && ControlPointsCache[0].IsValid();
 	const bool bHaveFlags  = FlagsCache.Num() > 0 && FlagsCache[0].IsValid();
-	if (bHavePoints || bHaveFlags)
+	const ACombatForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
+	const bool bNeedFlags  = GS && GS->MatchType == EPFMatchType::CaptureFlag;
+	const bool bNeedPoints = GS && (GS->MatchType == EPFMatchType::Domination
+	                             || GS->MatchType == EPFMatchType::Hardpoint);
+	const bool bSatisfied = GS
+		? ((!bNeedFlags || bHaveFlags) && (!bNeedPoints || bHavePoints) && (bHaveFlags || bHavePoints))
+		: (bHavePoints || bHaveFlags);   // no GameState yet: fall back to the old test
+	if (bSatisfied)
 	{
 		return;
 	}
@@ -1174,6 +1185,17 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 			OutGoal = MyHome;   // run it home to score
 			return true;
 		}
+		// Our own flag lying in the field used to be returned only if a bot happened to walk over
+		// it — the AI never went and got it, so an enemy could park a stolen flag anywhere and the
+		// bot team would ignore it all match. Send half the roster (parity split, same trick
+		// Domination uses) to touch it home; the other half keeps hunting the enemy flag. (P2-AI1)
+		if (HomeFlag && !HomeFlag->IsAtHome() && !HomeFlag->IsCarried()
+			&& (MyPS->RosterIndex % 2) == 0)
+		{
+			OutGoal = HomeFlag->GetActorLocation();
+			return true;
+		}
+
 		// Not carrying: go grab the nearest grabbable (not-carried) enemy flag.
 		APFFlagActor* BestFlag = nullptr;
 		float BestSq = TNumericLimits<float>::Max();
@@ -1322,6 +1344,10 @@ void APFBotController::SetFiring(bool bFire)
 			if (bFire)
 			{
 				Weapon->StartFire();
+				// This press IS the first pull. Charge the re-pull cadence now, or a timer left at
+				// <=0 from the previous engagement cycles the trigger again on this same frame and
+				// the bot opens with a double shot. (P2-AI2)
+				TriggerPullTimer = (Weapon->GetFireMode() == EPFFireMode::Single) ? 0.45f : 0.85f;
 			}
 			else
 			{

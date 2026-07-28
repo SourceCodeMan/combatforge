@@ -21,7 +21,6 @@
 #include "Materials/MaterialInterface.h"
 #include "UObject/SoftObjectPath.h"
 #include "Net/UnrealNetwork.h"
-#include "UObject/ConstructorHelpers.h"
 
 // ---------------------------------------------------------------------------
 // FPFBuildPieceArray — client mirror hooks (§5.11: visuals ONLY from these)
@@ -255,8 +254,9 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 		{
 			continue;
 		}
-		// One MID per type (team tint dropped for texture readability — accepted tradeoff).
-		UMaterialInstanceDynamic* PaletteMID = PFBuildPieceVisuals::CreateStructuralPaletteMID(this, Type);
+		// One MID PER TEAM: same warehouse surface either way, with a subtle albedo accent so you can
+		// tell your fort from theirs. The old shared-MID version had no team read on structure at
+		// all (Tom 2026-07-28 chose the accent over both no-tint and full per-team colour). (P2-BD5)
 		for (uint8 Team = 0; Team < 2; ++Team)
 		{
 			const int32 K = ISMCIndexFor(Type, Team);
@@ -264,8 +264,10 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 			{
 				continue;
 			}
+			UMaterialInstanceDynamic* PaletteMID = PFBuildPieceVisuals::CreateStructuralPaletteMID(this, Type);
 			if (PaletteMID != nullptr)
 			{
+				PFBuildPieceVisuals::ApplyTeamAccent(PaletteMID, Team);
 				PieceISMCs[K]->SetMaterial(0, PaletteMID);
 				TeamMIDs[K] = PaletteMID;
 			}
@@ -942,6 +944,7 @@ void APFBuildGrid::ClearAll()
 	BuilderByPieceId.Empty();
 	BombedPieceIds.Empty();
 	RateWindows.Empty();
+	DeleteRateWindows.Empty();   // else a heavy deleter stays rate-limited into the next Build (P2-BD3)
 	NextPieceId = 0;
 	bBuildFrozen = false;
 	UE_LOG(CombatForgeLog, Log, TEXT("BuildGrid: cleared"));
@@ -1218,6 +1221,36 @@ void APFBuildGrid::SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec)
 
 void APFBuildGrid::DestroySpecialPieceActor(uint16 PieceId)
 {
+	// Non-authority NEVER destroys a replicated actor. The server closes the channel and the client
+	// tears the actor down for us; calling Destroy() here races that and produces "attempted to
+	// destroy non-authority actor" noise or a brief double-teardown under load. Drop the local
+	// bookkeeping and hide it so the piece disappears immediately either way. (P2-BD6)
+	if (!HasAuthority())
+	{
+		if (TObjectPtr<APFBuildPieceActor>* Found = SpecialPieces.Find(PieceId))
+		{
+			if (IsValid(*Found))
+			{
+				(*Found)->SetActorHiddenInGame(true);
+				(*Found)->SetActorEnableCollision(false);
+			}
+			SpecialPieces.Remove(PieceId);
+		}
+		if (GetWorld())
+		{
+			for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
+			{
+				if (*It && (*It)->GetPieceId() == PieceId)
+				{
+					(*It)->SetActorHiddenInGame(true);
+					(*It)->SetActorEnableCollision(false);
+					break;
+				}
+			}
+		}
+		return;
+	}
+
 	if (TObjectPtr<APFBuildPieceActor>* Found = SpecialPieces.Find(PieceId))
 	{
 		if (IsValid(*Found))
@@ -1225,18 +1258,6 @@ void APFBuildGrid::DestroySpecialPieceActor(uint16 PieceId)
 			(*Found)->Destroy();
 		}
 		SpecialPieces.Remove(PieceId);
-	}
-	// Clients: actor may only exist via replication — also scan by id.
-	if (!HasAuthority() && GetWorld())
-	{
-		for (TActorIterator<APFBuildPieceActor> It(GetWorld()); It; ++It)
-		{
-			if (*It && (*It)->GetPieceId() == PieceId)
-			{
-				(*It)->Destroy();
-				break;
-			}
-		}
 	}
 }
 
