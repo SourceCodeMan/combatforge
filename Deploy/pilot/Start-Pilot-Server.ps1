@@ -23,15 +23,19 @@ $KeyFile = Join-Path $ProjectRoot "Saved\CombatForge\ServerKey.txt"
 if (-not (Test-Path $Exe))     { throw "Missing $Exe - build the game first (open the project and compile)." }
 if (-not (Test-Path $KeyFile)) { throw "Missing $KeyFile - the server key. Ask Claude to re-place it." }
 
-# Open the Windows Firewall for this port (both UDP for gameplay + the process), best-effort.
-$ruleName = "CombatForge Pilot $Port"
-if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
+# Open the Windows Firewall for this port, best-effort. UDP carries gameplay; TCP matches what
+# Deploy/playtest/_common.ps1 opens, so no join path is blocked by a protocol the pilot skipped.
+# Each protocol is checked on its own, so a box that once got only UDP still picks up TCP. (P2-D4)
+$ruleUdp = "CombatForge Pilot $Port"
+$ruleTcp = "CombatForge Pilot $Port TCP"
+foreach ($fw in @(@{ Name = $ruleUdp; Proto = "UDP" }, @{ Name = $ruleTcp; Proto = "TCP" })) {
+  if (Get-NetFirewallRule -DisplayName $fw.Name -ErrorAction SilentlyContinue) { continue }
   try {
-    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
-      -Protocol UDP -LocalPort $Port -Profile Any | Out-Null
-    Write-Host "Opened Windows Firewall for UDP $Port." -ForegroundColor Green
+    New-NetFirewallRule -DisplayName $fw.Name -Direction Inbound -Action Allow `
+      -Protocol $fw.Proto -LocalPort $Port -Profile Any | Out-Null
+    Write-Host "Opened Windows Firewall for $($fw.Proto) $Port." -ForegroundColor Green
   } catch {
-    Write-Host "NOTE: couldn't add a firewall rule automatically (run as Admin once if joins fail)." -ForegroundColor Yellow
+    Write-Host "NOTE: couldn't add the $($fw.Proto) firewall rule automatically (run as Admin once if joins fail)." -ForegroundColor Yellow
   }
 }
 

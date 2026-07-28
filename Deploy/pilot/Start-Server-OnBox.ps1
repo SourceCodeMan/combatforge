@@ -72,15 +72,20 @@ if (-not $vcInstalled) {
   }
 }
 
-# --- Firewall: open UDP $Port inbound so remote players can reach the server ---
-$rule = "CombatForge Server $Port"
-if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
+# --- Firewall: open UDP + TCP $Port inbound so remote players can reach the server ---
+# Each protocol is checked independently, matching Deploy/playtest/_common.ps1: a box that once got
+# only the UDP rule would never receive TCP on later runs if a single early-return guarded both.
+# UDP alone was the pilot default and left rare join paths blocked. (P2-D4)
+$ruleUdp = "CombatForge Server $Port"
+$ruleTcp = "CombatForge Server $Port TCP"
+foreach ($fw in @(@{ Name = $ruleUdp; Proto = "UDP" }, @{ Name = $ruleTcp; Proto = "TCP" })) {
+  if (Get-NetFirewallRule -DisplayName $fw.Name -ErrorAction SilentlyContinue) { continue }
   try {
-    New-NetFirewallRule -DisplayName $rule -Direction Inbound -Action Allow `
-      -Protocol UDP -LocalPort $Port -Profile Any | Out-Null
-    Write-Host "Opened Windows Firewall for UDP $Port." -ForegroundColor Green
+    New-NetFirewallRule -DisplayName $fw.Name -Direction Inbound -Action Allow `
+      -Protocol $fw.Proto -LocalPort $Port -Profile Any | Out-Null
+    Write-Host "Opened Windows Firewall for $($fw.Proto) $Port." -ForegroundColor Green
   } catch {
-    Write-Host "NOTE: could not add the firewall rule (re-run as Administrator once if joins fail)." -ForegroundColor Yellow
+    Write-Host "NOTE: could not add the $($fw.Proto) firewall rule (re-run as Administrator once if joins fail)." -ForegroundColor Yellow
   }
 }
 
