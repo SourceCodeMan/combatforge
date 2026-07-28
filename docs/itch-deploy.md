@@ -39,6 +39,15 @@ butler status <ITCH_USERNAME>/combatforge:windows-alpha
 
 ### `Scripts\Push-Itch.ps1`
 
+> **Corrected 2026-07-28.** This section described the script for months but it was never
+> actually created, and the `$BuildDir` it named (`Packaged\Windows`, the
+> `Scripts\Package-Windows.bat` output) does not exist on the build machine. alpha-15,
+> alpha-16 and alpha-17 were all cooked by `Deploy\playtest\package-playtest.ps1` into
+> **`Packaged\Playtest\Windows`**, and that is where butler pushes from. The script now
+> exists at `Scripts\Push-Itch.ps1`, defaults to that directory, and is **dry-run by
+> default** — it runs every check and only uploads when you pass `-Push`. It also refuses
+> to push if `CombatForge\Saved` or any `.pdb` survived the scrub.
+
 The alpha number lives in exactly ONE place — `PFBuild::NetProtocol` in
 `Source\CombatForge\CombatForge.h` — because that constant is what the join handshake
 actually gates on. Typing `--userversion` separately is how the itch page and the wire
@@ -50,7 +59,7 @@ means the header bump was forgotten).
 ```powershell
 param(
   [Parameter(Mandatory=$true)][string]$Channel,
-  [string]$BuildDir = "$PSScriptRoot\..\Packaged\Windows"
+  [string]$BuildDir = "$PSScriptRoot\..\Packaged\Playtest\Windows"
 )
 $ErrorActionPreference = 'Stop'
 
@@ -69,7 +78,7 @@ if ($existing -match [regex]::Escape($UserVersion)) {
   throw "$UserVersion is ALREADY on $Channel. Bump PFBuild::NetProtocol in CombatForge.h first."
 }
 
-if (-not (Test-Path $BuildDir)) { throw "No packaged build at $BuildDir - run Scripts\Package-Windows.bat." }
+if (-not (Test-Path $BuildDir)) { throw "No packaged build at $BuildDir - run Deploy\playtest\package-playtest.ps1." }
 if (Test-Path (Join-Path $BuildDir 'CombatForge\Saved')) { throw "Saved\ still present - privacy scrub did not run." }
 
 & butler push $BuildDir $Channel --userversion $UserVersion

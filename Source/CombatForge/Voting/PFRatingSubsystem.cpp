@@ -134,7 +134,8 @@ void UPFRatingSubsystem::BeginMatchRecord(const FString& MatchId,
 	if (WriteRecordToDisk())
 	{
 		const bool bRemix = !CurrentParentArenaId.IsEmpty() && CurrentParentArenaId != CurrentArenaId;
-		UE_LOG(CombatForgeLog, Warning,
+		// Success is Log; Warning stays for the discard / skip paths. (P2-VOT3)
+		UE_LOG(CombatForgeLog, Log,
 			TEXT("PFRatingSubsystem: SAVED map %s (arenaId %s, %d pieces%s) -> %s"),
 			*CurrentMatchId, *CurrentArenaId, FrozenPieces.Num(),
 			bRemix ? *FString::Printf(TEXT(", remix of %s"), *CurrentParentArenaId.Left(8)) : TEXT(""),
@@ -156,20 +157,26 @@ void UPFRatingSubsystem::AddVote(const FPFVoteRecord& Vote, bool bBuiltHalfA)
 		return;
 	}
 
-	// GameMode dedupes upstream (§3.7); if the same voter shows twice anyway, overwrite.
-	if (!Vote.VoterGuidHash.IsEmpty())
+	// A vote with no voter id can't be deduped, so two of them would both append and inflate the
+	// record's votes array. Refuse rather than silently double-count. (P2-VOT1)
+	if (Vote.VoterGuidHash.IsEmpty())
 	{
-		for (FPFPendingVote& Existing : PendingVotes)
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("PFRatingSubsystem: AddVote with empty VoterGuidHash — vote dropped (not dedupable)."));
+		return;
+	}
+
+	// GameMode dedupes upstream (§3.7); if the same voter shows twice anyway, overwrite.
+	for (FPFPendingVote& Existing : PendingVotes)
+	{
+		if (Existing.Vote.VoterGuidHash == Vote.VoterGuidHash)
 		{
-			if (Existing.Vote.VoterGuidHash == Vote.VoterGuidHash)
-			{
-				UE_LOG(CombatForgeLog, Warning,
-					TEXT("PFRatingSubsystem: duplicate vote from voter %s — overwriting staged vote."),
-					*Vote.VoterGuidHash);
-				Existing.Vote = Vote;
-				Existing.bBuiltHalfA = bBuiltHalfA;
-				return;
-			}
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("PFRatingSubsystem: duplicate vote from voter %s — overwriting staged vote."),
+				*Vote.VoterGuidHash);
+			Existing.Vote = Vote;
+			Existing.bBuiltHalfA = bBuiltHalfA;
+			return;
 		}
 	}
 
@@ -242,7 +249,7 @@ void UPFRatingSubsystem::CommitMatchRecord(const FPFMatchResult& Result)
 
 	if (WriteRecordToDisk(/*bRequestScreenshot=*/true))
 	{
-		UE_LOG(CombatForgeLog, Warning,
+		UE_LOG(CombatForgeLog, Log,
 			TEXT("PFRatingSubsystem: committed match record %s (%s, %d votes) -> %s"),
 			*CurrentMatchId, *WinnerString, VotesArray.Num(), *CurrentFilePath);
 	}
@@ -413,6 +420,12 @@ bool UPFRatingSubsystem::LoadCommunityArenaByFileName(const FString& FileName,
 	TArray<FPFBuildPieceRec>& OutPieces) const
 {
 	OutPieces.Reset();
+	// Host-only, same as LoadMostRecentArena: arena records are server truth, and a client reading
+	// its own Saved/Arenas here would build a fort the server never sanctioned. (P2-VOT2)
+	if (!IsServerContext())
+	{
+		return false;
+	}
 	if (FileName.IsEmpty() || FileName.Contains(TEXT("..")) || FileName.Contains(TEXT("/"))
 		|| FileName.Contains(TEXT("\\")))
 	{

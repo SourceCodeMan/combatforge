@@ -20,7 +20,10 @@ set -e
 
 # --- Paths: env vars win so a different Mac layout needs no file edit (issue #20 S5) ---
 UE="${UE:-/Users/Shared/Epic Games/UE_5.6}"
-PROJ="${PROJ:-$HOME/projects/combatforge/CombatForge.uproject}"
+# Default to the uproject beside this script's parent (Scripts/..), the same %~dp0.. rule
+# Package-Windows.bat uses, instead of assuming one hard-coded Mac layout. (P2-S9)
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+PROJ="${PROJ:-$_SCRIPT_DIR/../CombatForge.uproject}"
 OUT="${OUT:-$(dirname "$PROJ")/Packaged/Mac}"
 # ----------------------------------------------------------------------------------------
 
@@ -33,6 +36,22 @@ if [ "$CONFIG" = "Shipping" ]; then DISTFLAG="-distribution"; fi
 # NetProtocol reminder: every public push MUST bump PFBuild::NetProtocol (join-handshake gate).
 grep -n "NetProtocol" "$(dirname "$PROJ")/Source/CombatForge/CombatForge.h" || true
 echo "*** REMINDER: bump PFBuild::NetProtocol (above) if this package ships to players. ***"
+
+# Optional HARD GATE (P2-S4): PF_REQUIRE_PROTOCOL_BUMP=1 refuses to package at a protocol that
+# was already packaged. The reminder above is advisory and easy to scroll past; this compares
+# against the value recorded by the last successful package on this machine and stops.
+PROTO=$(sed -n 's/.*NetProtocol *= *\([0-9][0-9]*\).*/\1/p' \
+  "$(dirname "$PROJ")/Source/CombatForge/CombatForge.h" | head -1)
+PROTOSTAMP="$(dirname "$PROJ")/Packaged/.last-packaged-protocol"
+if [ "${PF_REQUIRE_PROTOCOL_BUMP:-}" = "1" ] && [ -n "$PROTO" ] && [ -f "$PROTOSTAMP" ]; then
+  if [ "$PROTO" = "$(cat "$PROTOSTAMP")" ]; then
+    echo ""
+    echo "*** REFUSING TO PACKAGE: NetProtocol is still $PROTO, the value already packaged."
+    echo "*** Bump PFBuild::NetProtocol in Source/CombatForge/CombatForge.h, or unset"
+    echo "*** PF_REQUIRE_PROTOCOL_BUMP to package anyway."
+    exit 2
+  fi
+fi
 
 echo ""
 echo "=== Packaging Combat Forge (Mac / $CONFIG) ==="
@@ -47,6 +66,14 @@ echo ""
   -clientconfig="$CONFIG" $DISTFLAG \
   -build -cook -stage -pak -iostore -compressed \
   -archive -archivedirectory="$OUT"
+
+# Record the protocol this package shipped at, so PF_REQUIRE_PROTOCOL_BUMP can detect a
+# re-package at the same value next time. `set -e` means we only get here on success. (P2-S4)
+if [ -n "$PROTO" ]; then
+  mkdir -p "$(dirname "$PROTOSTAMP")"
+  printf '%s
+' "$PROTO" > "$PROTOSTAMP"
+fi
 
 # --- PRIVACY SCRUB (mirrors Package-Windows.bat) -----------------------------
 # A packaged Saved/ has leaked real data before: hostname, LAN IP, hardware info

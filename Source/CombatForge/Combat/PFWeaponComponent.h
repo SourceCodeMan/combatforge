@@ -45,6 +45,8 @@ public:
 	/** Restrict the fire selector to a weapon's allowed modes (bitmask 1<<EPFFireMode) + set its default. */
 	void SetAllowedFireModes(uint8 Mask, EPFFireMode Default);
 	void SetFireMode(EPFFireMode Mode);   // clamps to the allowed mask
+	/** Ship the local selector to the server (no-op unless locally controlled). (P2-CB6) */
+	void PushFireModeToServer();
 	bool IsFireModeAllowed(EPFFireMode Mode) const { return (AllowedFireModeMask & (1u << static_cast<uint8>(Mode))) != 0; }
 
 	/** Throw a grenade of the given type (owner-predicts -> ServerThrowGrenade validates + spawns). */
@@ -199,6 +201,9 @@ protected:
 	// Intra RPC: server must learn about manual reloads (auto-reload triggers independently
 	// on both sides when the hopper empties).
 	UFUNCTION(Server, Reliable) void ServerStartReload();
+	/** Owning client tells the server which way its selector is set, so the server can enforce the
+	 *  cadence that mode implies. Re-clamped server-side to AllowedFireModeMask. (P2-CB6) */
+	UFUNCTION(Server, Reliable) void ServerSetFireMode(EPFFireMode Mode);
 
 private:
 	// ---- Fire internals ----
@@ -272,4 +277,9 @@ private:
 	// Consecutive accepted shots < 0.3 s apart (client clock) — drives the server-side DMR re-burst gate
 	// (issue #11 CB2). Reset to 1 on any real pause.
 	uint8  ServerBurstRun = 0;
+	/** Server's copy of the owning client's fire selector (P2-CB6). CurrentFireMode never leaves the
+	 *  client, so before this the server had no idea a weapon was on Single and happily accepted a
+	 *  full-auto stream from a modified client. Pushed by ServerSetFireMode and re-clamped to the
+	 *  weapon's AllowedFireModeMask (catalog truth the server sets itself in ApplyWeaponLoadout). */
+	EPFFireMode ServerFireMode = EPFFireMode::Auto;
 };

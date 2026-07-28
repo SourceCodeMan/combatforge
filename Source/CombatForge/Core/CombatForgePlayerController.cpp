@@ -944,6 +944,24 @@ void ACombatForgePlayerController::ServerShipClientLog_Implementation(const FStr
 	{
 		return;
 	}
+	// Per-connection volume cap. _Validate only bounds ONE chunk at 4 KB, so a client free-running
+	// at its 8 chunks/s self-cap could write ~32 KB/s into the host's Saved/ClientLogs/ forever.
+	// A real ship is a few hundred KB; past the budget we drop silently rather than kill the
+	// connection, since a genuine crash-log upload is not an attack. (P2-C12)
+	if (ServerClientLogBytes >= ServerClientLogByteBudget)
+	{
+		if (!bServerClientLogCapped)
+		{
+			bServerClientLogCapped = true;
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("ClientLogShip: %s hit the %d MB per-connection budget - dropping further chunks."),
+				PlayerState ? *PlayerState->GetPlayerName() : TEXT("client"),
+				ServerClientLogByteBudget / (1024 * 1024));
+		}
+		return;
+	}
+	ServerClientLogBytes += Chunk.Len();
+
 	if (ServerClientLogPath.IsEmpty())
 	{
 		const FString Dir = FPaths::ProjectSavedDir() / TEXT("ClientLogs");

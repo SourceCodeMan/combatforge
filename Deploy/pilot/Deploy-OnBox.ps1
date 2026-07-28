@@ -99,7 +99,38 @@ if (Test-Path $KeyFile) {
     if ($go -ne "y") { throw "Stopped so you can put ServerKey.txt in place first." }
 }
 
-# ---- 4. Stop the running server ----
+# ---- 4. Download ----
+# Downloading BEFORE stopping the server: a mid-download failure used to leave the box offline
+# until someone recovered it by hand, because the stop came first. The tunnel HEAD probe earlier
+# only proves the URL answers, not that the whole zip arrives. Land it to a .partial name, prove
+# it, and only then take the live server down. (P2-D3)
+Set-Location $Root
+$Zip     = Join-Path $Root "alpha-latest.zip"
+$ZipPart = Join-Path $Root "alpha-latest.partial.zip"
+if (Test-Path $ZipPart) { Remove-Item $ZipPart -Force }
+
+Say ""
+Say "Downloading the build (~3.8 GB - this is the slow part)..." Cyan
+& curl.exe -L --fail --progress-bar -o $ZipPart "$Tunnel/$ZipName"
+if ($LASTEXITCODE -ne 0) {
+    if (Test-Path $ZipPart) { Remove-Item $ZipPart -Force }
+    throw "Download failed (curl exit $LASTEXITCODE). The running server was NOT touched."
+}
+
+# Size floor: a truncated transfer that still exits 0 (no Content-Length) shows up here. A real
+# package is ~3.8 GB, so anything under 1 GB is a proxy error page or a half-written file.
+$partBytes = (Get-Item $ZipPart).Length
+if ($partBytes -lt 1GB) {
+    Remove-Item $ZipPart -Force
+    throw ("Download looks truncated ({0:N0} bytes). The running server was NOT touched." -f $partBytes)
+}
+if (Test-Path $Zip) { Remove-Item $Zip -Force }
+Move-Item $ZipPart $Zip -Force
+$sizeGB = [math]::Round((Get-Item $Zip).Length / 1GB, 2)
+Say "  Downloaded $sizeGB GB." Green
+
+# ---- 5. Stop the running server ----
+# Only now, with a verified archive on disk, is it safe to take the box offline.
 Say ""
 Say "Stopping any running server..." Gray
 $procs = Get-Process -Name "CombatForge*" -ErrorAction SilentlyContinue
@@ -110,18 +141,6 @@ if ($procs) {
 } else {
     Say "  Nothing was running." Gray
 }
-
-# ---- 5. Download ----
-Set-Location $Root
-$Zip = Join-Path $Root "alpha-latest.zip"
-if (Test-Path $Zip) { Remove-Item $Zip -Force }
-
-Say ""
-Say "Downloading the build (~3.8 GB - this is the slow part)..." Cyan
-& curl.exe -L --fail --progress-bar -o $Zip "$Tunnel/$ZipName"
-if ($LASTEXITCODE -ne 0) { throw "Download failed (curl exit $LASTEXITCODE)." }
-$sizeGB = [math]::Round((Get-Item $Zip).Length / 1GB, 2)
-Say "  Downloaded $sizeGB GB." Green
 
 # ---- 6. Extract ----
 # The archive root folder is "Windows", so extracting HERE (the parent) merges into the existing

@@ -296,17 +296,35 @@ struct COMBATFORGE_API FPFGridMath
 		}
 		const FVector Start(XY.X, XY.Y, static_cast<float>(HeightCapUU) + 100.f);
 		const FVector End(XY.X, XY.Y, -50.f);
-		FHitResult Hit;
 		FCollisionQueryParams Params;
 		Params.bTraceComplex = false;
-		if (!World->LineTraceSingleByChannel(Hit, Start, End, PF_ECC_BuildTrace, Params))
+
+		// Supports are terrain and FLOOR TOPS only (T25), and those sit at exact 300-multiples.
+		// A single trace took whatever it hit first, so standing beside a barrel (top ~220 uu)
+		// quantized the ghost to level 1 and the piece then failed NoAnchor or flickered invalid.
+		// Multi-trace and take the highest hit that actually lands on a level top; props and other
+		// arbitrary-height geometry are skipped rather than rounded to the nearest floor. (P2-BD4)
+		TArray<FHitResult> Hits;
+		if (!World->LineTraceMultiByChannel(Hits, Start, End, PF_ECC_BuildTrace, Params))
 		{
 			return 0;
 		}
 		const int32 MaxLevel = FMath::Max(0, NumLevels - 1);
-		const int32 Level = FMath::Clamp(
-			FMath::RoundToInt32(Hit.ImpactPoint.Z / static_cast<double>(PFGrid::WallHeightUU)),
-			0, MaxLevel);
-		return static_cast<int16>(Level * 3);
+		constexpr double LevelTopToleranceUU = 8.0;   // same slack the height-cap check uses
+		for (const FHitResult& Hit : Hits)   // ordered from Start (highest) downward
+		{
+			const double Z = Hit.ImpactPoint.Z;
+			const int32 Level = FMath::RoundToInt32(Z / static_cast<double>(PFGrid::WallHeightUU));
+			if (Level < 0 || Level > MaxLevel)
+			{
+				continue;
+			}
+			if (FMath::Abs(Z - static_cast<double>(Level) * PFGrid::WallHeightUU) > LevelTopToleranceUU)
+			{
+				continue;   // a prop / sloped surface, not a floor top
+			}
+			return static_cast<int16>(Level * 3);
+		}
+		return 0;   // nothing but props under us — ground level
 	}
 };

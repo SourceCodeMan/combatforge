@@ -771,6 +771,7 @@ FSavedMove_PF::FSavedMove_PF()
 	: bSavedWantsToSprint(false)
 	, bSavedWantsToADS(false)
 	, bSavedWantsToMantle(false)
+	, bSavedSlideGlideActive(false)
 {
 }
 
@@ -783,6 +784,10 @@ void FSavedMove_PF::Clear()
 	SavedMantleStart = FVector::ZeroVector;
 	SavedMantleTarget = FVector::ZeroVector;
 	SavedMantleElapsed = 0.f;
+	SavedSlideElapsed = 0.f;
+	SavedSlideRampStartElapsed = 0.f;
+	SavedSlideCooldownRemaining = 0.f;
+	bSavedSlideGlideActive = false;
 }
 
 uint8 FSavedMove_PF::GetCompressedFlags() const
@@ -820,6 +825,14 @@ bool FSavedMove_PF::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InC
 	{
 		return false;
 	}
+	// Same rule for the slide timers (all zero outside a slide, so normal moves still combine). (P2-P8)
+	if (SavedSlideElapsed != NewMovePF->SavedSlideElapsed
+		|| SavedSlideRampStartElapsed != NewMovePF->SavedSlideRampStartElapsed
+		|| SavedSlideCooldownRemaining != NewMovePF->SavedSlideCooldownRemaining
+		|| bSavedSlideGlideActive != NewMovePF->bSavedSlideGlideActive)
+	{
+		return false;
+	}
 	return Super::CanCombineWith(NewMove, InCharacter, MaxDelta);
 }
 
@@ -835,6 +848,10 @@ void FSavedMove_PF::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& 
 		SavedMantleStart = CMC->MantleStart;
 		SavedMantleTarget = CMC->MantleTarget;
 		SavedMantleElapsed = CMC->MantleElapsed;
+		SavedSlideElapsed = CMC->SlideElapsed;
+		SavedSlideRampStartElapsed = CMC->SlideRampStartElapsed;
+		SavedSlideCooldownRemaining = CMC->SlideCooldownRemaining;
+		bSavedSlideGlideActive = CMC->bSlideGlideActive;
 	}
 }
 
@@ -850,6 +867,10 @@ void FSavedMove_PF::PrepMoveFor(ACharacter* C)
 		CMC->MantleStart = SavedMantleStart;
 		CMC->MantleTarget = SavedMantleTarget;
 		CMC->MantleElapsed = SavedMantleElapsed;
+		CMC->SlideElapsed = SavedSlideElapsed;
+		CMC->SlideRampStartElapsed = SavedSlideRampStartElapsed;
+		CMC->SlideCooldownRemaining = SavedSlideCooldownRemaining;
+		CMC->bSlideGlideActive = bSavedSlideGlideActive;
 	}
 }
 

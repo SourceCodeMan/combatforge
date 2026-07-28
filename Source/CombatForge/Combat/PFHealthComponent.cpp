@@ -178,11 +178,7 @@ void UPFHealthComponent::ApplyPaintHit(const FPFPaintHitInfo& HitTemplate, bool 
 
 		// Corpse blocks paintballs 0.5 s, then collision turns off — paintball response and
 		// pawn blocking both (04 §2.4). Clients mirror this via OnRep_Eliminated.
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().SetTimer(CorpseCollisionTimer, this,
-				&UPFHealthComponent::DisableCorpseCollision, CorpseBlockSeconds, false);
-		}
+		ArmCorpseCollisionOff();
 
 		// GameMode (player pawns) / APFTargetDummy (itself) subscribe here — this component
 		// never calls the GameMode directly (T29 decoupling).
@@ -207,11 +203,7 @@ void UPFHealthComponent::ApplyFallDeath()
 
 	bEliminated = true;
 	ApplyEliminatedAppearance(true);
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimer(CorpseCollisionTimer, this,
-			&UPFHealthComponent::DisableCorpseCollision, CorpseBlockSeconds, false);
-	}
+	ArmCorpseCollisionOff();
 
 	FPFPaintHitInfo Hit;
 	Hit.ShooterPS = nullptr;
@@ -253,6 +245,21 @@ void UPFHealthComponent::ResetForRound(uint8 RoundHP)
 	ApplyEliminatedAppearance(false);
 	OnHitsChangedEvent.Broadcast(HeadHits, ChestHits, LimbHits, TotalHits);
 	OnHPChangedEvent.Broadcast(NearestRemaining());   // manual host broadcast (§5.9)
+}
+
+void UPFHealthComponent::ServerBenchUntilNextRound()
+{
+	if (GetOwnerRole() != ROLE_Authority || bEliminated)
+	{
+		return;
+	}
+	// Everything an eliminated body does — hidden, no collision, no interacts, no fire — WITHOUT
+	// broadcasting OnEliminatedEvent, so nobody is credited a tag and no respawn is scheduled.
+	// Used for a mid-round joiner who sits the round out; ResetForRound at StartNextRound undoes
+	// all of it (HP, collision, appearance). (P2-C5)
+	bEliminated = true;
+	ApplyEliminatedAppearance(true);
+	ArmCorpseCollisionOff();
 }
 
 EPFBodyRegion UPFHealthComponent::ComputeRegion(const FVector& ImpactPoint) const
@@ -380,19 +387,34 @@ void UPFHealthComponent::OnRep_Eliminated()
 	// Mirror the server's corpse collision-off locally: client-predicted movement must agree
 	// with authority that a corpse stops blocking pawns, or living players rubber-band on an
 	// invisible capsule that no longer exists server-side.
-	if (UWorld* World = GetWorld())
+	if (bEliminated)
 	{
-		if (bEliminated)
-		{
-			World->GetTimerManager().SetTimer(CorpseCollisionTimer, this,
-				&UPFHealthComponent::DisableCorpseCollision, CorpseBlockSeconds, false);
-		}
-		else
-		{
-			World->GetTimerManager().ClearTimer(CorpseCollisionTimer);
-			RestoreCorpseCollision();
-		}
+		ArmCorpseCollisionOff();
 	}
+	else if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(CorpseCollisionTimer);
+		RestoreCorpseCollision();
+	}
+}
+
+void UPFHealthComponent::ArmCorpseCollisionOff()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	if (bSkipCorpseBlock)
+	{
+		// The owner hides the instant it is eliminated, so a blocking window would just be
+		// invisible geometry eating shots. Drop collision on the same frame. (P2-CB10)
+		World->GetTimerManager().ClearTimer(CorpseCollisionTimer);
+		DisableCorpseCollision();
+		return;
+	}
+	World->GetTimerManager().SetTimer(CorpseCollisionTimer, this,
+		&UPFHealthComponent::DisableCorpseCollision, CorpseBlockSeconds, false);
 }
 
 void UPFHealthComponent::DisableCorpseCollision()

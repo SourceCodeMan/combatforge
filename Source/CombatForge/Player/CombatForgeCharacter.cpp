@@ -918,7 +918,12 @@ void ACombatForgeCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Audio->StopAmbientBed();
 	}
+	// Both session pose maps and both cosmetic timers, so a recycled pawn can never come back
+	// wearing a previous session's tuning or a pending arms/death callback. (P2-P9)
 	SessionWeaponPoses.Empty();
+	SessionWeaponTPs.Empty();
+	GetWorldTimerManager().ClearTimer(FPArmsReturnTimer);
+	GetWorldTimerManager().ClearTimer(DeathHideTimer);
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -1673,27 +1678,69 @@ FString ACombatForgeCharacter::GetInteractPromptText() const
 		return FString();
 	}
 
-	// Nearest usable door in range (same gate as OnInteractPressed).
-	const APFBuildPieceActor* BestDoor = nullptr;
-	float BestDistSq = FMath::Square(APFBuildPieceActor::DoorInteractRangeUU);
+	// Mirrors OnInteractPressed's priority order exactly — defuse, bomb pickup, door, barrel — so the
+	// prompt always names what F is actually about to do. It used to cover doors only, leaving the
+	// other three interactions undiscoverable. (P2-P7)
 	const FVector Me = GetActorLocation();
-	for (TActorIterator<APFBuildPieceActor> It(World); It; ++It)
+
+	// 1. Armed bomb in reach → hold-to-defuse.
+	for (TActorIterator<APFBombActor> It(World); It; ++It)
 	{
-		const APFBuildPieceActor* Door = *It;
-		if (!Door || !Door->CanUserToggleDoor(this))
+		const APFBombActor* Bomb = *It;
+		if (Bomb && Bomb->IsArmed()
+			&& FVector::DistSquared(Me, Bomb->GetActorLocation())
+				<= FMath::Square(APFBombActor::DefuseRangeUU))
 		{
-			continue;
-		}
-		const float D = FVector::DistSquared(Me, Door->GetDoorInteractLocation());
-		if (D <= BestDistSq)
-		{
-			BestDistSq = D;
-			BestDoor = Door;
+			return TEXT("Hold F to defuse");
 		}
 	}
-	if (BestDoor)
+
+	// 2. Mid-field bomb charge.
 	{
-		return BestDoor->IsOpen() ? TEXT("F to close") : TEXT("F to open");
+		float BestDistSq = FMath::Square(APFBombPickup::InteractRangeUU);
+		for (TActorIterator<APFBombPickup> It(World); It; ++It)
+		{
+			const APFBombPickup* P = *It;
+			if (P && P->IsAvailable() && FVector::DistSquared(Me, P->GetActorLocation()) <= BestDistSq)
+			{
+				return TEXT("F to pick up bomb");
+			}
+		}
+	}
+
+	// 3. Nearest usable door in range.
+	{
+		const APFBuildPieceActor* BestDoor = nullptr;
+		float BestDistSq = FMath::Square(APFBuildPieceActor::DoorInteractRangeUU);
+		for (TActorIterator<APFBuildPieceActor> It(World); It; ++It)
+		{
+			const APFBuildPieceActor* Door = *It;
+			if (!Door || !Door->CanUserToggleDoor(this))
+			{
+				continue;
+			}
+			const float D = FVector::DistSquared(Me, Door->GetDoorInteractLocation());
+			if (D <= BestDistSq)
+			{
+				BestDistSq = D;
+				BestDoor = Door;
+			}
+		}
+		if (BestDoor)
+		{
+			return BestDoor->IsOpen() ? TEXT("F to close") : TEXT("F to open");
+		}
+	}
+
+	// 4. Ammo barrel — same 220 uu gate the press path uses.
+	for (TActorIterator<APFAmmoBarrel> It(World); It; ++It)
+	{
+		const APFAmmoBarrel* Barrel = *It;
+		if (Barrel && Barrel->IsAvailable()
+			&& FVector::DistSquared(Me, Barrel->GetActorLocation()) <= FMath::Square(220.f))
+		{
+			return TEXT("F to refill");
+		}
 	}
 	return FString();
 }
@@ -2153,6 +2200,7 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 			FCollisionShape::MakeSphere(MeleeRange * 0.55f), Params))
 		{
 			float BestDistSq = TNumericLimits<float>::Max();
+			const FVector AimDir = EyeRot.Vector();
 			for (const FOverlapResult& O : Overlaps)
 			{
 				ACombatForgeCharacter* Cand = Cast<ACombatForgeCharacter>(O.GetActor());
@@ -2161,13 +2209,29 @@ void ACombatForgeCharacter::ServerMelee_Implementation()
 					continue;
 				}
 				const float Dsq = FVector::DistSquared(Cand->GetActorLocation(), EyeLoc);
-				if (Dsq < BestDistSq && Dsq <= FMath::Square(MeleeRange + MeleeRadius))
+				if (Dsq >= BestDistSq || Dsq > FMath::Square(MeleeRange + MeleeRadius))
 				{
-					BestDistSq = Dsq;
-					Victim = Cand;
-					ImpactPoint = Cand->GetActorLocation() + FVector(0.f, 0.f, 40.f);
-					ImpactNormal = (EyeLoc - ImpactPoint).GetSafeNormal();
+					continue;
 				}
+				// The sweep above is aimed; this fallback sphere is not, so on its own it would
+				// punch backwards and straight through a wall. Require the target to be roughly in
+				// front AND on a clear line before it can be tagged. (P2-P5)
+				const FVector Chest = Cand->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+				const FVector ToVictim = (Chest - EyeLoc).GetSafeNormal();
+				if (FVector::DotProduct(AimDir, ToVictim) <= 0.5f)
+				{
+					continue;   // behind / far off to the side
+				}
+				FHitResult LosHit;
+				if (World->LineTraceSingleByChannel(LosHit, EyeLoc, Chest, ECC_Visibility, Params)
+					&& LosHit.GetActor() != Cand)
+				{
+					continue;   // a wall or a piece is in the way
+				}
+				BestDistSq = Dsq;
+				Victim = Cand;
+				ImpactPoint = Chest;
+				ImpactNormal = (EyeLoc - ImpactPoint).GetSafeNormal();
 			}
 		}
 	}
@@ -2371,9 +2435,11 @@ bool ACombatForgeCharacter::IsADS() const
 	}
 	// Reload suppresses ADS for its duration. Deriving this from the weapon's live bReloading flag (instead
 	// of latching a copy) keeps bADSHeld as the player's PURE intent — a release mid-reload is honored, and
-	// dying mid-reload can't strand you scoped (respawn authoritatively clears bReloading). Owner-only, so it
-	// only gates the locally-controlled path; the server sees the same result via the compressed move flag.
-	if (IsLocallyControlled() && WeaponComponent != nullptr && WeaponComponent->bReloading)
+	// dying mid-reload can't strand you scoped (respawn authoritatively clears bReloading).
+	// Applied on AUTHORITY too, not just the local owner: bReloading is server truth, so a modified client
+	// that pins FLAG_Custom_1 through a reload would otherwise keep ADS spread + movement mult on the
+	// server while honest clients drop them. (P2-P6)
+	if ((IsLocallyControlled() || HasAuthority()) && WeaponComponent != nullptr && WeaponComponent->bReloading)
 	{
 		return false;
 	}
@@ -3355,13 +3421,36 @@ void ACombatForgeCharacter::ServerRequestResetToSpawn_Implementation()
 
 void ACombatForgeCharacter::ServerSetPlayerName_Implementation(const FString& Name)
 {
-	if (APlayerState* PS = GetPlayerState())
+	APlayerState* PS = GetPlayerState();
+	if (!PS)
 	{
-		const FString Clean = Name.TrimStartAndEnd().Left(24);   // backend already validated the name; clamp length
-		if (!Clean.IsEmpty())
+		return;
+	}
+	// One accepted name change per second. The owning client normally sends this exactly once on
+	// possess; without a limit it could spam the scoreboard into a flicker. (P2-P12)
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetTimeSeconds() : 0.0;
+	if (LastNameSetAt > 0.0 && Now - LastNameSetAt < 1.0)
+	{
+		return;
+	}
+
+	FString Clean = Name.TrimStartAndEnd().Left(24);   // backend already validated the name; clamp length
+	// Strip control characters — they render as boxes or break the scoreboard's layout.
+	FString Printable;
+	Printable.Reserve(Clean.Len());
+	for (const TCHAR C : Clean)
+	{
+		if (C >= 0x20 && C != 0x7F)
 		{
-			PS->SetPlayerName(Clean);
+			Printable.AppendChar(C);
 		}
+	}
+	Clean = Printable.TrimStartAndEnd();
+	if (!Clean.IsEmpty())
+	{
+		LastNameSetAt = Now;
+		PS->SetPlayerName(Clean);
 	}
 }
 

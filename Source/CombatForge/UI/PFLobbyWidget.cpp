@@ -202,8 +202,8 @@ void UPFLobbyWidget::BuildTree()
 	}
 
 	BuildConfigPanel(RootCanvas);
-	// Loadout overlay retired — the setter now lives on the main-menu LOADOUT tab (reads/writes the same
-	// FPFUserPrefs, applied on spawn). BuildLoadoutOverlay + its handlers remain but are no longer built/reached.
+	// The loadout overlay lives on the main-menu LOADOUT tab now (same FPFUserPrefs, applied on
+	// spawn). Its builder, handlers, widgets, and tick guard were dead here and are deleted. (P2-U7)
 }
 
 UButton* UPFLobbyWidget::MakeConfigButton(const FString& Label, TObjectPtr<UTextBlock>& OutValueText)
@@ -325,170 +325,6 @@ void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 	}
 }
 
-void UPFLobbyWidget::BuildLoadoutOverlay(UCanvasPanel* RootCanvas)
-{
-	LoadoutOverlay = WidgetTree->ConstructWidget<UBorder>();
-	LoadoutOverlay->SetBrushColor(FLinearColor(0.01f, 0.01f, 0.02f, 0.96f));
-	LoadoutOverlay->SetPadding(FMargin(24.f));
-	LoadoutOverlay->SetHorizontalAlignment(HAlign_Center);
-	LoadoutOverlay->SetVerticalAlignment(VAlign_Center);
-	LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed);
-
-	UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>();
-	LoadoutOverlay->SetContent(Box);
-
-	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>();
-	Title->SetText(FText::FromString(TEXT("LOADOUT")));
-	Title->SetFont(PFLobbyFont(34, true));
-	Title->SetJustification(ETextJustify::Center);
-	Title->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Title)) { VS->SetHorizontalAlignment(HAlign_Center); }
-
-	UTextBlock* Sub = WidgetTree->ConstructWidget<UTextBlock>();
-	Sub->SetText(FText::FromString(TEXT("Local preferences — saved to this PC.")));
-	Sub->SetFont(PFLobbyFont(14, false));
-	Sub->SetJustification(ETextJustify::Center);
-	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Sub)) { VS->SetPadding(FMargin(0.f, 8.f, 0.f, 18.f)); VS->SetHorizontalAlignment(HAlign_Center); }
-
-	// (No MARKER preset row — weapon stats are per-weapon in the catalog now.)
-
-	// Crosshair
-	UHorizontalBox* CRow = WidgetTree->ConstructWidget<UHorizontalBox>();
-	UTextBlock* CLab = WidgetTree->ConstructWidget<UTextBlock>();
-	CLab->SetText(FText::FromString(TEXT("CROSSHAIR")));
-	CLab->SetFont(PFLobbyFont(14, true));
-	CLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
-	USizeBox* CSizer = WidgetTree->ConstructWidget<USizeBox>();
-	CSizer->SetWidthOverride(100.f);
-	CSizer->SetContent(CLab);
-	CRow->AddChildToHorizontalBox(CSizer);
-	CrosshairButton = WidgetTree->ConstructWidget<UButton>();
-	CrosshairButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
-	CrosshairButton->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnCrosshairCycle);
-	CrosshairValueText = WidgetTree->ConstructWidget<UTextBlock>();
-	CrosshairValueText->SetFont(PFLobbyFont(15, true));
-	CrosshairValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	CrosshairButton->AddChild(CrosshairValueText);
-	if (UHorizontalBoxSlot* HS = CRow->AddChildToHorizontalBox(CrosshairButton))
-	{
-		HS->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		HS->SetPadding(FMargin(8.f, 0.f));
-	}
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(CRow)) { VS->SetPadding(FMargin(40.f, 6.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
-
-	LoadoutSummaryText = WidgetTree->ConstructWidget<UTextBlock>();
-	LoadoutSummaryText->SetFont(PFLobbyFont(13, false));
-	LoadoutSummaryText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.78f, 0.85f)));
-	LoadoutSummaryText->SetJustification(ETextJustify::Center);
-	LoadoutSummaryText->SetAutoWrapText(true);
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(LoadoutSummaryText))
-	{
-		VS->SetPadding(FMargin(24.f, 14.f, 24.f, 8.f));
-		VS->SetHorizontalAlignment(HAlign_Fill);
-	}
-
-	LoadoutHintText = WidgetTree->ConstructWidget<UTextBlock>();
-	LoadoutHintText->SetText(FText::FromString(TEXT("Click a row to cycle · APPLY saves · team paint color is fixed")));
-	LoadoutHintText->SetFont(PFLobbyFont(12, false));
-	LoadoutHintText->SetJustification(ETextJustify::Center);
-	LoadoutHintText->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(LoadoutHintText))
-	{
-		VS->SetPadding(FMargin(0.f, 4.f, 0.f, 16.f));
-		VS->SetHorizontalAlignment(HAlign_Center);
-	}
-
-	UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>();
-	UButton* ApplyBtn = WidgetTree->ConstructWidget<UButton>();
-	ApplyBtn->SetBackgroundColor(FLinearColor(0.2f, 0.45f, 0.25f, 1.f));
-	ApplyBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnLoadoutApply);
-	UTextBlock* ApplyLab = WidgetTree->ConstructWidget<UTextBlock>();
-	ApplyLab->SetText(FText::FromString(TEXT("  APPLY  ")));
-	ApplyLab->SetFont(PFLobbyFont(16, true));
-	ApplyLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	ApplyBtn->AddChild(ApplyLab);
-	if (UHorizontalBoxSlot* HS = Footer->AddChildToHorizontalBox(ApplyBtn)) { HS->SetPadding(FMargin(8.f)); }
-
-	UButton* CloseBtn = WidgetTree->ConstructWidget<UButton>();
-	CloseBtn->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
-	CloseBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnLoadoutClose);
-	UTextBlock* CloseLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	CloseLabel->SetText(FText::FromString(TEXT("  BACK  ")));
-	CloseLabel->SetFont(PFLobbyFont(16, true));
-	CloseLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	CloseBtn->AddChild(CloseLabel);
-	if (UHorizontalBoxSlot* HS = Footer->AddChildToHorizontalBox(CloseBtn)) { HS->SetPadding(FMargin(8.f)); }
-
-	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Footer)) { VS->SetHorizontalAlignment(HAlign_Center); }
-
-	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(LoadoutOverlay))
-	{
-		CSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
-		CSlot->SetOffsets(FMargin(0.f));
-	}
-}
-
-const TCHAR* UPFLobbyWidget::CrosshairStyleName(int32 Idx)
-{
-	switch (Idx)
-	{
-	case 1: return TEXT("  Dot only  ");
-	case 2: return TEXT("  Cross only  ");
-	default: return TEXT("  Cross + dot  ");
-	}
-}
-
-void UPFLobbyWidget::RefreshLoadoutLabels()
-{
-	if (CrosshairValueText)
-	{
-		CrosshairValueText->SetText(FText::FromString(CrosshairStyleName(WorkingCrosshairStyle)));
-	}
-	if (LoadoutSummaryText)
-	{
-		// Weapon stats (mag / ROF / accuracy / range) are per-weapon now — pick your gun in the LOADOUT tab.
-		LoadoutSummaryText->SetText(FText::FromString(
-			TEXT("Mag size, fire rate, and accuracy come from your chosen weapon.\nCrosshair style is local. Team paint color comes from your team.")));
-	}
-}
-
-void UPFLobbyWidget::ApplyLoadoutPrefs()
-{
-	// Crosshair only — weapon stats are per-weapon (catalog) and must NOT be clobbered here (the old preset
-	// re-apply reset the pistol's 18-round mag back to 30 mid-session).
-	FPFUserPrefs::SetCrosshairStyle(WorkingCrosshairStyle);
-	FPFUserPrefs::Flush();
-
-	if (LoadoutHintText)
-	{
-		LoadoutHintText->SetText(FText::FromString(TEXT("Saved. Crosshair applies now.")));
-	}
-}
-
-void UPFLobbyWidget::OnLoadoutClicked()
-{
-	WorkingCrosshairStyle = FPFUserPrefs::GetCrosshairStyle();
-	RefreshLoadoutLabels();
-	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Visible); }
-}
-
-void UPFLobbyWidget::OnLoadoutClose()
-{
-	if (LoadoutOverlay) { LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed); }
-}
-
-void UPFLobbyWidget::OnLoadoutApply()
-{
-	ApplyLoadoutPrefs();
-}
-
-void UPFLobbyWidget::OnCrosshairCycle()
-{
-	WorkingCrosshairStyle = (WorkingCrosshairStyle + 1) % 3;
-	RefreshLoadoutLabels();
-}
-
 void UPFLobbyWidget::OnOptionsClicked()
 {
 	if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(GetOwningPlayer()))
@@ -606,18 +442,6 @@ void UPFLobbyWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 				Hints += TEXT("    ·    Enter — Start Match    ·    Click a player to swap team");
 			}
 			FooterText->SetText(FText::FromString(Hints));
-		}
-	}
-
-	// The loadout overlay only makes sense while the Tab-hold cursor exists. Collapse it the moment the
-	// cursor goes away — releasing Tab, or a match cycle returning to the lobby — so a near-opaque
-	// full-screen panel can never strand the view with no cursor left to press BACK.
-	if (LoadoutOverlay && LoadoutOverlay->GetVisibility() != ESlateVisibility::Collapsed)
-	{
-		const ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(GetOwningPlayer());
-		if (!PC || !PC->IsScoreboardHeld())
-		{
-			LoadoutOverlay->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
 

@@ -56,7 +56,7 @@ public:
 	// ---- ADS (owned here; CMC + weapon read through these) ----
 	void  SetADS(bool bWantsADS);          // input entry; respects slide rule (queue during slide — 04 §1.2)
 	bool  IsADS() const;                   // target state
-	float GetADSAlpha() const;             // 0..1 transition alpha (0.18 in / 0.14 out) — weapon spread lerp input
+	float GetADSAlpha() const;             // 0..1 transition alpha (0.14 in / 0.14 out) — weapon spread lerp input
 	void  SetPreferredBaseFOV(float Fov);  // options menu hip FOV (80..110)
 	/** Reload begin/end pushes the current ADS intent into the movement stream (IsADS() self-suppresses
 	 *  while WeaponComponent->bReloading). Called by UPFWeaponComponent so a mid-reload aim release is honored. */
@@ -477,6 +477,8 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UAnimSequence> FirstPersonArmsReloadAnim = nullptr;
 	// Pending return-to-hold after a one-shot arm clip (fire kick / reload) finishes.
 	FTimerHandle FPArmsReturnTimer;
+	/** Server: world time of the last accepted ServerSetPlayerName, rate-limiting the next. (P2-P12) */
+	double LastNameSetAt = 0.0;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") TObjectPtr<UStaticMesh>   WeaponMesh = nullptr;            // rifle in hand (slice: static)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Art") FName WeaponAttachSocket = TEXT("hand_r");                 // preferred hand bone
 	// Grip in hand_r bone space (SM_Rifle family: local +Y = barrel-forward).

@@ -32,7 +32,10 @@ namespace
 APFFlagActor::APFFlagActor()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.bStartWithTickEnabled = true;
+	// Tick is ONLY needed to follow a carrier; enabled in ServerGiveTo and disabled again on
+	// drop/return, mirroring the control point's pulse pattern. It used to run every frame for
+	// the whole match while the flag sat at home doing nothing. (P2-OBJ4)
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	bReplicates = true;
 	SetReplicateMovement(true);
@@ -152,6 +155,10 @@ void APFFlagActor::ServerInit(uint8 InOwnerTeam, const FVector& InHomeLocation)
 	{
 		return;
 	}
+	// A re-init while a drop timer is still armed would let HandleDropReturnTimer fire against the
+	// fresh home state. Clear it before writing anything. (P2-OBJ1)
+	GetWorldTimerManager().ClearTimer(DropReturnTimer);
+	SetActorTickEnabled(false);   // (P2-OBJ4)
 	OwnerTeam = InOwnerTeam;
 	HomeLocation = InHomeLocation;
 	bAtHome = true;
@@ -171,6 +178,7 @@ void APFFlagActor::ServerGiveTo(ACombatForgePlayerState* Carrier)
 		return;
 	}
 	GetWorldTimerManager().ClearTimer(DropReturnTimer);
+	SetActorTickEnabled(true);   // follow the carrier (P2-OBJ4)
 	CarrierPS = Carrier;
 	bCarried = true;
 	bAtHome = false;
@@ -185,6 +193,7 @@ void APFFlagActor::ServerReturnHome()
 		return;
 	}
 	GetWorldTimerManager().ClearTimer(DropReturnTimer);
+	SetActorTickEnabled(false);   // parked at home, nothing to follow (P2-OBJ4)
 	CarrierPS.Reset();
 	bCarried = false;
 	bAtHome = true;
@@ -200,6 +209,7 @@ void APFFlagActor::ServerDropAt(const FVector& WorldLoc)
 	{
 		return;
 	}
+	SetActorTickEnabled(false);   // nothing to follow while it lies on the floor (P2-OBJ4)
 	CarrierPS.Reset();
 	bCarried = false;
 	bAtHome = false;
@@ -246,10 +256,18 @@ void APFFlagActor::Tick(float DeltaSeconds)
 		ServerReturnHome();
 		return;
 	}
-	if (APawn* Pawn = PS->GetPawn())
+	APawn* Pawn = PS->GetPawn();
+	if (!Pawn)
 	{
-		SetActorLocation(Pawn->GetActorLocation() + FVector(0.f, 0.f, 80.f));
+		// Carrier's PlayerState is alive but its pawn is gone (eliminated / destroyed before the
+		// GameMode's drop ran). Without this the flag hangs in mid-air at the last carried spot and
+		// nobody can retake it. Drop it where it is, clearing the carry flag exactly like the
+		// GameMode's elimination path does, so the round stays playable. (P2-OBJ2)
+		PS->ServerSetFlagCarry(false, 255);
+		ServerDropAt(GetActorLocation());
+		return;
 	}
+	SetActorLocation(Pawn->GetActorLocation() + FVector(0.f, 0.f, 80.f));
 }
 
 void APFFlagActor::OnPickupOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor,

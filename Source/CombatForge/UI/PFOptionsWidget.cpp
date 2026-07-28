@@ -1161,6 +1161,7 @@ void UPFOptionsWidget::OnSensChanged(float Value)
 void UPFOptionsWidget::OnFovChanged(float Value)
 {
 	WorkingFov = FMath::Clamp(Value, 80.f, 110.f);
+	ApplyFieldOfView(WorkingFov);   // live while dragging, same as sens/brightness (P2-U6)
 	RefreshLabels();
 }
 
@@ -1584,7 +1585,3 @@ void UPFOptionsWidget::ApplyFieldOfView(float Fov)
 	}
 }
 
-void UPFOptionsWidget::ApplyWindowAndResolution()
-{
-	// Handled inside PushToSettings via UGameUserSettings.
-}

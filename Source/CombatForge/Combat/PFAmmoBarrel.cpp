@@ -3,6 +3,7 @@
 #include "Combat/PFAmmoBarrel.h"
 
 #include "CombatForge.h"
+#include "Combat/PFHealthComponent.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgeTypes.h"
@@ -275,6 +276,15 @@ void APFAmmoBarrel::AuthorityInteract(APawn* Interactor)
 	if (!Char)
 	{
 		return;
+	}
+	// An eliminated pawn is still possessed until round cleanup, so it can still land an interact
+	// RPC during the death cam — it must not top up for the next round. (P2-CB9)
+	if (const UPFHealthComponent* Health = Char->GetHealth())
+	{
+		if (Health->bEliminated)
+		{
+			return;
+		}
 	}
 	UPFWeaponComponent* Weapon = Char->GetWeapon();
 	if (!Weapon || !Weapon->ServerRefillFromPickup())

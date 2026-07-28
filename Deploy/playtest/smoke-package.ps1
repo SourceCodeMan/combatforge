@@ -139,6 +139,28 @@ if (-not (Test-Path $BootLog)) {
 	if ($Alt) { $BootLog = $Alt }
 }
 
+# --- 3b) SECURITY SCRUB, after the boot ---
+# The boot smoke runs the packaged exe, which writes <package>\CombatForge\Saved back INTO the
+# archive - Config, Logs, and historically a crash dump and a logged-in session token. package-
+# playtest.ps1 scrubs BEFORE any smoke, so on this path the archive is dirty again by the time it
+# is zipped. Doing it here means the archive this script leaves behind is always distributable,
+# instead of relying on the operator remembering a manual re-scrub. (P2-D5)
+# The boot log can itself live inside the package, so it is copied out before the scrub runs.
+if ((Test-Path $BootLog) -and $BootLog.StartsWith($ArchiveDir, [StringComparison]::OrdinalIgnoreCase)) {
+	$Kept = Join-Path $ProjectRoot "Saved\Logs\smoke-package-boot-copied.log"
+	New-Item -ItemType Directory -Force -Path (Split-Path $Kept) | Out-Null
+	Copy-Item $BootLog $Kept -Force -ErrorAction SilentlyContinue
+	if (Test-Path $Kept) { $BootLog = $Kept }
+}
+Get-ChildItem $ArchiveDir -Recurse -Directory -Filter "Saved" -ErrorAction SilentlyContinue |
+	Where-Object { $_.Parent.Name -eq "CombatForge" } |
+	ForEach-Object {
+		Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+		Write-Host "==> Scrubbed $($_.FullName) (smoke boot wrote runtime data into the package)"
+	}
+Get-ChildItem $ArchiveDir -Recurse -Filter *.pdb -ErrorAction SilentlyContinue |
+	Remove-Item -Force -ErrorAction SilentlyContinue
+
 Write-Host "==> Scanning boot log: $BootLog"
 if (-not (Test-Path $BootLog)) {
 	# Still a useful landmine check if cook produced an exe that at least started then died.

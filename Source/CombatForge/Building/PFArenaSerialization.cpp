@@ -111,7 +111,10 @@ FString FPFArenaSerialization::ComputeHalfHash(const TArray<FPFBuildPieceRec>& P
 	AppendGridHeader(Buffer, GridCellsY);
 	for (const FPFBuildPieceRec& Rec : Sorted)
 	{
-		// Team excluded (T27): mirrored halves hash identically regardless of side.
+		// Team excluded (T27) so the SAME half hashes the same whichever side owns it. Note this does NOT
+		// make a team-B mirror equal its team-A original: X and Rot are still plot-absolute, so the two
+		// halves of a mirrored arena hash differently. Transform into plot-local space first if a future
+		// balance/lineage feature needs mirror equality. (P2-BD9)
 		Buffer.Add(static_cast<uint8>(Rec.Type));
 		AppendInt16LE(Buffer, Rec.X);
 		AppendInt16LE(Buffer, Rec.Y);
