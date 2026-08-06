@@ -381,35 +381,40 @@ namespace PFWeapon
 		};
 
 		// ---- Category 3: Shotgun (4) — ReloadTime 1.4 (sg_03: 2.2), pellets@spread ----
+		// Recoil re-tuned 2026-08-06 (smoke alpha.17): hip fire was a laser (SpreadHip 0.9° + climb
+		// only 1.2° vs sniper's 3–4° scoped punch). Every shell now kicks hard (~5–6° climb, slow
+		// recover) so you must reset between shots; wider hip cone + bloom free-shots=0 (no soft
+		// first shell). ADS still tames visual kick via ADSRecoilMult, but aim climb stays full.
 		const FPFWeaponDef GShotguns[] = {
 			MakeW(TEXT("Shotgun 01"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/01/SM_Modern_Weapons_Shotgun_01.SM_Modern_Weapons_Shotgun_01"),
 				nullptr, FVector(13.10f, -0.87f, -13.61f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(38.00f, 6.40f, 0.00f),
 				FVector(9.37f, 2.01f, 2.42f), FRotator(5.17f, -0.21f, 2.64f),
 				Mode_S, EPFFireMode::Single,
-				0.9f, 0.15f, 7000.f, 0.30f, 1, 6, 1.3f,
+				2.8f, 0.35f, 7000.f, 0.30f, 1, 6, 1.3f,
 				TEXT("sg_01"), 1, 8, 2.2f,
-				0.50f, 2.0f, 1, 8.f,
-				1.20f, 0.30f, 14.f,
+				1.5f, 4.0f, 0, 6.f,
+				5.5f, 1.1f, 9.f,
 				0.28f, 0.18f, 0.95f, 1.4f,
 				0.f, 0.f, 1.35f, 5),
 			MakeW(TEXT("Shotgun 02"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/02/SM_Modern_Weapons_Shotgun_02.SM_Modern_Weapons_Shotgun_02"),
 				nullptr, FVector(13.88f, -0.86f, -9.78f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(38.00f, 6.40f, 0.00f),
 				FVector(10.91f, 1.90f, -4.11f), FRotator(5.17f, -0.21f, 2.64f),
 				Mode_S, EPFFireMode::Single,
-				0.9f, 0.15f, 7500.f, 0.35f, 1, 5, 1.1f,
+				2.6f, 0.30f, 7500.f, 0.35f, 1, 5, 1.1f,
 				TEXT("sg_02"), 1, 6, 1.4f,
-				0.50f, 2.0f, 1, 8.f,
-				1.20f, 0.30f, 14.f,
+				1.4f, 3.8f, 0, 6.f,
+				5.2f, 1.0f, 9.f,
 				0.28f, 0.18f, 0.95f, 1.4f,
 				0.f, 0.f, 1.35f, 15),
 			MakeW(TEXT("Shotgun 03"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/03/SM_Modern_Weapons_Shotgun_03.SM_Modern_Weapons_Shotgun_03"),
 				nullptr, FVector(7.14f, -0.07f, -14.28f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(38.00f, 6.40f, 0.00f),
 				FVector(12.19f, 1.21f, 4.07f), FRotator(4.90f, -0.25f, 2.64f),
 				Mode_S, EPFFireMode::Single,
-				0.9f, 0.15f, 7000.f, 0.30f, 1, 2, 3.0f,
+				// Double-barrel cadence (3 bps) — harder climb so the second shell doesn't land free.
+				3.0f, 0.40f, 7000.f, 0.30f, 1, 2, 3.0f,
 				TEXT("sg_03"), 1, 8, 2.8f,
-				0.50f, 2.0f, 1, 8.f,
-				1.20f, 0.30f, 14.f,
+				1.6f, 4.2f, 0, 5.f,
+				6.0f, 1.3f, 8.f,
 				0.22f, 0.18f, 1.00f, 2.2f,
 				0.f, 0.f, 1.35f, 22),
 			MakeW(TEXT("Shotgun 04"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/04/SM_Modern_Weapons_Shotgun_04.SM_Modern_Weapons_Shotgun_04"),
@@ -421,11 +426,12 @@ namespace PFWeapon
 				// shotgun (the other three are Mode_S) and was the only weapon in the catalog below 2.
 				// 3 to match every other burst weapon (Tom's call). That is 18 pellets per pull at close
 				// range, which against the 10-hit-out model is lethal fast — intended, but the number to
-				// turn down first if the shotgun starts dominating CQB.
-				0.9f, 0.15f, 7200.f, 0.30f, 3, 10, 2.8f,
+				// turn down first if the shotgun starts dominating CQB. Climb is high so a burst string
+				// walks the aim hard off-target (not three laser shells).
+				2.8f, 0.35f, 7200.f, 0.30f, 3, 10, 2.8f,
 				TEXT("sg_04"), 1, 6, 2.6f,
-				0.50f, 2.0f, 1, 8.f,
-				1.00f, 0.25f, 14.f,
+				1.5f, 4.0f, 0, 6.f,
+				5.0f, 1.0f, 9.f,
 				0.28f, 0.18f, 0.90f, 1.4f,
 				0.f, 0.f, 1.35f, 37),
 		};

@@ -26,6 +26,9 @@ UPFCharacterMovementComponent::UPFCharacterMovementComponent()
 	GravityScale = 1.5f;
 	AirControl = 0.9f;
 	PerchRadiusThreshold = 15.f;
+	// Default 45uu; bump so the thin ramp plank crest → floor/plate lip doesn't catch the capsule
+	// (smoke alpha.17: "ran to the top of a ramp and it glitched me / couldn't run over").
+	MaxStepHeight = 55.f;
 
 	// Capsule depenetration ceilings (engine defaults 100/500). Even with GetPenetrationAdjustment
 	// zeroing pawn-vs-pawn Z, a large MaxDepenetration budget still lets geometry MTD fling a

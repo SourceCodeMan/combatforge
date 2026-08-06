@@ -29,7 +29,8 @@ namespace PFBuild
 	                                   // cadence on Single/Burst, so a modified client can no longer run a
 	                                   // Mode_S weapon at its internal ROF. Everything else in the batch is
 	                                   // client-side or server-only, but the RPC alone means 16↔17 must
-	                                   // never mix. NOT YET PACKAGED — this rides the next itch push.
+	                                   // never mix. PACKAGED + itch-pushed 2026-08-06 (windows-alpha
+	                                   // 0.1.0-alpha.17). Fleet must redeploy the same binary.
 	                                   // (16 = alpha.16, the 2026-07-24 batch: multi-server fleet (port-keyed
 	                                   // directory + START NEW MATCH), forced Creative→Remix→RemixSwap
 	                                   // cycle (GS CycleStage), phantom scrub (PS bHeadlessPhantom),
