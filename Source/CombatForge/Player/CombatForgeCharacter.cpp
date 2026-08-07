@@ -47,7 +47,10 @@
 #include "UObject/UObjectIterator.h"   // pf.ArmedAnims live-toggle sink
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NavigationInvokerComponent.h"
-#include "Net/UnrealNetwork.h"            // DOREPLIFETIME (KitRep)
+#include "Net/UnrealNetwork.h"
+#if WITH_EDITOR
+#include "Editor.h"   // GEditor — F8 eject/simulate detection in the FP body-visibility sync
+#endif            // DOREPLIFETIME (KitRep)
 #include "Perception/AISense_Hearing.h"   // running footsteps → AI can hear a sprinter 360°
 #include "InputActionValue.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -5381,10 +5384,8 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 	if (const APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		bTrueFirstPerson = (PC->GetViewTarget() == this);
-		// Same-pawn EXTERNAL cameras: PIE's F8 eject (and any future orbit cam) can leave the view
-		// target on the pawn while the actual camera flies away — the FP hide-set then dressed an
-		// externally-viewed body (headless/armless screenshots, 2026-08-07). If the rendering camera
-		// is nowhere near the FP eye, we are being looked AT, not THROUGH: show the full body.
+		// Same-pawn EXTERNAL cameras (any future orbit cam): if the game's own camera is far from
+		// the FP eye, we are being looked AT, not THROUGH — show the full body.
 		if (bTrueFirstPerson && PC->PlayerCameraManager != nullptr && FirstPersonCamera != nullptr
 			&& FVector::DistSquared(PC->PlayerCameraManager->GetCameraLocation(),
 				FirstPersonCamera->GetComponentLocation()) > FMath::Square(150.f))
@@ -5392,6 +5393,16 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 			bTrueFirstPerson = false;
 		}
 	}
+#if WITH_EDITOR
+	// F8 eject/simulate (Tom's 2026-08-07 floating-arms screenshots): the ejected EDITOR camera is
+	// invisible to the game — view target stays on the pawn and the camera manager never moves, so
+	// the distance guard above can't see it. The editor itself knows: F8 toggles simulate state.
+	// Editor builds only; packaged builds have no eject.
+	if (bTrueFirstPerson && GEditor != nullptr && GEditor->bIsSimulatingInEditor)
+	{
+		bTrueFirstPerson = false;
+	}
+#endif
 
 	const bool bWantFPGloves = bTrueFirstPerson
 		&& CVarFPArms.GetValueOnGameThread() != 0
