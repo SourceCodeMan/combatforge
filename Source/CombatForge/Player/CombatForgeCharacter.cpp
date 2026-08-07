@@ -3259,7 +3259,8 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 		const uint8 PrevHopper = WeaponComponent->HopperCount;
 		WeaponComponent->SpreadHip     = Def.SpreadHipDeg;
 		WeaponComponent->SpreadADS     = Def.SpreadADSDeg;
-		WeaponComponent->SpreadHipMoving = Def.SpreadHipDeg * Def.MoveSpreadMult;
+		WeaponComponent->SpreadHipMoving  = Def.SpreadHipDeg * Def.MoveSpreadMult;  // walk: mild
+		WeaponComponent->SpreadHipRunning = Def.SpreadHipDeg * Def.RunSpreadMult;   // run: heavy
 		WeaponComponent->MuzzleSpeedUU = Def.MuzzleSpeedUU;
 		WeaponComponent->ProjLifetime  = Def.ProjLifetimeSec;
 		WeaponComponent->BurstCount    = Def.ClassBurstCount;
@@ -3458,7 +3459,8 @@ void ACombatForgeCharacter::PushLocalKit()
 	// round the server keeps the CURRENT weapon ids, so previewing the new pick here put the owning
 	// client on a weapon the server never accepted (and if the server's KitRep didn't change, no
 	// OnRep ever corrected it). Cosmetics may still preview; weapon ids wait for the next spawn.
-	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated)
+	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated
+		&& (GetWorld() == nullptr || GetWorld()->GetTimeSeconds() >= KitPushGraceUntil))
 	{
 		const ACombatForgeGameState* GS = GetWorld()
 			? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
@@ -3604,7 +3606,8 @@ void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
 	// While this pawn is alive in a live round, keep the CURRENT weapon ids; cosmetics may change.
 	// The rejected weapon choice isn't lost: the client re-pushes its kit on the next spawn (and
 	// the death-screen class switch hits this path with bEliminated == true, which stays allowed).
-	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated)
+	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated
+		&& (GetWorld() == nullptr || GetWorld()->GetTimeSeconds() >= KitPushGraceUntil))
 	{
 		const ACombatForgeGameState* GS = GetWorld()
 			? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
@@ -5878,6 +5881,12 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated, bool bPlay
 		// Respawns REUSE this pawn (reset-in-place + teleport, no repossession), so PawnClientRestart never
 		// re-fires — without this push, a class switched on the death screen showed on the countdown UI but
 		// you respawned with the OLD kit. Revive runs on every machine; PushLocalKit no-ops on bots/remotes.
+		// Grace window FIRST (see KitPushGraceUntil): this exact push is the death-cam class switch
+		// landing, and the live-round kit freeze must let it through on both sides.
+		if (const UWorld* World = GetWorld())
+		{
+			KitPushGraceUntil = World->GetTimeSeconds() + 3.0;
+		}
 		PushLocalKit();
 	}
 }

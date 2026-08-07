@@ -49,7 +49,7 @@ public:
 	uint8 GetPlanterTeam() const { return PlanterTeam; }
 	ACombatForgePlayerState* GetPlanterPS() const { return PlanterPS.Get(); }
 
-	static constexpr float FuseSeconds       = 15.f;
+	static constexpr float FuseSeconds       = 12.f;   // 15 -> 12 per playtest 2026-08-07
 	static constexpr float DefuseHoldSeconds = 8.f;
 	static constexpr float DefuseRangeUU     = 260.f;   // hold-F reach (slightly over barrel interact range)
 	/** Radial BB count on detonation — same pipeline as the frag grenade (90), scaled up for a breach

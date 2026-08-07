@@ -362,6 +362,13 @@ private:
 	//      so the server can't read them — the owning client pushes its active class up (ServerSetKit) and the
 	//      server replicates it to everyone. Fixes LAN: clients used to spawn with the HOST's weapon stats and
 	//      default outfits on remote screens. Also powers the death-screen class switch.
+	/** Until this (world seconds), a kit push may change weapon ids even mid-live-round. Stamped on
+	 *  revive on EVERY machine (SetEliminatedAppearance(false) — respawns reuse the pawn): the death-cam
+	 *  class scroll only takes effect via the revive-time PushLocalKit, and both the local live-round
+	 *  freeze and ServerSetKit's P2-P2 gate would otherwise reject that legitimate push (the switch
+	 *  used to "work" only through the silent kit desync ClientCorrectKit now closes). Zero exploit
+	 *  value: a fresh spawn already has a full mag, which is all P2-P2 exists to protect. */
+	double KitPushGraceUntil = -1000.0;
 	UPROPERTY(ReplicatedUsing=OnRep_Kit) FPFKitRep KitRep;
 	UFUNCTION(Server, Reliable) void ServerSetKit(const FPFKitRep& NewKit);
 	UFUNCTION() void OnRep_Kit();

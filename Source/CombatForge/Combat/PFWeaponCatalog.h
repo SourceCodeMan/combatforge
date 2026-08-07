@@ -69,7 +69,8 @@ struct FPFWeaponDef
 	float  ReloadTime = 1.0f;
 	float  SpinupSec = 0.f;
 	float  ReburstDelaySec = 0.f;
-	float  MoveSpreadMult = 1.35f;  // multiplies hip for SpreadHipMoving in ApplyWeaponLoadout
+	float  MoveSpreadMult = 1.35f;  // multiplies hip → SpreadHipMoving (walk/strafe) in ApplyWeaponLoadout
+	float  RunSpreadMult  = 2.4f;   // multiplies hip → SpreadHipRunning (sprint-pace / post-sprint) — a lot worse
 	uint8  UnlockRank = 1;
 
 	// ---- Third-person RAISED (fire/ADS) pose correction — what OTHER players see while this pawn shoots ----

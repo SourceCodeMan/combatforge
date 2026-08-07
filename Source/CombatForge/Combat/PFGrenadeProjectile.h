@@ -88,7 +88,7 @@ protected:
 
 	// ---- Config ----
 	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float ThrowSpeed    = 1650.f;   // original toss speed (throw was right; only the spawn was wrong)
-	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float FuseSeconds   = 1.6f;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float FuseSeconds   = 3.6f;   // +2s per playtest 2026-08-07 (was 1.6)
 	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") int32 FragBBCount   = 90;       // 3x pellets
 	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float SmokeDuration = 8.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") float SmokeRadius   = 300.f;
