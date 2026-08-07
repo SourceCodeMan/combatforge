@@ -204,6 +204,12 @@ protected:
 	void UpdateFirstPersonArmsPose();
 
 	/**
+	 * Local human only. Default: body arms visible to owner in FP (no floating gun). Optional
+	 * pf.FPArms 1 = experimental viewmodel gloves. Bots never enter this path.
+	 */
+	void SyncLocalFirstPersonArmLayers();
+
+	/**
 	 * The two points on the CURRENT viewmodel gun the hands belong on, in ViewModelRoot space:
 	 * trigger grip (rear/low) and handguard (forward) — both off the same bounds recipe the
 	 * third-person grip uses, so FP and TP read identical per-weapon geometry.
@@ -638,6 +644,9 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float SprintKickTime = 0.15f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float SlideFOVKick = 9.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float CameraEyeOffsetFromCapsuleTop = 10.f;
+	/** Capsule-local +X: push the eye past the skull so FP is not "sitting in the back of the head"
+	 *  once the body is visible to the owner (body-arms-in-FP mode). */
+	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float CameraEyeForwardUU = 22.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float CrouchCameraInterpSpeed = 150.f; // 30 uu over 0.2 s
 	UPROPERTY(EditDefaultsOnly, Category="PF|Camera") float LandingDipMinFallUU = 300.f;
 	/** Fall distance (uu) that is lethal → instant respawn. 3 build levels = 3 × 300. */
