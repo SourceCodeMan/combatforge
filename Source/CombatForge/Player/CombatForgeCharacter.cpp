@@ -3024,14 +3024,17 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 		}
 	}
 
-	// Drop bare LEG skin whenever a Pants garment is worn (privates / thighs printing through jeans).
+	// Drop bare LEG skin under full pants (privates / thighs printing through jeans). Running shorts
+	// (procedural RunningShorts_*) keep calves visible under the hem — only the garment covers the upper leg.
 	// Pants = GSlots index 6. If modular legs failed to load we still hide nothing extra on the leader
 	// (leader is already fully hidden when modular skin is ready).
-	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
-		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
+	const int32 PantsSel = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
+		? ActiveCharConfig.Slots[PFChar::kSlotPants] : -1;
+	const bool bPantsWorn = PantsSel >= 0;
+	const bool bShortsLeaveLegs = bPantsWorn && PFChar::PantsLeaveLegsVisible(PantsSel);
 	if (CharBaseComps.IsValidIndex(PFChar::kBaseLegs) && CharBaseComps[PFChar::kBaseLegs] != nullptr)
 	{
-		const bool bShowLegs = bModularSkinReady && !bPantsWorn
+		const bool bShowLegs = bModularSkinReady && (!bPantsWorn || bShortsLeaveLegs)
 			&& CharBaseComps[PFChar::kBaseLegs]->GetSkeletalMeshAsset() != nullptr;
 		CharBaseComps[PFChar::kBaseLegs]->SetVisibility(bShowLegs);
 		CharBaseComps[PFChar::kBaseLegs]->SetHiddenInGame(!bShowLegs);
@@ -5468,8 +5471,10 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 	}
 	else
 	{
-	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
-		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
+	const int32 PantsSelFP = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
+		? ActiveCharConfig.Slots[PFChar::kSlotPants] : -1;
+	const bool bPantsWorn = PantsSelFP >= 0;
+	const bool bShortsLeaveLegs = bPantsWorn && PFChar::PantsLeaveLegsVisible(PantsSelFP);
 	const bool bArmsGarmentWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotArms)
 		&& ActiveCharConfig.Slots[PFChar::kSlotArms] >= 0;
 	const TArray<FSoftObjectPath>& BaseP = PFChar::BaseParts();
@@ -5495,7 +5500,8 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 			if (Leader != nullptr) { C->SetLeaderPoseComponent(Leader); }
 		}
 		if (C->GetSkeletalMeshAsset() == nullptr) { continue; }
-		if (i == PFChar::kBaseLegs && bPantsWorn)
+		// Full pants hide leg skin; running shorts leave calves visible under the hem.
+		if (i == PFChar::kBaseLegs && bPantsWorn && !bShortsLeaveLegs)
 		{
 			KillDraw(C);
 			continue;

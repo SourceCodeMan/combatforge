@@ -62,6 +62,12 @@ namespace PFChar
 	/** Readable name for a slot's part index ("None" for -1 / empty). */
 	FString PartDisplayName(int32 Slot, int32 Index);
 
+	/**
+	 * True when the selected Pants part is athletic/running shorts (procedural RunningShorts_*).
+	 * Full pants hide bare leg skin; shorts leave calves/feet visible under the hem.
+	 */
+	bool PantsLeaveLegsVisible(int32 PantsPartIndex);
+
 	// ---- Persistence (GGameUserSettings.ini [CombatForge]) ----
 	/** Save/load the ACTIVE save slot (convenience — routes to GetActiveSaveSlot()). */
 	void SaveConfig(const FPFCharacterConfig& Config);
