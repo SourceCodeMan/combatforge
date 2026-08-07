@@ -352,6 +352,10 @@ private:
 	UPROPERTY() TObjectPtr<UMaterialInstanceDynamic> ArmbandMIDR;
 	FPFCharacterConfig ActiveCharConfig;                                   // current per-slot selection
 	bool bBanditAssembled = false;
+	/** True while owner-only first-person overlays are applied (hidden head/arms, viewmodel gloves).
+	 *  If the pawn loses its local controller (F8 eject), the per-tick sync stops and the FP hides
+	 *  would freeze on the body — Tick restores the external look once when it sees this stranded. */
+	bool bLocalFPOverlaysActive = false;
 	FPFWeaponConfig ActiveWeaponConfig;                                    // current weapon selection
 
 	// ---- Replicated kit (clothing + weapon). The class configs live in each player's LOCAL GameUserSettings,

@@ -1123,6 +1123,25 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 		// ApplyCharacterConfig-style re-shows (same pattern as TP-weapon hide for the owning client).
 		SyncLocalFirstPersonArmLayers();
 	}
+	else if (bLocalFPOverlaysActive)
+	{
+		// This pawn ran the FP sync as a local pawn and then lost its local controller (F8 eject is
+		// the practical case) — the sync above no longer runs, so its last true-FP hides are frozen
+		// on the body: headless, armless from outside (Tom's 2026-08-07 screenshot). Re-dress once:
+		// ApplyCharacterConfig re-mounts every base/slot part under the normal garment rules, and
+		// the FP gloves come off. The viewmodel chain is already hidden by the per-tick arbiter.
+		bLocalFPOverlaysActive = false;
+		if (FirstPersonArms != nullptr)
+		{
+			FirstPersonArms->SetSkeletalMeshAsset(nullptr);
+			FirstPersonArms->SetVisibility(false);
+			FirstPersonArms->SetHiddenInGame(true);
+		}
+		if (bBanditAssembled)
+		{
+			ApplyCharacterConfig();
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -5429,8 +5448,9 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 		USkeletalMesh* WantMesh = BaseP.IsValidIndex(i) ? Cast<USkeletalMesh>(BaseP[i].TryLoad()) : nullptr;
 		if (i == PFChar::kBaseArms && bWantFPGloves)
 		{
-			C->SetLeaderPoseComponent(nullptr);
-			C->SetSkeletalMeshAsset(nullptr);
+			// HIDE ONLY — never null the mesh (Tom's 2026-08-07 screenshot: detached/missing arms in
+			// any external self-view). This branch used to strip the asset, and nothing re-mounted it
+			// when the view flipped external (death cam, F8 eject), leaving an armless body.
 			KillDraw(C);
 			continue;
 		}
@@ -5494,8 +5514,8 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 		if (bWantFPGloves && (N.Contains(TEXT("Arms"), ESearchCase::IgnoreCase)
 			|| N.Contains(TEXT("Glove"), ESearchCase::IgnoreCase)))
 		{
-			C->SetLeaderPoseComponent(nullptr);
-			C->SetSkeletalMeshAsset(nullptr);
+			// HIDE ONLY — nulling the asset here was one-way: this loop skips null-mesh comps, so
+			// the arms garment never came back on a view flip (armless external self-view).
 			KillDraw(C);
 			continue;
 		}
@@ -5524,6 +5544,12 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 		if (WeaponMeshComp != nullptr) { WeaponMeshComp->SetVisibility(true); }
 		if (BackWeaponMeshComp != nullptr) { BackWeaponMeshComp->SetVisibility(true); }
 	}
+
+	// Remember that first-person overlays (hidden head/arms, mounted gloves) are applied. If this
+	// pawn later loses its local controller (F8 eject), this function stops running and the last
+	// state would FREEZE — a headless, armless body from outside (Tom's 2026-08-07 screenshot).
+	// Tick spots the stranded flag and restores the full external look once.
+	bLocalFPOverlaysActive = bTrueFirstPerson;
 }
 
 void ACombatForgeCharacter::UpdateFirstPersonArmsPose()
