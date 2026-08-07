@@ -5378,6 +5378,16 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 	if (const APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		bTrueFirstPerson = (PC->GetViewTarget() == this);
+		// Same-pawn EXTERNAL cameras: PIE's F8 eject (and any future orbit cam) can leave the view
+		// target on the pawn while the actual camera flies away — the FP hide-set then dressed an
+		// externally-viewed body (headless/armless screenshots, 2026-08-07). If the rendering camera
+		// is nowhere near the FP eye, we are being looked AT, not THROUGH: show the full body.
+		if (bTrueFirstPerson && PC->PlayerCameraManager != nullptr && FirstPersonCamera != nullptr
+			&& FVector::DistSquared(PC->PlayerCameraManager->GetCameraLocation(),
+				FirstPersonCamera->GetComponentLocation()) > FMath::Square(150.f))
+		{
+			bTrueFirstPerson = false;
+		}
 	}
 
 	const bool bWantFPGloves = bTrueFirstPerson
@@ -5436,6 +5446,28 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 	KillDraw(BodyMesh);
 	KillDraw(HeadMesh);
 
+	// TRUE FP with viewmodel gloves = the alpha-15 read: the OWNER sees ONLY the gloves + gun.
+	// The alpha.18 "body visible to owner in FP" experiment layered the animating TP body under the
+	// viewmodel — shirt sleeves swinging across the camera, the gun clipping into the torso, armless
+	// shoulders when looking down (Tom's 2026-08-07 packaged-build FP screenshot). Hide the whole
+	// body from the owner while the gloves are up. Visibility-only: the else path below restores
+	// everything for external views (death cam, freecam) and for the pf.FPArms 0 body-arms fallback.
+	if (bWantFPGloves)
+	{
+		for (USkeletalMeshComponent* C : CharBaseComps) { KillDraw(C); }
+		for (USkeletalMeshComponent* C : CharSlotComps) { KillDraw(C); }
+		KillDraw(ArmbandMesh);
+		KillDraw(ArmbandMeshR);
+		if (USkeletalMeshComponent* LeaderMesh = GetMesh())
+		{
+			LeaderMesh->SetVisibility(false, false);
+			LeaderMesh->SetHiddenInGame(true, false);
+			LeaderMesh->SetCastShadow(false);
+		}
+		// TP guns hidden by the bTrueFirstPerson block at the end (bWantFPGloves implies true FP).
+	}
+	else
+	{
 	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
 		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
 	const bool bArmsGarmentWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotArms)
@@ -5525,16 +5557,9 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 		ShowToOwner(C, true);
 	}
 
-	if (bWantFPGloves)
-	{
-		KillDraw(ArmbandMesh);
-		KillDraw(ArmbandMeshR);
-	}
-	else
-	{
-		if (ArmbandMesh != nullptr && ArmbandMesh->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMesh, false); }
-		if (ArmbandMeshR != nullptr && ArmbandMeshR->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMeshR, false); }
-	}
+	if (ArmbandMesh != nullptr && ArmbandMesh->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMesh, false); }
+	if (ArmbandMeshR != nullptr && ArmbandMeshR->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMeshR, false); }
+	}   // end !bWantFPGloves (external view / body-arms fallback)
 
 	// TP guns: hide only in true FP (freecam should show held weapon).
 	if (bTrueFirstPerson)
