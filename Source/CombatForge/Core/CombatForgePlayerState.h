@@ -90,6 +90,14 @@ public:
 	void ServerSetHasVoted(bool bVoted);
 	void ServerResetMatchCombatStats();                     // elims / tags / score / vote for new match
 
+	/**
+	 * Server-only: last successful ammo-barrel refill (world time seconds).
+	 * Per-player so barrel-hopping cannot bypass the 10 s cooldown; not replicated.
+	 * Initialized far in the past so the first press of a match is always free.
+	 */
+	double LastBarrelRefillTime = -1000.0;
+	static constexpr float BarrelRefillCooldownSec = 10.f;
+
 	/** True for the phantom LOCAL player a headless pilot box (game exe + ?listen + -nullrhi)
 	 *  carries: it holds a controller but no human sits behind it. Excluded from match-leader
 	 *  assignment, human counts, and heartbeat player counts (multiplayer-plan Phase 0). Always

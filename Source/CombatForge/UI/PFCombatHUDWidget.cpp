@@ -135,7 +135,7 @@ void UPFCombatHUDWidget::BuildTree()
 	}
 
 	GrenadeText = WidgetTree->ConstructWidget<UTextBlock>();
-	GrenadeText->SetText(FText::FromString(TEXT("FRAG 2   SMOKE 2")));
+	GrenadeText->SetText(FText::FromString(TEXT("FRAG 6   SMOKE 6")));
 	GrenadeText->SetFont(PFCombatFont(15, true));
 	GrenadeText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.82f, 0.35f)));
 	GrenadeText->SetJustification(ETextJustify::Right);
@@ -161,6 +161,22 @@ void UPFCombatHUDWidget::BuildTree()
 		CSlot->SetPosition(FVector2D(0.f, 48.f));   // just below the crosshair
 		CSlot->SetAutoSize(true);
 		CSlot->SetZOrder(25);
+	}
+
+	// Ammo-barrel cooldown toast (lower-right, above hopper stack) — private, ~2 s fade.
+	BarrelCooldownText = WidgetTree->ConstructWidget<UTextBlock>();
+	BarrelCooldownText->SetText(FText::GetEmpty());
+	BarrelCooldownText->SetFont(PFCombatFont(16, true));
+	BarrelCooldownText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.4f, 0.95f)));
+	BarrelCooldownText->SetJustification(ETextJustify::Right);
+	BarrelCooldownText->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(BarrelCooldownText))
+	{
+		CSlot->SetAnchors(FAnchors(1.f, 1.f));
+		CSlot->SetAlignment(FVector2D(1.f, 1.f));
+		CSlot->SetPosition(FVector2D(-32.f, -150.f));
+		CSlot->SetAutoSize(true);
+		CSlot->SetZOrder(20);
 	}
 
 	// Bomb charge from mid-field pickup (hidden until claimed).
@@ -819,6 +835,25 @@ void UPFCombatHUDWidget::UpdateInteractPrompt()
 	InteractPromptText->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
+void UPFCombatHUDWidget::UpdateBarrelCooldownNotice()
+{
+	if (!BarrelCooldownText)
+	{
+		return;
+	}
+	const ACombatForgeCharacter* Char = BoundPawn.Get();
+	const FString Notice = Char ? Char->GetBarrelCooldownNoticeText() : FString();
+	if (Notice.IsEmpty())
+	{
+		BarrelCooldownText->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	const float Alpha = Char ? Char->GetBarrelCooldownNoticeAlpha() : 0.f;
+	BarrelCooldownText->SetText(FText::FromString(Notice));
+	BarrelCooldownText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.4f, Alpha * 0.95f)));
+	BarrelCooldownText->SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
 void UPFCombatHUDWidget::HandleHitsChanged(uint8 HeadHits, uint8 ChestHits, uint8 LimbHits, uint8 TotalHits)
 {
 	const UPFHealthComponent* Health = BoundHealth.Get();
@@ -1389,6 +1424,7 @@ void UPFCombatHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 	UpdateDominationHUD();
 	UpdateBombCarryIndicator();
 	UpdateInteractPrompt();
+	UpdateBarrelCooldownNotice();
 
 	if (const ACombatForgeGameState* GS = BoundGameState.Get())
 	{

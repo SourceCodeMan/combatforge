@@ -256,10 +256,12 @@ void APFCharacterPreviewActor::ApplyConfig(const FPFCharacterConfig& Config)
 		BaseMesh->SetVisibility(!bModularSkinReady, /*bPropagateToChildren=*/false);
 		BaseMesh->SetHiddenInGame(bModularSkinReady, /*bPropagateToChildren=*/false);
 	}
-	const bool bPantsWorn = Config.Slots.IsValidIndex(PFChar::kSlotPants) && Config.Slots[PFChar::kSlotPants] >= 0;
+	const int32 PantsSel = Config.Slots.IsValidIndex(PFChar::kSlotPants) ? Config.Slots[PFChar::kSlotPants] : -1;
+	const bool bPantsWorn = PantsSel >= 0;
+	const bool bShortsLeaveLegs = bPantsWorn && PFChar::PantsLeaveLegsVisible(PantsSel);
 	if (BaseComps.IsValidIndex(PFChar::kBaseLegs) && BaseComps[PFChar::kBaseLegs] != nullptr)
 	{
-		const bool bShowLegs = bModularSkinReady && !bPantsWorn
+		const bool bShowLegs = bModularSkinReady && (!bPantsWorn || bShortsLeaveLegs)
 			&& BaseComps[PFChar::kBaseLegs]->GetSkeletalMeshAsset() != nullptr;
 		BaseComps[PFChar::kBaseLegs]->SetVisibility(bShowLegs);
 		BaseComps[PFChar::kBaseLegs]->SetHiddenInGame(!bShowLegs);

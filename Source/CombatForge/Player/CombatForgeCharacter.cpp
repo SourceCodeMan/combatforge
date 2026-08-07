@@ -47,7 +47,10 @@
 #include "UObject/UObjectIterator.h"   // pf.ArmedAnims live-toggle sink
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NavigationInvokerComponent.h"
-#include "Net/UnrealNetwork.h"            // DOREPLIFETIME (KitRep)
+#include "Net/UnrealNetwork.h"
+#if WITH_EDITOR
+#include "Editor.h"   // GEditor — F8 eject/simulate detection in the FP body-visibility sync
+#endif            // DOREPLIFETIME (KitRep)
 #include "Perception/AISense_Hearing.h"   // running footsteps → AI can hear a sprinter 360°
 #include "InputActionValue.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -83,12 +86,16 @@ static TAutoConsoleVariable<int32> CVarFPArmsVerify(
 	TEXT("pf.FPArmsVerify"), 0,
 	TEXT("1 = automated FP-arms verification: equip lmg_01, log seating numbers, screenshot, quit."));
 
-// 0 (DEFAULT): no viewmodel gloves — first person uses the same body arms as bots/third person.
-//    Local player must see body arms (OwnerNoSee off for body) or the gun floats alone.
-// 1 (EXPERIMENTAL): viewmodel gloves; strips body arm mesh. Can leave shoulder/sleeve gaps — not default.
+// 1 (DEFAULT, re-flipped after the 2026-08-06 playtest): viewmodel gloves seated on the gun by the
+//    two-point grip solve; strips the body arm mesh for the owner. This is the alpha-15 system —
+//    the ONLY path with a solver that actually attaches hands to the viewmodel weapon.
+// 0 (FALLBACK): body arms in FP (the alpha.18 experiment). Body arms live under Mesh (capsule
+//    space) while the gun lives under ViewModelRoot (camera space) — nothing reconciles the two,
+//    so hands can NEVER align with the weapon in this mode by construction. The playtest verdict
+//    on it was misaligned hands + duplicated arm pairs; keep only as a debug fallback.
 static TAutoConsoleVariable<int32> CVarFPArms(
-	TEXT("pf.FPArms"), 0,
-	TEXT("0 = body arms in FP (default, bot-style). 1 = experimental viewmodel gloves."));
+	TEXT("pf.FPArms"), 1,
+	TEXT("1 = viewmodel gloves seated on the gun (default). 0 = body arms in FP (fallback, cannot align)."));
 
 // FPSCAN diagnostics (P2-P4): the per-mesh dump + world-wide TObjectIterator sweep inside
 // EnforceSingleFirstPersonWeapon were always-on Warning spam + a hitch risk on every equip /
@@ -1118,6 +1125,25 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 		// LAST write of the tick: kill the four-arm stack. Must run after UpdateBuildPhaseWeaponVisibility /
 		// ApplyCharacterConfig-style re-shows (same pattern as TP-weapon hide for the owning client).
 		SyncLocalFirstPersonArmLayers();
+	}
+	else if (bLocalFPOverlaysActive)
+	{
+		// This pawn ran the FP sync as a local pawn and then lost its local controller (F8 eject is
+		// the practical case) — the sync above no longer runs, so its last true-FP hides are frozen
+		// on the body: headless, armless from outside (Tom's 2026-08-07 screenshot). Re-dress once:
+		// ApplyCharacterConfig re-mounts every base/slot part under the normal garment rules, and
+		// the FP gloves come off. The viewmodel chain is already hidden by the per-tick arbiter.
+		bLocalFPOverlaysActive = false;
+		if (FirstPersonArms != nullptr)
+		{
+			FirstPersonArms->SetSkeletalMeshAsset(nullptr);
+			FirstPersonArms->SetVisibility(false);
+			FirstPersonArms->SetHiddenInGame(true);
+		}
+		if (bBanditAssembled)
+		{
+			ApplyCharacterConfig();
+		}
 	}
 }
 
@@ -2442,6 +2468,25 @@ void ACombatForgeCharacter::RefreshCrouchToggleMode()
 	}
 }
 
+void ACombatForgeCharacter::ResetStanceForPhase()
+{
+	// Owning client only — these are local input intents that flow to the server through the
+	// movement stream (ADS via FLAG_Custom_1, crouch via bWantsToCrouch in the saved moves).
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	if (bADSHeld)
+	{
+		SetADS(false);   // clears a latched ADS toggle; harmless for hold mode (key isn't mapped now anyway)
+	}
+	if (PFMovement != nullptr && PFMovement->bWantsToCrouch)
+	{
+		PFMovement->OnCrouchSlideReleased();   // clears a latched crouch toggle
+	}
+	UpdateMovementIntents();
+}
+
 bool ACombatForgeCharacter::IsADS() const
 {
 	if (PFMovement == nullptr)
@@ -2812,6 +2857,7 @@ void ACombatForgeCharacter::AssembleBanditCharacter()
 	Base->SetAnimInstanceClass(nullptr);
 	Base->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	CachedWeaponAttachBone = NAME_None;
+	BackWeaponAttachBone = NAME_None;   // same skeleton-change invalidation — this one was never cleared
 	SeqLocoState = 0;
 	bSequenceLocoActive = true;
 	bUsingArtBody = true;
@@ -2981,18 +3027,38 @@ void ACombatForgeCharacter::ApplyCharacterConfig()
 		}
 	}
 
-	// Drop bare LEG skin whenever a Pants garment is worn (privates / thighs printing through jeans).
+	// Drop bare LEG skin under full pants (privates / thighs printing through jeans). Running shorts
+	// (procedural RunningShorts_*) keep calves visible under the hem — only the garment covers the upper leg.
 	// Pants = GSlots index 6. If modular legs failed to load we still hide nothing extra on the leader
 	// (leader is already fully hidden when modular skin is ready).
-	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
-		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
+	const int32 PantsSel = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
+		? ActiveCharConfig.Slots[PFChar::kSlotPants] : -1;
+	const bool bPantsWorn = PantsSel >= 0;
+	const bool bShortsLeaveLegs = bPantsWorn && PFChar::PantsLeaveLegsVisible(PantsSel);
 	if (CharBaseComps.IsValidIndex(PFChar::kBaseLegs) && CharBaseComps[PFChar::kBaseLegs] != nullptr)
 	{
-		const bool bShowLegs = bModularSkinReady && !bPantsWorn
+		const bool bShowLegs = bModularSkinReady && (!bPantsWorn || bShortsLeaveLegs)
 			&& CharBaseComps[PFChar::kBaseLegs]->GetSkeletalMeshAsset() != nullptr;
 		CharBaseComps[PFChar::kBaseLegs]->SetVisibility(bShowLegs);
 		CharBaseComps[PFChar::kBaseLegs]->SetHiddenInGame(!bShowLegs);
 		CharBaseComps[PFChar::kBaseLegs]->SetCastShadow(bShowLegs);
+	}
+
+	// Same rule for ARMS (playtest 2026-08-06 "four arms"): every part in the Arms slot
+	// (/Game/Bandits/Mesh/Arms) is a FULL arm mesh — the slot's index 0 is literally the SAME
+	// SKM_Arms asset as the base skin, and DefaultConfig() selects index 0 — so mounting an Arms
+	// garment over the bare arms drew two coincident, identically-posed arm pairs (z-fighting read
+	// as four arms; bots and never-saved classes always hit it). Bare arm skin renders only when
+	// NO arms garment is worn, exactly like legs-under-pants.
+	const bool bArmsGarmentWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotArms)
+		&& ActiveCharConfig.Slots[PFChar::kSlotArms] >= 0;
+	if (CharBaseComps.IsValidIndex(PFChar::kBaseArms) && CharBaseComps[PFChar::kBaseArms] != nullptr)
+	{
+		const bool bShowArms = bModularSkinReady && !bArmsGarmentWorn
+			&& CharBaseComps[PFChar::kBaseArms]->GetSkeletalMeshAsset() != nullptr;
+		CharBaseComps[PFChar::kBaseArms]->SetVisibility(bShowArms);
+		CharBaseComps[PFChar::kBaseArms]->SetHiddenInGame(!bShowArms);
+		CharBaseComps[PFChar::kBaseArms]->SetCastShadow(bShowArms);
 	}
 
 	// CORPSE RE-ASSERT: a class switch on the DEATH SCREEN replicates the new kit to every machine, and the
@@ -3163,6 +3229,9 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 
 	if (RifleFPMesh != nullptr)
 	{
+		// Re-assert on every equip path (bot floater 2026-08-06): the ctor sets this once, and any
+		// machine where owner-see culling misfires renders a bot's viewmodel gun at its face.
+		RifleFPMesh->SetOnlyOwnerSee(true);
 		RifleFPMesh->SetStaticMesh(WpnMesh);
 		const int32 Mats = RifleFPMesh->GetNumMaterials();
 		for (int32 i = 0; i < Mats; ++i)
@@ -3196,7 +3265,8 @@ void ACombatForgeCharacter::ApplyWeaponLoadout()
 		const uint8 PrevHopper = WeaponComponent->HopperCount;
 		WeaponComponent->SpreadHip     = Def.SpreadHipDeg;
 		WeaponComponent->SpreadADS     = Def.SpreadADSDeg;
-		WeaponComponent->SpreadHipMoving = Def.SpreadHipDeg * Def.MoveSpreadMult;
+		WeaponComponent->SpreadHipMoving  = Def.SpreadHipDeg * Def.MoveSpreadMult;  // walk: mild
+		WeaponComponent->SpreadHipRunning = Def.SpreadHipDeg * Def.RunSpreadMult;   // run: heavy
 		WeaponComponent->MuzzleSpeedUU = Def.MuzzleSpeedUU;
 		WeaponComponent->ProjLifetime  = Def.ProjLifetimeSec;
 		WeaponComponent->BurstCount    = Def.ClassBurstCount;
@@ -3391,6 +3461,24 @@ void ACombatForgeCharacter::PushLocalKit()
 	Kit.SecondaryCategory = (uint8)SecCfg.Category;
 	Kit.SecondaryIndex    = (uint8)SecCfg.Index;
 
+	// Mirror ServerSetKit's P2-P2 rule in the LOCAL preview: while this pawn is alive in a live
+	// round the server keeps the CURRENT weapon ids, so previewing the new pick here put the owning
+	// client on a weapon the server never accepted (and if the server's KitRep didn't change, no
+	// OnRep ever corrected it). Cosmetics may still preview; weapon ids wait for the next spawn.
+	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated
+		&& (GetWorld() == nullptr || GetWorld()->GetTimeSeconds() >= KitPushGraceUntil))
+	{
+		const ACombatForgeGameState* GS = GetWorld()
+			? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
+		if (GS && GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live)
+		{
+			Kit.WeaponCategory    = KitRep.WeaponCategory;
+			Kit.WeaponIndex       = KitRep.WeaponIndex;
+			Kit.SecondaryCategory = KitRep.SecondaryCategory;
+			Kit.SecondaryIndex    = KitRep.SecondaryIndex;
+		}
+	}
+
 	KitRep = Kit;   // listen host: this IS the replicated copy; pure client: local preview until the RPC lands
 	ApplyKit();
 
@@ -3524,7 +3612,8 @@ void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
 	// While this pawn is alive in a live round, keep the CURRENT weapon ids; cosmetics may change.
 	// The rejected weapon choice isn't lost: the client re-pushes its kit on the next spawn (and
 	// the death-screen class switch hits this path with bEliminated == true, which stays allowed).
-	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated)
+	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated
+		&& (GetWorld() == nullptr || GetWorld()->GetTimeSeconds() >= KitPushGraceUntil))
 	{
 		const ACombatForgeGameState* GS = GetWorld()
 			? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
@@ -3537,8 +3626,79 @@ void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
 		}
 	}
 
+	// Did the gates above override any weapon id the client asked for? If so the owner is
+	// previewing a weapon the server refuses to run, and KitRep may be UNCHANGED server-side
+	// (rejected change back to the same ids) — meaning no OnRep will fire to fix the client.
+	const bool bWeaponAdjusted =
+		Kit.WeaponCategory    != NewKit.WeaponCategory    ||
+		Kit.WeaponIndex       != NewKit.WeaponIndex       ||
+		Kit.SecondaryCategory != NewKit.SecondaryCategory ||
+		Kit.SecondaryIndex    != NewKit.SecondaryIndex;
+
 	KitRep = Kit;
 	ApplyKit();   // server runs the owner's weapon stats; other clients re-dress via OnRep_Kit
+
+	if (bWeaponAdjusted)
+	{
+		UE_LOG(CombatForgeLog, Warning,
+			TEXT("ServerSetKit (%s): weapon claim adjusted (%u/%u,%u/%u -> %u/%u,%u/%u) — correcting owner"),
+			*GetNameSafe(this),
+			NewKit.WeaponCategory, NewKit.WeaponIndex, NewKit.SecondaryCategory, NewKit.SecondaryIndex,
+			Kit.WeaponCategory, Kit.WeaponIndex, Kit.SecondaryCategory, Kit.SecondaryIndex);
+		ClientCorrectKit(KitRep);
+	}
+}
+
+void ACombatForgeCharacter::ClientCorrectKit_Implementation(const FPFKitRep& ServerKit)
+{
+	if (HasAuthority())
+	{
+		return;   // listen host is already running the authoritative kit
+	}
+	KitRep = ServerKit;
+	ApplyKit();
+}
+
+void ACombatForgeCharacter::ClientBarrelCooldown_Implementation(float RemainingSec)
+{
+	// Runs on owning client AND on the listen host (Client RPC to local owner executes in-place).
+	// Do NOT early-out on HasAuthority — the host needs the toast too.
+	if (const UWorld* World = GetWorld())
+	{
+		BarrelCooldownToastEndTime = World->GetTimeSeconds() + BarrelCooldownToastDuration;
+	}
+	BarrelCooldownToastSecs = FMath::Max(0.f, RemainingSec);
+}
+
+FString ACombatForgeCharacter::GetBarrelCooldownNoticeText() const
+{
+	if (BarrelCooldownToastSecs <= 0.f)
+	{
+		return FString();
+	}
+	const UWorld* World = GetWorld();
+	if (!World || World->GetTimeSeconds() >= BarrelCooldownToastEndTime)
+	{
+		return FString();
+	}
+	const int32 Secs = FMath::Max(1, FMath::CeilToInt(BarrelCooldownToastSecs));
+	return FString::Printf(TEXT("Resupply in %ds"), Secs);
+}
+
+float ACombatForgeCharacter::GetBarrelCooldownNoticeAlpha() const
+{
+	const UWorld* World = GetWorld();
+	if (!World || BarrelCooldownToastDuration <= 0.f)
+	{
+		return 0.f;
+	}
+	const double Now = World->GetTimeSeconds();
+	if (Now >= BarrelCooldownToastEndTime)
+	{
+		return 0.f;
+	}
+	const float Left = static_cast<float>(BarrelCooldownToastEndTime - Now);
+	return FMath::Clamp(Left / BarrelCooldownToastDuration, 0.f, 1.f);
 }
 
 void ACombatForgeCharacter::OnRep_Kit()
@@ -4166,6 +4326,7 @@ void ACombatForgeCharacter::ApplyTeamBody(uint8 Team)
 	SeqLocoState = 0;
 	bSequenceLocoActive = false;
 	CachedWeaponAttachBone = NAME_None;
+	BackWeaponAttachBone = NAME_None;   // same skeleton-change invalidation — this one was never cleared
 	if (AnimClass != nullptr)
 	{
 		GetMesh()->SetAnimationMode(EAnimationMode::AnimationBlueprint);
@@ -4879,10 +5040,18 @@ void ACombatForgeCharacter::UpdateBuildPhaseWeaponVisibility()
 	// FP viewmodel (owner): fully off during build so it doesn't block placement, AND off while
 	// eliminated — without the elim gate this per-tick re-show defeated the death hide and left the
 	// owner's own rifle floating at the death spot until respawn (Tom's "floating gun").
+	// ALSO gated on "real human's own pawn" (playtest 2026-08-06: bots with a second ar_m4 floating
+	// at the head): this per-tick propagate-show force-showed the whole camera→ViewModelRoot→
+	// RifleFPMesh chain on EVERY pawn, bots included. RifleFPMesh still holds its constructor
+	// default SM_Rifle (= ar_m4 — why the floater was always the first assault rifle, never the
+	// rolled gun), sits ~48uu in front of the face at eye height, and bOnlyOwnerSee is a per-view
+	// hint that is not guaranteed on every machine. A viewmodel only exists for the local human;
+	// keep the chain hidden on everything else instead of trusting the owner-see flag.
 	if (ViewModelRoot != nullptr)
 	{
 		const bool bElim = (GetHealth() != nullptr && GetHealth()->bEliminated);
-		ViewModelRoot->SetVisibility(!bHideForBuild && !bElim, /*bPropagateToChildren=*/true);
+		const bool bLocalHuman = IsLocallyControlled() && IsPlayerControlled();
+		ViewModelRoot->SetVisibility(bLocalHuman && !bHideForBuild && !bElim, /*bPropagateToChildren=*/true);
 	}
 	// THE TWO CROSSED RIFLES (Tom, 2026-07-20). bOwnerNoSee is set on both third-person guns and is NOT
 	// culling them: the FPSCAN dump shows WeaponMeshComp (SM_Rifle) at 58 uu from the eye with
@@ -5215,7 +5384,25 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 	if (const APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		bTrueFirstPerson = (PC->GetViewTarget() == this);
+		// Same-pawn EXTERNAL cameras (any future orbit cam): if the game's own camera is far from
+		// the FP eye, we are being looked AT, not THROUGH — show the full body.
+		if (bTrueFirstPerson && PC->PlayerCameraManager != nullptr && FirstPersonCamera != nullptr
+			&& FVector::DistSquared(PC->PlayerCameraManager->GetCameraLocation(),
+				FirstPersonCamera->GetComponentLocation()) > FMath::Square(150.f))
+		{
+			bTrueFirstPerson = false;
+		}
 	}
+#if WITH_EDITOR
+	// F8 eject/simulate (Tom's 2026-08-07 floating-arms screenshots): the ejected EDITOR camera is
+	// invisible to the game — view target stays on the pawn and the camera manager never moves, so
+	// the distance guard above can't see it. The editor itself knows: F8 toggles simulate state.
+	// Editor builds only; packaged builds have no eject.
+	if (bTrueFirstPerson && GEditor != nullptr && GEditor->bIsSimulatingInEditor)
+	{
+		bTrueFirstPerson = false;
+	}
+#endif
 
 	const bool bWantFPGloves = bTrueFirstPerson
 		&& CVarFPArms.GetValueOnGameThread() != 0
@@ -5273,8 +5460,34 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 	KillDraw(BodyMesh);
 	KillDraw(HeadMesh);
 
-	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
-		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
+	// TRUE FP with viewmodel gloves = the alpha-15 read: the OWNER sees ONLY the gloves + gun.
+	// The alpha.18 "body visible to owner in FP" experiment layered the animating TP body under the
+	// viewmodel — shirt sleeves swinging across the camera, the gun clipping into the torso, armless
+	// shoulders when looking down (Tom's 2026-08-07 packaged-build FP screenshot). Hide the whole
+	// body from the owner while the gloves are up. Visibility-only: the else path below restores
+	// everything for external views (death cam, freecam) and for the pf.FPArms 0 body-arms fallback.
+	if (bWantFPGloves)
+	{
+		for (USkeletalMeshComponent* C : CharBaseComps) { KillDraw(C); }
+		for (USkeletalMeshComponent* C : CharSlotComps) { KillDraw(C); }
+		KillDraw(ArmbandMesh);
+		KillDraw(ArmbandMeshR);
+		if (USkeletalMeshComponent* LeaderMesh = GetMesh())
+		{
+			LeaderMesh->SetVisibility(false, false);
+			LeaderMesh->SetHiddenInGame(true, false);
+			LeaderMesh->SetCastShadow(false);
+		}
+		// TP guns hidden by the bTrueFirstPerson block at the end (bWantFPGloves implies true FP).
+	}
+	else
+	{
+	const int32 PantsSelFP = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
+		? ActiveCharConfig.Slots[PFChar::kSlotPants] : -1;
+	const bool bPantsWorn = PantsSelFP >= 0;
+	const bool bShortsLeaveLegs = bPantsWorn && PFChar::PantsLeaveLegsVisible(PantsSelFP);
+	const bool bArmsGarmentWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotArms)
+		&& ActiveCharConfig.Slots[PFChar::kSlotArms] >= 0;
 	const TArray<FSoftObjectPath>& BaseP = PFChar::BaseParts();
 	USkeletalMeshComponent* Leader = GetMesh();
 
@@ -5286,8 +5499,9 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 		USkeletalMesh* WantMesh = BaseP.IsValidIndex(i) ? Cast<USkeletalMesh>(BaseP[i].TryLoad()) : nullptr;
 		if (i == PFChar::kBaseArms && bWantFPGloves)
 		{
-			C->SetLeaderPoseComponent(nullptr);
-			C->SetSkeletalMeshAsset(nullptr);
+			// HIDE ONLY — never null the mesh (Tom's 2026-08-07 screenshot: detached/missing arms in
+			// any external self-view). This branch used to strip the asset, and nothing re-mounted it
+			// when the view flipped external (death cam, F8 eject), leaving an armless body.
 			KillDraw(C);
 			continue;
 		}
@@ -5297,13 +5511,29 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 			if (Leader != nullptr) { C->SetLeaderPoseComponent(Leader); }
 		}
 		if (C->GetSkeletalMeshAsset() == nullptr) { continue; }
-		if (i == PFChar::kBaseLegs && bPantsWorn)
+		// Full pants hide leg skin; running shorts leave calves visible under the hem.
+		if (i == PFChar::kBaseLegs && bPantsWorn && !bShortsLeaveLegs)
 		{
 			KillDraw(C);
 			continue;
 		}
-		// Head included: eye cam is forward of the face (CameraEyeForwardUU), so the skull
-		// sits behind the camera — no need to strip the head (that left F8 / self-view headless).
+		// Bare arm skin never draws under an Arms garment (four-arms fix, see ApplyCharacterConfig) —
+		// this per-tick ShowToOwner pass must not undo that hide.
+		if (i == PFChar::kBaseArms && bArmsGarmentWorn)
+		{
+			KillDraw(C);
+			continue;
+		}
+		// HEAD: hidden from the owner while in true first person (playtest 2026-08-06: the run/jog
+		// clips lean the skull forward past the 22uu camera offset — teeth and eyeball interiors at
+		// the near plane while sprinting). The camera does not follow head animation, so the fixed
+		// forward offset can never guarantee clearance in every clip; strip the skull instead. F8 /
+		// freecam / death cam set bTrueFirstPerson=false and still show the full head.
+		if (i == PFChar::kBaseHead && bTrueFirstPerson)
+		{
+			KillDraw(C);
+			continue;
+		}
 		ShowToOwner(C, true);
 	}
 
@@ -5321,31 +5551,32 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 		}
 	}
 
-	for (USkeletalMeshComponent* C : CharSlotComps)
+	for (int32 s = 0; s < CharSlotComps.Num(); ++s)
 	{
+		USkeletalMeshComponent* C = CharSlotComps[s];
 		if (C == nullptr || C->GetSkeletalMeshAsset() == nullptr) { continue; }
+		// Head-worn cosmetics (headwear/face/helmet) ride the skull — hide them from the owner in
+		// true FP along with the head itself, or a helmet brim swings through the camera while running.
+		if (bTrueFirstPerson && (s == PFChar::kSlotHeadwear || s == PFChar::kSlotFace || s == PFChar::kSlotHelmet))
+		{
+			KillDraw(C);
+			continue;
+		}
 		const FString N = C->GetSkeletalMeshAsset()->GetName();
 		if (bWantFPGloves && (N.Contains(TEXT("Arms"), ESearchCase::IgnoreCase)
 			|| N.Contains(TEXT("Glove"), ESearchCase::IgnoreCase)))
 		{
-			C->SetLeaderPoseComponent(nullptr);
-			C->SetSkeletalMeshAsset(nullptr);
+			// HIDE ONLY — nulling the asset here was one-way: this loop skips null-mesh comps, so
+			// the arms garment never came back on a view flip (armless external self-view).
 			KillDraw(C);
 			continue;
 		}
 		ShowToOwner(C, true);
 	}
 
-	if (bWantFPGloves)
-	{
-		KillDraw(ArmbandMesh);
-		KillDraw(ArmbandMeshR);
-	}
-	else
-	{
-		if (ArmbandMesh != nullptr && ArmbandMesh->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMesh, false); }
-		if (ArmbandMeshR != nullptr && ArmbandMeshR->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMeshR, false); }
-	}
+	if (ArmbandMesh != nullptr && ArmbandMesh->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMesh, false); }
+	if (ArmbandMeshR != nullptr && ArmbandMeshR->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMeshR, false); }
+	}   // end !bWantFPGloves (external view / body-arms fallback)
 
 	// TP guns: hide only in true FP (freecam should show held weapon).
 	if (bTrueFirstPerson)
@@ -5358,6 +5589,12 @@ void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
 		if (WeaponMeshComp != nullptr) { WeaponMeshComp->SetVisibility(true); }
 		if (BackWeaponMeshComp != nullptr) { BackWeaponMeshComp->SetVisibility(true); }
 	}
+
+	// Remember that first-person overlays (hidden head/arms, mounted gloves) are applied. If this
+	// pawn later loses its local controller (F8 eject), this function stops running and the last
+	// state would FREEZE — a headless, armless body from outside (Tom's 2026-08-07 screenshot).
+	// Tick spots the stranded flag and restores the full external look once.
+	bLocalFPOverlaysActive = bTrueFirstPerson;
 }
 
 void ACombatForgeCharacter::UpdateFirstPersonArmsPose()
@@ -5686,6 +5923,12 @@ void ACombatForgeCharacter::SetEliminatedAppearance(bool bEliminated, bool bPlay
 		// Respawns REUSE this pawn (reset-in-place + teleport, no repossession), so PawnClientRestart never
 		// re-fires — without this push, a class switched on the death screen showed on the countdown UI but
 		// you respawned with the OLD kit. Revive runs on every machine; PushLocalKit no-ops on bots/remotes.
+		// Grace window FIRST (see KitPushGraceUntil): this exact push is the death-cam class switch
+		// landing, and the live-round kit freeze must let it through on both sides.
+		if (const UWorld* World = GetWorld())
+		{
+			KitPushGraceUntil = World->GetTimeSeconds() + 3.0;
+		}
 		PushLocalKit();
 	}
 }

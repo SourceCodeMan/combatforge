@@ -31,6 +31,14 @@ public class CombatForge : ModuleRules
 			"HTTP",                          // combatforge-api client (accounts / server browser / reports)
 			"OpenSSL"                        // HMAC-SHA256 match-report signing (fleet mode only)
 		});
+		// Editor builds only: GEditor is consulted by the FP body-visibility sync to detect F8
+		// eject/simulate — the ejected editor camera moves without touching the game's own camera
+		// manager or view target, so the game has no other way to notice it is being LOOKED AT.
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("UnrealEd");
+		}
+
 		// No private-only deps. NOT needed: OnlineSubsystem (02 D12) — the backend is plain REST
 		// against api.playcombatforge.com (docs/multiplayer-plan.md), GameplayAbilities (overkill).
 		// ALSO not needed: MediaAssets + AudioMixer. Both were added for the Media Framework phase-BGM

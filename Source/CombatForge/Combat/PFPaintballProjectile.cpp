@@ -8,6 +8,7 @@
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFSplatSubsystem.h"
 #include "Combat/PFWeaponComponent.h"
+#include "Player/CombatForgeCharacter.h"
 #include "CollisionQueryParams.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -147,6 +148,36 @@ void APFPaintballProjectile::InitProjectile(const FVector& Origin, const FVector
 		// Real blocking sweep vs Pawn/World on the Paintball channel; server only.
 		CollisionComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 		SetLifeSpan(LifetimeSec);   // belt-and-braces destroy on a whiffed 2 s lob
+
+		// Point-blank rescue (playtest 2026-08-06: sub-3-feet shots did ~nothing). The ball spawns
+		// at the MUZZLE, 26-48uu in front of the camera — a target hugging the shooter sits between
+		// the eye and that spawn point, or the spawn point sits inside their body. A sweep that
+		// starts in penetration depenetrates without a blocking hit, so the ball sails away and the
+		// whole volley whiffs (worst on shotguns: 38uu muzzle x 6-8 pellets). Cover the eye→muzzle
+		// dead zone with one explicit sweep before flight; a live enemy pawn in it resolves as an
+		// immediate impact. Gun shots only (bIgnoreShooter=false marks bomb/frag utility balls,
+		// which have no viewmodel muzzle problem) — and a world hit in the gap (gun through a
+		// window frame) falls through to normal flight, same as before.
+		if (SourceWeapon != nullptr && bIgnoreShooter)
+		{
+			if (const ACombatForgeCharacter* ShooterPawn = Cast<ACombatForgeCharacter>(ShooterActorWeak.Get()))
+			{
+				const FVector Eye = ShooterPawn->GetEyeWorldLocation();
+				const FVector End = Origin + Dir * FMath::Max(3.f * RadiusUU, 12.f);
+				FCollisionQueryParams Q(SCENE_QUERY_STAT(PFPointBlankRescue), false, ShooterPawn);
+				Q.AddIgnoredActor(this);
+				FHitResult PB;
+				if (GetWorld()->SweepSingleByChannel(PB, Eye, End, FQuat::Identity, PF_ECC_Paintball,
+						FCollisionShape::MakeSphere(RadiusUU), Q)
+					&& Cast<APawn>(PB.GetActor()) != nullptr)
+				{
+					bInFlight = false;
+					ResolveAuthoritativeImpact(PB);
+					Destroy();
+					return;
+				}
+			}
+		}
 	}
 	else
 	{

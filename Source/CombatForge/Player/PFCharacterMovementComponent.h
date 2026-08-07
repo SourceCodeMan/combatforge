@@ -137,6 +137,12 @@ private:
 	FVector MantleStart = FVector::ZeroVector;
 	FVector MantleTarget = FVector::ZeroVector;
 	float MantleElapsed = 0.f;
+	/** One climb per press (playtest 2026-08-06 "wall elevator"): PhysMantle ends AIRBORNE by design,
+	 *  so a held mantle key whose climb failed to clear the lip re-detected the same ledge on the way
+	 *  back down and rode the wall up/down forever. Set in EnterMantle, cleared in the sim when the
+	 *  intent flag drops (key release, or Landed() clearing the intent). Carried in FSavedMove_PF like
+	 *  the rest of the mantle state so correction replays re-run each move with its original latch. */
+	uint8 bMantleUsedThisPress : 1;
 
 	// Slide simulation state. Advanced only inside the movement simulation
 	// (PhysSlide / OnMovementUpdated) so client and server stay in step, and — like the mantle
@@ -164,6 +170,7 @@ public:
 	FVector SavedMantleStart = FVector::ZeroVector;
 	FVector SavedMantleTarget = FVector::ZeroVector;
 	float SavedMantleElapsed = 0.f;
+	uint8 bSavedMantleUsedThisPress : 1;
 
 	// Slide sim state snapshot, same contract as the mantle fields above. (P2-P8)
 	float SavedSlideElapsed = 0.f;

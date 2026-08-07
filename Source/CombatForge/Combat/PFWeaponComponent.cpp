@@ -1058,12 +1058,24 @@ float UPFWeaponComponent::GetSpreadHalfAngleDeg(float StampT) const
 	// replicated ADS compressed flag), not just on the locally-controlled instance.
 	const float ADSAlpha = FMath::Clamp(Char->GetADSAlpha(), 0.f, 1.f);
 
-	// Base: hip 1.5 / hip-moving (>50% walk) 2.0, lerped to tight ADS by the transition
-	// alpha (04 §2.3 — fire is allowed at any point of the ADS transition).
+	// Base hip cone by locomotion tier (playtest ask: walk a little worse, run a lot worse).
+	// Velocity-based so post-sprint-out shots (sprint is cancelled before fire) still pay the run
+	// tax while carrying sprint speed. ADS lerps toward SpreadADS (04 §2.3 — fire mid-transition OK).
+	// Thresholds are fractions of WalkSpeed/SprintSpeed so weapon weight / crouch still tier correctly.
 	float HipBase = SpreadHip;
-	if (CMC != nullptr && Char->GetVelocity().Size2D() > CMC->WalkSpeed * 0.5f)
+	if (CMC != nullptr)
 	{
-		HipBase = SpreadHipMoving;
+		const float Speed2D = Char->GetVelocity().Size2D();
+		const float IdleMax = CMC->WalkSpeed * 0.2f;                         // ~120 uu/s
+		const float RunMin  = (CMC->WalkSpeed + CMC->SprintSpeed) * 0.5f;    // ~715 uu/s
+		if (CMC->IsSprintingEffective() || Speed2D >= RunMin)
+		{
+			HipBase = SpreadHipRunning;
+		}
+		else if (Speed2D >= IdleMax)
+		{
+			HipBase = SpreadHipMoving;
+		}
 	}
 	float Spread = FMath::Lerp(HipBase, SpreadADS, ADSAlpha);
 

@@ -13,8 +13,9 @@ class UTextRenderComponent;
 
 /**
  * Interactable ammo refill (Combat only). Soft-loads a warehouse barrel mesh when present.
- * Server grants full mag + full reserve. Permanent station for the whole combat phase — refill as often as
- * you like. A floating "AMMO" sign is always visible so it reads as a resupply point from across the arena.
+ * Server grants full mag + full reserve + grenades. Permanent station for the combat phase;
+ * per-player 10 s cooldown (on PlayerState) stops grenade-spam at the barrel — not a global
+ * barrel lock. A floating "AMMO" sign is always visible so it reads as a resupply point.
  */
 UCLASS()
 class COMBATFORGE_API APFAmmoBarrel : public AActor
