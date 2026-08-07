@@ -1155,8 +1155,13 @@ void APFBuildGrid::SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec)
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Params.Owner = this;
+	// Spawn AT the grid transform: the actor's root is STATIC now (Static frame parts refuse to
+	// attach under a Movable root — the 2026-08-07 "can't place windows" regression), so the old
+	// spawn-at-origin + InitFromRecord SetActorLocation dance is no longer possible. Clients place
+	// the replicated actor from the spawn bunch; part geometry is world-space either way.
+	const FVector GridLoc(Rec.X * PFGrid::SubUU, Rec.Y * PFGrid::SubUU, Rec.Z * PFGrid::SubUU);
 	APFBuildPieceActor* Actor = GetWorld()->SpawnActor<APFBuildPieceActor>(
-		APFBuildPieceActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
+		APFBuildPieceActor::StaticClass(), GridLoc, FRotator::ZeroRotator, Params);
 	if (!Actor)
 	{
 		UE_LOG(CombatForgeLog, Warning, TEXT("BuildGrid: failed to spawn special piece %u type %d"),

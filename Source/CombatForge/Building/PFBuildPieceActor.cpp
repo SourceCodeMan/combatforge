@@ -50,6 +50,12 @@ APFBuildPieceActor::APFBuildPieceActor()
 	SetReplicatingMovement(false);
 
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	// STATIC root (regression fix, Tom's 2026-08-07 solo test): the frame parts are Static (see
+	// AddCubePart) and UE REFUSES to attach a Static child to a Movable parent — every window's
+	// WinSill/WinPost attach aborted and windows placed as nothing. This actor never moves after
+	// spawn; the spawner passes the final grid transform (SpawnSpecialPieceActor), clients get it
+	// from the spawn bunch, and part geometry is authored in WORLD space regardless.
+	Root->SetMobility(EComponentMobility::Static);
 	SetRootComponent(Root);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -94,11 +100,9 @@ void APFBuildPieceActor::InitFromRecord(const FPFBuildPieceRec& Rec)
 	DoorOpenRemaining = 0.f;
 	TrapOpenRemaining = 0.f;
 
-	const float Wx = GridX * Sub;
-	const float Wy = GridY * Sub;
-	const float Wz = GridZ * Sub;
-	SetActorLocation(FVector(Wx, Wy, Wz));
-
+	// No SetActorLocation here: the root is STATIC (ctor) and refuses post-spawn moves. The
+	// server spawns this actor at its grid transform (SpawnSpecialPieceActor) and clients place
+	// it from the spawn bunch; all part geometry below is computed in world space from GridX/Y/Z.
 	RebuildGeometry();
 	ApplyOpenState();
 	ForceNetUpdate();
@@ -144,10 +148,7 @@ void APFBuildPieceActor::EnsureGeometryBuilt()
 	{
 		return;
 	}
-	const float Wx = GridX * Sub;
-	const float Wy = GridY * Sub;
-	const float Wz = GridZ * Sub;
-	SetActorLocation(FVector(Wx, Wy, Wz));
+	// No SetActorLocation (static root; parts are world-space from GridX/Y/Z — see Init note).
 	RebuildGeometry();
 	ApplyOpenState();
 }
