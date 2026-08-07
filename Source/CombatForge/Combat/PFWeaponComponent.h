@@ -235,6 +235,8 @@ private:
 
 	// Fire state
 	bool   bWantsFire = false;
+	/** Burst: a single trigger press commits the full BurstCount even after release (tap = 3-round burst). */
+	bool   bBurstCommit = false;
 	double NextFireTime = 0.0;
 	double SprintOutReadyTime = 0.0;
 	uint32 ShotIndexCounter = 0;        // owning-client monotonic (per weapon, per match)

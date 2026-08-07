@@ -169,8 +169,8 @@ private:
 	void SpawnSpecialPieceActor(const FPFBuildPieceRec& Rec);
 	void DestroySpecialPieceActor(uint16 PieceId);
 	/**
-	 * Local (server+client): solid under-ramp steps leave a crouch-height tunnel under the plank.
-	 * Standing capsules (~176uu) cannot crawl deep under; crouch (~116uu) can go further in.
+	 * Legacy hook: solid under-ramp steps were removed 2026-08-06 (invisible walls / crest glitch).
+	 * Spawn is a no-op that only cleans any leftover holder; Destroy still tears them down.
 	 */
 	void SpawnRampUnderfill(const FPFBuildPieceRec& Rec);
 	void DestroyRampUnderfill(uint16 PieceId);

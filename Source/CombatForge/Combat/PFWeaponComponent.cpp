@@ -87,6 +87,9 @@ void UPFWeaponComponent::StartFire()
 
 	bWantsFire = true;
 	ShotsThisPull = 0;   // new trigger pull re-arms Single/Burst caps
+	// Tap-to-burst: commit the full BurstCount on press so releasing mid-string doesn't truncate it
+	// to 1–2 shots (hold-to-fire felt like a short auto).
+	bBurstCommit = (CurrentFireMode == EPFFireMode::Burst);
 
 	// Minigun spin-up: cold start waits SpinupSec; feathering within grace keeps barrels hot.
 	if (SpinupSec > 0.f)
@@ -113,6 +116,7 @@ void UPFWeaponComponent::StartFire()
 void UPFWeaponComponent::StopFire()
 {
 	bWantsFire = false;
+	// Intentionally leave bBurstCommit set — residual burst shots finish after release.
 	if (const UWorld* World = GetWorld())
 	{
 		// Short grace so feathering the trigger doesn't re-spin the minigun every time.
@@ -140,10 +144,11 @@ void UPFWeaponComponent::StartReload()
 	{
 		return;
 	}
-	// Sprint/slide would cancel it on the very next tick — reject up front (04 §3).
+	// Slide still blocks arming a reload (you're committed to the slide). Sprint does NOT — product
+	// call 2026-08-06: reloading while sprinting must complete (04 §3 had cancelled on sprint).
 	if (const UPFCharacterMovementComponent* CMC = Char->GetPFMovement())
 	{
-		if (CMC->IsSprintingEffective() || CMC->IsSliding())
+		if (CMC->IsSliding())
 		{
 			return;
 		}
@@ -177,10 +182,10 @@ void UPFWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	{
 		TryFire(Now);
 
-		// Recoil-climb recovery: once the trigger is released, ease the accumulated climb back so the aim
-		// returns to where it started — reward for firing in bursts instead of holding.
+		// Recoil-climb recovery: once the trigger is released (and any residual burst is done), ease
+		// the accumulated climb back so the aim returns to where it started.
 		if ((RecoilClimbPitch > 0.f || !FMath::IsNearlyZero(RecoilClimbYaw))
-			&& !bWantsFire && (Now - LastClimbShotTime) > 0.12)
+			&& !bWantsFire && !bBurstCommit && (Now - LastClimbShotTime) > 0.12)
 		{
 			if (APlayerController* PC = Cast<APlayerController>(Char->GetController()))
 			{
@@ -230,7 +235,8 @@ bool UPFWeaponComponent::PassesCommonFireGates(const ACombatForgeCharacter& Char
 
 void UPFWeaponComponent::TryFire(double Now)
 {
-	if (!bWantsFire)
+	// Auto/Single require the button held. Burst also fires while a tap-commit is draining.
+	if (!bWantsFire && !(CurrentFireMode == EPFFireMode::Burst && bBurstCommit))
 	{
 		return;
 	}
@@ -251,6 +257,7 @@ void UPFWeaponComponent::TryFire(double Now)
 	                    : TNumericLimits<uint8>::Max();
 	if (ShotsThisPull >= PullCap)
 	{
+		bBurstCommit = false;
 		return;
 	}
 	if (ReburstDelaySec > 0.f && CurrentFireMode == EPFFireMode::Burst && Now < NextBurstAllowedTime)
@@ -285,6 +292,7 @@ void UPFWeaponComponent::TryFire(double Now)
 		{
 			ShotsThisPull = PullCap;
 		}
+		bBurstCommit = false;
 		// Auto-reload on empty with buffered fire (04 §3).
 		BeginReload(Now);
 		if (!Char->HasAuthority())
@@ -299,9 +307,13 @@ void UPFWeaponComponent::TryFire(double Now)
 	{
 		++ShotsThisPull;   // Auto never counts, so it can't reach the uint8 cap and stall mid-hold
 		// Rifle 03 re-burst: after a full 3-shot pull, block the next pull for ReburstDelaySec.
-		if (CurrentFireMode == EPFFireMode::Burst && ReburstDelaySec > 0.f && ShotsThisPull >= PullCap)
+		if (CurrentFireMode == EPFFireMode::Burst && ShotsThisPull >= PullCap)
 		{
-			NextBurstAllowedTime = Now + static_cast<double>(ReburstDelaySec);
+			bBurstCommit = false;
+			if (ReburstDelaySec > 0.f)
+			{
+				NextBurstAllowedTime = Now + static_cast<double>(ReburstDelaySec);
+			}
 		}
 	}
 
@@ -461,10 +473,14 @@ void UPFWeaponComponent::FireOneShot(double Now)
 			0.f, 1.f);
 		MagMult = FMath::Lerp(RecoilRampLowMult, RecoilRampHighMult, A);
 	}
-	// Shotguns read soft on the screen relative to their blast (playtest 2026-07-24): +25% on the
-	// VISIBLE kick only — viewmodel spring + camera shake below. Aim climb stays per-catalog so
-	// the balance tuning (sg climb is already the hottest in the catalog) is untouched.
-	const float ShotgunVisualKick = (Pellets > 1) ? 1.25f : 1.f;
+	// Shotguns: big visible kick on top of the catalog aim-climb (smoke alpha.17 — hip fire was a
+	// laser). Viewmodel spring + camera shake scale; climb is per-catalog (sg now ~5–6°/shell).
+	// No mag-ramp soft window — every shell punches full strength.
+	const float ShotgunVisualKick = (Pellets > 1) ? 2.1f : 1.f;
+	if (Pellets > 1)
+	{
+		MagMult = 1.f;
+	}
 	const float RecoilMult = ADSMult * MagMult * ShotgunVisualKick;
 	++ShotsThisMag;
 
@@ -507,7 +523,9 @@ void UPFWeaponComponent::FireOneShot(double Now)
 		// Recoil CLIMB: each shot walks the aim up + slightly right (gentler inside the free-shot window).
 		// Applied AFTER this shot's dir was sampled, so it shapes the NEXT shot — like real muzzle rise.
 		// Recovery back to the original aim runs in TickComponent once the trigger is released.
-		const float Mult = (ConsecShots < BloomFreeShots) ? ClimbFreeShotsMult : 1.f;
+		// Shotguns never get the free-shot soft window (catalog BloomFreeShots=0 + Pellets>1 belt).
+		const float Mult = (Pellets > 1) ? 1.f
+			: ((ConsecShots < BloomFreeShots) ? ClimbFreeShotsMult : 1.f);
 		const float StepP = ClimbPitchPerShotDeg * Mult;
 		const float StepY = ClimbYawPerShotDeg * Mult;
 		FRotator CR = PC->GetControlRotation().GetNormalized();
@@ -899,9 +917,10 @@ void UPFWeaponComponent::ServerStartReload_Implementation()
 	{
 		return;
 	}
+	// Slide still blocks arming; sprint does not (matches StartReload / product 2026-08-06).
 	if (const UPFCharacterMovementComponent* CMC = Char->GetPFMovement())
 	{
-		if (CMC->IsSprintingEffective() || CMC->IsSliding())
+		if (CMC->IsSliding())
 		{
 			return;
 		}
@@ -918,6 +937,7 @@ void UPFWeaponComponent::BeginReload(double Now)
 	{
 		return;
 	}
+	bBurstCommit = false;   // empty/manual reload ends any residual burst string
 	bReloading = true;
 	ReloadEndTime = Now + ReloadTime;
 
@@ -997,10 +1017,11 @@ void UPFWeaponComponent::UpdateReload(double Now)
 		return;
 	}
 
-	// Sprint/slide cancels the pod flip (04 §3).
+	// Slide still cancels the pod flip (you're committed to the maneuver). Sprint does NOT —
+	// product call 2026-08-06: sprint through a reload; the mag still finishes filling.
 	if (const UPFCharacterMovementComponent* CMC = Char->GetPFMovement())
 	{
-		if (CMC->IsSprintingEffective() || CMC->IsSliding())
+		if (CMC->IsSliding())
 		{
 			CancelReload();
 			return;

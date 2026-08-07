@@ -83,6 +83,13 @@ static TAutoConsoleVariable<int32> CVarFPArmsVerify(
 	TEXT("pf.FPArmsVerify"), 0,
 	TEXT("1 = automated FP-arms verification: equip lmg_01, log seating numbers, screenshot, quit."));
 
+// 0 (DEFAULT): no viewmodel gloves — first person uses the same body arms as bots/third person.
+//    Local player must see body arms (OwnerNoSee off for body) or the gun floats alone.
+// 1 (EXPERIMENTAL): viewmodel gloves; strips body arm mesh. Can leave shoulder/sleeve gaps — not default.
+static TAutoConsoleVariable<int32> CVarFPArms(
+	TEXT("pf.FPArms"), 0,
+	TEXT("0 = body arms in FP (default, bot-style). 1 = experimental viewmodel gloves."));
+
 // FPSCAN diagnostics (P2-P4): the per-mesh dump + world-wide TObjectIterator sweep inside
 // EnforceSingleFirstPersonWeapon were always-on Warning spam + a hitch risk on every equip /
 // swap / kit apply. The functional duplicate-HIDE still always runs; the forensics only when
@@ -257,8 +264,9 @@ ACombatForgeCharacter::ACombatForgeCharacter(const FObjectInitializer& ObjectIni
 	// ---- First-person camera: capsule-top - 10 uu, 0-length boom equivalent ----
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(Capsule);
+	// Forward of capsule center so the eye clears the head mesh (body-visible FP).
 	FirstPersonCamera->SetRelativeLocation(
-		FVector(0.f, 0.f, Capsule->GetUnscaledCapsuleHalfHeight() - CameraEyeOffsetFromCapsuleTop));
+		FVector(CameraEyeForwardUU, 0.f, Capsule->GetUnscaledCapsuleHalfHeight() - CameraEyeOffsetFromCapsuleTop));
 	FirstPersonCamera->bUsePawnControlRotation = true;
 	FirstPersonCamera->SetFieldOfView(BaseFOV);
 
@@ -1004,10 +1012,13 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 		UpdateTargetFOV(DeltaSeconds);
 
 		// Crouch camera smoothing: 88 -> 58 reads as 30 uu at 150 uu/s = 0.2 s.
+		// Keep a fixed forward offset so FP is through the eyes, not behind the skull.
 		if (FirstPersonCamera != nullptr && GetCapsuleComponent() != nullptr)
 		{
 			const float TargetZ = GetCapsuleComponent()->GetScaledCapsuleHalfHeight() - CameraEyeOffsetFromCapsuleTop;
 			FVector Rel = FirstPersonCamera->GetRelativeLocation();
+			Rel.X = CameraEyeForwardUU;
+			Rel.Y = 0.f;
 			Rel.Z = FMath::FInterpConstantTo(Rel.Z, TargetZ, DeltaSeconds, CrouchCameraInterpSpeed);
 			FirstPersonCamera->SetRelativeLocation(Rel);
 		}
@@ -1103,6 +1114,10 @@ void ACombatForgeCharacter::Tick(float DeltaSeconds)
 				FootstepDistanceAccum = 0.f;
 			}
 		}
+
+		// LAST write of the tick: kill the four-arm stack. Must run after UpdateBuildPhaseWeaponVisibility /
+		// ApplyCharacterConfig-style re-shows (same pattern as TP-weapon hide for the owning client).
+		SyncLocalFirstPersonArmLayers();
 	}
 }
 
@@ -5145,15 +5160,28 @@ void ACombatForgeCharacter::ApplyArtLoadout()
 	// authoritatively when the real TeamId lands.
 	ApplyTeamBody(CachedTeamId);
 
-	// FP arms mount — ONLY with a hold anim: an unanimated arms mesh renders a T-pose through the
-	// player's face, which is worse than no arms at all.
-	if (FirstPersonArmsMesh != nullptr && FirstPersonArmsAnim != nullptr && FirstPersonArms != nullptr)
+	// Viewmodel gloves are OFF by default (pf.FPArms 0). Only mount when explicitly enabled.
+	if (FirstPersonArms != nullptr)
 	{
-		FirstPersonArms->SetSkeletalMeshAsset(FirstPersonArmsMesh);
-		FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-		FirstPersonArms->PlayAnimation(FirstPersonArmsAnim, /*bLooping=*/true);
-		FirstPersonArms->SetVisibility(true);
-		UpdateFirstPersonArmsPose();
+		if (CVarFPArms.GetValueOnGameThread() != 0
+			&& FirstPersonArmsMesh != nullptr && FirstPersonArmsAnim != nullptr)
+		{
+			FirstPersonArms->SetSkeletalMeshAsset(FirstPersonArmsMesh);
+			FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			FirstPersonArms->PlayAnimation(FirstPersonArmsAnim, /*bLooping=*/true);
+			FirstPersonArms->SetVisibility(true);
+			UpdateFirstPersonArmsPose();
+		}
+		else
+		{
+			FirstPersonArms->SetSkeletalMeshAsset(nullptr);
+			FirstPersonArms->SetVisibility(false);
+			FirstPersonArms->SetHiddenInGame(true);
+		}
+	}
+	if (IsLocallyControlled() && IsPlayerControlled())
+	{
+		SyncLocalFirstPersonArmLayers();
 	}
 
 	AttachWeaponToHand();
@@ -5172,10 +5200,175 @@ void ACombatForgeCharacter::ApplyArtLoadout()
 	}
 }
 
+void ACombatForgeCharacter::SyncLocalFirstPersonArmLayers()
+{
+	// Only a human's OWN pawn. Bots never enter here.
+	// DEFAULT (pf.FPArms 0): body arms in FP; show body to owner (no floating gun); hide head only
+	// while ViewTarget is this pawn. F8 freecam shows the face + TP weapons.
+	// EXPERIMENTAL (pf.FPArms 1): viewmodel gloves + strip body arm mesh.
+	if (!IsLocallyControlled() || !IsPlayerControlled())
+	{
+		return;
+	}
+
+	bool bTrueFirstPerson = true;
+	if (const APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		bTrueFirstPerson = (PC->GetViewTarget() == this);
+	}
+
+	const bool bWantFPGloves = bTrueFirstPerson
+		&& CVarFPArms.GetValueOnGameThread() != 0
+		&& FirstPersonArms != nullptr
+		&& FirstPersonArmsMesh != nullptr
+		&& FirstPersonArmsAnim != nullptr
+		&& !bEliminatedAppearanceActive;
+
+	if (FirstPersonArms != nullptr)
+	{
+		if (bWantFPGloves)
+		{
+			if (FirstPersonArms->GetSkeletalMeshAsset() != FirstPersonArmsMesh)
+			{
+				FirstPersonArms->SetSkeletalMeshAsset(FirstPersonArmsMesh);
+				FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+				if (FirstPersonArmsAnim != nullptr)
+				{
+					FirstPersonArms->PlayAnimation(FirstPersonArmsAnim, /*bLooping=*/true);
+				}
+			}
+			FirstPersonArms->SetOnlyOwnerSee(true);
+			FirstPersonArms->SetOwnerNoSee(false);
+			FirstPersonArms->SetVisibility(true);
+			FirstPersonArms->SetHiddenInGame(false);
+			FirstPersonArms->SetCastShadow(false);
+		}
+		else
+		{
+			FirstPersonArms->SetSkeletalMeshAsset(nullptr);
+			FirstPersonArms->SetVisibility(false);
+			FirstPersonArms->SetHiddenInGame(true);
+		}
+	}
+
+	auto KillDraw = [](UPrimitiveComponent* C)
+	{
+		if (C == nullptr) { return; }
+		C->SetVisibility(false, false);
+		C->SetHiddenInGame(true, false);
+		C->SetCastShadow(false);
+		C->SetOwnerNoSee(true);
+		C->SetOnlyOwnerSee(false);
+	};
+	auto ShowToOwner = [](UPrimitiveComponent* C, bool bShadow)
+	{
+		if (C == nullptr) { return; }
+		C->SetHiddenInGame(false, false);
+		C->SetVisibility(true, false);
+		C->SetCastShadow(bShadow);
+		C->SetOwnerNoSee(false);
+		C->SetOnlyOwnerSee(false);
+	};
+
+	KillDraw(BodyMesh);
+	KillDraw(HeadMesh);
+
+	const bool bPantsWorn = ActiveCharConfig.Slots.IsValidIndex(PFChar::kSlotPants)
+		&& ActiveCharConfig.Slots[PFChar::kSlotPants] >= 0;
+	const TArray<FSoftObjectPath>& BaseP = PFChar::BaseParts();
+	USkeletalMeshComponent* Leader = GetMesh();
+
+	for (int32 i = 0; i < CharBaseComps.Num(); ++i)
+	{
+		USkeletalMeshComponent* C = CharBaseComps[i];
+		if (C == nullptr) { continue; }
+
+		USkeletalMesh* WantMesh = BaseP.IsValidIndex(i) ? Cast<USkeletalMesh>(BaseP[i].TryLoad()) : nullptr;
+		if (i == PFChar::kBaseArms && bWantFPGloves)
+		{
+			C->SetLeaderPoseComponent(nullptr);
+			C->SetSkeletalMeshAsset(nullptr);
+			KillDraw(C);
+			continue;
+		}
+		if (WantMesh != nullptr && C->GetSkeletalMeshAsset() != WantMesh)
+		{
+			C->SetSkeletalMeshAsset(WantMesh);
+			if (Leader != nullptr) { C->SetLeaderPoseComponent(Leader); }
+		}
+		if (C->GetSkeletalMeshAsset() == nullptr) { continue; }
+		if (i == PFChar::kBaseLegs && bPantsWorn)
+		{
+			KillDraw(C);
+			continue;
+		}
+		// Head included: eye cam is forward of the face (CameraEyeForwardUU), so the skull
+		// sits behind the camera — no need to strip the head (that left F8 / self-view headless).
+		ShowToOwner(C, true);
+	}
+
+	if (Leader != nullptr)
+	{
+		const bool bModular =
+			CharBaseComps.IsValidIndex(PFChar::kBaseTorso)
+			&& CharBaseComps[PFChar::kBaseTorso] != nullptr
+			&& CharBaseComps[PFChar::kBaseTorso]->GetSkeletalMeshAsset() != nullptr;
+		if (bModular)
+		{
+			Leader->SetVisibility(false, false);
+			Leader->SetHiddenInGame(true, false);
+			Leader->SetCastShadow(false);
+		}
+	}
+
+	for (USkeletalMeshComponent* C : CharSlotComps)
+	{
+		if (C == nullptr || C->GetSkeletalMeshAsset() == nullptr) { continue; }
+		const FString N = C->GetSkeletalMeshAsset()->GetName();
+		if (bWantFPGloves && (N.Contains(TEXT("Arms"), ESearchCase::IgnoreCase)
+			|| N.Contains(TEXT("Glove"), ESearchCase::IgnoreCase)))
+		{
+			C->SetLeaderPoseComponent(nullptr);
+			C->SetSkeletalMeshAsset(nullptr);
+			KillDraw(C);
+			continue;
+		}
+		ShowToOwner(C, true);
+	}
+
+	if (bWantFPGloves)
+	{
+		KillDraw(ArmbandMesh);
+		KillDraw(ArmbandMeshR);
+	}
+	else
+	{
+		if (ArmbandMesh != nullptr && ArmbandMesh->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMesh, false); }
+		if (ArmbandMeshR != nullptr && ArmbandMeshR->GetStaticMesh() != nullptr) { ShowToOwner(ArmbandMeshR, false); }
+	}
+
+	// TP guns: hide only in true FP (freecam should show held weapon).
+	if (bTrueFirstPerson)
+	{
+		if (WeaponMeshComp != nullptr) { WeaponMeshComp->SetVisibility(false); }
+		if (BackWeaponMeshComp != nullptr) { BackWeaponMeshComp->SetVisibility(false); }
+	}
+	else if (!bEliminatedAppearanceActive)
+	{
+		if (WeaponMeshComp != nullptr) { WeaponMeshComp->SetVisibility(true); }
+		if (BackWeaponMeshComp != nullptr) { BackWeaponMeshComp->SetVisibility(true); }
+	}
+}
+
 void ACombatForgeCharacter::UpdateFirstPersonArmsPose()
 {
 	// Owner-only cosmetic: a dedicated server never renders the arms, so skip the anim eval there.
 	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	SyncLocalFirstPersonArmLayers();
+	if (CVarFPArms.GetValueOnGameThread() == 0)
 	{
 		return;
 	}
