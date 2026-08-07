@@ -189,12 +189,24 @@ bool APFBuildPieceActor::DoorLeafAffectsNav() const
 UStaticMeshComponent* APFBuildPieceActor::AddCubePart(const FName& Name, const FVector& WorldCenter,
 	const FVector& WorldExtent, const FRotator& WorldRot, UMaterialInterface* Mat, bool bBlock)
 {
-	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(this, Name);
+	// UNIQUE name (playtest 2026-08-06 log forensics): net-recycled actor names re-ran this with the
+	// SAME fixed part names while the old components were still pending cleanup — 11k+ "Gamethread
+	// hitch waiting for resource cleanup on a UObject ... overwrite" per client session. A unique
+	// suffix keeps the readable stem and never overwrites a dying object.
+	UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(this,
+		MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(), Name));
 	Comp->SetupAttachment(Root);
 	Comp->SetStaticMesh(CubeMesh);
-	Comp->SetMobility(EComponentMobility::Movable);
+	// STATIC, not Movable (playtest 2026-08-06): these parts never move after spawn, but Movable
+	// mobility made pawns standing on them (sill / trap plate / posts) use RELATIVE based movement,
+	// and since runtime NewObject components are not stably named they cannot get a NetGUID — every
+	// server position correction against such a base was IGNORED on the client (~5k+ per session:
+	// "ClientAdjustPosition could not resolve the new relative movement base actor"). Ignored
+	// corrections are accumulating client/server position desync — rubber-banding, shots landing
+	// where players are not. Static bases use ABSOLUTE corrections, which need no base resolution.
+	// The transform must therefore be final BEFORE registration (Static refuses moves afterwards).
+	Comp->SetMobility(EComponentMobility::Static);
 	Comp->SetCastShadow(true);
-	Comp->RegisterComponent();
 	// Engine cube is 100³; scale so full size = WorldExtent*2.
 	const FVector Scale(
 		(WorldExtent.X * 2.f) / 100.f,
@@ -203,6 +215,7 @@ UStaticMeshComponent* APFBuildPieceActor::AddCubePart(const FName& Name, const F
 	Comp->SetWorldLocation(WorldCenter);
 	Comp->SetWorldRotation(WorldRot);
 	Comp->SetWorldScale3D(Scale);
+	Comp->RegisterComponent();
 	if (Mat)
 	{
 		Comp->SetMaterial(0, Mat);
@@ -365,7 +378,9 @@ void APFBuildPieceActor::BuildWallFrameParts(bool bWithDoorOpening, bool bWithWi
 
 void APFBuildPieceActor::BuildDoorLeaf()
 {
-	DoorLeaf = NewObject<UStaticMeshComponent>(this, TEXT("DoorLeaf"));
+	// Unique name for the same overwrite-hitch reason as AddCubePart. Stays MOVABLE — it swings.
+	DoorLeaf = NewObject<UStaticMeshComponent>(this,
+		MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(), TEXT("DoorLeaf")));
 	DoorLeaf->SetupAttachment(Root);
 	DoorLeaf->SetStaticMesh(CubeMesh);
 	DoorLeaf->SetMobility(EComponentMobility::Movable);
@@ -453,7 +468,8 @@ void APFBuildPieceActor::BuildTrapFloor()
 		TrapMID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.55f, 0.2f, 0.15f, 1.f));
 	}
 
-	TrapTrigger = NewObject<UBoxComponent>(this, TEXT("TrapTrigger"));
+	TrapTrigger = NewObject<UBoxComponent>(this,
+		MakeUniqueObjectName(this, UBoxComponent::StaticClass(), TEXT("TrapTrigger")));
 	TrapTrigger->SetupAttachment(Root);
 	TrapTrigger->SetBoxExtent(FVector(190.f, 190.f, 40.f));
 	TrapTrigger->SetWorldLocation(FVector(Wx + 200.f, Wy + 200.f, Wz + 40.f));
@@ -666,12 +682,20 @@ void APFBuildPieceActor::TickTrap(float DeltaSeconds)
 		return;   // combat-live only
 	}
 
+	// Playtest 2026-08-06 server-lag pass: this used to walk the FULL world actor list
+	// (TActorIterator<ACharacter>) every frame per untriggered trap — O(traps × world actors) at
+	// 60 Hz on the server. TrapTrigger already overlaps ECC_Pawn (BuildTrapFloor), so ask the
+	// physics scene for its live overlap set instead: cost is proportional to pawns actually
+	// standing on the plate (almost always zero). Trip logic below is unchanged, including the
+	// feet/center double containment test (the overlap set is the coarse filter, not the truth).
 	const FVector Center = TrapTrigger->GetComponentLocation();
 	const FVector Ext = TrapTrigger->GetScaledBoxExtent();
 	const FBox TriggerBox(Center - Ext, Center + Ext);
-	for (TActorIterator<ACharacter> It(World); It; ++It)
+	TArray<AActor*> Overlapping;
+	TrapTrigger->GetOverlappingActors(Overlapping, ACombatForgeCharacter::StaticClass());
+	for (AActor* Actor : Overlapping)
 	{
-		ACombatForgeCharacter* PFC = Cast<ACombatForgeCharacter>(*It);
+		ACombatForgeCharacter* PFC = Cast<ACombatForgeCharacter>(Actor);
 		if (!PFC)
 		{
 			continue;

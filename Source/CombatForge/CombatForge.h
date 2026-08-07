@@ -23,7 +23,8 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 18;  // alpha.18 — smoke playtest fixes + body-arms-in-FP visibility.
+	constexpr int32 NetProtocol = 19;  // alpha.19 — 2026-08-06 playtest batch: kit-desync correction RPC,
+	                                   // barrel-cooldown RPC, mantle latch in the saved moves, static bases.
 	                                   // Burst tap-to-fire, sprint does not cancel reload, ramp underfill
 	                                   // removed, shotgun recoil, local FP body arms (no gloved viewmodel
 	                                   // stack), eye cam forward. No new RPCs — bump is ship discipline so

@@ -47,8 +47,8 @@ namespace PFChar
 	// Base skin part indices (order of BaseParts()).
 	constexpr int32 kBaseHead = 0, kBaseTorso = 1, kBaseArms = 2, kBaseLegs = 3;
 	constexpr int32 kBasePartCount = 4;
-	// GSlots indices used by garment-vs-skin hiding.
-	constexpr int32 kSlotPants = 6;
+	// GSlots indices used by garment-vs-skin hiding (order of the GSlots table in the .cpp).
+	constexpr int32 kSlotHeadwear = 0, kSlotFace = 1, kSlotHelmet = 2, kSlotArms = 4, kSlotPants = 6;
 
 	/** Load the selected part mesh for a slot (nullptr if index is out of range / -1 / load fails). */
 	USkeletalMesh* LoadPart(int32 Slot, int32 Index);

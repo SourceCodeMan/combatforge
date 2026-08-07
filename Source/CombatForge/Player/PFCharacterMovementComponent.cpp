@@ -52,6 +52,7 @@ UPFCharacterMovementComponent::UPFCharacterMovementComponent()
 	bWantsToSprintPF = false;
 	bWantsToADSPF = false;
 	bWantsToMantlePF = false;
+	bMantleUsedThisPress = false;
 	bSlideGlideActive = false;
 }
 
@@ -303,8 +304,19 @@ void UPFCharacterMovementComponent::OnMovementUpdated(float DeltaSeconds, const 
 	// FLAG_Custom_2; while it's held and we're falling, retry the ledge test each sim step — geometry is
 	// STATIC world collision, so client prediction and server replay agree. The flag is a pure input intent
 	// (cleared by the character on key release, never mutated inside the sim).
-	if (!IsMantling()
-		&& bWantsToMantlePF
+	//
+	// ONE CLIMB PER PRESS (playtest 2026-08-06 "wall elevator"): PhysMantle deliberately ends in
+	// MOVE_Falling, so a climb that failed to clear onto the top fell back through the detection
+	// band with the key still held and re-mantled the same ledge — a smooth up/down loop. The
+	// bMantleUsedThisPress latch (sim state, saved-move carried) arms on EnterMantle and re-arms
+	// only when the intent flag drops — key release, or Landed() clearing the intent — so the
+	// forgiving hold-to-retry timing for the FIRST climb is preserved.
+	if (!bWantsToMantlePF)
+	{
+		bMantleUsedThisPress = false;
+	}
+	else if (!IsMantling()
+		&& !bMantleUsedThisPress
 		&& IsFalling())
 	{
 		FVector StandTarget;
@@ -343,6 +355,7 @@ void UPFCharacterMovementComponent::EnterMantle(const FVector& StandTarget)
 	// crouch intent here keeps the capsule state deterministic through the mode change (a mid-climb forced
 	// un-crouch would re-expand the capsule into the ledge).
 	bWantsToCrouch = false;
+	bMantleUsedThisPress = true;   // one climb per press — re-armed when the intent flag drops
 	SetMovementMode(MOVE_Custom, CMOVE_Mantle);
 }
 
@@ -774,6 +787,7 @@ FSavedMove_PF::FSavedMove_PF()
 	: bSavedWantsToSprint(false)
 	, bSavedWantsToADS(false)
 	, bSavedWantsToMantle(false)
+	, bSavedMantleUsedThisPress(false)
 	, bSavedSlideGlideActive(false)
 {
 }
@@ -787,6 +801,7 @@ void FSavedMove_PF::Clear()
 	SavedMantleStart = FVector::ZeroVector;
 	SavedMantleTarget = FVector::ZeroVector;
 	SavedMantleElapsed = 0.f;
+	bSavedMantleUsedThisPress = false;
 	SavedSlideElapsed = 0.f;
 	SavedSlideRampStartElapsed = 0.f;
 	SavedSlideCooldownRemaining = 0.f;
@@ -824,7 +839,8 @@ bool FSavedMove_PF::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InC
 	// elapsed/target it originally had (both are all-zero outside a mantle, so normal moves still combine).
 	if (SavedMantleElapsed != NewMovePF->SavedMantleElapsed
 		|| SavedMantleTarget != NewMovePF->SavedMantleTarget
-		|| SavedMantleStart != NewMovePF->SavedMantleStart)
+		|| SavedMantleStart != NewMovePF->SavedMantleStart
+		|| bSavedMantleUsedThisPress != NewMovePF->bSavedMantleUsedThisPress)
 	{
 		return false;
 	}
@@ -851,6 +867,7 @@ void FSavedMove_PF::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& 
 		SavedMantleStart = CMC->MantleStart;
 		SavedMantleTarget = CMC->MantleTarget;
 		SavedMantleElapsed = CMC->MantleElapsed;
+		bSavedMantleUsedThisPress = CMC->bMantleUsedThisPress;
 		SavedSlideElapsed = CMC->SlideElapsed;
 		SavedSlideRampStartElapsed = CMC->SlideRampStartElapsed;
 		SavedSlideCooldownRemaining = CMC->SlideCooldownRemaining;
@@ -870,6 +887,7 @@ void FSavedMove_PF::PrepMoveFor(ACharacter* C)
 		CMC->MantleStart = SavedMantleStart;
 		CMC->MantleTarget = SavedMantleTarget;
 		CMC->MantleElapsed = SavedMantleElapsed;
+		CMC->bMantleUsedThisPress = bSavedMantleUsedThisPress;
 		CMC->SlideElapsed = SavedSlideElapsed;
 		CMC->SlideRampStartElapsed = SavedSlideRampStartElapsed;
 		CMC->SlideCooldownRemaining = SavedSlideCooldownRemaining;

@@ -67,6 +67,10 @@ public:
 	/** Re-reads the hold-vs-toggle crouch pref (FPFUserPrefs::GetCrouchToggle). Called on possess and when
 	 *  the options menu changes it live; clears latched crouch on a mode change so you can't get stuck low. */
 	void  RefreshCrouchToggleMode();
+	/** Drop any latched ADS/crouch toggle (playtest 2026-08-06: a toggle left "on" at round end stayed
+	 *  stuck for the whole Build phase — ApplyInputForPhase swaps the mapping context, so the release
+	 *  key no longer exists in Build). Called by the PlayerController when the phase leaves Combat. */
+	void  ResetStanceForPhase();
 
 	// ---- Team + elimination cosmetics (pkg-weapons calls these) ----
 	void  SetTeamColor(uint8 TeamId);      // MID tint on the graybox mesh
@@ -105,6 +109,17 @@ public:
 	 * Empty when nothing usable is in range. Client display only.
 	 */
 	FString GetInteractPromptText() const;
+
+	/**
+	 * Owner-only: ammo barrel rejected this press because the per-player 10 s cooldown is active.
+	 * Client shows a short lower-right toast ("Resupply in Ns"); no persistent timer UI.
+	 * Called from APFAmmoBarrel::AuthorityInteract on a cooled-down press.
+	 */
+	UFUNCTION(Client, Reliable) void ClientBarrelCooldown(float RemainingSec);
+	/** Combat HUD poll: non-empty while a barrel-cooldown toast should show. */
+	FString GetBarrelCooldownNoticeText() const;
+	/** 0..1 fade for the barrel-cooldown toast (1 = full, 0 = gone). */
+	float GetBarrelCooldownNoticeAlpha() const;
 
 	// ---- AActor / ACharacter ----
 	virtual void Tick(float DeltaSeconds) override;
@@ -346,6 +361,13 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_Kit) FPFKitRep KitRep;
 	UFUNCTION(Server, Reliable) void ServerSetKit(const FPFKitRep& NewKit);
 	UFUNCTION() void OnRep_Kit();
+	/** Owner correction when ServerSetKit rejects/clamps a weapon claim. The client applies its
+	 *  pick locally as a preview BEFORE the RPC; if the server's KitRep ends up byte-identical to
+	 *  what it already held (mid-round change rejected, or a locked weapon clamped back to the
+	 *  starter it already had), NO OnRep fires and the owner keeps playing a weapon the server
+	 *  never accepted — mag corrections, ROF validation and HitValue then all come from the
+	 *  SERVER's weapon while the client renders another. This RPC closes that silent-desync gap. */
+	UFUNCTION(Client, Reliable) void ClientCorrectKit(const FPFKitRep& ServerKit);
 	/** Server RPC backing RequestResetToSpawn(): owning client → server teleport-to-spawn (heal + refill). */
 	UFUNCTION(Server, Reliable) void ServerRequestResetToSpawn();
 	/** Owning client → server: set this player's in-game name to their account display name (login profile).
@@ -353,6 +375,11 @@ private:
 	UFUNCTION(Server, Reliable) void ServerSetPlayerName(const FString& Name);
 	void ApplyKit();          // apply KitRep → ActiveCharConfig/ActiveWeaponConfig → visuals + weapon stats
 	bool HasValidKit() const { return KitRep.CharParts.Num() > 0; }
+
+	// Owner-client only (set by ClientBarrelCooldown). Not replicated.
+	double BarrelCooldownToastEndTime = 0.0;
+	float  BarrelCooldownToastSecs = 0.f;
+	static constexpr float BarrelCooldownToastDuration = 2.f;
 
 	// ---- Dual-weapon carry: primary + secondary (any catalog guns). Scroll swaps which is in hand;
 	// the other rides the back sling. bSecondaryActive = secondary is the hand gun.

@@ -197,6 +197,16 @@ void ACombatForgePlayerController::HandlePhaseChanged(EPFMatchPhase NewPhase)
 		return;
 	}
 	ApplyInputForPhase();
+	// Leaving Combat: drop latched ADS/crouch toggles NOW (playtest 2026-08-06 "stuck crouched/scoped
+	// through Build"). ApplyInputForPhase just swapped the mapping context, so the release keys for
+	// those toggles no longer exist — without this a toggle left on at round end is stuck all phase.
+	if (NewPhase != EPFMatchPhase::Combat)
+	{
+		if (ACombatForgeCharacter* PFChar = Cast<ACombatForgeCharacter>(GetPawn()))
+		{
+			PFChar->ResetStanceForPhase();
+		}
+	}
 	// Phase BGM: Build track during fort building, Combat track during live fight.
 	if (UGameInstance* GI = GetGameInstance())
 	{

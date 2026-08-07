@@ -1,4 +1,4 @@
-# CombatForge - run a FLEET of match instances on one box (up to 10 active matches).
+# CombatForge - run a FLEET of match instances on one box (up to 3 active matches).
 #
 # Each instance is its own CombatForge server process on its own UDP port (7777, 7778, ...),
 # registering with the directory under the shared ServerKey - the api keys each row as
@@ -6,11 +6,11 @@
 # START NEW MATCH in the game join the first EMPTY instance and set it up.
 #
 # USAGE (on the box, from the game folder next to Start-Server-OnBox.ps1):
-#   powershell -ExecutionPolicy Bypass -File .\Start-Fleet-OnBox.ps1 -Instances 4
+#   powershell -ExecutionPolicy Bypass -File .\Start-Fleet-OnBox.ps1 -Instances 3
 #
 # SIZING - each headless UE instance costs roughly 1-1.5 GB RAM and a share of CPU.
-#   vc2-4c-8gb (the current Vultr box): 3-4 instances is the realistic ceiling.
-#   For the full 10, resize the box to ~16-24 GB / 8 vCPU first.
+#   vc2-4c-8gb (the current Vultr box): 3 instances is the realistic ceiling (playtest lag).
+#   Do not raise the hard cap without resizing the box first.
 #
 # Stop: close the spawned windows (each has its own restart loop), or Stop-Process CombatForge*.
 #
@@ -29,9 +29,9 @@ $Single = Join-Path $Here "Start-Server-OnBox.ps1"
 if (-not (Test-Path $Single)) { throw "Start-Server-OnBox.ps1 not found next to this script." }
 
 if ($Instances -lt 1) { $Instances = 1 }
-if ($Instances -gt 10) {
-    Write-Host "Capping at 10 instances (the directory/browser design ceiling)." -ForegroundColor Yellow
-    $Instances = 10
+if ($Instances -gt 3) {
+    Write-Host "Capping at 3 instances (box lag ceiling; playtest 2026-08-06)." -ForegroundColor Yellow
+    $Instances = 3
 }
 
 $mem = $null

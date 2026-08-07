@@ -222,6 +222,17 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 					{
 						PieceISMCs[K]->EmptyOverrideMaterials();
 					}
+					// SetStaticMesh / SetMobility on a component ALREADY HOLDING instances tears down
+					// and rebuilds its physics state — and UE only pairs a body with an instance added
+					// while physics state is fully up, so instances added around this swap desync
+					// InstanceBodies from PerInstanceSMData. That desync is the root of the playtest
+					// 2026-08-06 invisible walls (RemoveInstance then strands a body that keeps
+					// blocking Paintball). Rebuild the bodies from the instance data right here so
+					// this component leaves the swap self-consistent.
+					if (PieceISMCs[K]->IsPhysicsStateCreated())
+					{
+						PieceISMCs[K]->RecreatePhysicsState();
+					}
 					bMeshSwapped = true;
 				}
 			}
@@ -236,6 +247,32 @@ void APFBuildGrid::EnsurePieceVisualsApplied()
 	if (bMeshSwapped)
 	{
 		RefreshPropInstanceTransforms();
+	}
+
+	// Once the real meshes are in, flip the prop ISMs back to STATIC (playtest 2026-08-06): Movable
+	// was only ever needed so SetStaticMesh would be accepted after begin-play (ctor comment). But a
+	// Movable ISM makes any pawn standing on a prop use RELATIVE based movement, feeding the same
+	// ignored-server-correction desync as the piece-actor parts. Props never move after this point;
+	// Static restores absolute corrections (and the mobility change itself rebuilds physics state,
+	// re-deriving every per-instance body). Structural ISMs were Static all along.
+	if (bPieceVisualsReady)
+	{
+		for (int32 TypeIdx = 0; TypeIdx < 7; ++TypeIdx)
+		{
+			const EPFPieceType Type = static_cast<EPFPieceType>(TypeIdx);
+			if (!PFIsProp(Type))
+			{
+				continue;
+			}
+			for (uint8 Team = 0; Team < 2; ++Team)
+			{
+				const int32 K = ISMCIndexFor(Type, Team);
+				if (PieceISMCs[K] && PieceISMCs[K]->Mobility != EComponentMobility::Static)
+				{
+					PieceISMCs[K]->SetMobility(EComponentMobility::Static);
+				}
+			}
+		}
 	}
 
 	// Cohesion palette: triplanar M_PF_Arena* masters + warehouse textures (same stack as arena shell).
@@ -1054,6 +1091,34 @@ void APFBuildGrid::RemovePieceLocal(const FPFBuildPieceRec& Rec)
 				InstanceToPiece[K].Remove(InstanceIdx);
 			}
 			PieceToInstance.Remove(Rec.PieceId);
+
+			// INVISIBLE-WALL FIX (playtest 2026-08-06): the ISM's per-instance physics bodies can
+			// drift out of sync with PerInstanceSMData — SetStaticMesh/SetMobility in
+			// EnsurePieceVisualsApplied recreates physics state on a component already holding live
+			// instances, and UE only creates a body per AddInstance while physics state is fully up
+			// (InstancedStaticMesh.cpp SetupNewInstanceData). Once desynced, RemoveInstance above
+			// terminates the WRONG body (or none) and strands one in the Chaos scene: invisible,
+			// unreachable by pawn sweeps, but still answering Paintball traces (that channel's
+			// DEFAULT response is Block) — "walk through it, can't shoot through it". Rebuilding the
+			// physics state re-derives every body from PerInstanceSMData, evicting any stray. Cost
+			// is per-delete on a component with tens of instances, only during Build/Remix.
+			if (PieceISMCs[K]->IsPhysicsStateCreated())
+			{
+				PieceISMCs[K]->RecreatePhysicsState();
+			}
+			// All 3 playtest "crashes" were the ISM cached-BOUNDS ensure (ISMComponent.h:128): the
+			// remove invalidates the bounds cache and something (nav/render) reads it before the
+			// lazy recompute. Recompute NOW so the cache is never left invalid — each tripped
+			// ensure wrote a synchronous minidump, a multi-second server hitch mid-round.
+			PieceISMCs[K]->UpdateBounds();
+		}
+		else
+		{
+			// A map miss here means the instance is STILL ALIVE with no owner record — exactly the
+			// phantom-blocker precursor. Loud, so a bookkeeping desync shows up in playtest logs.
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("BuildGrid: delete of piece %u found no ISM instance mapping (type %d team %d) — possible phantom blocker"),
+				Rec.PieceId, static_cast<int32>(Rec.Type), static_cast<int32>(Rec.Team));
 		}
 	}
 	UnregisterOccupancy(Rec);

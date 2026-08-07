@@ -488,6 +488,21 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 				}
 			}
 		}
+
+		// BUILD-PHASE JOINER (Tom 2026-08-07): PostLogin used to leave a Build joiner on
+		// PlayerState defaults — no fresh budget grant and bAliveInRound=false (counted dead by
+		// RecountAlive and unspectatable) until the first StartNextRound. Give them exactly what
+		// SetPhase(Build)'s per-player loop gives everyone else, and seat them on their own plot.
+		if (ACombatForgeGameState* BuildGS = GetPFGameState();
+			BuildGS && BuildGS->Phase == EPFMatchPhase::Build)
+		{
+			PS->ServerSetBudgets(BudgetStructural, BudgetProps);
+			PS->ServerSetAliveInRound(true);
+			RespawnCombatant(PS, 3);
+			UE_LOG(CombatForgeLog, Log,
+				TEXT("GameMode: %s joined during Build — fresh budgets + own-plot spawn"),
+				*PS->GetPlayerName());
+		}
 		RecountAlive();
 
 		UE_LOG(CombatForgeLog, Log, TEXT("GameMode: %s joined (team %d, roster %d)"),
@@ -502,6 +517,11 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 {
 	ACombatForgePlayerState* ExitingPS =
 		Exiting ? Exiting->GetPlayerState<ACombatForgePlayerState>() : nullptr;
+	// Captured before the team/roster wipe below — the bot backfill at the end of this function
+	// needs to know which team just went a man down.
+	const uint8 LeaverTeam = ExitingPS ? ExitingPS->TeamId : TeamNone;
+	const bool bLeaverWasBot = ExitingPS && ExitingPS->IsABot();
+	const FString LeaverName = ExitingPS ? ExitingPS->GetPlayerName() : TEXT("a player");
 	if (ExitingPS)
 	{
 		// Progression: capture the leaver's stats BEFORE any teardown below (team/roster wipe,
@@ -576,6 +596,44 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 				EmitMatchReport();
 			}
 			HostForceReturnToLobby();
+			return;
+		}
+	}
+
+	// SEAMLESS BOT BACKFILL (Tom 2026-08-07: "if a player leaves, then a bot should be dropped back
+	// in — players are the priority"). Before this, FillBotsToFormat only ran at Build entry, so a
+	// mid-match leaver left their team a man down for the REST OF THE MATCH. Refill the leaver's team
+	// immediately; a later human joiner trims a bot right back out (PostLogin). Runs LAST so every
+	// abandon/victory check above saw the true post-leave human counts (those all count HUMANS, so a
+	// fresh bot can never mask a real abandon). Skips: bot leavers (TrimOneBotFromTeam destroys the
+	// bot controller, which also lands here — re-adding would undo every trim), FFA (no teams), and
+	// any phase where the Build-entry fill will handle it anyway.
+	if (bFillWithBots && !bLeaverWasBot && LeaverTeam <= 1)
+	{
+		if (ACombatForgeGameState* GS = GetPFGameState();
+			GS && GS->MatchType != EPFMatchType::FreeForAll
+			&& (GS->Phase == EPFMatchPhase::Build || GS->Phase == EPFMatchPhase::Combat)
+			&& GetTeamCountByKind(LeaverTeam, /*bBotsOnly=*/false) < GS->TargetTeamSize)
+		{
+			if (ACombatForgePlayerState* NewBot = AddBot(LeaverTeam))
+			{
+				RespawnCombatant(NewBot, 3);   // AddBot leaves pawn spawning to the caller
+				// Mid-round joiner parity: a sudden-death round is one-hit for everyone.
+				if (bSuddenDeathRoundActive)
+				{
+					if (ACombatForgeCharacter* BotPawn = Cast<ACombatForgeCharacter>(NewBot->GetPawn()))
+					{
+						if (UPFHealthComponent* Health = BotPawn->GetHealth())
+						{
+							Health->ResetForRound(1);
+						}
+					}
+				}
+				RecountAlive();
+				UE_LOG(CombatForgeLog, Log,
+					TEXT("GameMode: backfilled bot onto team %d after %s left"),
+					LeaverTeam, *LeaverName);
+			}
 		}
 	}
 }
@@ -1012,6 +1070,17 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 				PC->SetEliminatedMoveLock(false);
 			}
 			RespawnCombatant(PS, 3);   // players and bots alike
+			// Death-cam recovery (playtest 2026-08-06 "stuck inside a bot"): a spectate view target
+			// picked during Combat (often a bot) was only ever restored by StartNextRound — which runs
+			// in Combat — so it survived Vote/Results into the next phases. Snap back to the player's
+			// own pawn (after the respawn, so it's the pawn they actually own now).
+			if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
+			{
+				if (PC->GetPawn() != nullptr && PC->GetViewTarget() != PC->GetPawn())
+				{
+					PC->SetViewTargetWithBlend(PC->GetPawn(), 0.f);
+				}
+			}
 		}
 		RecountAlive();
 		// Freeform warmup: top every combatant's loadout up every couple of seconds so lobby play is
@@ -1107,6 +1176,17 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 				PC->SetEliminatedMoveLock(false);
 			}
 			RespawnCombatant(PS, 3);   // own plot; players and bots alike
+			// Death-cam recovery (playtest 2026-08-06 "stuck inside a bot" during Build): the build
+			// ghost traces from PlayerCameraManager, so a leftover spectate target meant a player
+			// could only build where the BOT he was spectating looked. StartNextRound only covers
+			// Combat; restore here too (after the respawn, so it's the pawn they actually own now).
+			if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
+			{
+				if (PC->GetPawn() != nullptr && PC->GetViewTarget() != PC->GetPawn())
+				{
+					PC->SetViewTargetWithBlend(PC->GetPawn(), 0.f);
+				}
+			}
 		}
 		RecountAlive();
 

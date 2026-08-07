@@ -420,14 +420,12 @@ namespace PFWeapon
 			MakeW(TEXT("Shotgun 04"), TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Shotguns/04/SM_Modern_Weapons_Shotgun_04.SM_Modern_Weapons_Shotgun_04"),
 				nullptr, FVector(13.33f, 2.84f, -12.63f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(38.00f, 6.40f, 0.00f),
 				FVector(19.86f, -1.58f, -5.35f), FRotator(5.17f, -0.21f, 2.64f),
-				Mode_SB, EPFFireMode::Single,
-				// ClassBurstCount was 1, which made BURST fire exactly one shell — indistinguishable from
-				// SINGLE, so the mode looked broken (Tom 2026-07-20). This is the ONLY burst-capable
-				// shotgun (the other three are Mode_S) and was the only weapon in the catalog below 2.
-				// 3 to match every other burst weapon (Tom's call). That is 18 pellets per pull at close
-				// range, which against the 10-hit-out model is lethal fast — intended, but the number to
-				// turn down first if the shotgun starts dominating CQB. Climb is high so a burst string
-				// walks the aim hard off-target (not three laser shells).
+				Mode_SBA, EPFFireMode::Auto,
+				// Playtest 2026-08-06: full-auto shotgun (was Mode_SB / Single with ClassBurstCount 3).
+				// FireRateBps stays 2.8 shells/sec — full-auto at that cadence with the existing ~5° climb
+				// is the intended feel; tune only after play. ClassBurstCount 3 is kept for Burst mode
+				// on the selector (18 pellets per burst pull at close range) — turn pellets down first
+				// if this dominates CQB.
 				2.8f, 0.35f, 7200.f, 0.30f, 3, 10, 2.8f,
 				TEXT("sg_04"), 1, 6, 2.6f,
 				1.5f, 4.0f, 0, 6.f,
@@ -489,7 +487,7 @@ namespace PFWeapon
 				nullptr, FVector(10.80f, -1.24f, -14.29f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(42.00f, 6.40f, 0.00f),
 				FVector(8.19f, 2.68f, -1.13f), FRotator(5.17f, -0.21f, 2.64f),
 				Mode_A, EPFFireMode::Auto,
-				2.2f, 0.15f, 11000.f, 2.0f, 3, 75, 10.0f,
+				2.2f, 0.15f, 11000.f, 2.0f, 3, 200, 10.0f,
 				TEXT("lmg_01"), 1, 1, 0.f,
 				0.05f, 1.2f, 10, 4.f,
 				0.35f, 0.12f, 14.f,
@@ -499,7 +497,7 @@ namespace PFWeapon
 				nullptr, FVector(12.17f, 1.76f, -18.13f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(42.00f, 6.40f, 0.00f),
 				FVector(5.80f, 0.07f, -3.65f), FRotator(5.17f, -0.21f, 2.64f),
 				Mode_A, EPFFireMode::Auto,
-				2.4f, 0.16f, 12000.f, 2.2f, 3, 60, 6.0f,
+				2.4f, 0.16f, 12000.f, 2.2f, 3, 180, 6.0f,
 				TEXT("lmg_02"), 2, 1, 0.f,
 				0.05f, 1.2f, 10, 4.f,
 				0.50f, 0.16f, 14.f,
@@ -509,7 +507,7 @@ namespace PFWeapon
 				nullptr, FVector(10.37f, 0.79f, -20.26f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(42.00f, 6.40f, 0.00f),
 				FVector(7.27f, 0.99f, 0.22f), FRotator(4.47f, -0.21f, 2.64f),
 				Mode_A, EPFFireMode::Auto,
-				2.6f, 0.18f, 11000.f, 2.0f, 3, 100, 12.0f,
+				2.6f, 0.18f, 11000.f, 2.0f, 3, 200, 12.0f,
 				TEXT("lmg_03"), 1, 1, 0.f,
 				0.06f, 1.4f, 12, 4.f,
 				0.35f, 0.12f, 14.f,
@@ -532,7 +530,7 @@ namespace PFWeapon
 				nullptr, FVector(7.80f, 2.86f, -20.64f), FRotator(-5.00f, -90.00f, 5.00f), 1.000f, FVector(40.00f, 6.40f, -8.70f),
 				FVector(10.65f, 0.42f, 2.98f), FRotator(5.17f, -0.21f, 2.64f),
 				Mode_A, EPFFireMode::Auto,
-				3.0f, 0.5f, 9000.f, 1.5f, 3, 150, 18.0f,
+				3.0f, 0.5f, 9000.f, 1.5f, 3, 250, 18.0f,
 				TEXT("lmg_minigun"), 1, 1, 0.f,
 				-0.02f, 2.2f, 0, 4.f,
 				0.f, 0.f, 14.f,

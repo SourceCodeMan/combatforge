@@ -6,6 +6,7 @@
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Core/CombatForgeGameState.h"
+#include "Core/CombatForgePlayerState.h"
 #include "Core/CombatForgeTypes.h"
 #include "Player/CombatForgeCharacter.h"
 
@@ -286,14 +287,38 @@ void APFAmmoBarrel::AuthorityInteract(APawn* Interactor)
 			return;
 		}
 	}
+
+	// Per-player 10 s cooldown (playtest 2026-08-06): state lives on PlayerState so barrel-hopping
+	// cannot bypass it. Different players in a row wait nothing. Bots refill via
+	// ServerRefillFromPickup directly (not this function) and are unaffected.
+	ACombatForgePlayerState* PS = Char->GetPlayerState<ACombatForgePlayerState>();
+	const UWorld* World = GetWorld();
+	if (PS && World)
+	{
+		const double Now = World->GetTimeSeconds();
+		const double Elapsed = Now - PS->LastBarrelRefillTime;
+		if (Elapsed < ACombatForgePlayerState::BarrelRefillCooldownSec)
+		{
+			const float Remaining = static_cast<float>(
+				ACombatForgePlayerState::BarrelRefillCooldownSec - Elapsed);
+			Char->ClientBarrelCooldown(Remaining);
+			return;
+		}
+	}
+
 	UPFWeaponComponent* Weapon = Char->GetWeapon();
 	if (!Weapon || !Weapon->ServerRefillFromPickup())
 	{
-		return; // already full
+		return; // already full — do not burn the cooldown
 	}
 
-	// Permanent resupply station: do NOT consume the barrel. It stays available so any player can top up as
-	// often as they need for the whole combat phase. (ServerRefillFromPickup already no-ops when full, so
-	// spamming [E] against a full mag does nothing.)
+	// Stamp only on a successful grant so a full-mag press never starts the timer.
+	if (PS && World)
+	{
+		PS->LastBarrelRefillTime = World->GetTimeSeconds();
+	}
+
+	// Permanent resupply station: do NOT consume the barrel. Per-player cooldown (above) is the
+	// spam gate; the barrel itself stays available for the whole combat phase.
 	UE_LOG(CombatForgeLog, Log, TEXT("AmmoBarrel: refilled %s"), *Char->GetName());
 }

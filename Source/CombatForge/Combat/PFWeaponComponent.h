@@ -88,8 +88,8 @@ public:
 	UPROPERTY(ReplicatedUsing=OnRep_Reserve) int32 ReserveAmmo = 120; // COND_OwnerOnly
 	UPROPERTY(ReplicatedUsing=OnRep_Reload) bool  bReloading  = false; // COND_OwnerOnly
 	/** Grenades carried this life (COND_OwnerOnly). Reset on spawn, topped up at ammo barrels. */
-	UPROPERTY(ReplicatedUsing=OnRep_Grenades) uint8 FragCount  = 2;
-	UPROPERTY(ReplicatedUsing=OnRep_Grenades) uint8 SmokeCount = 2;
+	UPROPERTY(ReplicatedUsing=OnRep_Grenades) uint8 FragCount  = 6;
+	UPROPERTY(ReplicatedUsing=OnRep_Grenades) uint8 SmokeCount = 6;
 
 	// ---- Cross-package reads ----
 	float GetCurrentSpreadHalfAngleDeg() const;  // live cone incl. bloom + movement state; crosshair polls per tick
@@ -132,8 +132,8 @@ public:
 	/** Fire selector: rounds emitted per trigger pull in Burst mode. */
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") uint8 BurstCount = 3;
 	/** Grenade loadout granted per life (also the ammo-barrel refill cap). */
-	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") uint8 MaxFrag  = 2;
-	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") uint8 MaxSmoke = 2;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") uint8 MaxFrag  = 6;
+	UPROPERTY(EditDefaultsOnly, Category="PF|Grenade") uint8 MaxSmoke = 6;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float MuzzleSpeedUU = 10000.f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjGravityScale = 0.35f;
 	UPROPERTY(EditDefaultsOnly, Category="PF|Marker") float ProjLifetime = 2.f;

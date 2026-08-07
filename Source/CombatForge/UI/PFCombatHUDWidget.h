@@ -62,6 +62,8 @@ private:
 	void UpdateBombCarryIndicator();
 	/** Center prompt when a door (etc.) is in interact range — "F to open". */
 	void UpdateInteractPrompt();
+	/** Lower-right toast when ammo-barrel resupply is on per-player cooldown. */
+	void UpdateBarrelCooldownNotice();
 
 	void UpdateCrosshair();
 	void UpdateBanner(float InDeltaTime);
@@ -91,6 +93,8 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> BombCarryText;
 	/** Contextual interact cue (e.g. door in range). */
 	UPROPERTY() TObjectPtr<UTextBlock> InteractPromptText;
+	/** Lower-right private toast: "Resupply in Ns" after a cooled-down barrel press. */
+	UPROPERTY() TObjectPtr<UTextBlock> BarrelCooldownText;
 	UPROPERTY() TObjectPtr<UTextBlock> RoundTimerText;
 	/** Final-30-seconds pop: big top-center countdown, visible only while the live round timer
 	 *  is inside 30 s (Tom 2026-07-24 — "so people can see that the game is ending"). */

@@ -317,6 +317,17 @@ void UPFBuildComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		SetGhostVisible(false);
 		return;
 	}
+	// The placement trace below originates at the CAMERA. If the view target isn't this pawn
+	// (leftover death-cam spectate — playtest 2026-08-06 "could only build where the bot ran"),
+	// the ghost would anchor on whoever the camera is riding. Refuse to build from a borrowed
+	// camera; the phase-entry view-target restore in the GameMode is the primary fix, this is
+	// the guarantee that no future spectate path re-introduces it.
+	if (PC->GetViewTarget() != Char)
+	{
+		SetGhostVisible(false);
+		LastSentSlot.bValid = false;
+		return;
+	}
 
 	const FVector  CamLoc = PC->PlayerCameraManager->GetCameraLocation();
 	const FRotator CamRot = PC->PlayerCameraManager->GetCameraRotation();
