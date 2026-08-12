@@ -258,16 +258,25 @@ void UPFInputConfig::BuildRebindRegistry()
 	Add(FName(TEXT("Punch")),      TEXT("Punch"),        IA_Melee,      IMC_Combat, EKeys::B);
 }
 
+void UPFInputConfig::RemapEntry(FRebindEntry& E, FKey NewKey)
+{
+	if (E.Context == nullptr || E.Action == nullptr)
+	{
+		return;
+	}
+	E.Context->UnmapKey(E.Action, E.CurrentKey);
+	E.Context->MapKey(E.Action, NewKey);
+	E.CurrentKey = NewKey;
+}
+
 void UPFInputConfig::ApplySavedKeyOverrides()
 {
 	for (FRebindEntry& E : RebindEntries)
 	{
 		const FKey Saved = FPFUserPrefs::GetKeyOverride(E.Id);
-		if (Saved.IsValid() && Saved != E.CurrentKey && E.Context && E.Action)
+		if (Saved.IsValid() && Saved != E.CurrentKey)
 		{
-			E.Context->UnmapKey(E.Action, E.CurrentKey);
-			E.Context->MapKey(E.Action, Saved);
-			E.CurrentKey = Saved;
+			RemapEntry(E, Saved);
 		}
 	}
 }
@@ -344,9 +353,7 @@ bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
 			return false;
 		}
 	}
-	E->Context->UnmapKey(E->Action, E->CurrentKey);
-	E->Context->MapKey(E->Action, NewKey);
-	E->CurrentKey = NewKey;
+	RemapEntry(*E, NewKey);
 	return true;
 }
 
@@ -354,11 +361,6 @@ void UPFInputConfig::ResetActionKeysToDefaults()
 {
 	for (FRebindEntry& E : RebindEntries)
 	{
-		if (E.Context && E.Action)
-		{
-			E.Context->UnmapKey(E.Action, E.CurrentKey);
-			E.Context->MapKey(E.Action, E.DefaultKey);
-			E.CurrentKey = E.DefaultKey;
-		}
+		RemapEntry(E, E.DefaultKey);
 	}
 }
