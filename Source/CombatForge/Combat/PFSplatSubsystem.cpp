@@ -227,8 +227,7 @@ APFPaintballProjectile* UPFSplatSubsystem::AcquireCosmeticProjectile()
 
 bool UPFSplatSubsystem::IsRenderingWorld() const
 {
-	const UWorld* World = GetWorld();
-	return World != nullptr && World->GetNetMode() != NM_DedicatedServer;
+	return PFIsRenderingWorld(GetWorld());
 }
 
 void UPFSplatSubsystem::EnsureInfrastructure()

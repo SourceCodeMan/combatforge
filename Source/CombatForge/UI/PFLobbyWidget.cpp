@@ -11,6 +11,8 @@
 
 #include "UI/PFCycleBar.h"
 
+#include "UI/PFSlateFont.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -24,15 +26,9 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Brushes/SlateColorBrush.h"
 #include "GameFramework/PlayerState.h"
-#include "Styling/CoreStyle.h"
 
 namespace
 {
-	FSlateFontInfo PFLobbyFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
-
 	// Prefixed names avoid unity-build ODR clashes with PFLoadingMenuWidget.cpp helpers.
 	FString LobbyBuildModeLabel(EPFBuildMode Mode)
 	{
@@ -133,7 +129,7 @@ void UPFLobbyWidget::BuildTree()
 	// Title.
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>();
 	TitleText->SetText(FText::FromString(TEXT("COMBAT FORGE — LOBBY")));
-	TitleText->SetFont(PFLobbyFont(28, true));
+	TitleText->SetFont(PFSlateFont(28, true));
 	TitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	TitleText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(TitleText))
@@ -147,7 +143,7 @@ void UPFLobbyWidget::BuildTree()
 	// Start countdown (shown once the GameMode stamps a lobby end time).
 	CountdownText = WidgetTree->ConstructWidget<UTextBlock>();
 	CountdownText->SetText(FText::GetEmpty());
-	CountdownText->SetFont(PFLobbyFont(20, true));
+	CountdownText->SetFont(PFSlateFont(20, true));
 	CountdownText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.2f)));
 	CountdownText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(CountdownText))
@@ -190,7 +186,7 @@ void UPFLobbyWidget::BuildTree()
 
 	// Footer hints.
 	FooterText = WidgetTree->ConstructWidget<UTextBlock>();
-	FooterText->SetFont(PFLobbyFont(14, false));
+	FooterText->SetFont(PFSlateFont(14, false));
 	FooterText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.7f)));
 	FooterText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(FooterText))
@@ -215,7 +211,7 @@ UButton* UPFLobbyWidget::MakeConfigButton(const FString& Label, TObjectPtr<UText
 
 	UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>();
 	LabelText->SetText(FText::FromString(Label));
-	LabelText->SetFont(PFLobbyFont(12, true));
+	LabelText->SetFont(PFSlateFont(12, true));
 	LabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.68f, 0.85f)));
 	USizeBox* LabelSizer = WidgetTree->ConstructWidget<USizeBox>();
 	LabelSizer->SetWidthOverride(74.f);
@@ -227,7 +223,7 @@ UButton* UPFLobbyWidget::MakeConfigButton(const FString& Label, TObjectPtr<UText
 	}
 
 	OutValueText = WidgetTree->ConstructWidget<UTextBlock>();
-	OutValueText->SetFont(PFLobbyFont(15, false));
+	OutValueText->SetFont(PFSlateFont(15, false));
 	OutValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(OutValueText))
 	{
@@ -246,7 +242,7 @@ void UPFLobbyWidget::AddReadOnlyRow(UVerticalBox* Box, const FString& Label, TOb
 
 	UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>();
 	LabelText->SetText(FText::FromString(Label));
-	LabelText->SetFont(PFLobbyFont(12, true));
+	LabelText->SetFont(PFSlateFont(12, true));
 	LabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.55f, 0.7f)));
 	USizeBox* LabelSizer = WidgetTree->ConstructWidget<USizeBox>();
 	LabelSizer->SetWidthOverride(74.f);
@@ -258,7 +254,7 @@ void UPFLobbyWidget::AddReadOnlyRow(UVerticalBox* Box, const FString& Label, TOb
 	}
 
 	OutValueText = WidgetTree->ConstructWidget<UTextBlock>();
-	OutValueText->SetFont(PFLobbyFont(14, false));
+	OutValueText->SetFont(PFSlateFont(14, false));
 	OutValueText->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.87f, 0.9f)));
 	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(OutValueText))
 	{
@@ -285,7 +281,7 @@ void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 
 	UTextBlock* Header = WidgetTree->ConstructWidget<UTextBlock>();
 	Header->SetText(FText::FromString(TEXT("MATCH SETUP")));
-	Header->SetFont(PFLobbyFont(16, true));
+	Header->SetFont(PFSlateFont(16, true));
 	Header->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(Header)) { VS->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f)); }
 
@@ -302,14 +298,14 @@ void UPFLobbyWidget::BuildConfigPanel(UCanvasPanel* RootCanvas)
 	OptionsBtn->OnClicked.AddUniqueDynamic(this, &UPFLobbyWidget::OnOptionsClicked);
 	UTextBlock* OptionsLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	OptionsLabel->SetText(FText::FromString(TEXT("OPTIONS")));
-	OptionsLabel->SetFont(PFLobbyFont(14, true));
+	OptionsLabel->SetFont(PFSlateFont(14, true));
 	OptionsLabel->SetJustification(ETextJustify::Center);
 	OptionsLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.88f, 1.f)));
 	OptionsBtn->SetContent(OptionsLabel);
 	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(OptionsBtn)) { VS->SetPadding(FMargin(0.f, 6.f, 0.f, 2.f)); VS->SetHorizontalAlignment(HAlign_Fill); }
 
 	ConfigHintText = WidgetTree->ConstructWidget<UTextBlock>();
-	ConfigHintText->SetFont(PFLobbyFont(11, false));
+	ConfigHintText->SetFont(PFSlateFont(11, false));
 	ConfigHintText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	if (UVerticalBoxSlot* VS = Box->AddChildToVerticalBox(ConfigHintText)) { VS->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f)); }
 
@@ -560,7 +556,7 @@ void UPFLobbyWidget::RefreshRoster()
 		// Player name.
 		UTextBlock* NameText = WidgetTree->ConstructWidget<UTextBlock>();
 		NameText->SetText(FText::FromString(PS->GetPlayerName()));
-		NameText->SetFont(PFLobbyFont(16, false));
+		NameText->SetFont(PFSlateFont(16, false));
 		NameText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		if (UHorizontalBoxSlot* HSlot = RowBox->AddChildToHorizontalBox(NameText))
 		{
@@ -571,7 +567,7 @@ void UPFLobbyWidget::RefreshRoster()
 		// Ready check.
 		UTextBlock* ReadyText = WidgetTree->ConstructWidget<UTextBlock>();
 		ReadyText->SetText(FText::FromString(PS->bReady ? TEXT("READY") : TEXT("—")));
-		ReadyText->SetFont(PFLobbyFont(14, true));
+		ReadyText->SetFont(PFSlateFont(14, true));
 		ReadyText->SetColorAndOpacity(FSlateColor(PS->bReady
 			? FLinearColor(0.2f, 0.9f, 0.3f)
 			: FLinearColor(1.f, 1.f, 1.f, 0.35f)));

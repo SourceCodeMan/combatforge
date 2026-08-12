@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/World.h"
 #include "Modules/ModuleManager.h"
 
 /**
@@ -14,6 +15,11 @@
  *   Error   = contract violations
  */
 DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
+
+FORCEINLINE bool PFIsRenderingWorld(const UWorld* World)
+{
+	return World != nullptr && World->GetNetMode() != NM_DedicatedServer;
+}
 
 /**
  * Multiplayer build gate. This number is folded into the network version (UCombatForgeGameInstance::Init),

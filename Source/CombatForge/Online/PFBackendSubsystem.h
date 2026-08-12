@@ -188,4 +188,5 @@ private:
 		const TMap<FString, FString>& ExtraHeaders = {});
 	void LinkInstallGuid();
 	static bool ParseServerInfo(const TSharedPtr<class FJsonObject>& Obj, FPFBackendServerInfo& Out);
+	static bool ParseSingleServerResponse(int32 Code, const FString& Resp, FPFBackendServerInfo& Out);
 };

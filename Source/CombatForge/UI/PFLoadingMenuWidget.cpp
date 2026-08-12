@@ -9,6 +9,8 @@
 #include "Voting/PFRatingSubsystem.h"
 #include "Engine/GameInstance.h"
 
+#include "UI/PFSlateFont.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "Brushes/SlateColorBrush.h"
 #include "Components/Button.h"
@@ -45,7 +47,6 @@
 #include "Engine/StaticMesh.h"
 #include "ShaderCompiler.h"
 #include "ShaderPipelineCache.h"
-#include "Styling/CoreStyle.h"
 #include "UObject/SoftObjectPath.h"
 
 namespace
@@ -69,11 +70,6 @@ namespace
 
 namespace
 {
-	FSlateFontInfo PFLoadFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
-
 	FString BuildModeLabel(EPFBuildMode Mode)
 	{
 		switch (Mode)
@@ -200,7 +196,7 @@ UButton* UPFLoadingMenuWidget::MakeMenuTab(const FString& Label, FName Name)
 	Btn->SetBackgroundColor(FLinearColor(0.14f, 0.15f, 0.18f, 0.95f));
 	UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>();
 	T->SetText(FText::FromString(Label));
-	T->SetFont(PFLoadFont(14, true));
+	T->SetFont(PFSlateFont(14, true));
 	T->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.12f, 0.14f)));
 	T->SetJustification(ETextJustify::Center);
 	Btn->AddChild(T);
@@ -216,7 +212,7 @@ UButton* UPFLoadingMenuWidget::MakeSetupButton(const FString& Label, TObjectPtr<
 
 	UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>();
 	LabelText->SetText(FText::FromString(Label));
-	LabelText->SetFont(PFLoadFont(13, true));
+	LabelText->SetFont(PFSlateFont(13, true));
 	LabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
 	USizeBox* LabelSizer = WidgetTree->ConstructWidget<USizeBox>();
 	LabelSizer->SetWidthOverride(90.f);
@@ -228,7 +224,7 @@ UButton* UPFLoadingMenuWidget::MakeSetupButton(const FString& Label, TObjectPtr<
 	}
 
 	OutValueText = WidgetTree->ConstructWidget<UTextBlock>();
-	OutValueText->SetFont(PFLoadFont(16, true));
+	OutValueText->SetFont(PFSlateFont(16, true));
 	OutValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	if (UHorizontalBoxSlot* HS = Row->AddChildToHorizontalBox(OutValueText))
 	{
@@ -246,7 +242,7 @@ void UPFLoadingMenuWidget::AddHowToLine(UVerticalBox* Box, const FString& Text, 
 {
 	UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>();
 	T->SetText(FText::FromString(Text));
-	T->SetFont(PFLoadFont(Size, bBold));
+	T->SetFont(PFSlateFont(Size, bBold));
 	T->SetColorAndOpacity(FSlateColor(Color));
 	T->SetAutoWrapText(true);
 	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(T))
@@ -298,7 +294,7 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 
 	MapPickerHeader = WidgetTree->ConstructWidget<UTextBlock>();
 	MapPickerHeader->SetText(FText::FromString(TEXT("COMMUNITY MAP")));
-	MapPickerHeader->SetFont(PFLoadFont(13, true));
+	MapPickerHeader->SetFont(PFSlateFont(13, true));
 	MapPickerHeader->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
 	MapPickerHeader->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = MapPickerBox->AddChildToVerticalBox(MapPickerHeader))
@@ -308,7 +304,7 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 	}
 
 	MapSelectedLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	MapSelectedLabel->SetFont(PFLoadFont(12, false));
+	MapSelectedLabel->SetFont(PFSlateFont(12, false));
 	MapSelectedLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.88f, 1.f)));
 	MapSelectedLabel->SetJustification(ETextJustify::Center);
 	MapSelectedLabel->SetAutoWrapText(true);
@@ -327,7 +323,7 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 	MapPageNextBtn = MakeMenuTab(TEXT("  >  "), TEXT("MapNext"));
 	MapPageNextBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnMapPageNext);
 	MapPageLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	MapPageLabel->SetFont(PFLoadFont(12, true));
+	MapPageLabel->SetFont(PFSlateFont(12, true));
 	MapPageLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.87f, 0.9f)));
 	MapPageLabel->SetJustification(ETextJustify::Center);
 
@@ -382,7 +378,7 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 		}
 
 		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
-		Lab->SetFont(PFLoadFont(12, false));
+		Lab->SetFont(PFSlateFont(12, false));
 		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.91f, 0.94f)));
 		Lab->SetJustification(ETextJustify::Left);
 		if (UHorizontalBoxSlot* H = RowContent->AddChildToHorizontalBox(Lab))
@@ -399,7 +395,7 @@ void UPFLoadingMenuWidget::BuildMapPicker(UVerticalBox* Parent)
 		Fav->InitRow(this, i);
 		UTextBlock* FavGlyph = WidgetTree->ConstructWidget<UTextBlock>();
 		FavGlyph->SetText(FText::FromString(TEXT("*")));
-		FavGlyph->SetFont(PFLoadFont(20, true));
+		FavGlyph->SetFont(PFSlateFont(20, true));
 		FavGlyph->SetColorAndOpacity(FSlateColor(FLinearColor(0.40f, 0.42f, 0.48f)));
 		FavGlyph->SetJustification(ETextJustify::Center);
 		Fav->AddChild(FavGlyph);
@@ -509,12 +505,7 @@ void UPFLoadingMenuWidget::OnOptionsClicked() { SelectMenuTab(3); }
 
 const TCHAR* UPFLoadingMenuWidget::CrosshairStyleName(int32 Idx)
 {
-	switch (Idx)
-	{
-	case 1:  return TEXT("  Dot only  ");
-	case 2:  return TEXT("  Cross only  ");
-	default: return TEXT("  Cross + dot  ");
-	}
+	return PFCrosshairStyleName(Idx);
 }
 
 void UPFLoadingMenuWidget::RefreshLoadoutLabels()
@@ -540,7 +531,7 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 
 	UTextBlock* Head = WidgetTree->ConstructWidget<UTextBlock>();
 	Head->SetText(FText::FromString(TEXT("WEAPON")));
-	Head->SetFont(PFLoadFont(15, true));
+	Head->SetFont(PFSlateFont(15, true));
 	Head->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
 	Head->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Head))
@@ -554,7 +545,7 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
 		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
 		Lab->SetText(FText::FromString(Label));
-		Lab->SetFont(PFLoadFont(13, true));
+		Lab->SetFont(PFSlateFont(13, true));
 		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
 		USizeBox* LabSizer = WidgetTree->ConstructWidget<USizeBox>();
 		LabSizer->SetWidthOverride(110.f);
@@ -566,13 +557,13 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 		Prev->InitStep(this, Kind, -1);
 		UTextBlock* PrevLab = WidgetTree->ConstructWidget<UTextBlock>();
 		PrevLab->SetText(FText::FromString(TEXT(" < ")));
-		PrevLab->SetFont(PFLoadFont(14, true));
+		PrevLab->SetFont(PFSlateFont(14, true));
 		PrevLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Prev->SetContent(PrevLab);
 		Row->AddChildToHorizontalBox(Prev);
 
 		UTextBlock* Val = WidgetTree->ConstructWidget<UTextBlock>();
-		Val->SetFont(PFLoadFont(12, false));
+		Val->SetFont(PFSlateFont(12, false));
 		Val->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Val->SetJustification(ETextJustify::Center);
 		Val->SetClipping(EWidgetClipping::ClipToBounds);
@@ -589,7 +580,7 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 		Next->InitStep(this, Kind, +1);
 		UTextBlock* NextLab = WidgetTree->ConstructWidget<UTextBlock>();
 		NextLab->SetText(FText::FromString(TEXT(" > ")));
-		NextLab->SetFont(PFLoadFont(14, true));
+		NextLab->SetFont(PFSlateFont(14, true));
 		NextLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Next->SetContent(NextLab);
 		Row->AddChildToHorizontalBox(Next);
@@ -605,7 +596,7 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 	auto MakeLockLine = [&](TObjectPtr<UTextBlock>& Out)
 	{
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>();
-		T->SetFont(PFLoadFont(11, false));
+		T->SetFont(PFSlateFont(11, false));
 		T->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.62f, 0.20f)));
 		T->SetJustification(ETextJustify::Center);
 		T->SetAutoWrapText(true);
@@ -627,7 +618,7 @@ void UPFLoadingMenuWidget::BuildWeaponPicker(UVerticalBox* Col)
 	// selectable - two rifles is a legal, if heavy, loadout. Scroll wheel swaps hand <-> back in game.
 	UTextBlock* SecHdr = WidgetTree->ConstructWidget<UTextBlock>();
 	SecHdr->SetText(FText::FromString(TEXT("SECOND WEAPON  —  carried on the back, scroll wheel to swap")));
-	SecHdr->SetFont(PFLoadFont(11, false));
+	SecHdr->SetFont(PFSlateFont(11, false));
 	SecHdr->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.55f)));
 	SecHdr->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SecHdr))
@@ -821,7 +812,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 	// 13px + wrap + Fill slot: the old default-size, centered, non-wrapping line overran the
 	// HOST LAN GAME column on the right (Tom 2026-07-15).
 	Sub->SetText(FText::FromString(TEXT("Your soldier classes — clothing + weapon per slot. Class 1 is free; a free account unlocks all five. Saved to this PC, applied on spawn.")));
-	Sub->SetFont(PFLoadFont(13, false));
+	Sub->SetFont(PFSlateFont(13, false));
 	Sub->SetAutoWrapText(true);
 	Sub->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.65f)));
 	Sub->SetJustification(ETextJustify::Center);
@@ -845,7 +836,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		SlotBtn->InitSlot(this, ss);
 		UTextBlock* SlotLab = WidgetTree->ConstructWidget<UTextBlock>();
 		SlotLab->SetText(FText::FromString(FString::Printf(TEXT("  %d  "), ss + 1)));
-		SlotLab->SetFont(PFLoadFont(16, true));
+		SlotLab->SetFont(PFSlateFont(16, true));
 		SlotLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		SlotLab->SetJustification(ETextJustify::Center);
 		SlotBtn->SetContent(SlotLab);
@@ -870,7 +861,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		UHorizontalBox* XRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 		UTextBlock* XLab = WidgetTree->ConstructWidget<UTextBlock>();
 		XLab->SetText(FText::FromString(TEXT("CROSSHAIR")));
-		XLab->SetFont(PFLoadFont(13, true));
+		XLab->SetFont(PFSlateFont(13, true));
 		XLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
 		USizeBox* XSizer = WidgetTree->ConstructWidget<USizeBox>();
 		XSizer->SetWidthOverride(110.f);
@@ -880,7 +871,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		LoadoutCrosshairButton->SetBackgroundColor(FLinearColor(0.12f, 0.13f, 0.16f, 1.f));
 		LoadoutCrosshairButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnCrosshairCycle);
 		LoadoutCrosshairValueText = WidgetTree->ConstructWidget<UTextBlock>();
-		LoadoutCrosshairValueText->SetFont(PFLoadFont(12, false));
+		LoadoutCrosshairValueText->SetFont(PFSlateFont(12, false));
 		LoadoutCrosshairValueText->SetJustification(ETextJustify::Center);
 		LoadoutCrosshairValueText->SetClipping(EWidgetClipping::ClipToBounds);
 		LoadoutCrosshairValueText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
@@ -928,7 +919,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 
 		UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
 		Lab->SetText(FText::FromString(PFChar::SlotLabel(s).ToUpper()));
-		Lab->SetFont(PFLoadFont(13, true));
+		Lab->SetFont(PFSlateFont(13, true));
 		Lab->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
 		USizeBox* LabSizer = WidgetTree->ConstructWidget<USizeBox>();
 		LabSizer->SetWidthOverride(110.f);
@@ -940,13 +931,13 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		Prev->InitStep(this, s, -1);
 		UTextBlock* PrevLab = WidgetTree->ConstructWidget<UTextBlock>();
 		PrevLab->SetText(FText::FromString(TEXT(" < ")));
-		PrevLab->SetFont(PFLoadFont(14, true));
+		PrevLab->SetFont(PFSlateFont(14, true));
 		PrevLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Prev->SetContent(PrevLab);
 		Row->AddChildToHorizontalBox(Prev);
 
 		UTextBlock* Val = WidgetTree->ConstructWidget<UTextBlock>();
-		Val->SetFont(PFLoadFont(12, false));
+		Val->SetFont(PFSlateFont(12, false));
 		Val->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Val->SetJustification(ETextJustify::Center);
 		Val->SetClipping(EWidgetClipping::ClipToBounds);
@@ -963,7 +954,7 @@ void UPFLoadingMenuWidget::BuildCharacterPage(UVerticalBox* Col)
 		Next->InitStep(this, s, +1);
 		UTextBlock* NextLab = WidgetTree->ConstructWidget<UTextBlock>();
 		NextLab->SetText(FText::FromString(TEXT(" > ")));
-		NextLab->SetFont(PFLoadFont(14, true));
+		NextLab->SetFont(PFSlateFont(14, true));
 		NextLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Next->SetContent(NextLab);
 		Row->AddChildToHorizontalBox(Next);
@@ -1248,7 +1239,7 @@ void UPFLoadingMenuWidget::BuildSetupCards(UVerticalBox* Col)
 {
 	// Description panel — the selected game mode's name + what it is (CoD-style header above the cards).
 	SetupDescTitle = WidgetTree->ConstructWidget<UTextBlock>();
-	SetupDescTitle->SetFont(PFLoadFont(20, true));
+	SetupDescTitle->SetFont(PFSlateFont(20, true));
 	SetupDescTitle->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
 	SetupDescTitle->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SetupDescTitle))
@@ -1257,7 +1248,7 @@ void UPFLoadingMenuWidget::BuildSetupCards(UVerticalBox* Col)
 		V->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
 	}
 	SetupDescText = WidgetTree->ConstructWidget<UTextBlock>();
-	SetupDescText->SetFont(PFLoadFont(13, false));
+	SetupDescText->SetFont(PFSlateFont(13, false));
 	SetupDescText->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.81f, 0.88f)));
 	SetupDescText->SetJustification(ETextJustify::Center);
 	SetupDescText->SetAutoWrapText(true);
@@ -1272,7 +1263,7 @@ void UPFLoadingMenuWidget::BuildSetupCards(UVerticalBox* Col)
 	{
 		UTextBlock* Head = WidgetTree->ConstructWidget<UTextBlock>();
 		Head->SetText(FText::FromString(Header));
-		Head->SetFont(PFLoadFont(11, true));
+		Head->SetFont(PFSlateFont(11, true));
 		Head->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.72f, 0.95f)));
 		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(Head))
 		{
@@ -1286,7 +1277,7 @@ void UPFLoadingMenuWidget::BuildSetupCards(UVerticalBox* Col)
 			Card->InitCard(this, Kind, i);
 			UTextBlock* Lab = WidgetTree->ConstructWidget<UTextBlock>();
 			Lab->SetText(FText::FromString(LabelFn(i)));
-			Lab->SetFont(PFLoadFont(11, true));
+			Lab->SetFont(PFSlateFont(11, true));
 			Lab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			Lab->SetJustification(ETextJustify::Center);
 			Lab->SetAutoWrapText(true);   // long names (e.g. "Capture the Flag") wrap inside the card
@@ -1439,7 +1430,7 @@ void UPFLoadingMenuWidget::BuildTree()
 
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>();
 	TitleText->SetText(FText::FromString(TEXT("COMBAT FORGE")));
-	TitleText->SetFont(PFLoadFont(48, true));
+	TitleText->SetFont(PFSlateFont(48, true));
 	TitleText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
 	TitleText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(TitleText))
@@ -1450,7 +1441,7 @@ void UPFLoadingMenuWidget::BuildTree()
 
 	SubtitleText = WidgetTree->ConstructWidget<UTextBlock>();
 	SubtitleText->SetText(FText::FromString(TEXT("Airsoft arena · multiplayer")));
-	SubtitleText->SetFont(PFLoadFont(16, false));
+	SubtitleText->SetFont(PFSlateFont(16, false));
 	SubtitleText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.78f, 0.85f)));
 	SubtitleText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(SubtitleText))
@@ -1471,7 +1462,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	QuickStartButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuickStartClicked);
 	QuickStartLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	QuickStartLabel->SetText(FText::FromString(TEXT("  AUTO MATCH SETUP  ")));
-	QuickStartLabel->SetFont(PFLoadFont(16, true));
+	QuickStartLabel->SetFont(PFSlateFont(16, true));
 	QuickStartLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.12f, 0.12f, 0.14f)));
 	QuickStartLabel->SetJustification(ETextJustify::Center);
 	QuickStartButton->AddChild(QuickStartLabel);
@@ -1482,7 +1473,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	}
 	UTextBlock* QuickHint = WidgetTree->ConstructWidget<UTextBlock>();
 	QuickHint->SetText(FText::FromString(TEXT("Play-Only · Skirmish · 4v4 · bots · community map")));
-	QuickHint->SetFont(PFLoadFont(12, false));
+	QuickHint->SetFont(PFSlateFont(12, false));
 	QuickHint->SetColorAndOpacity(FSlateColor(FLinearColor(0.6f, 0.62f, 0.68f)));
 	QuickHint->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = RightCol->AddChildToVerticalBox(QuickHint))
@@ -1502,7 +1493,7 @@ void UPFLoadingMenuWidget::BuildTree()
 		{
 			// ---- ONLINE (hosted servers via api.playcombatforge.com; account required) ----
 			AccountStatusText = WidgetTree->ConstructWidget<UTextBlock>();
-			AccountStatusText->SetFont(PFLoadFont(12, false));
+			AccountStatusText->SetFont(PFSlateFont(12, false));
 			AccountStatusText->SetJustification(ETextJustify::Center);
 			AccountStatusText->SetAutoWrapText(true);
 			if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(AccountStatusText))
@@ -1517,7 +1508,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			LoginButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnLoginClicked);
 			LoginLabel = WidgetTree->ConstructWidget<UTextBlock>();
 			LoginLabel->SetText(FText::FromString(TEXT("  LOG IN  ")));
-			LoginLabel->SetFont(PFLoadFont(13, true));
+			LoginLabel->SetFont(PFSlateFont(13, true));
 			LoginLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			LoginButton->AddChild(LoginLabel);
 			if (UHorizontalBoxSlot* H = OnlineRow->AddChildToHorizontalBox(LoginButton))
@@ -1531,7 +1522,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			QuickPlayButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuickPlayClicked);
 			UTextBlock* QpLab = WidgetTree->ConstructWidget<UTextBlock>();
 			QpLab->SetText(FText::FromString(TEXT("  QUICK PLAY  ")));
-			QpLab->SetFont(PFLoadFont(13, true));
+			QpLab->SetFont(PFSlateFont(13, true));
 			QpLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			QuickPlayButton->AddChild(QpLab);
 			if (UHorizontalBoxSlot* H = OnlineRow->AddChildToHorizontalBox(QuickPlayButton))
@@ -1545,7 +1536,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			ServerListButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerListClicked);
 			UTextBlock* SlLab = WidgetTree->ConstructWidget<UTextBlock>();
 			SlLab->SetText(FText::FromString(TEXT("  SERVERS  ")));
-			SlLab->SetFont(PFLoadFont(13, true));
+			SlLab->SetFont(PFSlateFont(13, true));
 			SlLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			ServerListButton->AddChild(SlLab);
 			if (UHorizontalBoxSlot* H = OnlineRow->AddChildToHorizontalBox(ServerListButton))
@@ -1562,7 +1553,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			UHorizontalBox* CodeRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 			JoinCodeBox = WidgetTree->ConstructWidget<UEditableTextBox>();
 			JoinCodeBox->SetHintText(FText::FromString(TEXT("match code")));
-			JoinCodeBox->WidgetStyle.SetFont(PFLoadFont(13, false));
+			JoinCodeBox->WidgetStyle.SetFont(PFSlateFont(13, false));
 			JoinCodeBox->WidgetStyle.SetForegroundColor(FSlateColor(FLinearColor(0.06f, 0.06f, 0.08f)));
 			JoinCodeBox->SetForegroundColor(FLinearColor(0.06f, 0.06f, 0.08f));
 			USizeBox* CodeSizer = WidgetTree->ConstructWidget<USizeBox>();
@@ -1579,7 +1570,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			JoinCodeButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnJoinCodeClicked);
 			UTextBlock* CodeLab = WidgetTree->ConstructWidget<UTextBlock>();
 			CodeLab->SetText(FText::FromString(TEXT("  GO  ")));
-			CodeLab->SetFont(PFLoadFont(13, true));
+			CodeLab->SetFont(PFSlateFont(13, true));
 			CodeLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			JoinCodeButton->AddChild(CodeLab);
 			if (UHorizontalBoxSlot* H = CodeRow->AddChildToHorizontalBox(JoinCodeButton))
@@ -1603,7 +1594,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			{
 				UTextBlock* NewMatchLab = WidgetTree->ConstructWidget<UTextBlock>();
 				NewMatchLab->SetText(FText::FromString(TEXT("  START NEW MATCH (empty server)  ")));
-				NewMatchLab->SetFont(PFLoadFont(12, true));
+				NewMatchLab->SetFont(PFSlateFont(12, true));
 				NewMatchLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 				NewMatchButton->AddChild(NewMatchLab);
 			}
@@ -1638,7 +1629,7 @@ void UPFLoadingMenuWidget::BuildTree()
 				default: Row->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnServerRow11Clicked); break;
 				}
 				UTextBlock* RowLab = WidgetTree->ConstructWidget<UTextBlock>();
-				RowLab->SetFont(PFLoadFont(11, false));
+				RowLab->SetFont(PFSlateFont(11, false));
 				RowLab->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.87f, 0.92f)));
 				RowLab->SetAutoWrapText(true);                    // long name/map/mode wraps instead of overrunning
 				RowLab->SetJustification(ETextJustify::Center);
@@ -1674,7 +1665,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			HostLanButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnHostLanClicked);
 			UTextBlock* HostLab = WidgetTree->ConstructWidget<UTextBlock>();
 			HostLab->SetText(FText::FromString(TEXT("HOST LAN GAME")));
-			HostLab->SetFont(PFLoadFont(14, true));
+			HostLab->SetFont(PFSlateFont(14, true));
 			HostLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			HostLab->SetJustification(ETextJustify::Center);
 			HostLanButton->AddChild(HostLab);
@@ -1688,7 +1679,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			JoinIpBox = WidgetTree->ConstructWidget<UEditableTextBox>();
 			JoinIpBox->SetHintText(FText::FromString(TEXT("host IP")));
 			JoinIpBox->SetText(FText::FromString(FPFUserPrefs::GetLastJoinIp()));
-			JoinIpBox->WidgetStyle.SetFont(PFLoadFont(13, false));   // default editable-text font is comically large
+			JoinIpBox->WidgetStyle.SetFont(PFSlateFont(13, false));   // default editable-text font is comically large
 			// The light default box washed out the "host IP" hint + typed IP to near-invisible (Tom). Dark text
 			// on the light box; the hint reads as a lighter shade of the same dark so it's legible but muted.
 			JoinIpBox->WidgetStyle.SetForegroundColor(FSlateColor(FLinearColor(0.06f, 0.06f, 0.08f)));
@@ -1708,7 +1699,7 @@ void UPFLoadingMenuWidget::BuildTree()
 			JoinLanButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnJoinLanClicked);
 			UTextBlock* JoinLab = WidgetTree->ConstructWidget<UTextBlock>();
 			JoinLab->SetText(FText::FromString(TEXT("  JOIN  ")));
-			JoinLab->SetFont(PFLoadFont(13, true));
+			JoinLab->SetFont(PFSlateFont(13, true));
 			JoinLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			JoinLanButton->AddChild(JoinLab);
 			if (UHorizontalBoxSlot* H = JoinRow->AddChildToHorizontalBox(JoinLanButton))
@@ -1723,7 +1714,7 @@ void UPFLoadingMenuWidget::BuildTree()
 		else
 		{
 			UTextBlock* NetLab = WidgetTree->ConstructWidget<UTextBlock>();
-			NetLab->SetFont(PFLoadFont(13, true));
+			NetLab->SetFont(PFSlateFont(13, true));
 			NetLab->SetJustification(ETextJustify::Center);
 			if (Net == NM_ListenServer)
 			{
@@ -1749,7 +1740,7 @@ void UPFLoadingMenuWidget::BuildTree()
 				StopBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnStopHostingClicked);
 				UTextBlock* StopLab = WidgetTree->ConstructWidget<UTextBlock>();
 				StopLab->SetText(FText::FromString(TEXT("STOP HOSTING")));
-				StopLab->SetFont(PFLoadFont(12, true));
+				StopLab->SetFont(PFSlateFont(12, true));
 				StopLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 				StopLab->SetJustification(ETextJustify::Center);
 				StopBtn->AddChild(StopLab);
@@ -1768,7 +1759,7 @@ void UPFLoadingMenuWidget::BuildTree()
 				LeaveBtn->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnLeaveServerClicked);
 				UTextBlock* LeaveLab = WidgetTree->ConstructWidget<UTextBlock>();
 				LeaveLab->SetText(FText::FromString(TEXT("DISCONNECT FROM SERVER")));
-				LeaveLab->SetFont(PFLoadFont(12, true));
+				LeaveLab->SetFont(PFSlateFont(12, true));
 				LeaveLab->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 				LeaveLab->SetJustification(ETextJustify::Center);
 				LeaveBtn->AddChild(LeaveLab);
@@ -1841,7 +1832,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	}
 	BotsLabelText = WidgetTree->ConstructWidget<UTextBlock>();
 	BotsLabelText->SetText(FText::FromString(TEXT("Fill empty slots with bots")));
-	BotsLabelText->SetFont(PFLoadFont(15, false));
+	BotsLabelText->SetFont(PFSlateFont(15, false));
 	BotsLabelText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.91f, 0.94f)));
 	if (UHorizontalBoxSlot* H = BotsRow->AddChildToHorizontalBox(BotsLabelText))
 	{
@@ -1857,7 +1848,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	BuildMapPicker(SetupCol);
 
 	SetupHintText = WidgetTree->ConstructWidget<UTextBlock>();
-	SetupHintText->SetFont(PFLoadFont(12, false));
+	SetupHintText->SetFont(PFSlateFont(12, false));
 	SetupHintText->SetColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.52f, 0.58f)));
 	SetupHintText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* V = SetupCol->AddChildToVerticalBox(SetupHintText))
@@ -1906,7 +1897,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	// ---- Warmup status (right column, above START GAME) ----
 	StatusText = WidgetTree->ConstructWidget<UTextBlock>();
 	StatusText->SetText(FText::FromString(TEXT("Starting…")));
-	StatusText->SetFont(PFLoadFont(14, false));
+	StatusText->SetFont(PFSlateFont(14, false));
 	StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.92f)));
 	StatusText->SetJustification(ETextJustify::Center);
 	StatusText->SetAutoWrapText(true);
@@ -1933,7 +1924,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	EnterButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnEnterClicked);
 	EnterLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	EnterLabel->SetText(FText::FromString(TEXT("START GAME")));
-	EnterLabel->SetFont(PFLoadFont(18, true));
+	EnterLabel->SetFont(PFSlateFont(18, true));
 	EnterLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.15f, 0.15f, 0.18f)));
 	EnterLabel->SetJustification(ETextJustify::Center);
 	EnterButton->AddChild(EnterLabel);
@@ -1954,7 +1945,7 @@ void UPFLoadingMenuWidget::BuildTree()
 		OutBtn->SetBackgroundColor(Bg);
 		OutLabel = WidgetTree->ConstructWidget<UTextBlock>();
 		OutLabel->SetText(FText::FromString(Text));
-		OutLabel->SetFont(PFLoadFont(14, true));
+		OutLabel->SetFont(PFSlateFont(14, true));
 		OutLabel->SetColorAndOpacity(FSlateColor(Fg));
 		OutLabel->SetJustification(ETextJustify::Center);
 		OutBtn->AddChild(OutLabel);
@@ -2000,7 +1991,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	// a glance whether they're in sync (a mismatched build can't join — the directory gates on NetProtocol).
 	VersionText = WidgetTree->ConstructWidget<UTextBlock>();
 	VersionText->SetText(FText::FromString(FString::Printf(TEXT("Client v%d"), PFBuild::NetProtocol)));
-	VersionText->SetFont(PFLoadFont(11, false));
+	VersionText->SetFont(PFSlateFont(11, false));
 	VersionText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
 	VersionText->SetJustification(ETextJustify::Right);
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(VersionText))
@@ -2017,7 +2008,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	QuitDesktopButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnQuitDesktopClicked);
 	QuitDesktopLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	QuitDesktopLabel->SetText(FText::FromString(TEXT("QUIT TO DESKTOP")));
-	QuitDesktopLabel->SetFont(PFLoadFont(14, true));
+	QuitDesktopLabel->SetFont(PFSlateFont(14, true));
 	QuitDesktopLabel->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.85f)));
 	QuitDesktopLabel->SetJustification(ETextJustify::Center);
 	QuitDesktopButton->AddChild(QuitDesktopLabel);

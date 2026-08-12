@@ -8,6 +8,8 @@
 #include "Core/CombatForgePlayerState.h"
 #include "Player/CombatForgeCharacter.h"
 
+#include "UI/PFSlateFont.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "Brushes/SlateColorBrush.h"
 #include "Components/CanvasPanel.h"
@@ -18,15 +20,6 @@
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
-#include "Styling/CoreStyle.h"
-
-namespace
-{
-	FSlateFontInfo PFBuildFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
-}
 
 const TCHAR* UPFBuildHUDWidget::ToolDisplayName(EPFBuildTool Tool)
 {
@@ -72,7 +65,7 @@ void UPFBuildHUDWidget::BuildTree()
 
 	// Phase countdown — top center.
 	TimerText = WidgetTree->ConstructWidget<UTextBlock>();
-	TimerText->SetFont(PFBuildFont(30, true));
+	TimerText->SetFont(PFSlateFont(30, true));
 	TimerText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	TimerText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(TimerText))
@@ -85,7 +78,7 @@ void UPFBuildHUDWidget::BuildTree()
 
 	// Build-mode banner — under the timer (Improvement callout is the main one).
 	ModeBannerText = WidgetTree->ConstructWidget<UTextBlock>();
-	ModeBannerText->SetFont(PFBuildFont(14, true));
+	ModeBannerText->SetFont(PFSlateFont(14, true));
 	ModeBannerText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.35f)));
 	ModeBannerText->SetJustification(ETextJustify::Center);
 	ModeBannerText->SetText(FText::GetEmpty());
@@ -99,7 +92,7 @@ void UPFBuildHUDWidget::BuildTree()
 
 	// Per-team ready counts — under the mode banner.
 	ReadyText = WidgetTree->ConstructWidget<UTextBlock>();
-	ReadyText->SetFont(PFBuildFont(15, false));
+	ReadyText->SetFont(PFSlateFont(15, false));
 	ReadyText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.8f)));
 	ReadyText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(ReadyText))
@@ -112,7 +105,7 @@ void UPFBuildHUDWidget::BuildTree()
 
 	// Deny flash — center, below crosshair line.
 	DenyText = WidgetTree->ConstructWidget<UTextBlock>();
-	DenyText->SetFont(PFBuildFont(18, true));
+	DenyText->SetFont(PFSlateFont(18, true));
 	DenyText->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.1f, 0.1f)));
 	DenyText->SetJustification(ETextJustify::Center);
 	DenyText->SetRenderOpacity(0.f);
@@ -126,7 +119,7 @@ void UPFBuildHUDWidget::BuildTree()
 
 	// Budget + equipped piece — bottom right.
 	BudgetText = WidgetTree->ConstructWidget<UTextBlock>();
-	BudgetText->SetFont(PFBuildFont(20, true));
+	BudgetText->SetFont(PFSlateFont(20, true));
 	BudgetText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	BudgetText->SetJustification(ETextJustify::Right);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(BudgetText))
@@ -142,7 +135,7 @@ void UPFBuildHUDWidget::BuildTree()
 	UHorizontalBox* ReelRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 
 	PrevPieceText = WidgetTree->ConstructWidget<UTextBlock>();
-	PrevPieceText->SetFont(PFBuildFont(13, false));
+	PrevPieceText->SetFont(PFSlateFont(13, false));
 	PrevPieceText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
 	PrevPieceText->SetJustification(ETextJustify::Right);
 	if (UHorizontalBoxSlot* H = ReelRow->AddChildToHorizontalBox(PrevPieceText))
@@ -152,7 +145,7 @@ void UPFBuildHUDWidget::BuildTree()
 	}
 
 	EquippedText = WidgetTree->ConstructWidget<UTextBlock>();
-	EquippedText->SetFont(PFBuildFont(18, true));
+	EquippedText->SetFont(PFSlateFont(18, true));
 	EquippedText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.95f)));
 	EquippedText->SetJustification(ETextJustify::Center);
 	if (UHorizontalBoxSlot* H = ReelRow->AddChildToHorizontalBox(EquippedText))
@@ -161,7 +154,7 @@ void UPFBuildHUDWidget::BuildTree()
 	}
 
 	NextPieceText = WidgetTree->ConstructWidget<UTextBlock>();
-	NextPieceText->SetFont(PFBuildFont(13, false));
+	NextPieceText->SetFont(PFSlateFont(13, false));
 	NextPieceText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
 	NextPieceText->SetJustification(ETextJustify::Left);
 	if (UHorizontalBoxSlot* H = ReelRow->AddChildToHorizontalBox(NextPieceText))
@@ -182,7 +175,7 @@ void UPFBuildHUDWidget::BuildTree()
 	HintText = WidgetTree->ConstructWidget<UTextBlock>();
 	HintText->SetText(FText::FromString(
 		TEXT("F1-F4  ·  scroll cycle  ·  Q piece wheel  ·  LMB place  ·  X delete  ·  F ready")));
-	HintText->SetFont(PFBuildFont(12, false));
+	HintText->SetFont(PFSlateFont(12, false));
 	HintText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.5f)));
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(HintText))
 	{

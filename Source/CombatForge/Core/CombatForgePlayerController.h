@@ -124,6 +124,7 @@ protected:
 	void OnMenuBack();
 	void OnFireWhileDead();                   // dead-only spectate cycle: Fire = next (T5)
 	void OnADSWhileDead();                    // ADS = previous
+	void SpectateWhileDead(bool bForward);    // Fire=next, ADS=prev
 	void OnCycleClassWhileDead(const struct FInputActionValue& Value); // wheel on the respawn countdown = switch class
 
 	// ---- (intra) spectate (server side) ----
