@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "Combat/PFHealthComponent.h"
+#include "Combat/PFSoftMeshFit.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Core/CombatForgeGameState.h"
 #include "Core/CombatForgePlayerState.h"
@@ -20,7 +21,6 @@
 #include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
-#include "UObject/SoftObjectPath.h"
 
 APFAmmoBarrel::APFAmmoBarrel()
 {
@@ -152,22 +152,11 @@ void APFAmmoBarrel::SoftLoadMesh()
 		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_War_Storage_Barrel_Plastic_Blue_01/SM_Ind_War_Storage_Barrel_Plastic_Blue_01.SM_Ind_War_Storage_Barrel_Plastic_Blue_01"),
 		TEXT("/Game/Scene_Warehouse/Assets/MS/3D/Ind_Sto_Barrel_Metal_Rust_03/SM_Ind_Sto_Barrel_Metal_Rust_03.SM_Ind_Sto_Barrel_Metal_Rust_03"),
 	};
-	for (const TCHAR* Path : Paths)
+	if (UStaticMesh* M = PFTryLoadStaticMesh(Paths))
 	{
-		if (UStaticMesh* M = Cast<UStaticMesh>(FSoftObjectPath(Path).TryLoad()))
-		{
-			Mesh->SetStaticMesh(M);
-			const FBoxSphereBounds B = M->GetBounds();
-			const float H = FMath::Max(B.BoxExtent.Z * 2.f, 1.f);
-			const float Sc = 140.f / H;
-			Mesh->SetRelativeScale3D(FVector(Sc));
-			// Sit bottom on ground.
-			Mesh->SetRelativeLocation(FVector(
-				-B.Origin.X * Sc,
-				-B.Origin.Y * Sc,
-				-(B.Origin.Z - B.BoxExtent.Z) * Sc));
-			return;
-		}
+		Mesh->SetStaticMesh(M);
+		// Sit bottom on ground.
+		PFFitMeshSitOnGroundByHeight(M, Mesh, 140.f);
 	}
 }
 

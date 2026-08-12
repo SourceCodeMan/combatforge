@@ -8,6 +8,7 @@
 #include "Combat/PFCombatAudio.h"
 #include "Combat/PFHealthComponent.h"
 #include "Combat/PFPaintballProjectile.h"
+#include "Combat/PFSoftMeshFit.h"
 #include "Combat/PFSplatSubsystem.h"
 #include "Combat/PFWeaponComponent.h"
 #include "Core/CombatForgeGameState.h"
@@ -27,7 +28,6 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
-#include "UObject/SoftObjectPath.h"
 
 APFBombActor::APFBombActor()
 {
@@ -99,22 +99,16 @@ void APFBombActor::SoftLoadMesh()
 		TEXT("/Game/MarketplaceBlockout/Modern/Weapons/Assets/Explosives/03/SM_Modern_Weapons_Explosive_03.SM_Modern_Weapons_Explosive_03"),
 		TEXT("/Game/Bandits/Mesh/Weapon/Hand_Granate/SM_Hand_Granate.SM_Hand_Granate"),
 	};
-	for (const TCHAR* Path : Paths)
+	const TCHAR* Path = nullptr;
+	if (UStaticMesh* M = PFTryLoadStaticMesh(Paths, &Path))
 	{
-		if (UStaticMesh* M = Cast<UStaticMesh>(FSoftObjectPath(Path).TryLoad()))
-		{
-			Mesh->SetStaticMesh(M);
-			// Scale so the tallest axis ≈ 70 uu — C4/charge sized, readable on a wall cell.
-			const FBoxSphereBounds B = M->GetBounds();
-			const float MaxDim = FMath::Max3(B.BoxExtent.X, B.BoxExtent.Y, B.BoxExtent.Z) * 2.f;
-			const float Sc = 70.f / FMath::Max(MaxDim, 1.f);
-			Mesh->SetRelativeScale3D(FVector(Sc));
-			// Center the mesh on the bomb actor (piece AABB center) so dual-side burst still lines up.
-			Mesh->SetRelativeLocation(FVector(-B.Origin.X * Sc, -B.Origin.Y * Sc, -B.Origin.Z * Sc));
-			// Keep authored materials — no BasicShape "Color" override.
-			UE_LOG(CombatForgeLog, Log, TEXT("Bomb: skinned with %s (scale %.2f)"), Path, Sc);
-			return;
-		}
+		Mesh->SetStaticMesh(M);
+		// Scale so the tallest axis ≈ 70 uu — C4/charge sized, readable on a wall cell.
+		// Center the mesh on the bomb actor (piece AABB center) so dual-side burst still lines up.
+		const float Sc = PFFitMeshCenterToSize(M, Mesh, 70.f);
+		// Keep authored materials — no BasicShape "Color" override.
+		UE_LOG(CombatForgeLog, Log, TEXT("Bomb: skinned with %s (scale %.2f)"), Path, Sc);
+		return;
 	}
 	// Cylinder fallback: danger-red via the verified BasicShapeMaterial "Color" param.
 	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
