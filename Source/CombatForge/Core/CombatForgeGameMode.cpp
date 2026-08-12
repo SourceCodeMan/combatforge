@@ -2449,16 +2449,12 @@ void ACombatForgeGameMode::CheckSkirmishAbandon()
 	{
 		return;
 	}
-	const uint8 A = GS->AliveCounts[0];
-	const uint8 B = GS->AliveCounts[1];
-	if (A > 0 && B > 0)
+	const TOptional<uint8> Winner = WinnerIfTeamAbandoned(*GS);
+	if (!Winner.IsSet())
 	{
 		return;   // both sides still present
 	}
-	uint8 Winner = TeamNone;   // both empty → draw
-	if (A == 0 && B > 0) { Winner = 1; }
-	else if (B == 0 && A > 0) { Winner = 0; }
-	EndSkirmish(Winner);   // clears the round timer + jumps Combat→Vote (double-fire guarded)
+	EndSkirmish(Winner.GetValue());   // clears the round timer + jumps Combat→Vote (double-fire guarded)
 }
 
 void ACombatForgeGameMode::ResolveFreeForAllOnTimer()
@@ -2551,6 +2547,28 @@ bool ACombatForgeGameMode::IsTeamScoreObjectiveMode(EPFMatchType Type) const
 		|| Type == EPFMatchType::Hardpoint;
 }
 
+TOptional<uint8> ACombatForgeGameMode::WinnerIfTeamAbandoned(const ACombatForgeGameState& GS) const
+{
+	const uint8 A = GS.AliveCounts[0];
+	const uint8 B = GS.AliveCounts[1];
+	if (A > 0 && B > 0)
+	{
+		return {};
+	}
+	uint8 Winner = TeamNone;   // both empty → draw
+	if (A == 0 && B > 0) { Winner = 1; }
+	else if (B == 0 && A > 0) { Winner = 0; }
+	return Winner;
+}
+
+uint8 ACombatForgeGameMode::WinnerByTeamScore(const ACombatForgeGameState& GS) const
+{
+	uint8 Winner = TeamNone;
+	if (GS.TeamScores[0] > GS.TeamScores[1]) { Winner = 0; }
+	else if (GS.TeamScores[1] > GS.TeamScores[0]) { Winner = 1; }
+	return Winner;
+}
+
 void ACombatForgeGameMode::EndTeamScoreObjective(uint8 WinnerTeam, const TCHAR* ModeName)
 {
 	ACombatForgeGameState* GS = GetPFGameState();
@@ -2577,10 +2595,7 @@ void ACombatForgeGameMode::ResolveCaptureFlagOnTimer()
 	{
 		return;
 	}
-	uint8 Winner = TeamNone;
-	if (GS->TeamScores[0] > GS->TeamScores[1]) { Winner = 0; }
-	else if (GS->TeamScores[1] > GS->TeamScores[0]) { Winner = 1; }
-	EndCaptureFlag(Winner);
+	EndCaptureFlag(WinnerByTeamScore(*GS));
 }
 
 void ACombatForgeGameMode::EndCaptureFlag(uint8 WinnerTeam)
@@ -2596,13 +2611,12 @@ void ACombatForgeGameMode::CheckCaptureFlagAbandon()
 	{
 		return;
 	}
-	const uint8 A = GS->AliveCounts[0];
-	const uint8 B = GS->AliveCounts[1];
-	if (A > 0 && B > 0) { return; }
-	uint8 Winner = TeamNone;
-	if (A == 0 && B > 0) { Winner = 1; }
-	else if (B == 0 && A > 0) { Winner = 0; }
-	EndCaptureFlag(Winner);
+	const TOptional<uint8> Winner = WinnerIfTeamAbandoned(*GS);
+	if (!Winner.IsSet())
+	{
+		return;
+	}
+	EndCaptureFlag(Winner.GetValue());
 }
 
 void ACombatForgeGameMode::ResolveDominationOnTimer()
@@ -2612,10 +2626,7 @@ void ACombatForgeGameMode::ResolveDominationOnTimer()
 	{
 		return;
 	}
-	uint8 Winner = TeamNone;
-	if (GS->TeamScores[0] > GS->TeamScores[1]) { Winner = 0; }
-	else if (GS->TeamScores[1] > GS->TeamScores[0]) { Winner = 1; }
-	EndDomination(Winner);
+	EndDomination(WinnerByTeamScore(*GS));
 }
 
 void ACombatForgeGameMode::EndDomination(uint8 WinnerTeam)
@@ -2631,13 +2642,12 @@ void ACombatForgeGameMode::CheckDominationAbandon()
 	{
 		return;
 	}
-	const uint8 A = GS->AliveCounts[0];
-	const uint8 B = GS->AliveCounts[1];
-	if (A > 0 && B > 0) { return; }
-	uint8 Winner = TeamNone;
-	if (A == 0 && B > 0) { Winner = 1; }
-	else if (B == 0 && A > 0) { Winner = 0; }
-	EndDomination(Winner);
+	const TOptional<uint8> Winner = WinnerIfTeamAbandoned(*GS);
+	if (!Winner.IsSet())
+	{
+		return;
+	}
+	EndDomination(Winner.GetValue());
 }
 
 void ACombatForgeGameMode::ResolveHardpointOnTimer()
@@ -2647,10 +2657,7 @@ void ACombatForgeGameMode::ResolveHardpointOnTimer()
 	{
 		return;
 	}
-	uint8 Winner = TeamNone;
-	if (GS->TeamScores[0] > GS->TeamScores[1]) { Winner = 0; }
-	else if (GS->TeamScores[1] > GS->TeamScores[0]) { Winner = 1; }
-	EndHardpoint(Winner);
+	EndHardpoint(WinnerByTeamScore(*GS));
 }
 
 void ACombatForgeGameMode::EndHardpoint(uint8 WinnerTeam)
@@ -2666,13 +2673,12 @@ void ACombatForgeGameMode::CheckHardpointAbandon()
 	{
 		return;
 	}
-	const uint8 A = GS->AliveCounts[0];
-	const uint8 B = GS->AliveCounts[1];
-	if (A > 0 && B > 0) { return; }
-	uint8 Winner = TeamNone;
-	if (A == 0 && B > 0) { Winner = 1; }
-	else if (B == 0 && A > 0) { Winner = 0; }
-	EndHardpoint(Winner);
+	const TOptional<uint8> Winner = WinnerIfTeamAbandoned(*GS);
+	if (!Winner.IsSet())
+	{
+		return;
+	}
+	EndHardpoint(Winner.GetValue());
 }
 
 void ACombatForgeGameMode::SpawnObjectiveActors()

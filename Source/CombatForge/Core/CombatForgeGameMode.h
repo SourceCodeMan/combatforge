@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Misc/Optional.h"
 #include "GameFramework/GameModeBase.h"
 #include "Core/CombatForgeTypes.h"
 #include "CombatForgeGameMode.generated.h"
@@ -171,6 +172,8 @@ protected:
 	void ClearAllFlagCarriers();
 	APFFlagActor* GetFlagForTeam(uint8 Team) const;
 	bool IsTeamScoreObjectiveMode(EPFMatchType Type) const;
+	TOptional<uint8> WinnerIfTeamAbandoned(const ACombatForgeGameState& GS) const; // unset = both present; both empty = TeamNone
+	uint8 WinnerByTeamScore(const ACombatForgeGameState& GS) const;               // tie = TeamNone
 	void EndTeamScoreObjective(uint8 WinnerTeam, const TCHAR* ModeName); // shared Combat→Vote jump
 
 	// ---- (intra) lobby / build countdowns ----
