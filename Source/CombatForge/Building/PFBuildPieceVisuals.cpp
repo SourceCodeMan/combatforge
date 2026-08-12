@@ -4,6 +4,7 @@
 
 #include "CombatForge.h"
 #include "Building/PFGridMath.h"
+#include "Combat/PFSoftMeshFit.h"
 
 #include "HAL/IConsoleManager.h"
 
@@ -108,12 +109,7 @@ namespace
 
 	UStaticMesh* SoftLoadMesh(const TCHAR* Path)
 	{
-		if (!Path || !*Path)
-		{
-			return nullptr;
-		}
-		const FSoftObjectPath Soft(Path);
-		return Cast<UStaticMesh>(Soft.TryLoad());
+		return PFTryLoadStaticMesh(Path);
 	}
 
 	UTexture* SoftLoadTexture(const TCHAR* Path)
