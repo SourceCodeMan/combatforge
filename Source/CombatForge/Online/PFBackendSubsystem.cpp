@@ -66,25 +66,85 @@ namespace
 		}
 		return Hex;
 	}
+
+	constexpr float FleetRegisterRetryInitialSec = 10.f;
+	constexpr float FleetRegisterRetryMidSec     = 30.f;
+	constexpr float FleetRegisterRetryMaxSec     = 60.f;
+
+	// Four 0..255 octets, nothing else. Local checks (not a test harness):
+	//   "192.168.1.5" ok; "192.168.1.5:7777" / "2001:db8::1" / "box.local" / "" fail
+	//   (192.168.1.5 >> 8) != (192.168.10.5 >> 8)  — last-dot /24 is not the rule
+	//   IsRfc1918: 10/8, 172.16/12, 192.168/16; 203.0.113.5 false
+	bool ParseIpv4Host(const FString& S, uint32& Out)
+	{
+		TArray<FString> Octets;
+		S.ParseIntoArray(Octets, TEXT("."), /*bCullEmpty=*/false);
+		if (Octets.Num() != 4)
+		{
+			return false;
+		}
+		uint32 Acc = 0;
+		for (const FString& Octet : Octets)
+		{
+			if (Octet.IsEmpty() || Octet.Len() > 3)
+			{
+				return false;
+			}
+			int32 Value = 0;
+			for (const TCHAR C : Octet)
+			{
+				if (C < TEXT('0') || C > TEXT('9'))
+				{
+					return false;
+				}
+				Value = Value * 10 + (C - TEXT('0'));
+			}
+			if (Value > 255)
+			{
+				return false;
+			}
+			Acc = (Acc << 8) | static_cast<uint32>(Value);
+		}
+		Out = Acc;
+		return true;
+	}
+
+	bool IsRfc1918(uint32 Ip)
+	{
+		const uint32 B0 = (Ip >> 24) & 0xFFu;
+		const uint32 B1 = (Ip >> 16) & 0xFFu;
+		return B0 == 10u
+			|| (B0 == 172u && B1 >= 16u && B1 <= 31u)
+			|| (B0 == 192u && B1 == 168u);
+	}
 }
 
 FString FPFBackendServerInfo::JoinAddress() const
 {
-	// Same-LAN hairpin fallback: if the directory gave us a LAN address and our own primary
-	// adapter sits in the same /24, the public IP would hairpin through the router (flaky on
-	// consumer gear) — go direct instead.
+	// Prefer LanAddr only when the row has no distinct public mapping: both the
+	// local adapter and LanAddr parse as IPv4, share a real /24, LanAddr is
+	// RFC1918, and Addr is empty / equal / also RFC1918. Last-dot /24 is not
+	// "this LAN" — every consumer 192.168.1.0/24 would false-positive.
 	if (!LanAddr.IsEmpty())
 	{
-		bool bCanBind = false;
 		if (ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM))
 		{
+			bool bCanBind = false;
 			const TSharedRef<FInternetAddr> Local = Sockets->GetLocalHostAddr(*GLog, bCanBind);
-			FString LocalIp = Local->ToString(/*bAppendPort=*/false);
-			int32 LastDotA, LastDotB;
-			if (LocalIp.FindLastChar(TEXT('.'), LastDotA) && LanAddr.FindLastChar(TEXT('.'), LastDotB)
-				&& LocalIp.Left(LastDotA) == LanAddr.Left(LastDotB))
+			const FString LocalIp = Local->ToString(/*bAppendPort=*/false);
+			uint32 LocalHost = 0, LanHost = 0;
+			if (ParseIpv4Host(LocalIp, LocalHost) && ParseIpv4Host(LanAddr, LanHost)
+				&& (LocalHost >> 8) == (LanHost >> 8)
+				&& IsRfc1918(LanHost))
 			{
-				return FString::Printf(TEXT("%s:%d"), *LanAddr, Port);
+				uint32 PubHost = 0;
+				const bool bNoDistinctPublic = Addr.IsEmpty()
+					|| Addr == LanAddr
+					|| (ParseIpv4Host(Addr, PubHost) && IsRfc1918(PubHost));
+				if (bNoDistinctPublic)
+				{
+					return FString::Printf(TEXT("%s:%d"), *LanAddr, Port);
+				}
 			}
 		}
 	}
@@ -214,7 +274,10 @@ void UPFBackendSubsystem::Request(const FString& Verb, const FString& Path, cons
 					bOk && Resp.IsValid() ? Resp->GetContentAsString() : FString());
 			}
 		});
-	Req->ProcessRequest();
+	if (!Req->ProcessRequest() && Done)
+	{
+		Done(0, FString());
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -682,6 +745,13 @@ void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 			if (Code != 200)
 			{
 				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: fleet register failed (%d) %s"), Code, *Resp);
+				// Transient (cold Worker / 409 "already listed" / timeout): bounded backoff.
+				// Config 4xx (400/401/403 and other non-retry 4xx): stay dark — do not hammer a bad key.
+				const bool bTransient = Code == 0 || Code == 408 || Code == 409 || Code == 429 || Code >= 500;
+				if (bTransient)
+				{
+					Self->ArmFleetRegisterRetry();
+				}
 				return;
 			}
 			// Private match: surface the join code where the box operator can read + share it.
@@ -696,6 +766,12 @@ void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 					FPFPaths::ServerDataDir(), TEXT("JoinCode.txt")));
 			}
 			Self->bFleetRegistered = true;
+			Self->FleetRegisterRetryDelaySec = FleetRegisterRetryInitialSec;
+			if (Self->FleetRegisterRetryTicker.IsValid())
+			{
+				FTSTicker::GetCoreTicker().RemoveTicker(Self->FleetRegisterRetryTicker);
+				Self->FleetRegisterRetryTicker.Reset();
+			}
 			UE_LOG(CombatForgeLog, Log, TEXT("Backend: fleet registered (port %d)"), Self->FleetPort);
 			Self->HeartbeatTicker = FTSTicker::GetCoreTicker().AddTicker(
 				FTickerDelegate::CreateLambda([WeakThis](float) -> bool
@@ -708,23 +784,65 @@ void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 					return false;
 				}), HeartbeatPeriodSec);
 			Self->SendHeartbeat();
-
-			// Crash recovery: re-send any match reports that never reached the API. The Worker is
-			// idempotent on matchId, so double delivery is harmless (progression-plan §1). Persistent dir so a
-			// redeploy mid-unsent-report doesn't drop that match's XP (#8) — must match the GameMode's write path.
-			TArray<FString> Pending;
-			const FString Dir = FPaths::Combine(FPFPaths::ServerDataDir(), TEXT("PendingReports"));
-			IFileManager::Get().FindFiles(Pending, *FPaths::Combine(Dir, TEXT("*.json")), true, false);
-			for (const FString& File : Pending)
-			{
-				FString Json;
-				const FString FullPath = FPaths::Combine(Dir, File);
-				if (FFileHelper::LoadFileToString(Json, *FullPath))
-				{
-					Self->SendMatchReport(Json, FullPath);
-				}
-			}
+			Self->ReplayPendingReports();
 		});
+}
+
+void UPFBackendSubsystem::ReplayPendingReports()
+{
+	if (PendingReplayInFlight > 0)
+	{
+		return;
+	}
+	// Crash / mid-session recovery: re-send reports that never reached the API. Worker is
+	// idempotent on matchId. Persistent dir so a redeploy mid-unsent-report doesn't drop XP.
+	// FindFiles is non-recursive — rejected/ is not walked.
+	TArray<FString> Pending;
+	const FString Dir = FPaths::Combine(FPFPaths::ServerDataDir(), TEXT("PendingReports"));
+	IFileManager::Get().FindFiles(Pending, *FPaths::Combine(Dir, TEXT("*.json")), true, false);
+	for (const FString& File : Pending)
+	{
+		FString Json;
+		const FString FullPath = FPaths::Combine(Dir, File);
+		if (FFileHelper::LoadFileToString(Json, *FullPath))
+		{
+			++PendingReplayInFlight;
+			SendMatchReport(Json, FullPath);
+		}
+	}
+}
+
+void UPFBackendSubsystem::ArmFleetRegisterRetry()
+{
+	if (FleetRegisterRetryTicker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(FleetRegisterRetryTicker);
+		FleetRegisterRetryTicker.Reset();
+	}
+	const float Delay = FleetRegisterRetryDelaySec;
+	FleetRegisterRetryDelaySec = (Delay < FleetRegisterRetryMidSec)
+		? FleetRegisterRetryMidSec
+		: FleetRegisterRetryMaxSec;
+	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
+	FleetRegisterRetryTicker = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([WeakThis](float) -> bool
+		{
+			UPFBackendSubsystem* Inner = WeakThis.Get();
+			if (!Inner)
+			{
+				return false;
+			}
+			Inner->FleetRegisterRetryTicker.Reset();
+			const UGameInstance* GI = Inner->GetGameInstance();
+			const UWorld* World = GI ? GI->GetWorld() : nullptr;
+			const ENetMode Net = World ? World->GetNetMode() : NM_Standalone;
+			if (Net != NM_DedicatedServer && Net != NM_ListenServer)
+			{
+				return false;   // STOP HOSTING — do not re-arm
+			}
+			Inner->FleetRegisterIfServer(GI->GetWorld());
+			return false;       // one-shot; fail path re-arms from the register callback
+		}), Delay);
 }
 
 void UPFBackendSubsystem::SendHeartbeat()
@@ -748,6 +866,7 @@ void UPFBackendSubsystem::SendHeartbeat()
 			return;
 		}
 	}
+	ReplayPendingReports();
 	// ALWAYS re-resolve the current GameState (not just when null): a map reload swaps it, and a stale-but-
 	// valid pointer would keep counting the OLD (empty) PlayerArray — the "0/12 with players connected" bug.
 	if (const UGameInstance* GI = GetGameInstance())
@@ -842,6 +961,11 @@ void UPFBackendSubsystem::FleetUnregister()
 		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTicker);
 		HeartbeatTicker.Reset();
 	}
+	if (FleetRegisterRetryTicker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(FleetRegisterRetryTicker);
+		FleetRegisterRetryTicker.Reset();
+	}
 	if (!bFleetRegistered)
 	{
 		return;
@@ -864,8 +988,9 @@ void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FStri
 	TMap<FString, FString> Headers;
 	Headers.Add(TEXT("X-Timestamp"), FString::Printf(TEXT("%lld"), Ts));
 	Headers.Add(TEXT("X-Signature"), Signature);
+	TWeakObjectPtr<UPFBackendSubsystem> WeakThis(this);
 	Request(TEXT("POST"), TEXT("/v1/match-report"), ReportJson, /*AuthMode=*/2,
-		[PendingFilePath](int32 Code, const FString& Resp)
+		[WeakThis, PendingFilePath](int32 Code, const FString& Resp)
 		{
 			if (Code == 200)
 			{
@@ -888,8 +1013,15 @@ void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FStri
 			}
 			else
 			{
-				// Transient (5xx / network / rate limit): leave in place — re-sent at next registration.
+				// Transient (5xx / network / rate limit): leave in place — replayed on heartbeat / register.
 				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: match report failed (%d) %s"), Code, *Resp);
+			}
+			if (UPFBackendSubsystem* Self = WeakThis.Get())
+			{
+				if (Self->PendingReplayInFlight > 0)
+				{
+					--Self->PendingReplayInFlight;
+				}
 			}
 		}, Headers);
 }
