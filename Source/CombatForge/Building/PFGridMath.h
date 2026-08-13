@@ -28,12 +28,12 @@ struct COMBATFORGE_API FPFGridMath
 	// World → grid quantization (03 §4)
 	// ---------------------------------------------------------------
 
-	/** Cell + level from a world point: floor(P.xy/400), level = clamp(round(P.z/300), 0, NumLevels-1). */
+	/** Cell + level from a world point: floor(P.xy/400), level = clamp(round(P.z/300), 0, NumLevels). */
 	static FIntVector WorldToCell(const FVector& P, int32 NumLevels = PFGrid::Levels)
 	{
 		const int32 Cx = FMath::FloorToInt32(P.X / static_cast<double>(PFGrid::CellUU));
 		const int32 Cy = FMath::FloorToInt32(P.Y / static_cast<double>(PFGrid::CellUU));
-		const int32 MaxLevel = FMath::Max(0, NumLevels - 1);
+		const int32 MaxLevel = FMath::Max(0, NumLevels);
 		const int32 Level = FMath::Clamp(
 			FMath::RoundToInt32(P.Z / static_cast<double>(PFGrid::WallHeightUU)), 0, MaxLevel);
 		return FIntVector(Cx, Cy, Level);
@@ -50,7 +50,8 @@ struct COMBATFORGE_API FPFGridMath
 
 	/**
 	 * Wall snap: nearest of the 4 cell edges from frac(P.xy/400), canonicalized S/W → the
-	 * neighbor cell's N/E (03 §2). Level clamps to 0..NumLevels-2 — a top-base wall breaches the cap.
+	 * neighbor cell's N/E (03 §2). Level clamps to 0..NumLevels-1 — top-base walls are legal
+	 * and crown flush at the cap. Query still rejects a wall at Level == MapLevels.
 	 * EdgeNE: 0 = N (+Y edge of the anchor cell), 1 = E (+X edge).
 	 */
 	static void SnapWall(const FVector& P, int32& CellX, int32& CellY, int32& Level, uint8& EdgeNE,
@@ -72,7 +73,7 @@ struct COMBATFORGE_API FPFGridMath
 		else if (Edge == 3) { CellX -= 1; Edge = 1; }   // W → neighbor's E
 		EdgeNE = Edge;
 
-		const int32 MaxWallLevel = FMath::Max(0, NumLevels - 2);
+		const int32 MaxWallLevel = FMath::Max(0, NumLevels - 1);
 		Level = FMath::Clamp(
 			FMath::RoundToInt32(P.Z / static_cast<double>(PFGrid::WallHeightUU)), 0, MaxWallLevel);
 	}
