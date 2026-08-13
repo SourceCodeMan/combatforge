@@ -115,7 +115,9 @@ private:
 		FKey CurrentKey;
 	};
 	void BuildRebindRegistry();       // populate from the IA_*/IMC_* after the default MapKey calls
-	void ApplySavedKeyOverrides();    // read FPFUserPrefs::GetKeyOverride and remap
+	void ApplySavedKeyOverrides();    // validate saved Bind_* as a set, then RemapEntry accepted rows
+	// Unmap CurrentKey, MapKey NewKey, store CurrentKey. No conflict / reserved-key checks.
+	void RemapEntry(FRebindEntry& E, FKey NewKey);
 	FRebindEntry* FindRebind(FName Id);
 	const FRebindEntry* FindRebind(FName Id) const;
 
