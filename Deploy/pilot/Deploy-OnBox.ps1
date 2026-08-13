@@ -145,7 +145,13 @@ if (-not $ZipName) {
 # always back it up so a zip stub cannot become the next OnBox migrate source.
 Say ""
 $BackupRoot = Join-Path $env:TEMP "cf-key-backup"
-if (Test-Path $BackupRoot) { Remove-Item $BackupRoot -Recurse -Force }
+$BackupPrev = Join-Path $env:TEMP "cf-key-backup.prev"
+# Rotate, do not delete: a failed extract last run may never have restored, and wiping
+# this dir would snapshot the zip stub as the only remaining key.
+if (Test-Path $BackupRoot) {
+    if (Test-Path $BackupPrev) { Remove-Item $BackupPrev -Recurse -Force }
+    Rename-Item $BackupRoot $BackupPrev
+}
 New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
 
 $PdRoot     = Join-Path $env:ProgramData "CombatForge"
@@ -230,9 +236,37 @@ Say "  Old hosts are gone." Green
 # find nothing.
 Say ""
 Say "Extracting..." Cyan
-& tar.exe -xf $Zip
-if ($LASTEXITCODE -ne 0) { throw "Extract failed (tar exit $LASTEXITCODE)." }
-Say "  Extracted." Green
+function Restore-LiveKey([string]$Bak, [string]$Live) {
+    if (Test-Path $Bak) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $Live) | Out-Null
+        Copy-Item $Bak $Live -Force
+        Say "  ServerKey.txt restored from backup." Green
+    }
+}
+function Restore-AllLiveKeys {
+    # Prefer this run's snapshot; if we never got one (crash mid-backup), use the rotated prev.
+    $tree = if (Test-Path $TreeBak) { $TreeBak } else { Join-Path $BackupPrev (Join-Path $GameFolderName "ServerKey.txt") }
+    $pd   = if (Test-Path $PdBak)   { $PdBak }   else { Join-Path $BackupPrev "CombatForge\ServerKey.txt" }
+    $i2   = if (Test-Path $Inst2Bak) { $Inst2Bak } else { Join-Path $BackupPrev "CombatForge\Instance2\ServerKey.txt" }
+    $i3   = if (Test-Path $Inst3Bak) { $Inst3Bak } else { Join-Path $BackupPrev "CombatForge\Instance3\ServerKey.txt" }
+    Restore-LiveKey $tree $KeyFile
+    Restore-LiveKey $pd   $PdKey
+    Restore-LiveKey $i2   $Inst2Key
+    Restore-LiveKey $i3   $Inst3Key
+    if (-not (Test-Path $PdKey) -and (Test-Path $tree)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $PdKey) | Out-Null
+        Copy-Item $tree $PdKey -Force
+        Say "  ServerKey.txt restored from backup." Green
+    }
+}
+try {
+    & tar.exe -xf $Zip
+    if ($LASTEXITCODE -ne 0) { throw "Extract failed (tar exit $LASTEXITCODE)." }
+    Say "  Extracted." Green
+} finally {
+    # Always put pre-extract key bytes back before any later throw (launcher curl / exe verify).
+    Restore-AllLiveKeys
+}
 
 # ---- 7. Refresh the launcher(s) ----
 Say ""
@@ -261,32 +295,13 @@ if (-not (Test-Path $RealExe)) {
 }
 Say "  Game exe present." Green
 
-function Restore-LiveKey([string]$Bak, [string]$Live) {
-    if (Test-Path $Bak) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $Live) | Out-Null
-        Copy-Item $Bak $Live -Force
-        Say "  ServerKey.txt restored from backup." Green
-    }
-}
-
 if ((Test-Path $KeyFile) -and (Test-Path $TreeBak)) {
     $liveHash = (Get-FileHash $KeyFile -Algorithm SHA256).Hash
     $bakHash  = (Get-FileHash $TreeBak -Algorithm SHA256).Hash
     if ($liveHash -ne $bakHash) {
         Say "  WARNING: zip tried to replace the fleet key at $KeyFile - restoring backed-up bytes." Yellow
+        Restore-LiveKey $TreeBak $KeyFile
     }
-}
-
-Restore-LiveKey $TreeBak  $KeyFile
-Restore-LiveKey $PdBak    $PdKey
-Restore-LiveKey $Inst2Bak $Inst2Key
-Restore-LiveKey $Inst3Bak $Inst3Key
-
-# First-time migrate during deploy: tree backup exists, ProgramData did not.
-if (-not (Test-Path $PdBak) -and (Test-Path $TreeBak)) {
-    New-Item -ItemType Directory -Force -Path (Split-Path $PdKey) | Out-Null
-    Copy-Item $TreeBak $PdKey -Force
-    Say "  ServerKey.txt restored from backup." Green
 }
 
 Remove-Item $Zip -Force -ErrorAction SilentlyContinue
