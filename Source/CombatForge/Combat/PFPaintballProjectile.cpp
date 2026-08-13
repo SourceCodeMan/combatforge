@@ -357,5 +357,5 @@ void APFPaintballProjectile::HandleCosmeticImpact(const FHitResult& Hit)
 
 uint8 APFPaintballProjectile::VictimTeamOf(const AActor* HitActor)
 {
-	return PFTeamIdOf(Cast<APawn>(HitActor));   // 255 = teamless (dummy/world)
+	return PFTeamIdOf(Cast<APawn>(HitActor));   // 255 = always a valid target, never "friendly"
 }

@@ -3,8 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/World.h"
 #include "Modules/ModuleManager.h"
+
+class UWorld;
 
 /**
  * The one log category for the whole game (contract §3.1). Every package logs through
@@ -16,10 +17,8 @@
  */
 DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
 
-FORCEINLINE bool PFIsRenderingWorld(const UWorld* World)
-{
-	return World != nullptr && World->GetNetMode() != NM_DedicatedServer;
-}
+/** True if this world can play client cosmetics (exists and is not a dedicated server). */
+bool PFIsRenderingWorld(const UWorld* World);
 
 /**
  * Multiplayer build gate. This number is folded into the network version (UCombatForgeGameInstance::Init),
