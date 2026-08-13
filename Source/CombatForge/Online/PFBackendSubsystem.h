@@ -63,7 +63,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnBackendStatus, const FString& /*HumanRe
  *  heartbeats every 10 s (a 409 re-registers — the directory row can expire), and HMAC-signs match
  *  reports (SendMatchReport, called by the GAME MODE at EmitMatchReport when the match enters
  *  Results — not by the rating subsystem). Key sources, first hit wins: -PFServerKey= on the command
- *  line, then Saved/CombatForge/ServerKey.txt. No key (every player install) = fleet path is
+ *  line, then FPFPaths::ServerDataDir()/ServerKey.txt (parent of ArenaDir; on a -NOHOMEDIR / -nullrhi / -server box that is %ProgramData%/CombatForge or /var/lib/combatforge). No key (every player install) = fleet path is
  *  completely inert — a listen host can never grant XP by design (progression-plan §1).
  *
  * Api base: [CombatForge.Backend] ApiBaseUrl in Game.ini, -PFApi= override for local dev.

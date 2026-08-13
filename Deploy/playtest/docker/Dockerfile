@@ -38,6 +38,7 @@ EXPOSE 7777/udp 7777/tcp
 
 ENV PF_MAP=/Game/Maps/L_Graybox
 ENV PF_PORT=7777
+# Fleet key is runtime env (PF_SERVER_KEY), not bake-in.
 
 # Default entry: adjust binary path if your cook layout differs
 COPY entrypoint.sh /entrypoint.sh

@@ -25,6 +25,60 @@ $KeyFile = Join-Path $GameDir "ServerKey.txt"
 
 function Say($msg, $color = "Gray") { Write-Host $msg -ForegroundColor $color }
 
+function Stop-OnBoxRestartHosts {
+    # Never touch $PID (this deploy). Instances=1 leaves the OLD Deploy-OnBox
+    # process inside Start-Server-OnBox's while-loop; its CommandLine is
+    # Deploy-OnBox.ps1 and its window title is "CombatForge server #N ...".
+    $self = $PID
+
+    $logDir = Join-Path $GameDir "Logs"
+    foreach ($name in @("host.pid", "host2.pid", "host3.pid")) {
+        $pf = Join-Path $logDir $name
+        if (Test-Path $pf) {
+            $oldPid = 0
+            try { $oldPid = [int]((Get-Content $pf -Raw).Trim()) } catch { $oldPid = 0 }
+            if ($oldPid -gt 0 -and $oldPid -ne $self) {
+                Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    $cim = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.ProcessId -ne $self -and
+            $_.Name -match '^(powershell|pwsh)\.exe$' -and
+            $_.CommandLine -and
+            $_.CommandLine -match 'Start-Server-OnBox\.ps1|Start-Fleet-OnBox\.ps1|Deploy-OnBox\.ps1'
+        }
+    foreach ($p in $cim) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+
+    Get-Process -Name powershell,pwsh -ErrorAction SilentlyContinue |
+        Where-Object { $_.Id -ne $self -and $_.MainWindowTitle -match 'CombatForge server #' } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    Get-Process -Name "CombatForge*" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    $deadline = (Get-Date).AddSeconds(20)
+    do {
+        Start-Sleep -Seconds 1
+        $psLeft = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.ProcessId -ne $self -and
+                $_.Name -match '^(powershell|pwsh)\.exe$' -and
+                $_.CommandLine -and
+                $_.CommandLine -match 'Start-Server-OnBox\.ps1|Start-Fleet-OnBox\.ps1'
+            }).Count
+        $titleLeft = @(Get-Process -Name powershell,pwsh -ErrorAction SilentlyContinue |
+            Where-Object { $_.Id -ne $self -and $_.MainWindowTitle -match 'CombatForge server #' }).Count
+        $exeLeft = @(Get-Process -Name "CombatForge*" -ErrorAction SilentlyContinue).Count
+    } while (($psLeft + $titleLeft + $exeLeft) -gt 0 -and (Get-Date) -lt $deadline)
+
+    if (($psLeft + $titleLeft + $exeLeft) -gt 0) {
+        throw "Old restart-loop host(s) still running (ps=$psLeft title=$titleLeft exe=$exeLeft). Close those windows and re-run."
+    }
+}
+
 Say ""
 Say "=== CombatForge server deploy ===" Cyan
 Say ""
@@ -85,15 +139,47 @@ if (-not $ZipName) {
     Say "  Found: $ZipName" Green
 }
 
-# ---- 3. Protect the server key ----
+# ---- 3. Protect the server key (ProgramData live + tree + InstanceN) ----
+# Canonical live key is %ProgramData%\CombatForge\ServerKey.txt (and InstanceN if those
+# dirs exist). The tree file next to the launcher is a fallback migrate source only -
+# always back it up so a zip stub cannot become the next OnBox migrate source.
 Say ""
-$KeyBackup = $null
-if (Test-Path $KeyFile) {
-    $KeyBackup = Join-Path $env:TEMP "ServerKey.backup.txt"
-    Copy-Item $KeyFile $KeyBackup -Force
+$BackupRoot = Join-Path $env:TEMP "cf-key-backup"
+if (Test-Path $BackupRoot) { Remove-Item $BackupRoot -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+
+$PdRoot     = Join-Path $env:ProgramData "CombatForge"
+$PdKey      = Join-Path $PdRoot "ServerKey.txt"
+$Inst2Key   = Join-Path $PdRoot "Instance2\ServerKey.txt"
+$Inst3Key   = Join-Path $PdRoot "Instance3\ServerKey.txt"
+$TreeBak    = Join-Path $BackupRoot (Join-Path $GameFolderName "ServerKey.txt")
+$PdBak      = Join-Path $BackupRoot "CombatForge\ServerKey.txt"
+$Inst2Bak   = Join-Path $BackupRoot "CombatForge\Instance2\ServerKey.txt"
+$Inst3Bak   = Join-Path $BackupRoot "CombatForge\Instance3\ServerKey.txt"
+
+function Backup-LiveKey([string]$Live, [string]$Bak) {
+    if (Test-Path $Live) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $Bak) | Out-Null
+        Copy-Item $Live $Bak -Force
+        return $true
+    }
+    return $false
+}
+
+$hadAnyKey = $false
+if (Backup-LiveKey $KeyFile $TreeBak)  { $hadAnyKey = $true }
+if (Backup-LiveKey $PdKey   $PdBak)    { $hadAnyKey = $true }
+if (Test-Path (Join-Path $PdRoot "Instance2")) {
+    if (Backup-LiveKey $Inst2Key $Inst2Bak) { $hadAnyKey = $true }
+}
+if (Test-Path (Join-Path $PdRoot "Instance3")) {
+    if (Backup-LiveKey $Inst3Key $Inst3Bak) { $hadAnyKey = $true }
+}
+
+if ($hadAnyKey) {
     Say "ServerKey.txt found and backed up." Green
 } else {
-    Say "WARNING: no ServerKey.txt at $KeyFile" Yellow
+    Say "WARNING: no ServerKey.txt at $KeyFile or $PdKey" Yellow
     Say "The server will still run, but it cannot register with the directory or grant XP." Yellow
     $go = Read-Host "Continue anyway? (y/N)"
     if ($go -ne "y") { throw "Stopped so you can put ServerKey.txt in place first." }
@@ -129,18 +215,14 @@ Move-Item $ZipPart $Zip -Force
 $sizeGB = [math]::Round((Get-Item $Zip).Length / 1GB, 2)
 Say "  Downloaded $sizeGB GB." Green
 
-# ---- 5. Stop the running server ----
+# ---- 5. Stop leftover restart hosts + CombatForge* ----
 # Only now, with a verified archive on disk, is it safe to take the box offline.
+# Killing CombatForge* alone leaves the parent while ($true) host alive; default
+# restart delay is 3 s, so a 3 s sleep is a race the old host often wins.
 Say ""
-Say "Stopping any running server..." Gray
-$procs = Get-Process -Name "CombatForge*" -ErrorAction SilentlyContinue
-if ($procs) {
-    $procs | Stop-Process -Force
-    Start-Sleep -Seconds 3
-    Say "  Stopped $($procs.Count) process(es)." Green
-} else {
-    Say "  Nothing was running." Gray
-}
+Say "Stopping leftover restart hosts and any running server..." Gray
+Stop-OnBoxRestartHosts
+Say "  Old hosts are gone." Green
 
 # ---- 6. Extract ----
 # The archive root folder is "Windows", so extracting HERE (the parent) merges into the existing
@@ -179,11 +261,32 @@ if (-not (Test-Path $RealExe)) {
 }
 Say "  Game exe present." Green
 
-if ($KeyBackup -and -not (Test-Path $KeyFile)) {
-    Copy-Item $KeyBackup $KeyFile -Force
-    Say "  ServerKey.txt was missing after extract - restored from backup." Yellow
-} elseif (Test-Path $KeyFile) {
-    Say "  ServerKey.txt intact." Green
+function Restore-LiveKey([string]$Bak, [string]$Live) {
+    if (Test-Path $Bak) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $Live) | Out-Null
+        Copy-Item $Bak $Live -Force
+        Say "  ServerKey.txt restored from backup." Green
+    }
+}
+
+if ((Test-Path $KeyFile) -and (Test-Path $TreeBak)) {
+    $liveHash = (Get-FileHash $KeyFile -Algorithm SHA256).Hash
+    $bakHash  = (Get-FileHash $TreeBak -Algorithm SHA256).Hash
+    if ($liveHash -ne $bakHash) {
+        Say "  WARNING: zip tried to replace the fleet key at $KeyFile - restoring backed-up bytes." Yellow
+    }
+}
+
+Restore-LiveKey $TreeBak  $KeyFile
+Restore-LiveKey $PdBak    $PdKey
+Restore-LiveKey $Inst2Bak $Inst2Key
+Restore-LiveKey $Inst3Bak $Inst3Key
+
+# First-time migrate during deploy: tree backup exists, ProgramData did not.
+if (-not (Test-Path $PdBak) -and (Test-Path $TreeBak)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $PdKey) | Out-Null
+    Copy-Item $TreeBak $PdKey -Force
+    Say "  ServerKey.txt restored from backup." Green
 }
 
 Remove-Item $Zip -Force -ErrorAction SilentlyContinue

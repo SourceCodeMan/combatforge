@@ -13,6 +13,8 @@ services:
     environment:
       PF_MAP: /Game/Maps/L_Graybox
       PF_PORT: "7777"
+      # Write-only into /var/lib/combatforge/ServerKey.txt; never on CMD.
+      PF_SERVER_KEY: ${PF_SERVER_KEY:-}
     restart: unless-stopped
     volumes:
       # PFPaths.cpp resolves arena records to /var/lib/combatforge/Arenas on a Linux dedicated
