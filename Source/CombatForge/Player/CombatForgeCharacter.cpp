@@ -3444,6 +3444,21 @@ void ACombatForgeCharacter::PawnClientRestart()
 	PushLocalKit();
 }
 
+bool ACombatForgeCharacter::ShouldFreezeLiveRoundWeapons() const
+{
+	if (HealthComponent == nullptr || HealthComponent->bEliminated)
+	{
+		return false;
+	}
+	if (GetWorld() != nullptr && GetWorld()->GetTimeSeconds() < KitPushGraceUntil)
+	{
+		return false;
+	}
+	const ACombatForgeGameState* GS = GetWorld()
+		? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
+	return GS && GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live;
+}
+
 void ACombatForgeCharacter::PushLocalKit()
 {
 	if (GetController() == nullptr || !GetController()->IsLocalPlayerController())
@@ -3461,22 +3476,23 @@ void ACombatForgeCharacter::PushLocalKit()
 	Kit.SecondaryCategory = (uint8)SecCfg.Category;
 	Kit.SecondaryIndex    = (uint8)SecCfg.Index;
 
+	// After a valid kit is accepted, empty CharParts would drop HasValidKit() so the local
+	// preview can show a gun ServerSetKit will reject (P3-P1). Restore the previous parts.
+	if (HasValidKit() && Kit.CharParts.Num() == 0)
+	{
+		Kit.CharParts = KitRep.CharParts;
+	}
+
 	// Mirror ServerSetKit's P2-P2 rule in the LOCAL preview: while this pawn is alive in a live
 	// round the server keeps the CURRENT weapon ids, so previewing the new pick here put the owning
 	// client on a weapon the server never accepted (and if the server's KitRep didn't change, no
 	// OnRep ever corrected it). Cosmetics may still preview; weapon ids wait for the next spawn.
-	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated
-		&& (GetWorld() == nullptr || GetWorld()->GetTimeSeconds() >= KitPushGraceUntil))
+	if (HasValidKit() && ShouldFreezeLiveRoundWeapons())
 	{
-		const ACombatForgeGameState* GS = GetWorld()
-			? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
-		if (GS && GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live)
-		{
-			Kit.WeaponCategory    = KitRep.WeaponCategory;
-			Kit.WeaponIndex       = KitRep.WeaponIndex;
-			Kit.SecondaryCategory = KitRep.SecondaryCategory;
-			Kit.SecondaryIndex    = KitRep.SecondaryIndex;
-		}
+		Kit.WeaponCategory    = KitRep.WeaponCategory;
+		Kit.WeaponIndex       = KitRep.WeaponIndex;
+		Kit.SecondaryCategory = KitRep.SecondaryCategory;
+		Kit.SecondaryIndex    = KitRep.SecondaryIndex;
 	}
 
 	KitRep = Kit;   // listen host: this IS the replicated copy; pure client: local preview until the RPC lands
@@ -3560,6 +3576,7 @@ void ACombatForgeCharacter::ServerSetPlayerName_Implementation(const FString& Na
 void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
 {
 	FPFKitRep Kit = NewKit;
+	const bool bHadKit = HasValidKit();
 	// Fleet rank gate (weapon-implementation-spec Stage 5): when unlocks are loaded, force locked
 	// claims down to the category's rank-1 starter. Listen/LAN / empty unlocks = skip (advisory client-side only).
 	if (UWorld* World = GetWorld())
@@ -3607,44 +3624,51 @@ void ACombatForgeCharacter::ServerSetKit_Implementation(const FPFKitRep& NewKit)
 			FMath::Clamp<int32>(Kit.CharParts[SlotIdx], -1, MaxPart));
 	}
 
+	// After a valid kit is accepted, empty CharParts would overwrite HasValidKit() to false
+	// so the next ServerSetKit is treated as a first kit (P3-P1). Restore the previous parts.
+	if (bHadKit && Kit.CharParts.Num() == 0)
+	{
+		Kit.CharParts = KitRep.CharParts;
+	}
+
 	// P2-P2: a class cycled in the Options menu mid-LIVE-round used to hand over the NEW gun with
 	// a FULL mag (ApplyWeaponLoadout's first-draw fill) — a free reload-plus with better stats.
 	// While this pawn is alive in a live round, keep the CURRENT weapon ids; cosmetics may change.
 	// The rejected weapon choice isn't lost: the client re-pushes its kit on the next spawn (and
 	// the death-screen class switch hits this path with bEliminated == true, which stays allowed).
-	if (HasValidKit() && HealthComponent != nullptr && !HealthComponent->bEliminated
-		&& (GetWorld() == nullptr || GetWorld()->GetTimeSeconds() >= KitPushGraceUntil))
+	if (bHadKit && ShouldFreezeLiveRoundWeapons())
 	{
-		const ACombatForgeGameState* GS = GetWorld()
-			? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
-		if (GS && GS->Phase == EPFMatchPhase::Combat && GS->RoundState == EPFRoundState::Live)
-		{
-			Kit.WeaponCategory    = KitRep.WeaponCategory;
-			Kit.WeaponIndex       = KitRep.WeaponIndex;
-			Kit.SecondaryCategory = KitRep.SecondaryCategory;
-			Kit.SecondaryIndex    = KitRep.SecondaryIndex;
-		}
+		Kit.WeaponCategory    = KitRep.WeaponCategory;
+		Kit.WeaponIndex       = KitRep.WeaponIndex;
+		Kit.SecondaryCategory = KitRep.SecondaryCategory;
+		Kit.SecondaryIndex    = KitRep.SecondaryIndex;
 	}
 
 	// Did the gates above override any weapon id the client asked for? If so the owner is
 	// previewing a weapon the server refuses to run, and KitRep may be UNCHANGED server-side
 	// (rejected change back to the same ids) — meaning no OnRep will fire to fix the client.
+	// Restoring CharParts has the same silent-desync: KitRep can stay byte-identical, and
+	// the owner already applied empty locally (HasValidKit() == false).
 	const bool bWeaponAdjusted =
 		Kit.WeaponCategory    != NewKit.WeaponCategory    ||
 		Kit.WeaponIndex       != NewKit.WeaponIndex       ||
 		Kit.SecondaryCategory != NewKit.SecondaryCategory ||
 		Kit.SecondaryIndex    != NewKit.SecondaryIndex;
+	const bool bPartsAdjusted = Kit.CharParts != NewKit.CharParts;
 
 	KitRep = Kit;
 	ApplyKit();   // server runs the owner's weapon stats; other clients re-dress via OnRep_Kit
 
-	if (bWeaponAdjusted)
+	if (bWeaponAdjusted || bPartsAdjusted)
 	{
-		UE_LOG(CombatForgeLog, Warning,
-			TEXT("ServerSetKit (%s): weapon claim adjusted (%u/%u,%u/%u -> %u/%u,%u/%u) — correcting owner"),
-			*GetNameSafe(this),
-			NewKit.WeaponCategory, NewKit.WeaponIndex, NewKit.SecondaryCategory, NewKit.SecondaryIndex,
-			Kit.WeaponCategory, Kit.WeaponIndex, Kit.SecondaryCategory, Kit.SecondaryIndex);
+		if (bWeaponAdjusted)
+		{
+			UE_LOG(CombatForgeLog, Warning,
+				TEXT("ServerSetKit (%s): weapon claim adjusted (%u/%u,%u/%u -> %u/%u,%u/%u) — correcting owner"),
+				*GetNameSafe(this),
+				NewKit.WeaponCategory, NewKit.WeaponIndex, NewKit.SecondaryCategory, NewKit.SecondaryIndex,
+				Kit.WeaponCategory, Kit.WeaponIndex, Kit.SecondaryCategory, Kit.SecondaryIndex);
+		}
 		ClientCorrectKit(KitRep);
 	}
 }

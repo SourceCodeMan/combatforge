@@ -386,6 +386,8 @@ private:
 	UFUNCTION(Server, Reliable) void ServerSetPlayerName(const FString& Name);
 	void ApplyKit();          // apply KitRep → ActiveCharConfig/ActiveWeaponConfig → visuals + weapon stats
 	bool HasValidKit() const { return KitRep.CharParts.Num() > 0; }
+	/** Alive + Combat/Live + past KitPushGraceUntil. Shared by ServerSetKit and PushLocalKit (P2-P2). */
+	bool ShouldFreezeLiveRoundWeapons() const;
 
 	// Owner-client only (set by ClientBarrelCooldown). Not replicated.
 	double BarrelCooldownToastEndTime = 0.0;
