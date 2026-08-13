@@ -806,7 +806,6 @@ void UPFBackendSubsystem::ReplayPendingReports()
 		const FString FullPath = FPaths::Combine(Dir, File);
 		if (FFileHelper::LoadFileToString(Json, *FullPath))
 		{
-			++PendingReplayInFlight;
 			SendMatchReport(Json, FullPath);
 		}
 	}
@@ -981,6 +980,12 @@ void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FStri
 	if (ServerKey.IsEmpty())
 	{
 		return;   // by design: only provisioned fleet boxes can grant XP
+	}
+	// Hold the replay latch for every pending-file POST (live GameMode emit and Replay).
+	// Decrement only in this request's callback so a 15 s timeout cannot clear a still-in-flight drain.
+	if (!PendingFilePath.IsEmpty())
+	{
+		++PendingReplayInFlight;
 	}
 	const int64 Ts = FDateTime::UtcNow().ToUnixTimestamp();
 	const FString Signature = HmacSha256Hex(ServerKey,
