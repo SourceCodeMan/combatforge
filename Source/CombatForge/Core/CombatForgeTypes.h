@@ -277,9 +277,9 @@ namespace PFGrid
 	constexpr int32 WallHeightUU = 300;constexpr int32 SubPerCell = 4;   // CellUU / SubUU
 	constexpr int32 CellsX = 16;       constexpr int32 CellsY = 10;   // CellsY = the DEFAULT (Warehouse) rows
 	constexpr int32 MaxCellsY = 20;    // largest per-map row count (The Yard) — sizes fixed seal-check arrays
-	// Vertical stack: Levels base heights at Z = 0, 300, … (Levels-1)*300. Walls use levels 0..Levels-2
-	// (a wall on the top base would crown at HeightCap). Warehouse = 4 levels / 3 wall stories / 1200 cap
-	// (fits under the roof). The Yard is open air and allows 7 levels / 6 wall stories / 2100 cap.
+	// Vertical stack: Levels base heights at Z = 0, 300, … (Levels-1)*300. Walls use levels 0..Levels-1
+	// (4 Warehouse wall stories / 7 Yard); plates may sit at Level == Levels. Warehouse = 4 levels / 1200 cap
+	// (fits under the roof). The Yard is open air and allows 7 levels / 2100 cap.
 	constexpr int32 Levels = 4;        constexpr int32 HeightCapUU = 1200;
 	constexpr int32 YardLevels = 7;    constexpr int32 YardHeightCapUU = 2100;
 	constexpr int32 MaxLevels = YardLevels;   // largest per-map level count
