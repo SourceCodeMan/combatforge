@@ -91,7 +91,7 @@ APFPaintballProjectile::APFPaintballProjectile()
 
 void APFPaintballProjectile::InitProjectile(const FVector& Origin, const FVector& SpreadedDir,
 	uint8 Team, bool bAuthoritative, UPFWeaponComponent* SourceWeapon, uint32 ShotIndex,
-	bool bIgnoreShooter)
+	bool bIgnoreShooter, bool bPointBlankRescue)
 {
 	TeamId = Team;
 	ShotIndexStored = ShotIndex;
@@ -155,10 +155,12 @@ void APFPaintballProjectile::InitProjectile(const FVector& Origin, const FVector
 		// starts in penetration depenetrates without a blocking hit, so the ball sails away and the
 		// whole volley whiffs (worst on shotguns: 38uu muzzle x 6-8 pellets). Cover the eye→muzzle
 		// dead zone with one explicit sweep before flight; a live enemy pawn in it resolves as an
-		// immediate impact. Gun shots only (bIgnoreShooter=false marks bomb/frag utility balls,
-		// which have no viewmodel muzzle problem) — and a world hit in the gap (gun through a
-		// window frame) falls through to normal flight, same as before.
-		if (SourceWeapon != nullptr && bIgnoreShooter)
+		// immediate impact. Live-fire only (bPointBlankRescue + bIgnoreShooter, both default true).
+		// bIgnoreShooter=false is the bomb (planter self-splat). Frag keeps bIgnoreShooter=true
+		// (no self-splat) and passes bPointBlankRescue=false so the cloud does not hitscan
+		// Eye → Origin. A world hit in the gap (gun through a window frame) falls through to
+		// normal flight, same as before.
+		if (bPointBlankRescue && SourceWeapon != nullptr && bIgnoreShooter)
 		{
 			if (const ACombatForgeCharacter* ShooterPawn = Cast<ACombatForgeCharacter>(ShooterActorWeak.Get()))
 			{
