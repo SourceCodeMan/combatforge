@@ -7,6 +7,7 @@
 #   UnrealEditor-Cmd.exe D:/projects/combatforge/CombatForge.uproject -run=pythonscript ^
 #     -script=D:/projects/combatforge/Scripts/retarget_rifle_to_bandit.py -stdout -unattended -nosplash -nullrhi -NoLogTimes
 # Results are written to the OUT file (headless print is unreliable).
+# PF_DRY_RUN=1 previews deletes/moves and exits. Rebuilding RTG_Rifle_To_Bandit requires PF_FORCE=1.
 
 import os
 import unreal
@@ -41,6 +42,30 @@ try:
     ANIMS = ["AS_Rifle_Idle","AS_Rifle_RunFwd","AS_Rifle_WalkFwd","AS_Rifle_WalkRight","AS_Rifle_WalkBwdRight",
              "AS_Rifle_WalkBwd","AS_Rifle_WalkBwdLeft","AS_Rifle_WalkLeft","AS_Rifle_JogFwd","AS_Rifle_JogRight",
              "AS_Rifle_JogBwdRight","AS_Rifle_JogBwd","AS_Rifle_JogBwdLeft","AS_Rifle_JogLeft"]
+
+    _IK = [
+        OUT_DIR + "/IK_RifleSrc",
+        OUT_DIR + "/IK_Bandit",
+        OUT_DIR + "/RTG_Rifle_To_Bandit",
+    ]
+    if os.environ.get("PF_DRY_RUN") == "1":
+        eal = unreal.EditorAssetLibrary
+        for p in _IK:
+            log("DRY RUN: would delete %s (exists=%s)" % (p, eal.does_asset_exist(p)))
+        for a in ANIMS:
+            src = ANIM_DIR + "/" + a + SUFFIX
+            dst = OUT_DIR + "/" + a + SUFFIX
+            log("DRY RUN: would move %s -> %s (src_exists=%s dst_exists=%s)"
+                % (src, dst, eal.does_asset_exist(src), eal.does_asset_exist(dst)))
+        log("DRY RUN: exiting before any delete/rename")
+        flush()
+        raise SystemExit(0)
+
+    _rtg = OUT_DIR + "/RTG_Rifle_To_Bandit"
+    if unreal.EditorAssetLibrary.does_asset_exist(_rtg) and os.environ.get("PF_FORCE") != "1":
+        log("REFUSING to delete %s (set PF_FORCE=1 to rebuild the retargeter)" % _rtg)
+        flush()
+        raise SystemExit(1)
 
     adv = unreal.AssetToolsHelpers.get_asset_tools()
     eal = unreal.EditorAssetLibrary

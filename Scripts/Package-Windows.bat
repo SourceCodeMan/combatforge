@@ -74,14 +74,6 @@ if %ERRORLEVEL% NEQ 0 (
   exit /b 1
 )
 
-REM Success only: record the protocol this package shipped at, so PF_REQUIRE_PROTOCOL_BUMP can
-REM detect a re-package at the same value next time. Must stay BELOW the failure check - mkdir
-REM and echo reset ERRORLEVEL, so writing the stamp above it would mask a failed package. (P2-S4)
-if defined PROTO (
-  if not exist "%~dp0..\Packaged" mkdir "%~dp0..\Packaged"
-  >"%PROTOSTAMP%" echo %PROTO%
-)
-
 REM --- Privacy scrub (Adam/Benj alpha, 2026-07-15) --------------------------------
 REM Saved\ regenerates every time the packaged exe runs (playtest logs/crash dumps)
 REM and leaks the host's PC name + LAN IP + hardware; .pdb leaks build paths. Strip
@@ -91,13 +83,21 @@ if exist "%OUT%\CombatForge\Saved" rmdir /s /q "%OUT%\CombatForge\Saved"
 if exist "%OUT%\Engine\Saved"      rmdir /s /q "%OUT%\Engine\Saved"
 del /s /q "%OUT%\*.pdb" >nul 2>&1
 
-REM --- Pre-push guard: refuse to leave anything sensitive in the archive ----------
+REM --- Pre-push guard: leftover Saved/pdb must fail (exit 1). Protocol stamp is
+REM written only after a clean scrub so a dirty attempt cannot lock PF_REQUIRE_PROTOCOL_BUMP.
 set "DIRTY="
 if exist "%OUT%\CombatForge\Saved" set "DIRTY=1"
+if exist "%OUT%\Engine\Saved"      set "DIRTY=1"
 dir /s /b "%OUT%\*.pdb" >nul 2>&1 && set "DIRTY=1"
 if defined DIRTY (
-  echo *** WARNING: Saved or pdb still present in %OUT% - do NOT push until clean. ***
-) else (
-  echo === Done + scrubbed. Build is in %OUT% - no Saved, no pdb. ===
+  echo *** ERROR: Saved or pdb still present in %OUT% - do NOT push. Failing. ***
+  endlocal
+  exit /b 1
 )
+
+if defined PROTO (
+  if not exist "%~dp0..\Packaged" mkdir "%~dp0..\Packaged"
+  >"%PROTOSTAMP%" echo %PROTO%
+)
+echo === Done + scrubbed. Build is in %OUT% - no Saved, no pdb. ===
 endlocal
