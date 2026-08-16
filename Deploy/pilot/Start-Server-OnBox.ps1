@@ -1,13 +1,14 @@
 # CombatForge - headless dedicated server for a cloud/VPS box (e.g. Vultr Windows Server).
 #
 # Runs the PACKAGED client exe headless as the fleet dedicated server, pointed at the LIVE backend
-# (api.playcombatforge.com). Reads the server key from ServerKey.txt sitting next to this script.
+# (api.playcombatforge.com). Reads the server key from %ProgramData%\CombatForge (tree file is migrate-only).
 # On boot it registers with the directory + heartbeats, so it shows up in the in-game SERVERS list
 # and QUICK PLAY, and it can mint XP via HMAC-signed match reports (fleet hat).
 #
 # SETUP ON THE BOX (once):
 #   1) Extract the CombatForge Windows build into this folder (so CombatForge.exe is here or in a subfolder).
-#   2) Copy ServerKey.txt (the secret) into this same folder.
+#   2) Copy ServerKey.txt next to this script or into %ProgramData%\CombatForge; the process never
+#      sees the secret on argv.
 #   3) Right-click this file -> "Run with PowerShell"  (the FIRST run should be as Administrator so the
 #      firewall rule can be added; after that a normal run is fine).
 #
@@ -26,6 +27,10 @@ try { $Host.UI.RawUI.WindowTitle = "CombatForge server #$InstanceIndex (port $Po
 
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$LogDir = Join-Path $Here "Logs"
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$PidFile = Join-Path $LogDir ("host{0}.pid" -f $(if ($InstanceIndex -le 1) { '' } else { $InstanceIndex }))
+Set-Content $PidFile $PID
 
 # --- Locate the REAL packaged game exe (NOT the tiny root bootstrap launcher) ---
 # The root Windows\CombatForge.exe is a ~166 KB bootstrapper that spawns the real 318 MB exe under
@@ -45,11 +50,36 @@ if (-not $Exe) {
 }
 if (-not $Exe) { throw "CombatForge.exe not found under $Here - extract the Windows build here first." }
 
-# --- Server key (secret) - read from ServerKey.txt next to this script ---
-$KeyFile = Join-Path $Here "ServerKey.txt"
-if (-not (Test-Path $KeyFile)) { throw "ServerKey.txt not found next to this script - copy it here." }
-$Key = (Get-Content $KeyFile -Raw).Trim()
-if ($Key.Length -lt 32) { throw "ServerKey.txt looks wrong (too short)." }
+# --- Persistent data dir + server key (never on argv) ---
+# -ArenaDir makes ServerDataDir = $DataDir, so runtime loads $DataDir\ServerKey.txt.
+# If $RuntimeKey already exists, do not overwrite it from the tree file (a zip stub
+# must not re-poison ProgramData on the next start).
+$DataDir  = Join-Path $env:ProgramData "CombatForge"
+if ($InstanceIndex -gt 1) { $DataDir = Join-Path $DataDir "Instance$InstanceIndex" }
+$ArenaDir = Join-Path $DataDir "Arenas"
+New-Item -ItemType Directory -Force -Path $ArenaDir | Out-Null
+
+$RuntimeKey = Join-Path $DataDir "ServerKey.txt"
+$TreeKey    = Join-Path $Here "ServerKey.txt"
+
+function Read-Key([string]$Path) {
+    $k = (Get-Content $Path -Raw).Trim()
+    if ($k.Length -lt 32) { throw "ServerKey.txt at $Path looks wrong (too short)." }
+    return $k
+}
+
+if (Test-Path $RuntimeKey) {
+    $null = Read-Key $RuntimeKey
+} elseif (Test-Path $TreeKey) {
+    $k = Read-Key $TreeKey
+    Set-Content -Path $RuntimeKey -Value $k -Encoding ascii -NoNewline
+} elseif ($InstanceIndex -gt 1 -and (Test-Path (Join-Path $env:ProgramData "CombatForge\ServerKey.txt"))) {
+    $k = Read-Key (Join-Path $env:ProgramData "CombatForge\ServerKey.txt")
+    Set-Content -Path $RuntimeKey -Value $k -Encoding ascii -NoNewline
+} else {
+    throw "ServerKey.txt not found at $RuntimeKey or $TreeKey - copy it next to this script or into ProgramData\CombatForge."
+}
+# Do not keep $k / $Key in a variable used later on the command line.
 
 # --- Prerequisite: Microsoft Visual C++ 2015-2022 Redistributable (x64) ---
 # A fresh Windows Server lacks this and the UE exe refuses to start ("component(s) required").
@@ -90,13 +120,12 @@ foreach ($fw in @(@{ Name = $ruleUdp; Proto = "UDP" }, @{ Name = $ruleTcp; Proto
 }
 
 # The map URL MUST carry ?listen so the server actually opens the port (a plain -server boots a
-# non-listening standalone). -nullrhi/-nosound = headless. -PFServerKey passes the fleet key; the
-# API base defaults to https://api.playcombatforge.com (no override needed).
+# non-listening standalone). -nullrhi/-nosound = headless. Copy ServerKey.txt next to this script
+# or into %ProgramData%\CombatForge; the process never sees the secret on argv. The API base
+# defaults to https://api.playcombatforge.com (no override needed).
 # Persistent, verbose log for monitoring. -ABSLOG pins the file to a known path (next to this script) so
 # it's easy to tail; UE renames the previous run's log to a -backup- file on each restart. CombatForgeLog
 # runs Verbose (gameplay detail) while net stays at Log so the file doesn't drown in per-packet spam.
-$LogDir = Join-Path $Here "Logs"
-New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogName = if ($InstanceIndex -le 1) { "server.log" } else { "server$InstanceIndex.log" }
 $LogFile = Join-Path $LogDir $LogName
 
@@ -104,11 +133,7 @@ $LogFile = Join-Path $LogDir $LogName
 # The build runs with -NOHOMEDIR, so UE's UserSettingsDir() (where maps + PendingReports would otherwise land)
 # resolves INSIDE this folder and is wiped every time you re-extract a new build over it - which silently
 # dropped built maps AND un-minted XP on every redeploy (#8/#9). Passing -ArenaDir pins them to ProgramData
-# (survives re-extraction). The game derives PendingReports/JoinCode/ServerKey.txt from this dir's parent too.
-$DataDir = Join-Path $env:ProgramData "CombatForge"
-if ($InstanceIndex -gt 1) { $DataDir = Join-Path $DataDir "Instance$InstanceIndex" }
-$ArenaDir = Join-Path $DataDir "Arenas"
-New-Item -ItemType Directory -Force -Path $ArenaDir | Out-Null
+# (survives re-extraction). $DataDir / $ArenaDir were created with the key block above.
 
 $mapUrl = "$Map`?listen"
 # CombatForge.exe is a GUI-subsystem app, so PowerShell's "& $exe" call operator returns INSTANTLY without
@@ -117,7 +142,7 @@ $mapUrl = "$Map`?listen"
 # ArgumentList is ONE string on purpose: Start-Process -ArgumentList as an ARRAY drops the quotes around
 # space-containing args (e.g. -LogCmds="CombatForgeLog Verbose, LogNet Log"), corrupting them.
 $cmdLine = @(
-    $mapUrl, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR", "-PFServerKey=$Key",
+    $mapUrl, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR",
     "`"-ArenaDir=$ArenaDir`"",
     "`"-ABSLOG=$LogFile`"", "`"-LogCmds=CombatForgeLog Verbose, LogNet Log`""
 ) -join " "
@@ -139,19 +164,25 @@ Write-Host ""
 # that dies inside 60s doubles the delay (3s -> 300s cap) instead of hammering restarts; any run
 # longer than 60s resets the delay to 3s.
 $RestartDelay = 3
-while ($true) {
-  Write-Host ("[{0}] launching server..." -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor Green
-  $LaunchedAt = Get-Date
-  $proc = Start-Process -FilePath $Exe -ArgumentList $cmdLine -PassThru
-  if ($proc) { $proc.WaitForExit() }   # BLOCKS until the GUI server process actually exits (not the & bug)
-  $code = if ($proc) { $proc.ExitCode } else { "?" }
-  $RanSecs = ((Get-Date) - $LaunchedAt).TotalSeconds
-  if ($RanSecs -lt 60) {
-    $RestartDelay = [Math]::Min($RestartDelay * 2, 300)
-    Write-Host ("[{0}] server exited after only {1:n0}s (code {2}) - CRASH LOOP? backing off {3}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $RanSecs, $code, $RestartDelay) -ForegroundColor Red
-  } else {
-    $RestartDelay = 3
-    Write-Host ("[{0}] server exited (code {1}) - restarting in {2}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $code, $RestartDelay) -ForegroundColor Yellow
+try {
+  while ($true) {
+    Write-Host ("[{0}] launching server..." -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor Green
+    $LaunchedAt = Get-Date
+    $proc = Start-Process -FilePath $Exe -ArgumentList $cmdLine -PassThru
+    if ($proc) { $proc.WaitForExit() }   # BLOCKS until the GUI server process actually exits (not the & bug)
+    $code = if ($proc) { $proc.ExitCode } else { "?" }
+    $RanSecs = ((Get-Date) - $LaunchedAt).TotalSeconds
+    if ($RanSecs -lt 60) {
+      $RestartDelay = [Math]::Min($RestartDelay * 2, 300)
+      Write-Host ("[{0}] server exited after only {1:n0}s (code {2}) - CRASH LOOP? backing off {3}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $RanSecs, $code, $RestartDelay) -ForegroundColor Red
+    } else {
+      $RestartDelay = 3
+      Write-Host ("[{0}] server exited (code {1}) - restarting in {2}s. Ctrl+C to stop." -f (Get-Date -Format "HH:mm:ss"), $code, $RestartDelay) -ForegroundColor Yellow
+    }
+    Start-Sleep -Seconds $RestartDelay
   }
-  Start-Sleep -Seconds $RestartDelay
+} finally {
+  if ($PidFile -and (Test-Path $PidFile)) {
+    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+  }
 }

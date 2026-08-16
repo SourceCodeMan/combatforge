@@ -7,28 +7,41 @@ function Get-ProjectRoot {
 
 function Find-CombatForgeExe {
 	param([string]$Root, [string]$Name = "CombatForge.exe")
-	foreach ($Rel in @(
+	# Binaries before the 166 KB bootstrap at Packaged\Playtest\Windows\$Name.
+	$Rels = @(
 		"Binaries\Win64\$Name",
-		"Packaged\Playtest\Windows\$Name",
-		"Packaged\Playtest\Windows\CombatForge\Binaries\Win64\$Name",
-		"Packaged\Playtest\WindowsServer\$Name",
-		"Saved\StagedBuilds\Windows\$Name",
-		"Saved\StagedBuilds\Windows\CombatForge\Binaries\Win64\$Name"
-	)) {
-		$P = Join-Path $Root $Rel
-		if (Test-Path $P) { return (Resolve-Path $P).Path }
+		"Packaged\Playtest\Windows\CombatForge\Binaries\Win64\$Name"
+	)
+	if ($Name -eq "CombatForgeServer.exe") {
+		$Rels += "Packaged\Playtest\WindowsServer\CombatForgeServer.exe"
 	}
-	foreach ($Scan in @(
-		(Join-Path $Root "Packaged\Playtest"),
-		(Join-Path $Root "Saved\StagedBuilds"),
-		(Join-Path $Root "Binaries")
-	)) {
-		if (Test-Path $Scan) {
-			$F = Get-ChildItem $Scan -Recurse -Filter $Name -ErrorAction SilentlyContinue | Select-Object -First 1
-			if ($F) { return $F.FullName }
+	$Rels += @(
+		"Saved\StagedBuilds\Windows\CombatForge\Binaries\Win64\$Name",
+		"Packaged\Playtest\Windows\$Name",
+		"Saved\StagedBuilds\Windows\$Name"
+	)
+	$Winner = $null
+	foreach ($Rel in $Rels) {
+		$P = Join-Path $Root $Rel
+		if (Test-Path $P) { $Winner = (Resolve-Path $P).Path; break }
+	}
+	if (-not $Winner) {
+		foreach ($Scan in @(
+			(Join-Path $Root "Packaged\Playtest"),
+			(Join-Path $Root "Saved\StagedBuilds"),
+			(Join-Path $Root "Binaries")
+		)) {
+			if (Test-Path $Scan) {
+				$F = Get-ChildItem $Scan -Recurse -Filter $Name -ErrorAction SilentlyContinue |
+					Sort-Object Length -Descending | Select-Object -First 1
+				if ($F) { $Winner = $F.FullName; break }
+			}
 		}
 	}
-	return $null
+	if ($Winner -and $Name -eq "CombatForge.exe") {
+		if ((Get-Item $Winner).Length -lt 10MB) { return $null }
+	}
+	return $Winner
 }
 
 function Get-UnrealEditor {
