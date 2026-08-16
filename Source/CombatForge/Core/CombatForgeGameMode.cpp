@@ -1349,7 +1349,7 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		for (APlayerState* PSBase : GS->PlayerArray)
 		{
 			ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
-			if (!PS)
+			if (!PS || PS->IsPhantom())
 			{
 				continue;
 			}
