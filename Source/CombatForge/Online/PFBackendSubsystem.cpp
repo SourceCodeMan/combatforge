@@ -543,6 +543,17 @@ bool UPFBackendSubsystem::ParseServerInfo(const TSharedPtr<FJsonObject>& Obj, FP
 	return !Out.Addr.IsEmpty() && Out.Port > 0;
 }
 
+bool UPFBackendSubsystem::ParseSingleServerResponse(int32 Code, const FString& Resp, FPFBackendServerInfo& Out)
+{
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resp);
+	bool bOk = Code == 200 && FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid();
+	const TSharedPtr<FJsonObject>* Server = nullptr;
+	bOk = bOk && Root->TryGetObjectField(TEXT("server"), Server) && Server
+		&& ParseServerInfo(*Server, Out);
+	return bOk;
+}
+
 void UPFBackendSubsystem::FetchServers(TFunction<void(bool, const TArray<FPFBackendServerInfo>&)> Done)
 {
 	Request(TEXT("GET"), TEXT("/v1/servers"), FString(), /*AuthMode=*/1,
@@ -581,12 +592,7 @@ void UPFBackendSubsystem::RequestQuickPlay(TFunction<void(bool, const FPFBackend
 		[Done](int32 Code, const FString& Resp)
 		{
 			FPFBackendServerInfo Info;
-			TSharedPtr<FJsonObject> Root;
-			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resp);
-			bool bOk = Code == 200 && FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid();
-			const TSharedPtr<FJsonObject>* Server = nullptr;
-			bOk = bOk && Root->TryGetObjectField(TEXT("server"), Server) && Server
-				&& ParseServerInfo(*Server, Info);
+			const bool bOk = ParseSingleServerResponse(Code, Resp, Info);
 			if (Done)
 			{
 				Done(bOk, Info);
@@ -612,12 +618,7 @@ void UPFBackendSubsystem::RequestJoinByCode(const FString& Code,
 		[Done](int32 RespCode, const FString& Resp)
 		{
 			FPFBackendServerInfo Info;
-			TSharedPtr<FJsonObject> Root;
-			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resp);
-			bool bOk = RespCode == 200 && FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid();
-			const TSharedPtr<FJsonObject>* Server = nullptr;
-			bOk = bOk && Root->TryGetObjectField(TEXT("server"), Server) && Server
-				&& ParseServerInfo(*Server, Info);
+			const bool bOk = ParseSingleServerResponse(RespCode, Resp, Info);
 			if (Done)
 			{
 				Done(bOk, Info);

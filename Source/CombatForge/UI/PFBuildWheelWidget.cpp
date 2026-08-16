@@ -6,6 +6,8 @@
 
 #include "Core/CombatForgePlayerState.h"
 
+#include "UI/PFSlateFont.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -33,11 +35,6 @@ namespace
 		EPFBuildTool::Floor, EPFBuildTool::FloorTrap, EPFBuildTool::Ramp, EPFBuildTool::Roof,
 		EPFBuildTool::PropCan, EPFBuildTool::PropDorito, EPFBuildTool::PropSnake, EPFBuildTool::Delete
 	};
-
-	FSlateFontInfo PFWheelFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
 }
 
 const TCHAR* UPFBuildWheelWidget::ToolDisplayName(EPFBuildTool Tool)
@@ -104,7 +101,7 @@ void UPFBuildWheelWidget::BuildTree()
 		// 0 -> sector 9, and sectors 10+ have no digit binding at all (mouse-select only). (P2-U3)
 		UTextBlock* Digit = WidgetTree->ConstructWidget<UTextBlock>();
 		Digit->SetText(FText::FromString(SectorHotkeyLabel(i)));
-		Digit->SetFont(PFWheelFont(10, false));
+		Digit->SetFont(PFSlateFont(10, false));
 		Digit->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
 		Digit->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* DigitSlot = Box->AddChildToVerticalBox(Digit))
@@ -114,7 +111,7 @@ void UPFBuildWheelWidget::BuildTree()
 
 		UTextBlock* Name = WidgetTree->ConstructWidget<UTextBlock>();
 		Name->SetText(FText::FromString(ToolDisplayName(SectorTool(i))));
-		Name->SetFont(PFWheelFont(14, true));
+		Name->SetFont(PFSlateFont(14, true));
 		Name->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Name->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* NameSlot = Box->AddChildToVerticalBox(Name))
@@ -143,7 +140,7 @@ void UPFBuildWheelWidget::BuildTree()
 
 	// Center readout — sits inside the dead zone.
 	CenterReadout = WidgetTree->ConstructWidget<UTextBlock>();
-	CenterReadout->SetFont(PFWheelFont(13, true));
+	CenterReadout->SetFont(PFSlateFont(13, true));
 	CenterReadout->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.9f)));
 	CenterReadout->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(CenterReadout))

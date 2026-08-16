@@ -42,8 +42,7 @@ UPFCombatVFX::UPFCombatVFX()
 
 bool UPFCombatVFX::CanPlay() const
 {
-	const UWorld* World = GetWorld();
-	return World != nullptr && World->GetNetMode() != NM_DedicatedServer;
+	return PFIsRenderingWorld(GetWorld());
 }
 
 void UPFCombatVFX::EnsureAssets()

@@ -20,18 +20,13 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
 #include "Rendering/DrawElements.h"
-#include "Styling/CoreStyle.h"
+#include "UI/PFSlateFont.h"
 
 namespace
 {
 	const FLinearColor GChipNeutral(0.14f, 0.15f, 0.17f, 1.f);
 	const FLinearColor GChipLiked(0.10f, 0.55f, 0.20f, 1.f);
 	const FLinearColor GChipDisliked(0.60f, 0.13f, 0.10f, 1.f);
-
-	FSlateFontInfo PFVoteFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
 }
 
 // ----------------------------------------------------------------- chip button
@@ -78,7 +73,7 @@ void UPFVoteWidget::BuildTree()
 
 	// Countdown number — the ring is painted around it in NativePaint.
 	TimerText = WidgetTree->ConstructWidget<UTextBlock>();
-	TimerText->SetFont(PFVoteFont(22, true));
+	TimerText->SetFont(PFSlateFont(22, true));
 	TimerText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	TimerText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(TimerText))
@@ -104,7 +99,7 @@ void UPFVoteWidget::BuildTree()
 	{
 		UTextBlock* Question = WidgetTree->ConstructWidget<UTextBlock>();
 		Question->SetText(FText::FromString(TEXT("Did you like this arena?")));
-		Question->SetFont(PFVoteFont(26, true));
+		Question->SetFont(PFSlateFont(26, true));
 		Question->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Question->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* VSlot = Step1->AddChildToVerticalBox(Question))
@@ -120,7 +115,7 @@ void UPFVoteWidget::BuildTree()
 			Btn->SetBackgroundColor(Color);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>();
 			Text->SetText(FText::FromString(Label));
-			Text->SetFont(PFVoteFont(22, true));
+			Text->SetFont(PFSlateFont(22, true));
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			Text->SetJustification(ETextJustify::Center);
 			Btn->SetContent(Text);
@@ -157,7 +152,7 @@ void UPFVoteWidget::BuildTree()
 	{
 		UTextBlock* Prompt = WidgetTree->ConstructWidget<UTextBlock>();
 		Prompt->SetText(FText::FromString(TEXT("What stood out?  (click cycles: neutral → liked → disliked)")));
-		Prompt->SetFont(PFVoteFont(18, true));
+		Prompt->SetFont(PFSlateFont(18, true));
 		Prompt->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Prompt->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* VSlot = Step2->AddChildToVerticalBox(Prompt))
@@ -182,7 +177,7 @@ void UPFVoteWidget::BuildTree()
 			const FString CatName = PFVoteCategories::All.IsValidIndex(i)
 				? PFVoteCategories::All[i].ToString() : FString::Printf(TEXT("cat%d"), i + 1);
 			Label->SetText(FText::FromString(CatName));
-			Label->SetFont(PFVoteFont(16, true));
+			Label->SetFont(PFSlateFont(16, true));
 			Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			Label->SetJustification(ETextJustify::Center);
 			if (UVerticalBoxSlot* VSlot = ChipBox->AddChildToVerticalBox(Label))
@@ -193,7 +188,7 @@ void UPFVoteWidget::BuildTree()
 			UTextBlock* Hint = WidgetTree->ConstructWidget<UTextBlock>();
 			Hint->SetText(PFVoteCategories::HintText.IsValidIndex(i)
 				? PFVoteCategories::HintText[i] : FText::GetEmpty());
-			Hint->SetFont(PFVoteFont(10, false));
+			Hint->SetFont(PFSlateFont(10, false));
 			Hint->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.6f)));
 			Hint->SetJustification(ETextJustify::Center);
 			if (UVerticalBoxSlot* VSlot = ChipBox->AddChildToVerticalBox(Hint))
@@ -223,7 +218,7 @@ void UPFVoteWidget::BuildTree()
 		}
 
 		SelectionCountText = WidgetTree->ConstructWidget<UTextBlock>();
-		SelectionCountText->SetFont(PFVoteFont(13, false));
+		SelectionCountText->SetFont(PFSlateFont(13, false));
 		SelectionCountText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.7f)));
 		SelectionCountText->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* VSlot = Step2->AddChildToVerticalBox(SelectionCountText))
@@ -237,7 +232,7 @@ void UPFVoteWidget::BuildTree()
 		SubmitButton->OnClicked.AddUniqueDynamic(this, &UPFVoteWidget::HandleSubmitClicked);
 		UTextBlock* SubmitLabel = WidgetTree->ConstructWidget<UTextBlock>();
 		SubmitLabel->SetText(FText::FromString(TEXT("  SUBMIT VOTE  ")));
-		SubmitLabel->SetFont(PFVoteFont(20, true));
+		SubmitLabel->SetFont(PFSlateFont(20, true));
 		SubmitLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		SubmitLabel->SetJustification(ETextJustify::Center);
 		SubmitButton->SetContent(SubmitLabel);
@@ -253,7 +248,7 @@ void UPFVoteWidget::BuildTree()
 
 		UTextBlock* SubmitHint = WidgetTree->ConstructWidget<UTextBlock>();
 		SubmitHint->SetText(FText::FromString(TEXT("Chips optional — hit SUBMIT when ready")));
-		SubmitHint->SetFont(PFVoteFont(13, false));
+		SubmitHint->SetFont(PFSlateFont(13, false));
 		SubmitHint->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.78f, 0.85f)));
 		SubmitHint->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* VSlot = Step2->AddChildToVerticalBox(SubmitHint))
@@ -265,7 +260,7 @@ void UPFVoteWidget::BuildTree()
 
 	// Submitted / status line.
 	StatusText = WidgetTree->ConstructWidget<UTextBlock>();
-	StatusText->SetFont(PFVoteFont(16, true));
+	StatusText->SetFont(PFSlateFont(16, true));
 	StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.2f, 0.9f, 0.3f)));
 	StatusText->SetJustification(ETextJustify::Center);
 	StatusText->SetText(FText::GetEmpty());
@@ -318,13 +313,13 @@ void UPFVoteWidget::ResetForVote()
 	UpdateSelectionCount();
 }
 
-void UPFVoteWidget::HandleThumbUpClicked()
+void UPFVoteWidget::HandleThumbClicked(EPFThumbVote Vote)
 {
 	if (bSubmitted)
 	{
 		return;
 	}
-	Thumb = EPFThumbVote::Up;
+	Thumb = Vote;
 	if (StepSwitcher)
 	{
 		StepSwitcher->SetActiveWidgetIndex(1);
@@ -337,23 +332,14 @@ void UPFVoteWidget::HandleThumbUpClicked()
 	ReturnFocusToGame();
 }
 
+void UPFVoteWidget::HandleThumbUpClicked()
+{
+	HandleThumbClicked(EPFThumbVote::Up);
+}
+
 void UPFVoteWidget::HandleThumbDownClicked()
 {
-	if (bSubmitted)
-	{
-		return;
-	}
-	Thumb = EPFThumbVote::Down;
-	if (StepSwitcher)
-	{
-		StepSwitcher->SetActiveWidgetIndex(1);
-	}
-	if (StatusText)
-	{
-		StatusText->SetText(FText::FromString(TEXT("Optional: tag what stood out, then SUBMIT")));
-		StatusText->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.5f)));
-	}
-	ReturnFocusToGame();
+	HandleThumbClicked(EPFThumbVote::Down);
 }
 
 void UPFVoteWidget::ReturnFocusToGame()

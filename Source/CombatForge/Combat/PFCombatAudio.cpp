@@ -270,8 +270,7 @@ UPFCombatAudio::UPFCombatAudio()
 
 bool UPFCombatAudio::CanPlay() const
 {
-	const UWorld* World = GetWorld();
-	return World != nullptr && World->GetNetMode() != NM_DedicatedServer;
+	return PFIsRenderingWorld(GetWorld());
 }
 
 void UPFCombatAudio::QueuePcm(USoundWaveProcedural* Wave, const TArray<uint8>& Pcm)

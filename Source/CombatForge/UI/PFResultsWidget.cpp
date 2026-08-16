@@ -20,14 +20,7 @@
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "Styling/CoreStyle.h"
-
-namespace
-{
-	FSlateFontInfo PFResultsFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
-}
+#include "UI/PFSlateFont.h"
 
 TSharedRef<SWidget> UPFResultsWidget::RebuildWidget()
 {
@@ -58,7 +51,7 @@ void UPFResultsWidget::BuildTree()
 	                                const FLinearColor& Color, const FMargin& SlotPadding)
 	{
 		OutText = WidgetTree->ConstructWidget<UTextBlock>();
-		OutText->SetFont(PFResultsFont(FontSize, bBold));
+		OutText->SetFont(PFSlateFont(FontSize, bBold));
 		OutText->SetColorAndOpacity(FSlateColor(Color));
 		OutText->SetJustification(ETextJustify::Center);
 		if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(OutText))
@@ -108,7 +101,7 @@ void UPFResultsWidget::BuildTree()
 	ReturnButton->OnClicked.AddUniqueDynamic(this, &UPFResultsWidget::HandleReturnClicked);
 	UTextBlock* ReturnLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	ReturnLabel->SetText(FText::FromString(TEXT("RETURN TO LOBBY")));
-	ReturnLabel->SetFont(PFResultsFont(16, true));
+	ReturnLabel->SetFont(PFSlateFont(16, true));
 	ReturnLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	ReturnLabel->SetJustification(ETextJustify::Center);
 	ReturnButton->SetContent(ReturnLabel);
@@ -132,7 +125,7 @@ void UPFResultsWidget::BuildTree()
 
 	// Phase countdown — bottom center.
 	CountdownText = WidgetTree->ConstructWidget<UTextBlock>();
-	CountdownText->SetFont(PFResultsFont(14, false));
+	CountdownText->SetFont(PFSlateFont(14, false));
 	CountdownText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.6f)));
 	CountdownText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(CountdownText))

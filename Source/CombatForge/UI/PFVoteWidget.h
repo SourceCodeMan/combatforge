@@ -69,6 +69,7 @@ protected:
 	UFUNCTION() void HandleSubmitClicked();
 
 private:
+	void HandleThumbClicked(EPFThumbVote Vote);
 	/** Chip cycle state — mirrors the vote wire semantics. */
 	enum class EChipState : uint8 { Neutral = 0, Liked = 1, Disliked = 2 };
 

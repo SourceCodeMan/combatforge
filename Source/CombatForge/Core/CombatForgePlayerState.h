@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Core/CombatForgeTypes.h"
 #include "CombatForgePlayerState.generated.h"
@@ -124,3 +125,16 @@ protected:
 	UFUNCTION() void HandlePawnSet(APlayerState* Player, APawn* NewPawn, APawn* OldPawn);
 	void ApplyTeamColorToPawn(APawn* InPawn) const;
 };
+
+/** Pawn → TeamId; 255 if null / no PlayerState (dummy / world). */
+FORCEINLINE uint8 PFTeamIdOf(const APawn* Pawn)
+{
+	if (Pawn)
+	{
+		if (const ACombatForgePlayerState* PS = Pawn->GetPlayerState<ACombatForgePlayerState>())
+		{
+			return PS->TeamId;
+		}
+	}
+	return 255;
+}

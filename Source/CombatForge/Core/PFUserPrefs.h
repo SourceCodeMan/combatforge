@@ -89,3 +89,14 @@ struct COMBATFORGE_API FPFUserPrefs
 	static void Flush();
 
 };
+
+/** 0=Cross+dot, 1=Dot only, 2=Cross only */
+FORCEINLINE const TCHAR* PFCrosshairStyleName(int32 Idx)
+{
+	switch (Idx)
+	{
+	case 1: return TEXT("  Dot only  ");
+	case 2: return TEXT("  Cross only  ");
+	default: return TEXT("  Cross + dot  ");
+	}
+}

@@ -1502,12 +1502,5 @@ ACombatForgeGameState* UPFWeaponComponent::GetPFGameState() const
 
 uint8 UPFWeaponComponent::GetOwnerTeam() const
 {
-	if (const ACombatForgeCharacter* Char = GetPFCharacter())
-	{
-		if (const ACombatForgePlayerState* PS = Char->GetPlayerState<ACombatForgePlayerState>())
-		{
-			return PS->TeamId;
-		}
-	}
-	return 255;
+	return PFTeamIdOf(GetPFCharacter());
 }

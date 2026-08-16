@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
+class UWorld;
+
 /**
  * The one log category for the whole game (contract §3.1). Every package logs through
  * UE_LOG(CombatForgeLog, ...). Verbosity conventions (§4.1):
@@ -14,6 +16,9 @@
  *   Error   = contract violations
  */
 DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
+
+/** True if this world can play client cosmetics (exists and is not a dedicated server). */
+bool PFIsRenderingWorld(const UWorld* World);
 
 /**
  * Multiplayer build gate. This number is folded into the network version (UCombatForgeGameInstance::Init),

@@ -19,15 +19,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Brushes/SlateColorBrush.h"
 #include "GameFramework/PlayerState.h"
-#include "Styling/CoreStyle.h"
-
-namespace
-{
-	FSlateFontInfo PFBoardFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
-}
+#include "UI/PFSlateFont.h"
 
 TSharedRef<SWidget> UPFScoreboardWidget::RebuildWidget()
 {
@@ -60,14 +52,14 @@ void UPFScoreboardWidget::BuildTree()
 	// Round-win score line: "A 2 — 1 B" in team colors.
 	UHorizontalBox* ScoreRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	WinsAText = WidgetTree->ConstructWidget<UTextBlock>();
-	WinsAText->SetFont(PFBoardFont(30, true));
+	WinsAText->SetFont(PFSlateFont(30, true));
 	WinsAText->SetColorAndOpacity(FSlateColor(PFColors::ForTeam(0)));
 	UTextBlock* ScoreDash = WidgetTree->ConstructWidget<UTextBlock>();
 	ScoreDash->SetText(FText::FromString(TEXT("  —  ")));
-	ScoreDash->SetFont(PFBoardFont(30, false));
+	ScoreDash->SetFont(PFSlateFont(30, false));
 	ScoreDash->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.6f)));
 	WinsBText = WidgetTree->ConstructWidget<UTextBlock>();
-	WinsBText->SetFont(PFBoardFont(30, true));
+	WinsBText->SetFont(PFSlateFont(30, true));
 	WinsBText->SetColorAndOpacity(FSlateColor(PFColors::ForTeam(1)));
 	ScoreRow->AddChildToHorizontalBox(WinsAText);
 	ScoreRow->AddChildToHorizontalBox(ScoreDash);
@@ -79,7 +71,7 @@ void UPFScoreboardWidget::BuildTree()
 
 	// Mode + unit line ("CAPTURE THE FLAG · first to 3 · CAPTURES").
 	RoundText = WidgetTree->ConstructWidget<UTextBlock>();
-	RoundText->SetFont(PFBoardFont(13, true));
+	RoundText->SetFont(PFSlateFont(13, true));
 	RoundText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.75f)));
 	RoundText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(RoundText))
@@ -89,7 +81,7 @@ void UPFScoreboardWidget::BuildTree()
 	}
 
 	ScoreUnitText = WidgetTree->ConstructWidget<UTextBlock>();
-	ScoreUnitText->SetFont(PFBoardFont(11, false));
+	ScoreUnitText->SetFont(PFSlateFont(11, false));
 	ScoreUnitText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.45f)));
 	ScoreUnitText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* VSlot = Body->AddChildToVerticalBox(ScoreUnitText))
@@ -351,7 +343,7 @@ void UPFScoreboardWidget::AddHeaderRow()
 
 	UTextBlock* PlayerLabel = WidgetTree->ConstructWidget<UTextBlock>();
 	PlayerLabel->SetText(FText::FromString(TEXT("PLAYER")));
-	PlayerLabel->SetFont(PFBoardFont(12, true));
+	PlayerLabel->SetFont(PFSlateFont(12, true));
 	PlayerLabel->SetColorAndOpacity(FSlateColor(HeaderColor));
 	if (UHorizontalBoxSlot* HSlot = Row->AddChildToHorizontalBox(PlayerLabel))
 	{
@@ -363,7 +355,7 @@ void UPFScoreboardWidget::AddHeaderRow()
 	{
 		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>();
 		Text->SetText(FText::FromString(Label));
-		Text->SetFont(PFBoardFont(12, true));
+		Text->SetFont(PFSlateFont(12, true));
 		Text->SetColorAndOpacity(FSlateColor(HeaderColor));
 		Text->SetJustification(ETextJustify::Right);
 		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();
@@ -449,7 +441,7 @@ void UPFScoreboardWidget::AddRow(const ACombatForgePlayerState* PS)
 		DisplayName += FString::Printf(TEXT("  ·  %s"), PointNames[Idx]);
 	}
 	NameText->SetText(FText::FromString(DisplayName));
-	NameText->SetFont(PFBoardFont(15, bIsLocal));
+	NameText->SetFont(PFSlateFont(15, bIsLocal));
 	FLinearColor NameColor = FLinearColor::White;
 	if (PS->bCarryingFlag && PS->CarriedFlagTeam <= 1)
 	{
@@ -471,7 +463,7 @@ void UPFScoreboardWidget::AddRow(const ACombatForgePlayerState* PS)
 	{
 		UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>();
 		Text->SetText(FText::FromString(FString::Printf(TEXT("%d"), Value)));
-		Text->SetFont(PFBoardFont(15, bBold));
+		Text->SetFont(PFSlateFont(15, bBold));
 		Text->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.9f)));
 		Text->SetJustification(ETextJustify::Right);
 		USizeBox* Sizer = WidgetTree->ConstructWidget<USizeBox>();

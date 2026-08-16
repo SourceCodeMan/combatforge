@@ -579,12 +579,7 @@ void ACombatForgePlayerController::OnMenuBack()
 
 void ACombatForgePlayerController::OnFireWhileDead()
 {
-	const ACombatForgeGameState* GS = GetPFGameState();
-	const ACombatForgePlayerState* PS = GetPlayerState<ACombatForgePlayerState>();
-	if (GS && PS && GS->Phase == EPFMatchPhase::Combat && !PS->bAliveInRound)
-	{
-		ServerSpectateNext(true);
-	}
+	SpectateWhileDead(true);
 }
 
 void ACombatForgePlayerController::OnCycleClassWhileDead(const FInputActionValue& Value)
@@ -622,11 +617,16 @@ void ACombatForgePlayerController::OnCycleClassWhileDead(const FInputActionValue
 
 void ACombatForgePlayerController::OnADSWhileDead()
 {
+	SpectateWhileDead(false);
+}
+
+void ACombatForgePlayerController::SpectateWhileDead(bool bForward)
+{
 	const ACombatForgeGameState* GS = GetPFGameState();
 	const ACombatForgePlayerState* PS = GetPlayerState<ACombatForgePlayerState>();
 	if (GS && PS && GS->Phase == EPFMatchPhase::Combat && !PS->bAliveInRound)
 	{
-		ServerSpectateNext(false);
+		ServerSpectateNext(bForward);
 	}
 }
 

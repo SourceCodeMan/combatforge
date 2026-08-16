@@ -42,20 +42,15 @@
 #include "InputModifiers.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Sound/SoundClass.h"
-#include "Styling/CoreStyle.h"
+#include "UI/PFSlateFont.h"
 
 namespace
 {
-	FSlateFontInfo PFOptFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
-
 	UTextBlock* MakeLabel(UWidgetTree* Tree, const FString& Text, int32 Size = 14, bool bBold = false)
 	{
 		UTextBlock* T = Tree->ConstructWidget<UTextBlock>();
 		T->SetText(FText::FromString(Text));
-		T->SetFont(PFOptFont(Size, bBold));
+		T->SetFont(PFSlateFont(Size, bBold));
 		T->SetColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.91f, 0.94f)));
 		return T;
 	}

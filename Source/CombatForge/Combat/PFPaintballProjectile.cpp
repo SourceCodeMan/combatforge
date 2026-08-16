@@ -357,12 +357,5 @@ void APFPaintballProjectile::HandleCosmeticImpact(const FHitResult& Hit)
 
 uint8 APFPaintballProjectile::VictimTeamOf(const AActor* HitActor)
 {
-	if (const APawn* VictimPawn = Cast<APawn>(HitActor))
-	{
-		if (const ACombatForgePlayerState* PS = VictimPawn->GetPlayerState<ACombatForgePlayerState>())
-		{
-			return PS->TeamId;
-		}
-	}
-	return 255;   // teamless (target dummy) — always a valid target, never "friendly"
+	return PFTeamIdOf(Cast<APawn>(HitActor));   // 255 = always a valid target, never "friendly"
 }

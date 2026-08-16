@@ -14,6 +14,8 @@
 
 #include "EngineUtils.h"
 
+#include "UI/PFSlateFont.h"
+
 #include "Blueprint/WidgetTree.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CanvasPanel.h"
@@ -28,15 +30,9 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Brushes/SlateColorBrush.h"
 #include "GameFramework/PlayerController.h"
-#include "Styling/CoreStyle.h"
 
 namespace
 {
-	FSlateFontInfo PFCombatFont(int32 Size, bool bBold)
-	{
-		return FCoreStyle::GetDefaultFontStyle(bBold ? FName(TEXT("Bold")) : FName(TEXT("Regular")), Size);
-	}
-
 	UImage* MakeSolidImage(UWidgetTree* Tree, const FLinearColor& Color)
 	{
 		UImage* Img = Tree->ConstructWidget<UImage>();
@@ -97,7 +93,7 @@ void UPFCombatHUDWidget::BuildTree()
 	// ---- Hopper + reload — bottom right ----
 	HopperText = WidgetTree->ConstructWidget<UTextBlock>();
 	HopperText->SetText(FText::FromString(TEXT("30 | 120")));
-	HopperText->SetFont(PFCombatFont(22, true));
+	HopperText->SetFont(PFSlateFont(22, true));
 	HopperText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	HopperText->SetJustification(ETextJustify::Right);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(HopperText))
@@ -123,7 +119,7 @@ void UPFCombatHUDWidget::BuildTree()
 	// Fire-mode + grenade indicators, stacked above the hopper (bottom-right).
 	FireModeText = WidgetTree->ConstructWidget<UTextBlock>();
 	FireModeText->SetText(FText::FromString(TEXT("AUTO")));
-	FireModeText->SetFont(PFCombatFont(15, true));
+	FireModeText->SetFont(PFSlateFont(15, true));
 	FireModeText->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.9f, 1.f)));
 	FireModeText->SetJustification(ETextJustify::Right);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(FireModeText))
@@ -136,7 +132,7 @@ void UPFCombatHUDWidget::BuildTree()
 
 	GrenadeText = WidgetTree->ConstructWidget<UTextBlock>();
 	GrenadeText->SetText(FText::FromString(TEXT("FRAG 6   SMOKE 6")));
-	GrenadeText->SetFont(PFCombatFont(15, true));
+	GrenadeText->SetFont(PFSlateFont(15, true));
 	GrenadeText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.82f, 0.35f)));
 	GrenadeText->SetJustification(ETextJustify::Right);
 	if (UCanvasPanelSlot* CSlot = RootCanvas->AddChildToCanvas(GrenadeText))
@@ -150,7 +146,7 @@ void UPFCombatHUDWidget::BuildTree()
 	// Contextual interact prompt (center, under reticle) — doors, etc.
 	InteractPromptText = WidgetTree->ConstructWidget<UTextBlock>();
 	InteractPromptText->SetText(FText::GetEmpty());
-	InteractPromptText->SetFont(PFCombatFont(18, true));
+	InteractPromptText->SetFont(PFSlateFont(18, true));
 	InteractPromptText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.92f)));
 	InteractPromptText->SetJustification(ETextJustify::Center);
 	InteractPromptText->SetVisibility(ESlateVisibility::Collapsed);
@@ -166,7 +162,7 @@ void UPFCombatHUDWidget::BuildTree()
 	// Ammo-barrel cooldown toast (lower-right, above hopper stack) — private, ~2 s fade.
 	BarrelCooldownText = WidgetTree->ConstructWidget<UTextBlock>();
 	BarrelCooldownText->SetText(FText::GetEmpty());
-	BarrelCooldownText->SetFont(PFCombatFont(16, true));
+	BarrelCooldownText->SetFont(PFSlateFont(16, true));
 	BarrelCooldownText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.85f, 0.4f, 0.95f)));
 	BarrelCooldownText->SetJustification(ETextJustify::Right);
 	BarrelCooldownText->SetVisibility(ESlateVisibility::Collapsed);
@@ -182,7 +178,7 @@ void UPFCombatHUDWidget::BuildTree()
 	// Bomb charge from mid-field pickup (hidden until claimed).
 	BombCarryText = WidgetTree->ConstructWidget<UTextBlock>();
 	BombCarryText->SetText(FText::FromString(TEXT("BOMB · G")));
-	BombCarryText->SetFont(PFCombatFont(15, true));
+	BombCarryText->SetFont(PFSlateFont(15, true));
 	BombCarryText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.35f, 0.12f)));
 	BombCarryText->SetJustification(ETextJustify::Right);
 	BombCarryText->SetVisibility(ESlateVisibility::Collapsed);
@@ -218,7 +214,7 @@ void UPFCombatHUDWidget::BuildTree()
 		AddPip(PipsA, PipSizersA);
 	}
 	RoundNumberText = WidgetTree->ConstructWidget<UTextBlock>();
-	RoundNumberText->SetFont(PFCombatFont(14, true));
+	RoundNumberText->SetFont(PFSlateFont(14, true));
 	RoundNumberText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.8f)));
 	if (UHorizontalBoxSlot* HSlot = PipsRow->AddChildToHorizontalBox(RoundNumberText))
 	{
@@ -235,7 +231,7 @@ void UPFCombatHUDWidget::BuildTree()
 	}
 
 	RoundTimerText = WidgetTree->ConstructWidget<UTextBlock>();
-	RoundTimerText->SetFont(PFCombatFont(26, true));
+	RoundTimerText->SetFont(PFSlateFont(26, true));
 	RoundTimerText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	RoundTimerText->SetJustification(ETextJustify::Center);
 	if (UVerticalBoxSlot* VSlot = TopBox->AddChildToVerticalBox(RoundTimerText))
@@ -247,7 +243,7 @@ void UPFCombatHUDWidget::BuildTree()
 	// Final-30s countdown: its own canvas slot (not TopBox) so the per-second scale pop never
 	// reflows the pips/alive strip. Hidden until the live round timer crosses 30 s.
 	FinalCountdownText = WidgetTree->ConstructWidget<UTextBlock>();
-	FinalCountdownText->SetFont(PFCombatFont(54, true));
+	FinalCountdownText->SetFont(PFSlateFont(54, true));
 	FinalCountdownText->SetColorAndOpacity(FSlateColor(FLinearColor(0.98f, 0.25f, 0.12f)));
 	FinalCountdownText->SetJustification(ETextJustify::Center);
 	FinalCountdownText->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
@@ -263,14 +259,14 @@ void UPFCombatHUDWidget::BuildTree()
 
 	UHorizontalBox* AliveRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	AliveTextA = WidgetTree->ConstructWidget<UTextBlock>();
-	AliveTextA->SetFont(PFCombatFont(16, true));
+	AliveTextA->SetFont(PFSlateFont(16, true));
 	AliveTextA->SetColorAndOpacity(FSlateColor(PFColors::ForTeam(0)));
 	UTextBlock* AliveDash = WidgetTree->ConstructWidget<UTextBlock>();
 	AliveDash->SetText(FText::FromString(TEXT("  —  ")));
-	AliveDash->SetFont(PFCombatFont(16, false));
+	AliveDash->SetFont(PFSlateFont(16, false));
 	AliveDash->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.6f)));
 	AliveTextB = WidgetTree->ConstructWidget<UTextBlock>();
-	AliveTextB->SetFont(PFCombatFont(16, true));
+	AliveTextB->SetFont(PFSlateFont(16, true));
 	AliveTextB->SetColorAndOpacity(FSlateColor(PFColors::ForTeam(1)));
 	AliveRow->AddChildToHorizontalBox(AliveTextA);
 	AliveRow->AddChildToHorizontalBox(AliveDash);
@@ -282,7 +278,7 @@ void UPFCombatHUDWidget::BuildTree()
 
 	// Objective status (CTF carrier / Dom·HP on-point) sits under the score strip.
 	ObjectiveStatusText = WidgetTree->ConstructWidget<UTextBlock>();
-	ObjectiveStatusText->SetFont(PFCombatFont(15, true));
+	ObjectiveStatusText->SetFont(PFSlateFont(15, true));
 	ObjectiveStatusText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.9f, 0.35f)));
 	ObjectiveStatusText->SetJustification(ETextJustify::Center);
 	ObjectiveStatusText->SetText(FText::GetEmpty());
@@ -300,7 +296,7 @@ void UPFCombatHUDWidget::BuildTree()
 	for (int32 i = 0; i < 3; ++i)
 	{
 		UTextBlock* Chip = WidgetTree->ConstructWidget<UTextBlock>();
-		Chip->SetFont(PFCombatFont(17, true));
+		Chip->SetFont(PFSlateFont(17, true));
 		Chip->SetJustification(ETextJustify::Center);
 		Chip->SetText(FText::GetEmpty());
 		if (UHorizontalBoxSlot* HSlot = ZoneChipsRow->AddChildToHorizontalBox(Chip))
@@ -326,7 +322,7 @@ void UPFCombatHUDWidget::BuildTree()
 
 	// ---- Banner (freeze / intermission / showdown) ----
 	BannerText = WidgetTree->ConstructWidget<UTextBlock>();
-	BannerText->SetFont(PFCombatFont(34, true));
+	BannerText->SetFont(PFSlateFont(34, true));
 	BannerText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	BannerText->SetJustification(ETextJustify::Center);
 	BannerText->SetText(FText::GetEmpty());
@@ -356,7 +352,7 @@ void UPFCombatHUDWidget::BuildTree()
 	}
 	HitsBox->AddChildToVerticalBox(HPRow);
 	RegionHitsText = WidgetTree->ConstructWidget<UTextBlock>();
-	RegionHitsText->SetFont(PFCombatFont(13, false));
+	RegionHitsText->SetFont(PFSlateFont(13, false));
 	RegionHitsText->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.85f, 0.85f)));
 	RegionHitsText->SetText(FText::GetEmpty());
 	if (UVerticalBoxSlot* VSlot = HitsBox->AddChildToVerticalBox(RegionHitsText))
@@ -376,7 +372,7 @@ void UPFCombatHUDWidget::BuildTree()
 	for (int32 i = 0; i < FeedLineCount; ++i)
 	{
 		UTextBlock* Line = WidgetTree->ConstructWidget<UTextBlock>();
-		Line->SetFont(PFCombatFont(13, false));
+		Line->SetFont(PFSlateFont(13, false));
 		Line->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Line->SetJustification(ETextJustify::Right);
 		if (UVerticalBoxSlot* VSlot = FeedBox->AddChildToVerticalBox(Line))
@@ -406,7 +402,7 @@ void UPFCombatHUDWidget::BuildTree()
 
 	OutTitleText = WidgetTree->ConstructWidget<UTextBlock>();
 	OutTitleText->SetText(FText::FromString(TEXT("YOU'RE OUT")));
-	OutTitleText->SetFont(PFCombatFont(56, true));
+	OutTitleText->SetFont(PFSlateFont(56, true));
 	OutTitleText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.92f, 0.35f)));
 	OutTitleText->SetJustification(ETextJustify::Center);
 	OutTitleText->SetVisibility(ESlateVisibility::Collapsed);
@@ -421,7 +417,7 @@ void UPFCombatHUDWidget::BuildTree()
 
 	OutSubtitleText = WidgetTree->ConstructWidget<UTextBlock>();
 	OutSubtitleText->SetText(FText::GetEmpty());
-	OutSubtitleText->SetFont(PFCombatFont(28, true));
+	OutSubtitleText->SetFont(PFSlateFont(28, true));
 	OutSubtitleText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 1.f, 0.95f)));
 	OutSubtitleText->SetJustification(ETextJustify::Center);
 	OutSubtitleText->SetVisibility(ESlateVisibility::Collapsed);
@@ -436,7 +432,7 @@ void UPFCombatHUDWidget::BuildTree()
 
 	OutClassText = WidgetTree->ConstructWidget<UTextBlock>();
 	OutClassText->SetText(FText::GetEmpty());
-	OutClassText->SetFont(PFCombatFont(18, true));
+	OutClassText->SetFont(PFSlateFont(18, true));
 	OutClassText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.9f, 1.f, 0.95f)));
 	OutClassText->SetJustification(ETextJustify::Center);
 	OutClassText->SetVisibility(ESlateVisibility::Collapsed);
@@ -452,7 +448,7 @@ void UPFCombatHUDWidget::BuildTree()
 	// ---- Domination capture meter (CoD "Capture Meter": linear bar, lower-center, above the weapon HUD;
 	//      shown while the local player stands in a zone with capture activity) ----
 	CaptureBarLabel = WidgetTree->ConstructWidget<UTextBlock>();
-	CaptureBarLabel->SetFont(PFCombatFont(16, true));
+	CaptureBarLabel->SetFont(PFSlateFont(16, true));
 	CaptureBarLabel->SetJustification(ETextJustify::Center);
 	CaptureBarLabel->SetText(FText::GetEmpty());
 	CaptureBarLabel->SetVisibility(ESlateVisibility::Collapsed);

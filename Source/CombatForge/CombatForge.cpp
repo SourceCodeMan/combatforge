@@ -3,12 +3,18 @@
 #include "CombatForge.h"
 
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/App.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY(CombatForgeLog);
+
+bool PFIsRenderingWorld(const UWorld* World)
+{
+	return World != nullptr && World->GetNetMode() != NM_DedicatedServer;
+}
 
 void FCombatForgeModule::StartupModule()
 {
