@@ -121,10 +121,10 @@ namespace
 
 FString FPFBackendServerInfo::JoinAddress() const
 {
-	// Prefer LanAddr only when the row has no distinct public mapping: both the
+	// Prefer LanAddr only when the row also has a distinct public mapping: both the
 	// local adapter and LanAddr parse as IPv4, share a real /24, LanAddr is
-	// RFC1918, and Addr is empty / equal / also RFC1918. Last-dot /24 is not
-	// "this LAN" — every consumer 192.168.1.0/24 would false-positive.
+	// RFC1918, and Addr is a different public IPv4. The public mapping proves this
+	// row came from our server; matching a common private /24 alone is not "this LAN".
 	if (!LanAddr.IsEmpty())
 	{
 		if (ISocketSubsystem* Sockets = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM))
@@ -133,18 +133,17 @@ FString FPFBackendServerInfo::JoinAddress() const
 			const TSharedRef<FInternetAddr> Local = Sockets->GetLocalHostAddr(*GLog, bCanBind);
 			const FString LocalIp = Local->ToString(/*bAppendPort=*/false);
 			uint32 LocalHost = 0, LanHost = 0;
-			if (ParseIpv4Host(LocalIp, LocalHost) && ParseIpv4Host(LanAddr, LanHost)
+			uint32 PubHost = 0;
+			const bool bHasDistinctPublic = ParseIpv4Host(Addr, PubHost)
+				&& !IsRfc1918(PubHost)
+				&& Addr != LanAddr;
+			if (bCanBind
+				&& ParseIpv4Host(LocalIp, LocalHost) && ParseIpv4Host(LanAddr, LanHost)
 				&& (LocalHost >> 8) == (LanHost >> 8)
-				&& IsRfc1918(LanHost))
+				&& IsRfc1918(LanHost)
+				&& bHasDistinctPublic)
 			{
-				uint32 PubHost = 0;
-				const bool bNoDistinctPublic = Addr.IsEmpty()
-					|| Addr == LanAddr
-					|| (ParseIpv4Host(Addr, PubHost) && IsRfc1918(PubHost));
-				if (bNoDistinctPublic)
-				{
-					return FString::Printf(TEXT("%s:%d"), *LanAddr, Port);
-				}
+				return FString::Printf(TEXT("%s:%d"), *LanAddr, Port);
 			}
 		}
 	}
