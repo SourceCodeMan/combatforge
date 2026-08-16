@@ -1975,9 +1975,12 @@ void ACombatForgeGameMode::RequestResetToSpawn(ACombatForgeCharacter* Pawn)
 	}
 	// P3-O1: drop a live carry at the pre-teleport XY, then clear the stamp. Do not
 	// ServerReturnHome (free extract) and do not reject the click (carrier can be the stuck one).
+	// Verify the actor still belongs to this player before moving it: a stale PS stamp must not
+	// rip a flag away from its real carrier.
 	if (PS->bCarryingFlag)
 	{
-		if (APFFlagActor* Carried = GetFlagForTeam(PS->CarriedFlagTeam))
+		if (APFFlagActor* Carried = GetFlagForTeam(PS->CarriedFlagTeam);
+			Carried && Carried->IsCarried() && Carried->GetCarrier() == PS)
 		{
 			Carried->ServerDropAt(Pawn->GetActorLocation());
 		}
