@@ -257,6 +257,9 @@ void FPFGamepadCursor::SynthesizeEscapeKey(FSlateApplication& SlateApp, bool bDo
 	{
 		SlateApp.ProcessKeyUpEvent(EscapeEvent);
 	}
+	// ProcessKey* re-enters input preprocessors with a non-gamepad Escape event. Restore
+	// the real source device so pressing B does not flip all UI hints back to keyboard.
+	FPFInputDevice::NoteGamepad();
 }
 
 void FPFGamepadCursor::EmitScroll(FSlateApplication& SlateApp, float NotchDelta)
