@@ -29,6 +29,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
+#include "Core/PFHandheldPlatform.h"
 #include "Core/PFUserPrefs.h"
 #include "Player/CombatForgeCharacter.h"
 #include "Player/PFCharacterPreviewActor.h"
@@ -3445,12 +3446,22 @@ void UPFLoadingMenuWidget::OnDonateClicked()
 {
 	// Opens the system default browser — no in-game web view, no network call from the game.
 	FPlatformProcess::LaunchURL(TEXT("https://buymeacoffee.com/tomchapman"), nullptr, nullptr);
+	if (FPFHandheldPlatform::Detect() == EPFHandheldKind::SteamDeck)
+	{
+		// Deck Game Mode has no browser — LaunchURL fails silently there, so always
+		// surface the address as text too (harmless if the overlay did open it).
+		SetStatus(TEXT("If no browser opened: buymeacoffee.com/tomchapman"));
+	}
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened donate page (buymeacoffee.com/tomchapman)"));
 }
 
 void UPFLoadingMenuWidget::OnWebsiteClicked()
 {
 	FPlatformProcess::LaunchURL(TEXT("https://playcombatforge.com/"), nullptr, nullptr);
+	if (FPFHandheldPlatform::Detect() == EPFHandheldKind::SteamDeck)
+	{
+		SetStatus(TEXT("If no browser opened: playcombatforge.com"));
+	}
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened website (playcombatforge.com)"));
 }
 
@@ -3459,12 +3470,20 @@ void UPFLoadingMenuWidget::OnStoreClicked()
 	// Store checkout lives on the website (merchant of record). Opens the system browser — no card entry
 	// or purchase flow inside the kids-audience client, by design (store.ts).
 	FPlatformProcess::LaunchURL(TEXT("https://playcombatforge.com/store"), nullptr, nullptr);
+	if (FPFHandheldPlatform::Detect() == EPFHandheldKind::SteamDeck)
+	{
+		SetStatus(TEXT("If no browser opened: playcombatforge.com/store"));
+	}
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened store (playcombatforge.com/store)"));
 }
 
 void UPFLoadingMenuWidget::OnDiscordClicked()
 {
 	FPlatformProcess::LaunchURL(TEXT("https://discord.gg/f7U2xXxAxc"), nullptr, nullptr);
+	if (FPFHandheldPlatform::Detect() == EPFHandheldKind::SteamDeck)
+	{
+		SetStatus(TEXT("If no browser opened: discord.gg/f7U2xXxAxc"));
+	}
 	UE_LOG(CombatForgeLog, Log, TEXT("LoadingMenu: opened Discord invite"));
 }
 
