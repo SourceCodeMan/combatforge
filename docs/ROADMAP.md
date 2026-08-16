@@ -1,9 +1,15 @@
 # CombatForge Roadmap
 
-**Last updated:** 2026-07-27
-**Current release:** `0.1.0-alpha.16` · NetProtocol **16**
+**Last updated:** 2026-08-16
+**Current source/network gate:** `0.1.0-alpha.19` · NetProtocol **19**
 
 Companion docs: [`store-beta-plan.md`](store-beta-plan.md) (storefront mechanics) · [`code-review/TRACKER.md`](code-review/TRACKER.md) (quality backlog) · [`multiplayer-plan.md`](multiplayer-plan.md) (netcode) · [`mac-port.md`](mac-port.md)
+
+> **August 16 status update:** the July 27 platform audit remains the strategic baseline, but
+> several implementation items have moved. The shared controller/handheld layer is implemented
+> in open PR #45, the Deck-specific remainder is stacked in #47, the Docker arena-volume gap
+> (#26) is fixed on `main`, and the source/network gate has advanced to alpha.19. Pass 3
+> fixes are open in #52–#61 and still need a Windows/UE5 build plus gameplay verification.
 
 ---
 
@@ -11,10 +17,10 @@ Companion docs: [`store-beta-plan.md`](store-beta-plan.md) (storefront mechanics
 
 | | Status |
 |---|---|
-| **Windows** | Live on itch — channel `windows-alpha`, upload #18350204 |
-| **macOS (arm64)** | Live on itch — channel `osx-alpha`, upload #18571629, shipped 2026-07-27 |
-| **Cross-play** | Proven Mac ↔ PC. Both channels on `0.1.0-alpha.16` / NetProtocol 16 |
-| **Code review Pass 2** | 2 blockers + 16 majors **fixed**. 49 minors + 38 nits open (issues #27–#38) |
+| **Windows** | Live on itch — `windows-alpha`; source/network gate is now alpha.19 / protocol 19 |
+| **macOS (arm64)** | Live on itch — `osx-alpha`; last audited 2026-07-27 |
+| **Cross-play** | Proven Mac ↔ PC when both builds share the same protocol; recheck both live channels after the next synchronized push |
+| **Code review** | Pass 2 is 93/107 closed; Pass 3 work is open in PRs #52–#61 and awaits Windows/UE5 verification |
 | **Backend** | Plain REST `api.playcombatforge.com`. No OnlineSubsystem, no EOS |
 | **Servers** | Vultr dedicated fleet + listen-server hosting |
 
@@ -34,12 +40,16 @@ Effort figures are engineer-days for a solo developer, calibrated against the 3-
 
 Cheap, high-leverage, or time-gated. Several of these are calendar-bound, so starting them early costs nothing.
 
-### 1. Verify the Steam Deck hypothesis on real hardware — *2 hours*
-The existing `windows-alpha` build should run on a Deck under Proton with **zero code changes**: no anti-cheat, no DRM, no launcher, no OnlineSubsystem, and joining is a plain `open <ip:port>` console command over UDP.
+### 1. Land and verify the handheld stack — *Windows/Deck hardware required*
 
-**This gates every other handheld decision.** Two claims are unverified: whether VKD3D exposes `AtomicInt64OnTypedResource` (the capability UE5 gates Nanite on), and whether 8 RDNA2 CUs at 15W hold 30fps at 800p with Nanite + virtual shadow maps + volumetric fog through a translation layer. If either fails, the Deck plan changes shape entirely.
+The shared controller, pad-cursor, stick-look, build-wheel, UI-scale, and one-shot handheld
+preset work is implemented in **PR #45**. The Deck-specific Proton guide and Game Mode URL
+fallback are stacked in **PR #47**.
 
-*Do not spend a day on Deck tuning until this test passes.*
+Static review is complete, but neither branch has been tested on real handheld hardware in
+the current environment. Before merge/release: build the rebased branch with warnings-as-errors,
+exercise every menu with only a pad, test the X reload/interact pairing, verify lobby
+cursor/play switching, and run the Deck checklist in `docs/steam-deck.md`.
 
 ### 2. Start the Steam Direct clock — *$100, ~30 calendar days*
 Two-week mandatory "Coming Soon" plus review. The clock runs in parallel with all engineering, so there is no reason to wait. Note `store-beta-plan.md:106` is wrong that Epic is free — Epic also charges $100 recoupable; the real Epic advantage is 0% on the first $1M/yr vs Steam's 30%, which is moot while the game is free. Discovery favours Steam decisively for a game whose core problem is population.
@@ -49,25 +59,22 @@ Epic's documentation defines the Personal tier by *"gross revenue from **commerc
 
 Open `fab.com/eula` and `unrealengine.com/eula/content` **in a browser** and read §2(a), §4(c), §5(a), §6(b)(iii). Both pages return HTTP 403 to automated fetch, so no automated audit can settle this — it needs human eyes.
 
-### 4. Fix the dedicated-server volume gap — *15 minutes* — issue #26
-`docker-compose.yml` declares no volume for `/var/lib/combatforge` ([`PFPaths.cpp:56`](../Source/CombatForge/Core/PFPaths.cpp)), so every container recreate destroys all community arenas.
+### 4. Dedicated-server volume gap — **completed on `main`**
 
----
+The deployment/container fixes now preserve the external arena directory across replacement.
+Keep the persistence path in the smoke checklist whenever the fleet packaging changes.
 
 ## NEXT — 2 to 4 weeks
 
-### 5. The shared input layer — *5–8 days* ⭐ highest leverage on this page
-Every remaining platform — Deck Verified, Steam Machine, Windows handhelds, Xbox, PS5, Switch — requires the **same five items**. Building them once unlocks all of them, *and* delivers couch-controller play on Windows and Mac immediately.
+### 5. Merge the shared input layer — **implemented in PR #45**
 
-| Item | Effort | Evidence |
-|---|---|---|
-| Gamepad bindings | 1–2 d | All 40 `MapKey` calls in `PFInputConfig.cpp` are keyboard/mouse; repo-wide grep for `gamepad\|xinput\|thumbstick` returns **zero** |
-| Look input: DeltaTime + deadzone + response curve | 1 d | `CombatForgeCharacter.cpp:1221-1222` — turn speed currently scales with framerate on a stick |
-| Build wheel off mouse-delta onto a stick vector | 0.5 d | `PFBuildWheelWidget.cpp:275` |
-| `DefaultDeviceProfiles.ini` | — | Does not exist; every scalability value is a single global desktop setting |
-| UI scale curve | — | No `[/Script/Engine.UserInterfaceSettings]` UIScaleCurve |
+The originally estimated controller foundation now exists: fixed gamepad bindings, a
+DeltaTime-scaled right-stick look path with deadzone/response curve, stick-driven build
+wheel, pad-aware menu cursor, UI scaling, handheld detection/preset, and in-game documentation.
 
-**Two warnings.** The multi-week part is *focus navigation*, not bindings: ~55 click-only widgets across a 3,483-line `PFLoadingMenuWidget.cpp` and a 1,590-line `PFOptionsWidget.cpp`, with `CommonUI` not enabled, plus two deliberate anti-focus decisions to reverse (`PFVoteWidget.cpp:359-367`, `PFBuildWheelWidget.h:22-27`) that exist because taking focus caused real regressions. And the DPI fix is not one line — pinning 800px to 1.0 shrinks the logical canvas from 1730×1081 to 1280×800, giving a layout authored for 2560×1440 *less* room than it has ever had, with only 2 of 12 UI files using a `ScrollBox`.
+Remaining work is integration and hardware QA, not greenfield implementation. Rebase onto
+current `main`, compile on Windows with warnings-as-errors, then complete the controller and
+handheld checklist before treating Windows handhelds or Deck as supported.
 
 ### 6. Close the NetProtocol fragmentation risk — *1–2 days*
 `PFBuild::NetProtocol` ([`CombatForge.h:26`](../Source/CombatForge/CombatForge.h)) is bumped every push and hard-fails mismatched joins. Every storefront with async review adds a potential stale client version, and **each stale version is its own empty server pool**. At current population, two pools is fatal.
@@ -83,8 +90,8 @@ The live Mac download currently makes every user do the Gatekeeper right-click d
 ### 9. Shrink the package — *1 day*
 Roughly **3.9 GB of the 4.3 GB is recoverable** without touching authored fidelity: point `Scripts/trim_bandit_textures.py` at the other five packs, and drop `Industrial_Warehouse` from `MapsToCook` (`DefaultGame.ini:25` — it only feeds a cvar that defaults to OFF). Shrinks the download for every existing player on every platform, and is a prerequisite for any future mobile conversation.
 
-### 10. Work the quality backlog — issues #27–#38
-49 minors + 38 nits, one issue per module, checkboxed. None are ship-blockers. Best done module-by-module since each shares files and context.
+### 10. Finish the quality backlog and Pass 3
+Pass 2 is 93/107 closed. Pass 3 PRs #52–#61 cover the next reviewed batch; static fixes can land now, but gameplay/network/deploy changes still require the Windows/UE5 verification matrix before merge.
 
 ---
 
