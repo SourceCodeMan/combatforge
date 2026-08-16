@@ -2,7 +2,7 @@
 
 Written 2026-07-28 on branch `feat/steam-deck` (stacked on `feat/handheld-windows`).
 CombatForge runs on Steam Deck as the **Windows build under Proton** — there is no native
-Linux build (deliberate: one binary, one NetProtocol, cross-plays with the live Windows
+Linux build (deliberate: one binary and one network-version gate, cross-playing with the live Windows
 fleet; a Linux server/client would need the cross-toolchain and a second QA matrix).
 
 ⚠️ **Not run on a real Deck** (none owned). The compatibility story below is an audit of
@@ -80,7 +80,7 @@ the focused field.
 2. Menus render un-cropped at 1280×800; pad cursor works end-to-end (boot menu → lobby →
    options → vote), Steam+X OSK types into the JOIN box.
 3. Sign-in via phone code; server browser lists the Vultr fleet; join + play a full online
-   match vs the live Windows build (protocol 16 — cross-play is the whole point).
+   match vs a live Windows build on the same current protocol (cross-play is the whole point).
 4. `stat fps`: ≥40 sustained in a busy combat phase at the preset (aim: 45–60). If short,
    drop to 65% scale / lower TSR quality in `ApplyHandheldPreset`.
 5. Rendering sanity vs the SM6/VKD3D path: no black/checker materials (Nanite props,
