@@ -16,7 +16,7 @@ struct FPFBackendServerInfo
 	FString ServerId;
 	FString Name;
 	FString Addr;        // Worker-observed public IP
-	FString LanAddr;     // self-reported (same-LAN hairpin fallback); may be empty
+	FString LanAddr;     // self-reported (in-house only when the row also has a distinct public mapping)
 	int32   Port = 7777;
 	FString Map;
 	FString Mode;
@@ -26,7 +26,8 @@ struct FPFBackendServerInfo
 	int32   MaxPlayers = 12;
 	int32   NetProtocol = 0;
 
-	/** "ip:port" ready for `open` — prefers the LAN address when we appear to share its subnet. */
+	/** "ip:port" ready for `open` — LAN only when both ends are RFC1918 on the same parsed /24
+	 *  and the directory row has a distinct public mapping. Matching a private /24 alone is not LAN. */
 	FString JoinAddress() const;
 };
 
@@ -175,11 +176,16 @@ private:
 	bool bFleetRegistered = false;
 	bool bFleetRegisterInFlight = false;
 	FTSTicker::FDelegateHandle HeartbeatTicker;
+	FTSTicker::FDelegateHandle FleetRegisterRetryTicker;
+	float FleetRegisterRetryDelaySec = 10.f;   // 10 → 30 → 60, then stay at 60
+	int32 PendingReplayInFlight = 0;           // drain latch: skip while prior POSTs are out
 	TWeakObjectPtr<ACombatForgeGameState> FleetGS;
 	int32 FleetPort = 7777;
 	void SendHeartbeat();
-	/** Drop out of the directory (POST /unregister + stop the heartbeat). Safe to call anytime. */
+	/** Drop out of the directory (POST /unregister + stop heartbeat and register-retry). Safe anytime. */
 	void FleetUnregister();
+	void ReplayPendingReports();
+	void ArmFleetRegisterRetry();
 
 	// ---- plumbing ----
 	/** Fire an HTTP request. AuthMode: 0 none, 1 Bearer(player token), 2 Bearer(server key). */
