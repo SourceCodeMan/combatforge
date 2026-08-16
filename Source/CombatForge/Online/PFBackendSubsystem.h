@@ -16,7 +16,7 @@ struct FPFBackendServerInfo
 	FString ServerId;
 	FString Name;
 	FString Addr;        // Worker-observed public IP
-	FString LanAddr;     // self-reported (in-house only when the row has no distinct public mapping)
+	FString LanAddr;     // self-reported (in-house only when the row also has a distinct public mapping)
 	int32   Port = 7777;
 	FString Map;
 	FString Mode;
@@ -27,7 +27,7 @@ struct FPFBackendServerInfo
 	int32   NetProtocol = 0;
 
 	/** "ip:port" ready for `open` — LAN only when both ends are RFC1918 on the same parsed /24
-	 *  and the directory row has no distinct public mapping. Matching first-three octets is not LAN. */
+	 *  and the directory row has a distinct public mapping. Matching a private /24 alone is not LAN. */
 	FString JoinAddress() const;
 };
 
