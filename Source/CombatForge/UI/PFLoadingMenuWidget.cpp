@@ -127,7 +127,7 @@ namespace
 		case EPFMatchType::CaptureFlag:
 			return TEXT("Grab their flag · score at your base · first to 3");
 		case EPFMatchType::Domination:
-			return TEXT("Capture & hold A / B / C · first to 200");
+			return TEXT("Capture & hold A / B / C · first to 150");
 		case EPFMatchType::Hardpoint:
 			return TEXT("One rotating point · hold it · score over time");
 		default:

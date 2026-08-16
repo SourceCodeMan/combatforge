@@ -1973,6 +1973,19 @@ void ACombatForgeGameMode::RequestResetToSpawn(ACombatForgeCharacter* Pawn)
 			Weapon->ServerResetLoadout();
 		}
 	}
+	// P3-O1: drop a live carry at the pre-teleport XY, then clear the stamp. Do not
+	// ServerReturnHome (free extract) and do not reject the click (carrier can be the stuck one).
+	// Verify the actor still belongs to this player before moving it: a stale PS stamp must not
+	// rip a flag away from its real carrier.
+	if (PS->bCarryingFlag)
+	{
+		if (APFFlagActor* Carried = GetFlagForTeam(PS->CarriedFlagTeam);
+			Carried && Carried->IsCarried() && Carried->GetCarrier() == PS)
+		{
+			Carried->ServerDropAt(Pawn->GetActorLocation());
+		}
+		PS->ServerSetFlagCarry(false, 255);
+	}
 	TeleportPawnTo(Pawn, GetSpawnTransform(PS));
 }
 
@@ -2322,7 +2335,7 @@ void ACombatForgeGameMode::BeginLiveRound()
 		// CoD-style Domination (playtest + research rework): ALL THREE zones live simultaneously, no rotation.
 		// A zone is captured by standing in it uncontested — 15s solo for a neutral zone, faster with teammates
 		// (x min(N,3)), 2x total for an enemy zone (neutralize, then capture). Progress persists when the zone
-		// empties (Tom's spec), freezes while contested (CoD). Income: 1 pt per owned zone per 5s, first to 200.
+		// empties (Tom's spec), freezes while contested (CoD). Income: 1 pt per owned zone per 5s, first to 150.
 		DominationIncomeTickCounter = 0;
 		SpawnObjectiveActors();
 		GS->ServerSetRoundState(EPFRoundState::Live, GS->GetServerWorldTimeSeconds() + SkirmishMatchDuration);
@@ -2731,6 +2744,9 @@ void ACombatForgeGameMode::SpawnObjectiveActors()
 
 void ACombatForgeGameMode::DestroyObjectiveActors()
 {
+	// Fold #9: host abort / SetPhase(Vote) destroy without EndTeamScoreObjective — stamps
+	// would otherwise linger. End-match already cleared; second pass is a no-op.
+	ClearAllFlagCarriers();
 	GetWorldTimerManager().ClearTimer(ObjectiveScoreTimerHandle);
 	GetWorldTimerManager().ClearTimer(HardpointRotateTimerHandle);
 
@@ -3072,12 +3088,15 @@ void ACombatForgeGameMode::NotifyFlagTouched(APFFlagActor* Flag, ACombatForgePla
 		{
 			return;
 		}
-		// Capture: score + return both flags + clear carrier.
+		// Capture: actor must still be this toucher's carry. A stale PS stamp must not
+		// home someone else's flag (ServerReturnHome does not clear the other pawn).
 		APFFlagActor* EnemyFlag = GetFlagForTeam(Toucher->CarriedFlagTeam);
-		if (EnemyFlag)
+		if (!EnemyFlag || !EnemyFlag->IsCarried() || EnemyFlag->GetCarrier() != Toucher)
 		{
-			EnemyFlag->ServerReturnHome();
+			Toucher->ServerSetFlagCarry(false, 255);
+			return;
 		}
+		EnemyFlag->ServerReturnHome();
 		Toucher->ServerSetFlagCarry(false, 255);
 		Toucher->ServerAddScore(ScoreRoundWin);   // reuse T18 capture bonus weight
 
@@ -3157,7 +3176,7 @@ void ACombatForgeGameMode::TickDominationScoring()
 		}
 	}
 
-	// Owner income: 1 pt per owned zone per 5 seconds (CoD: 1 pt/flag/5s tick, first to 200). Presence not
+	// Owner income: 1 pt per owned zone per 5 seconds (CoD: 1 pt/flag/5s tick, first to 150). Presence not
 	// required once captured — and per BO6, contested does NOT pause an owned zone's income, only capture.
 	if (++DominationIncomeTickCounter >= 5)
 	{
@@ -4371,7 +4390,7 @@ void ACombatForgeGameMode::ComputeEffectiveScaling()
 			}
 			else if (SkGS->MatchType == EPFMatchType::Domination)
 			{
-				// Dom win logic uses DominationTargetScore (default 200); HUD must match (C1).
+				// Dom win logic uses DominationTargetScore (default 150); HUD must match (C1).
 				Target = DominationTargetScore;
 			}
 			const uint8 TargetU8 = static_cast<uint8>(FMath::Clamp(Target, 1, 255));
