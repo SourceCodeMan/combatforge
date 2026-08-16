@@ -414,9 +414,8 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 	{
 		SpawnWarmupDummyFor(PS);   // one pen dummy per connected player (T29)
 
-		// Joiners during Combat enter the current round alive at their team spawn.
-		// CONTRACT-GAP: contract is silent on mid-round joiners; alive-at-spawn is the smallest
-		// implementation that keeps alive counts and elim-victory checks self-consistent.
+		// Combat join: Elimination benches until the next round; continuous modes seat now
+		// (P3-C1). Format-trim first so a bot slot frees before we decide alive-or-bench.
 		// Keep the joined team at/under the format size. Prefer to free a bot slot; if the team is all
 		// humans (no bot to drop), move the joiner to the other side when it has room, so no team
 		// exceeds the format (which would also alias onto the 6 fixed spawn slots).
@@ -444,13 +443,13 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 		{
 			const bool bAlive = (JoinGS->RoundState == EPFRoundState::Freeze ||
 			                     JoinGS->RoundState == EPFRoundState::Live);
+			// Same pair fall death uses: only Elimination + RoundElimination benches. RespawnMode
+			// defaults to RoundElimination and is never written from MatchType, so the old
+			// RespawnMode-only gate benched every live mode (default boot is Skirmish). (P3-C1)
+			const bool bElimBench = (JoinGS->MatchType == EPFMatchType::Elimination
+				&& RespawnMode == EPFRespawnMode::RoundElimination);
 
-			// Round-elimination: a joiner SPECTATES the round in progress instead of materialising
-			// alive in the middle of a firefight (Tom 2026-07-28; the old behaviour was flagged in
-			// code as a contract gap). Continuous-respawn modes are unaffected — there is nothing
-			// to wait for there. StartNextRound clears OutKind, re-alives, and respawns everyone,
-			// so no extra bookkeeping is needed to bring them back in. (P2-C5)
-			if (bAlive && RespawnMode == EPFRespawnMode::RoundElimination)
+			if (bAlive && bElimBench)
 			{
 				PS->ServerSetAliveInRound(false);
 				PS->ServerSetOutForRound();   // HUD: out until the next round
@@ -471,22 +470,27 @@ void ACombatForgeGameMode::PostLogin(APlayerController* NewPlayer)
 					TEXT("GameMode: %s joined mid-round - spectating until the next round"),
 					*PS->GetPlayerName());
 			}
-			else
+			else if (bAlive)
 			{
-				PS->ServerSetAliveInRound(bAlive);
-				// Mid-combat joiners miss StartNextRound's RoundHP stamp — apply sudden-death
-				// one-hit mode if the live round is showdown (C2).
-				if (bAlive && bSuddenDeathRoundActive)
+				// Continuous modes (Skirmish / FFA / CTF / Dom / HP): seat now. ApplyServerMoveLocks
+				// is not re-run on join, so a Freeze joiner must be locked here or they walk freeze.
+				PS->ServerSetAliveInRound(true);
+				RespawnCombatant(PS, bSuddenDeathRoundActive ? 1 : 3);
+				if (ACombatForgePlayerController* JoinPC =
+					Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
 				{
-					if (ACombatForgeCharacter* JoinPawn = Cast<ACombatForgeCharacter>(PS->GetPawn()))
+					if (JoinPC->GetPawn() != nullptr && JoinPC->GetViewTarget() != JoinPC->GetPawn())
 					{
-						if (UPFHealthComponent* Health = JoinPawn->GetHealth())
-						{
-							Health->ResetForRound(1);
-						}
+						JoinPC->SetViewTargetWithBlend(JoinPC->GetPawn(), 0.f);
+					}
+					if (JoinGS->RoundState == EPFRoundState::Freeze)
+					{
+						JoinPC->ApplyServerMoveLock(true);
 					}
 				}
 			}
+			// Intermission (bAlive == false): leave ServerSetAliveInRound(false). StartNextRound
+			// seats them. Vote/Results joiners never enter this Combat block.
 		}
 
 		// BUILD-PHASE JOINER (Tom 2026-08-07): PostLogin used to leave a Build joiner on
@@ -521,6 +525,9 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 	// needs to know which team just went a man down.
 	const uint8 LeaverTeam = ExitingPS ? ExitingPS->TeamId : TeamNone;
 	const bool bLeaverWasBot = ExitingPS && ExitingPS->IsABot();
+	// Read before the alive wipe below — a dead Elimination leaver must not gift the team a
+	// live backfill bot in the current firefight. (P3-C3)
+	const bool bLeaverWasAliveInRound = ExitingPS && ExitingPS->bAliveInRound;
 	const FString LeaverName = ExitingPS ? ExitingPS->GetPlayerName() : TEXT("a player");
 	if (ExitingPS)
 	{
@@ -567,14 +574,19 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 
 	// A leaver can complete an elimination victory, an all-ready condition, or an all-voted
 	// condition. Their PlayerState may still sit in PlayerArray here, so the ready/vote scans
-	// take it as an explicit exclusion.
+	// take it as an explicit exclusion. Bot Logout in Combat/Live is a format-trim
+	// (TrimOneBotFromTeam) — do not resolve the match on that destroy. A human leave still
+	// resolves BEFORE backfill so a replacement bot cannot mask a real abandon. (P3-C2)
 	RecountAlive();
-	CheckElimVictory();
-	CheckSkirmishAbandon();   // Skirmish: a whole team leaving ends the match (CheckElimVictory no-ops here)
-	CheckFreeForAllAbandon(); // FFA: last combatant standing wins
-	CheckCaptureFlagAbandon();
-	CheckDominationAbandon();
-	CheckHardpointAbandon();
+	if (!bLeaverWasBot)
+	{
+		CheckElimVictory();
+		CheckSkirmishAbandon();   // Skirmish: a whole team leaving ends the match (CheckElimVictory no-ops here)
+		CheckFreeForAllAbandon(); // FFA: last combatant standing wins
+		CheckCaptureFlagAbandon();
+		CheckDominationAbandon();
+		CheckHardpointAbandon();
+	}
 	NotifyReadyChangedInternal(ExitingPS);
 	CheckAllVotesIn(ExitingPS);
 
@@ -617,15 +629,28 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 		{
 			if (ACombatForgePlayerState* NewBot = AddBot(LeaverTeam))
 			{
-				RespawnCombatant(NewBot, 3);   // AddBot leaves pawn spawning to the caller
-				// Mid-round joiner parity: a sudden-death round is one-hit for everyone.
-				if (bSuddenDeathRoundActive)
+				// AddBot stamps alive=true. A dead Elimination leaver must not gift the team a
+				// live body in the current firefight — bench the replacement (no pawn).
+				// StartNextRound already RespawnCombatants everyone next round. (P3-C3)
+				if (GS->Phase == EPFMatchPhase::Combat
+					&& GS->RoundState == EPFRoundState::Live
+					&& !bLeaverWasAliveInRound)
 				{
-					if (ACombatForgeCharacter* BotPawn = Cast<ACombatForgeCharacter>(NewBot->GetPawn()))
+					NewBot->ServerSetAliveInRound(false);
+					NewBot->ServerSetOutForRound();
+				}
+				else
+				{
+					RespawnCombatant(NewBot, 3);   // AddBot leaves pawn spawning to the caller
+					// Mid-round joiner parity: a sudden-death round is one-hit for everyone.
+					if (bSuddenDeathRoundActive)
 					{
-						if (UPFHealthComponent* Health = BotPawn->GetHealth())
+						if (ACombatForgeCharacter* BotPawn = Cast<ACombatForgeCharacter>(NewBot->GetPawn()))
 						{
-							Health->ResetForRound(1);
+							if (UPFHealthComponent* Health = BotPawn->GetHealth())
+							{
+								Health->ResetForRound(1);
+							}
 						}
 					}
 				}
@@ -1318,6 +1343,30 @@ void ACombatForgeGameMode::SetPhase(EPFMatchPhase NewPhase)
 		DestroyAmmoBarrels();
 		DestroyBombs();
 		GS->ServerSetRoundState(EPFRoundState::None, 0.f);
+		// Tag-cap (and any mid-respawn) used to leave corpses: Vote only tore toys down, and
+		// the pending RespawnVictim timer aborts at the Live gate. Reseat like Lobby so
+		// everyone is a seated pawn. ApplyServerMoveLocks after the switch still locks Vote.
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+			if (!PS || PS->IsPhantom())
+			{
+				continue;
+			}
+			PS->ServerSetAliveInRound(true);
+			if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
+			{
+				PC->SetEliminatedMoveLock(false);
+			}
+			RespawnCombatant(PS, 3);
+			if (ACombatForgePlayerController* PC = Cast<ACombatForgePlayerController>(PS->GetPlayerController()))
+			{
+				if (PC->GetPawn() != nullptr && PC->GetViewTarget() != PC->GetPawn())
+				{
+					PC->SetViewTargetWithBlend(PC->GetPawn(), 0.f);
+				}
+			}
+		}
 		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this,
 			&ACombatForgeGameMode::FinalizeVotePhase, VotePhaseDuration, false);
 		break;
@@ -2171,7 +2220,10 @@ void ACombatForgeGameMode::FillBotsToFormat()
 		int32 Have = 0;
 		for (APlayerState* PSBase : GS->PlayerArray)
 		{
-			if (Cast<ACombatForgePlayerState>(PSBase))
+			const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+			// Phantom is a real PlayerState with no roster/pawn — counting it shorted fleet FFA
+			// one combatant. Same filter as abandon / lobby / scoreboard.
+			if (PS && !PS->IsPhantom() && PS->RosterIndex != 255)
 			{
 				++Have;
 			}
@@ -2213,21 +2265,58 @@ void ACombatForgeGameMode::TrimOneBotFromTeam(uint8 Team)
 	{
 		return;
 	}
+
+	auto DestroyOwnedBot = [](const ACombatForgePlayerState* PS) -> bool
+	{
+		if (APFBotController* Bot = Cast<APFBotController>(PS->GetOwningController()))
+		{
+			if (APawn* Pawn = Bot->GetPawn())
+			{
+				Bot->UnPossess();
+				Pawn->Destroy();
+			}
+			Bot->Destroy();   // AController::Destroyed unregisters the PlayerState
+			return true;
+		}
+		return false;
+	};
+
+	// Prefer a bot already out of the round so a format-trim does not drop AliveCounts
+	// to 0 (and resolve the match) while the joiner is still default-dead. Then a tagged
+	// corpse, then any bot. TrimOneBotAnyTeam inherits this. (P3-C2)
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+		if (PS && PS->IsABot() && PS->TeamId == Team && !PS->bAliveInRound)
+		{
+			if (DestroyOwnedBot(PS))
+			{
+				return;
+			}
+		}
+	}
 	for (APlayerState* PSBase : GS->PlayerArray)
 	{
 		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
 		if (PS && PS->IsABot() && PS->TeamId == Team)
 		{
-			if (APFBotController* Bot = Cast<APFBotController>(PS->GetOwningController()))
+			const ACombatForgeCharacter* Pawn = Cast<ACombatForgeCharacter>(PS->GetPawn());
+			const UPFHealthComponent* Health = Pawn ? Pawn->GetHealth() : nullptr;
+			if (Health && Health->bEliminated && DestroyOwnedBot(PS))
 			{
-				if (APawn* Pawn = Bot->GetPawn())
-				{
-					Bot->UnPossess();
-					Pawn->Destroy();
-				}
-				Bot->Destroy();   // AController::Destroyed unregisters the PlayerState
+				return;
 			}
-			return;   // one is enough
+		}
+	}
+	for (APlayerState* PSBase : GS->PlayerArray)
+	{
+		const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+		if (PS && PS->IsABot() && PS->TeamId == Team)
+		{
+			if (DestroyOwnedBot(PS))
+			{
+				return;
+			}
 		}
 	}
 }
@@ -4197,10 +4286,24 @@ void ACombatForgeGameMode::SweepEmptyServer()
 	}
 	// Logout's empty-check covers a clean quit; this sweep covers the ordering it missed
 	// (playtest 2026-07-23: everyone bailed, the box sat mid-match with just the phantom and
-	// nobody could set up a new match without a Ctrl+C).
+	// nobody could set up a new match without a Ctrl+C). Emit here — HostForceReturnToLobby
+	// deliberately does not, so Logout's last-human path stays single-shot. (P3-C4)
 	UE_LOG(CombatForgeLog, Warning,
 		TEXT("GameMode: no humans connected mid-match (phase %d) - forcing return to Lobby"),
 		static_cast<int32>(GS->Phase));
+	if (GS->Phase == EPFMatchPhase::Combat || GS->Phase == EPFMatchPhase::Vote)
+	{
+		for (APlayerState* PSBase : GS->PlayerArray)
+		{
+			const ACombatForgePlayerState* PS = Cast<ACombatForgePlayerState>(PSBase);
+			if (PS && !PS->IsABot() && !PS->IsPhantom())
+			{
+				SnapshotLeaverForReport(PS);
+			}
+		}
+		PendingMatchResult = MakeMatchResult(255);
+		EmitMatchReport();
+	}
 	HostForceReturnToLobby();
 }
 
