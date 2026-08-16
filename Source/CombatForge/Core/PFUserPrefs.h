@@ -72,6 +72,20 @@ struct COMBATFORGE_API FPFUserPrefs
 	 */
 	static void ApplyQualityMethodCVars(int32 QualityLevel);
 
+	// ---- Gamepad / handheld ----
+	// Right-stick look speed multiplier on the base 220°/s yaw / 150°/s pitch (0.2..3, default 1).
+	static float GetGamepadLookScale();
+	static void SetGamepadLookScale(float Scale);
+
+	// Slate ApplicationScale multiplier (0.85..1.30, default 1) — handheld preset bumps it for 7-8" panels.
+	static float GetUIScale();
+	static void SetUIScale(float Scale);
+
+	// Highest handheld-preset version ever auto-applied on this install (0 = never). The one-shot
+	// guard that keeps the boot preset from stomping settings the player changed afterwards.
+	static int32 GetHandheldPresetApplied();
+	static void SetHandheldPresetApplied(int32 Version);
+
 	// ---- Key rebinding (stored as "Bind_<ActionId>" = key name) ----
 	/** Saved override key for a rebindable action, or an invalid FKey if none is saved. */
 	static FKey GetKeyOverride(FName ActionId);

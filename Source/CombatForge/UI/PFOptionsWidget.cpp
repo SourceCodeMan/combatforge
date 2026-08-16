@@ -5,6 +5,7 @@
 
 #include "CombatForge.h"
 #include "Core/CombatForgePlayerController.h"
+#include "Core/PFHandheldPlatform.h"
 #include "Core/PFUserPrefs.h"
 #include "Input/PFInputConfig.h"
 #include "EnhancedInputSubsystems.h"
@@ -340,6 +341,26 @@ void UPFOptionsWidget::BuildVideoPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 10.f));
 	}
 
+	// UI scale — Slate ApplicationScale. Handhelds default it up (7-8" panels); live-applies.
+	UHorizontalBox* UiRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	UiRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("UI scale"), 15, false));
+	UIScaleSlider = WidgetTree->ConstructWidget<USlider>();
+	UIScaleSlider->SetMinValue(0.85f);
+	UIScaleSlider->SetMaxValue(1.3f);
+	UIScaleSlider->SetStepSize(0.05f);
+	UIScaleSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnUIScaleChanged);
+	if (UHorizontalBoxSlot* H = UiRow->AddChildToHorizontalBox(UIScaleSlider))
+	{
+		H->SetPadding(FMargin(16.f, 0.f));
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+	UIScaleValueText = MakeLabel(WidgetTree, TEXT("100%"), 14, true);
+	UiRow->AddChildToHorizontalBox(UIScaleValueText);
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(UiRow))
+	{
+		V->SetPadding(FMargin(0.f, 10.f));
+	}
+
 	// Brightness — EV offset on the match lighting rig's frozen base exposure (live-applies).
 	UHorizontalBox* BrRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	BrRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Brightness"), 15, false));
@@ -487,6 +508,26 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 		V->SetPadding(FMargin(0.f, 10.f));
 	}
 
+	// Gamepad right-stick look speed (multiplier on 220°/s yaw / 150°/s pitch).
+	UHorizontalBox* PadRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+	PadRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Gamepad look speed"), 15, false));
+	GamepadSensSlider = WidgetTree->ConstructWidget<USlider>();
+	GamepadSensSlider->SetMinValue(0.2f);
+	GamepadSensSlider->SetMaxValue(3.0f);
+	GamepadSensSlider->SetStepSize(0.05f);
+	GamepadSensSlider->OnValueChanged.AddDynamic(this, &UPFOptionsWidget::OnGamepadSensChanged);
+	if (UHorizontalBoxSlot* H = PadRow->AddChildToHorizontalBox(GamepadSensSlider))
+	{
+		H->SetPadding(FMargin(16.f, 0.f));
+		H->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
+	GamepadSensValueText = MakeLabel(WidgetTree, TEXT("1.00"), 14, true);
+	PadRow->AddChildToHorizontalBox(GamepadSensValueText);
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(PadRow))
+	{
+		V->SetPadding(FMargin(0.f, 10.f));
+	}
+
 	UHorizontalBox* InvRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 	InvRow->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("Invert Y"), 15, false));
 	InvertYCheck = WidgetTree->ConstructWidget<UCheckBox>();
@@ -554,6 +595,19 @@ void UPFOptionsWidget::BuildControlsPage(UWidget* ParentBox)
 		TEXT("Sensitivity, Invert, Aim/Crouch toggle apply on Apply. FOV is hip FOV (ADS still zooms). Unchecked = hold."), 12, false);
 	Note->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
 	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(Note))
+	{
+		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+	}
+
+	// Fixed gamepad layout (not rebindable yet) — spelled out so handheld players can
+	// discover the controls without a glyph pass.
+	UTextBlock* PadNote = MakeLabel(WidgetTree,
+		TEXT("Gamepad: LS move · RS look · A jump · B crouch · L3 sprint · R3 punch · RT fire/place · LT aim\n")
+		TEXT("X reload/use · Y fire mode/delete · RB frag/rotate · LB smoke/build wheel (hold) · D-pad: up ready,\n")
+		TEXT("down plant bomb, left-right switch class/piece · View scoreboard · Menu back. In menus the pad is a\n")
+		TEXT("pointer: LS moves, A clicks, B backs out, RS scrolls (lobby: D-pad down toggles walk-around)."), 12, false);
+	PadNote->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.6f)));
+	if (UVerticalBoxSlot* V = Box->AddChildToVerticalBox(PadNote))
 	{
 		V->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 	}
@@ -1158,6 +1212,23 @@ void UPFOptionsWidget::OnSensChanged(float Value)
 	RefreshLabels();
 }
 
+void UPFOptionsWidget::OnGamepadSensChanged(float Value)
+{
+	// Pref-backed and read live by OnLookStickInput, so writing it IS the live apply.
+	WorkingGamepadSens = FMath::Clamp(Value, 0.2f, 3.f);
+	FPFUserPrefs::SetGamepadLookScale(WorkingGamepadSens);
+	RefreshLabels();
+}
+
+void UPFOptionsWidget::OnUIScaleChanged(float Value)
+{
+	WorkingUIScale = FMath::Clamp(Value, 0.85f, 1.3f);
+	// Live-apply while dragging so the effect is visible immediately (like brightness).
+	FPFUserPrefs::SetUIScale(WorkingUIScale);
+	FPFHandheldPlatform::ApplyUIScaleFromPrefs();
+	RefreshLabels();
+}
+
 void UPFOptionsWidget::OnFovChanged(float Value)
 {
 	WorkingFov = FMath::Clamp(Value, 80.f, 110.f);
@@ -1277,6 +1348,14 @@ void UPFOptionsWidget::RefreshLabels()
 	{
 		ResScaleValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(WorkingResScale))));
 	}
+	if (GamepadSensValueText)
+	{
+		GamepadSensValueText->SetText(FText::FromString(FString::Printf(TEXT("%.2f"), WorkingGamepadSens)));
+	}
+	if (UIScaleValueText)
+	{
+		UIScaleValueText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(WorkingUIScale * 100.f))));
+	}
 	if (BrightnessValueText)
 	{
 		BrightnessValueText->SetText(FText::FromString(FString::Printf(TEXT("%+.2f EV"), WorkingBrightness)));
@@ -1332,6 +1411,8 @@ void UPFOptionsWidget::RefreshLabels()
 	if (SfxVolSlider) { SfxVolSlider->SetValue(WorkingSfxVol); }
 	if (AmbientVolSlider) { AmbientVolSlider->SetValue(WorkingAmbientVol); }
 	if (SensSlider) { SensSlider->SetValue(WorkingSens); }
+	if (GamepadSensSlider) { GamepadSensSlider->SetValue(WorkingGamepadSens); }
+	if (UIScaleSlider) { UIScaleSlider->SetValue(WorkingUIScale); }
 	if (FovSlider) { FovSlider->SetValue(WorkingFov); }
 }
 
@@ -1368,6 +1449,8 @@ void UPFOptionsWidget::PullFromSettings()
 	WorkingAmbientVol = FPFUserPrefs::GetAmbientVolume();
 	WorkingBrightness = FPFUserPrefs::GetBrightnessEV();
 	WorkingContrast = FPFUserPrefs::GetContrastScale();
+	WorkingGamepadSens = FPFUserPrefs::GetGamepadLookScale();
+	WorkingUIScale = FPFUserPrefs::GetUIScale();
 	bWorkingInvertY = FPFUserPrefs::GetInvertY();
 	bWorkingADSToggle = FPFUserPrefs::GetADSToggle();
 	bWorkingCrouchToggle = FPFUserPrefs::GetCrouchToggle();
@@ -1403,6 +1486,9 @@ void UPFOptionsWidget::PushToSettings(bool bSave)
 	FPFUserPrefs::SetADSToggle(bWorkingADSToggle);
 	FPFUserPrefs::SetCrouchToggle(bWorkingCrouchToggle);
 	FPFUserPrefs::SetFieldOfView(WorkingFov);
+	FPFUserPrefs::SetGamepadLookScale(WorkingGamepadSens);
+	FPFUserPrefs::SetUIScale(WorkingUIScale);
+	FPFHandheldPlatform::ApplyUIScaleFromPrefs();
 	FPFUserPrefs::SetAmbientVolume(WorkingAmbientVol);
 	FPFUserPrefs::SetBrightnessEV(WorkingBrightness);
 	FPFUserPrefs::SetContrastScale(WorkingContrast);

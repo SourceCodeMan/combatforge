@@ -66,6 +66,7 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 	// ---- Actions (22) ----
 	IA_Move        = MakeAction(Outer, TEXT("IA_Move"),        EInputActionValueType::Axis2D);
 	IA_Look        = MakeAction(Outer, TEXT("IA_Look"),        EInputActionValueType::Axis2D);
+	IA_LookStick   = MakeAction(Outer, TEXT("IA_LookStick"),   EInputActionValueType::Axis2D);
 	IA_Jump        = MakeAction(Outer, TEXT("IA_Jump"),        EInputActionValueType::Boolean);
 	IA_Sprint      = MakeAction(Outer, TEXT("IA_Sprint"),      EInputActionValueType::Boolean);
 	IA_CrouchSlide = MakeAction(Outer, TEXT("IA_CrouchSlide"), EInputActionValueType::Boolean);
@@ -215,6 +216,74 @@ void UPFInputConfig::Build(ACombatForgePlayerController* OuterPC)
 		}
 	}
 
+	// ================= Gamepad (fixed layout, all three contexts) =================
+	// Windows-handheld / controller support. The pad maps onto the SAME actions as the
+	// keyboard, so every handler works unchanged; only look is a separate action
+	// (IA_LookStick — rate-based, see the header). Menu/cursor interaction is handled
+	// by FPFGamepadCursor, not mappings. Layout (Xbox names):
+	//   LS move · RS look · A jump · B crouch/slide · L3 sprint · R3 punch
+	//   RT fire/place · LT ADS · X reload+interact · Y fire-mode / delete tool
+	//   RB frag / rotate piece · LB smoke / build wheel (hold)
+	//   DPad: up ready · down plant bomb · left/right class or piece cycle
+	//   View scoreboard · Menu back/options
+	{
+		auto AddRadialDeadZone = [](FEnhancedActionKeyMapping& Mapping, UInputMappingContext* Ctx)
+		{
+			UInputModifierDeadZone* DeadZone = NewObject<UInputModifierDeadZone>(Ctx);
+			DeadZone->LowerThreshold = 0.25f;   // stick drift guard (worn handheld sticks especially)
+			DeadZone->Type = EDeadZoneType::Radial;
+			Mapping.Modifiers.Add(DeadZone);
+		};
+		// One-shot trigger for digital keys mapped onto axis actions built for per-notch
+		// pulses (mouse wheel): without it a held D-pad key re-triggers every tick.
+		auto AddPressedTrigger = [](FEnhancedActionKeyMapping& Mapping, UInputMappingContext* Ctx)
+		{
+			Mapping.Triggers.Add(NewObject<UInputTriggerPressed>(Ctx));
+		};
+
+		// ---- Common ----
+		AddRadialDeadZone(IMC_Common->MapKey(IA_Move, EKeys::Gamepad_Left2D), IMC_Common);
+		AddRadialDeadZone(IMC_Common->MapKey(IA_LookStick, EKeys::Gamepad_Right2D), IMC_Common);
+		IMC_Common->MapKey(IA_Jump,        EKeys::Gamepad_FaceButton_Bottom);
+		IMC_Common->MapKey(IA_Sprint,      EKeys::Gamepad_LeftThumbstick);
+		IMC_Common->MapKey(IA_CrouchSlide, EKeys::Gamepad_FaceButton_Right);
+		IMC_Common->MapKey(IA_Ready,       EKeys::Gamepad_DPad_Up);
+		IMC_Common->MapKey(IA_Scoreboard,  EKeys::Gamepad_Special_Left);
+		IMC_Common->MapKey(IA_MenuBack,    EKeys::Gamepad_Special_Right);
+		AddPressedTrigger(IMC_Common->MapKey(IA_CycleClass, EKeys::Gamepad_DPad_Right), IMC_Common);
+		{
+			FEnhancedActionKeyMapping& Left = IMC_Common->MapKey(IA_CycleClass, EKeys::Gamepad_DPad_Left);
+			AddPressedTrigger(Left, IMC_Common);
+			Left.Modifiers.Add(NewObject<UInputModifierNegate>(IMC_Common));
+		}
+
+		// ---- Combat ----
+		IMC_Combat->MapKey(IA_Fire,       EKeys::Gamepad_RightTrigger);
+		IMC_Combat->MapKey(IA_ADS,        EKeys::Gamepad_LeftTrigger);
+		// X = reload AND barrel refill, one button by design (reload at a barrel = top-up).
+		// Same-key sharing inside one context mirrors the F precedent; flagged for
+		// on-device verification since Tom has no handheld to try it on.
+		IMC_Combat->MapKey(IA_Reload,     EKeys::Gamepad_FaceButton_Left);
+		IMC_Combat->MapKey(IA_Interact,   EKeys::Gamepad_FaceButton_Left);
+		IMC_Combat->MapKey(IA_FireSelect, EKeys::Gamepad_FaceButton_Top);
+		IMC_Combat->MapKey(IA_ThrowFrag,  EKeys::Gamepad_RightShoulder);
+		IMC_Combat->MapKey(IA_ThrowSmoke, EKeys::Gamepad_LeftShoulder);
+		IMC_Combat->MapKey(IA_Melee,      EKeys::Gamepad_RightThumbstick);
+		IMC_Combat->MapKey(IA_PlantBomb,  EKeys::Gamepad_DPad_Down);
+
+		// ---- Build ----
+		IMC_Build->MapKey(IA_Place,       EKeys::Gamepad_RightTrigger);
+		IMC_Build->MapKey(IA_DeleteTool,  EKeys::Gamepad_FaceButton_Top);
+		IMC_Build->MapKey(IA_RotatePiece, EKeys::Gamepad_RightShoulder);
+		IMC_Build->MapKey(IA_BuildWheel,  EKeys::Gamepad_LeftShoulder);   // hold = wheel, like Q
+		AddPressedTrigger(IMC_Build->MapKey(IA_CyclePiece, EKeys::Gamepad_DPad_Right), IMC_Build);
+		{
+			FEnhancedActionKeyMapping& Left = IMC_Build->MapKey(IA_CyclePiece, EKeys::Gamepad_DPad_Left);
+			AddPressedTrigger(Left, IMC_Build);
+			Left.Modifiers.Add(NewObject<UInputModifierNegate>(IMC_Build));
+		}
+	}
+
 	// Rebindable-action registry, then apply any saved key overrides. Must run INSIDE Build() (which is
 	// idempotent-guarded) after the default MapKey calls, not via a re-run.
 	BuildRebindRegistry();
@@ -322,7 +391,17 @@ bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
 		EKeys::Escape, EKeys::Tab, EKeys::Enter, EKeys::F,                                // menu/ready
 		EKeys::LeftMouseButton, EKeys::RightMouseButton, EKeys::MiddleMouseButton,        // fire/ADS/drag
 		EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::LeftControl, EKeys::C,             // move/crouch
-		EKeys::F1, EKeys::F2, EKeys::F3, EKeys::F4, EKeys::F5, EKeys::X, EKeys::Q         // build kit
+		EKeys::F1, EKeys::F2, EKeys::F3, EKeys::F4, EKeys::F5, EKeys::X, EKeys::Q,        // build kit
+		// The whole fixed gamepad layout — the rebind UI is keyboard/mouse only, and the
+		// key-capture listener would otherwise happily grab a pad button and double-bind it.
+		EKeys::Gamepad_FaceButton_Bottom, EKeys::Gamepad_FaceButton_Right,
+		EKeys::Gamepad_FaceButton_Left, EKeys::Gamepad_FaceButton_Top,
+		EKeys::Gamepad_LeftTrigger, EKeys::Gamepad_RightTrigger,
+		EKeys::Gamepad_LeftShoulder, EKeys::Gamepad_RightShoulder,
+		EKeys::Gamepad_LeftThumbstick, EKeys::Gamepad_RightThumbstick,
+		EKeys::Gamepad_Special_Left, EKeys::Gamepad_Special_Right,
+		EKeys::Gamepad_DPad_Up, EKeys::Gamepad_DPad_Down,
+		EKeys::Gamepad_DPad_Left, EKeys::Gamepad_DPad_Right
 	};
 	if (NewKey != E->DefaultKey)
 	{

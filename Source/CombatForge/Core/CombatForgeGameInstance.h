@@ -6,6 +6,8 @@
 #include "Engine/GameInstance.h"
 #include "CombatForgeGameInstance.generated.h"
 
+class FPFGamepadCursor;
+
 /**
  * Process-lifetime state: the per-install player identity (T24).
  *
@@ -30,6 +32,12 @@ private:
 	void LoadOrCreateIdentity();
 	FString GetIdentityFilePath() const;
 
+	// (intra) gamepad-as-pointer Slate preprocessor (clients only — see PFGamepadCursor.h)
+	void RegisterGamepadCursor();
+	void UnregisterGamepadCursor();
+
 	FGuid   LocalPlayerGuid;
 	FString LocalPlayerGuidHash;   // lowercase SHA1-hex, cached at Init
+
+	TSharedPtr<FPFGamepadCursor> GamepadCursor;
 };

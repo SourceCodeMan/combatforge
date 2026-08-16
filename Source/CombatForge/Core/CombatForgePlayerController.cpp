@@ -484,6 +484,11 @@ bool ACombatForgePlayerController::IsOptionsMenuOpen() const
 	return RootHUD && RootHUD->IsOptionsOpen();
 }
 
+bool ACombatForgePlayerController::IsBootMenuActive() const
+{
+	return LoadingMenu && !LoadingMenu->IsFinished();
+}
+
 void ACombatForgePlayerController::CreateHUDIfNeeded()
 {
 	if (RootHUD || !IsLocalController())

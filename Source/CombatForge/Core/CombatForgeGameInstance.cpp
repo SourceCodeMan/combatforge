@@ -3,8 +3,11 @@
 #include "Core/CombatForgeGameInstance.h"
 
 #include "CombatForge.h"
+#include "Core/PFHandheldPlatform.h"
 #include "Core/PFUserPrefs.h"
 #include "Dom/JsonObject.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Input/PFGamepadCursor.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/GameUserSettings.h"
@@ -40,6 +43,13 @@ void UCombatForgeGameInstance::Init()
 		});
 	}
 
+	// Handheld detect + first-run preset BEFORE the frame-cap/quality applies below, so the
+	// prefs the preset writes are what this boot then applies. Also pushes the saved UI scale.
+	FPFHandheldPlatform::InitAtBoot();
+
+	// Gamepad-as-pointer for every mouse-driven menu (boot menu, lobby, options, vote).
+	RegisterGamepadCursor();
+
 	// Frame cap from OUR pref (default 144) — uncapped rendering pegs any GPU at ~100% (an RTX 5090 sat at
 	// 86-90% drawing 300+ fps of a simple arena) for zero gameplay gain. Applied every boot so players who
 	// never open Options still get the cap; the Options FPS-limit row edits the same pref.
@@ -62,8 +72,37 @@ void UCombatForgeGameInstance::Init()
 	FPFUserPrefs::ApplyQualityMethodCVars(FPFUserPrefs::GetQualityLevel());
 }
 
+void UCombatForgeGameInstance::RegisterGamepadCursor()
+{
+	// Clients only: dedicated servers have no Slate, commandlets (cook) must stay clean.
+	if (IsRunningDedicatedServer() || IsRunningCommandlet() || !FSlateApplication::IsInitialized())
+	{
+		return;
+	}
+	if (!GamepadCursor.IsValid())
+	{
+		GamepadCursor = MakeShared<FPFGamepadCursor>(this);
+		FSlateApplication::Get().RegisterInputPreProcessor(GamepadCursor);
+		UE_LOG(CombatForgeLog, Log, TEXT("Gamepad UI cursor registered"));
+	}
+}
+
+void UCombatForgeGameInstance::UnregisterGamepadCursor()
+{
+	if (GamepadCursor.IsValid())
+	{
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateApplication::Get().UnregisterInputPreProcessor(GamepadCursor);
+		}
+		GamepadCursor.Reset();
+	}
+}
+
 void UCombatForgeGameInstance::Shutdown()
 {
+	UnregisterGamepadCursor();
+
 	// Process/PIE teardown: always drop listen-server / client net drivers so the next boot never inherits
 	// a hosted session. HOST LAN is opt-in only (menu HOST button or an explicit ?listen launch URL).
 	if (UWorld* World = GetWorld())

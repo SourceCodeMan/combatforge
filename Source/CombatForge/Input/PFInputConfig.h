@@ -52,8 +52,13 @@ public:
 	void ResetActionKeysToDefaults();
 
 	// ---- Common (IMC_Common, priority 0) ----
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Move;        // Axis2D, WASD swizzle
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Move;        // Axis2D, WASD swizzle + gamepad left stick
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Look;        // Axis2D, Mouse2D, negate Y, sensitivity scalar
+	/** Gamepad right-stick look. Separate from IA_Look because stick deflection is a RATE
+	 *  (deg/sec, frame-time scaled in the handler) while mouse deltas are absolute — sharing
+	 *  one action would make pad turn speed framerate-dependent. Deadzone on the mapping;
+	 *  response curve + speed + invert live in ACombatForgeCharacter::OnLookStickInput. */
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_LookStick;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Jump;        // Space
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_Sprint;      // LeftShift, hold
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInputAction> IA_CrouchSlide; // LeftCtrl + C, hold (slide if sprinting)

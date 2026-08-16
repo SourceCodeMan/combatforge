@@ -76,6 +76,8 @@ protected:
 	UFUNCTION() void OnSfxVolChanged(float Value);
 	UFUNCTION() void OnAmbientVolChanged(float Value);
 	UFUNCTION() void OnSensChanged(float Value);
+	UFUNCTION() void OnGamepadSensChanged(float Value);
+	UFUNCTION() void OnUIScaleChanged(float Value);
 	UFUNCTION() void OnFovChanged(float Value);
 	UFUNCTION() void OnResScaleChanged(float Value);
 	UFUNCTION() void OnBrightnessChanged(float Value);
@@ -155,6 +157,10 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> AmbientVolValueText;
 	UPROPERTY() TObjectPtr<USlider> SensSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> SensValueText;
+	UPROPERTY() TObjectPtr<USlider> GamepadSensSlider;
+	UPROPERTY() TObjectPtr<UTextBlock> GamepadSensValueText;
+	UPROPERTY() TObjectPtr<USlider> UIScaleSlider;
+	UPROPERTY() TObjectPtr<UTextBlock> UIScaleValueText;
 	UPROPERTY() TObjectPtr<USlider> FovSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> FovValueText;
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
@@ -181,6 +187,8 @@ private:
 	float  WorkingSfxVol = 1.f;
 	float  WorkingAmbientVol = 0.22f;
 	float  WorkingSens = 3.f;   // default sensitivity (Tom 2026-07-17: was 1.0; new default = the old max)
+	float  WorkingGamepadSens = 1.f;   // right-stick look speed multiplier (0.2..3)
+	float  WorkingUIScale = 1.f;       // Slate ApplicationScale (0.85..1.30, handhelds bump it)
 	float  WorkingFov = 105.f;
 
 	bool bOpen = false;
