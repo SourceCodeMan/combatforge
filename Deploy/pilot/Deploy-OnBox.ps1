@@ -237,27 +237,28 @@ Say "  Old hosts are gone." Green
 Say ""
 Say "Extracting..." Cyan
 function Restore-LiveKey([string]$Bak, [string]$Live) {
-    if (Test-Path $Bak) {
+    if (-not [string]::IsNullOrWhiteSpace($Bak) -and (Test-Path $Bak)) {
         New-Item -ItemType Directory -Force -Path (Split-Path $Live) | Out-Null
         Copy-Item $Bak $Live -Force
         Say "  ServerKey.txt restored from backup." Green
     }
 }
 function Restore-AllLiveKeys {
-    # Prefer this run's snapshot; if we never got one (crash mid-backup), use the rotated prev.
-    $tree = if (Test-Path $TreeBak) { $TreeBak } else { Join-Path $BackupPrev (Join-Path $GameFolderName "ServerKey.txt") }
-    $pd   = if (Test-Path $PdBak)   { $PdBak }   else { Join-Path $BackupPrev "CombatForge\ServerKey.txt" }
-    $i2   = if (Test-Path $Inst2Bak) { $Inst2Bak } else { Join-Path $BackupPrev "CombatForge\Instance2\ServerKey.txt" }
-    $i3   = if (Test-Path $Inst3Bak) { $Inst3Bak } else { Join-Path $BackupPrev "CombatForge\Instance3\ServerKey.txt" }
-    Restore-LiveKey $tree $KeyFile
-    Restore-LiveKey $pd   $PdKey
+    # ProgramData is canonical. If it disappeared during a hard-killed prior deploy, prefer the
+    # rotated known-good ProgramData/tree backup over this run's tree snapshot: the latter may be
+    # the ZIP stub left behind by the interrupted extract. A deliberate key rotation belongs in
+    # ProgramData, so a current ProgramData snapshot always wins.
+    $prevTree = Join-Path $BackupPrev (Join-Path $GameFolderName "ServerKey.txt")
+    $prevPd   = Join-Path $BackupPrev "CombatForge\ServerKey.txt"
+    $canonical = if (Test-Path $PdBak) { $PdBak } elseif (Test-Path $prevPd) { $prevPd } elseif (Test-Path $prevTree) { $prevTree } else { $TreeBak }
+
+    $i2 = if (Test-Path $Inst2Bak) { $Inst2Bak } elseif (Test-Path (Join-Path $BackupPrev "CombatForge\Instance2\ServerKey.txt")) { Join-Path $BackupPrev "CombatForge\Instance2\ServerKey.txt" } else { $null }
+    $i3 = if (Test-Path $Inst3Bak) { $Inst3Bak } elseif (Test-Path (Join-Path $BackupPrev "CombatForge\Instance3\ServerKey.txt")) { Join-Path $BackupPrev "CombatForge\Instance3\ServerKey.txt" } else { $null }
+
+    Restore-LiveKey $canonical $KeyFile
+    Restore-LiveKey $canonical $PdKey
     Restore-LiveKey $i2   $Inst2Key
     Restore-LiveKey $i3   $Inst3Key
-    if (-not (Test-Path $PdKey) -and (Test-Path $tree)) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $PdKey) | Out-Null
-        Copy-Item $tree $PdKey -Force
-        Say "  ServerKey.txt restored from backup." Green
-    }
 }
 try {
     & tar.exe -xf $Zip
