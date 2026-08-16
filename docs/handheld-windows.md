@@ -2,8 +2,9 @@
 
 Written 2026-07-28 on branch `feat/handheld-windows`. Goal: CombatForge is fully playable
 on a Windows handheld — pad-only gameplay, pad-driven menus, and sane performance defaults
-on 7-8" low-wattage hardware — without touching replication (**NetProtocol stays 16**) and
-without changing anything for keyboard+mouse desktop players.
+on 7-8" low-wattage hardware — without touching replication or the network-version gate (the branch inherits the current
+`PFBuild::NetProtocol` when merged) and without changing anything for keyboard+mouse
+desktop players.
 
 ⚠️ **Nothing here has run on real handheld hardware** (none owned). Everything compiles and
 the design leans on engine-supported paths, but stick feel, cursor speed, preset framerates,
