@@ -1,0 +1,81 @@
+name: Release static checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "release/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-static:
+    name: Unreal release static gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source without downloading LFS payloads
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Check changed-file whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -n "${BASE_SHA:-}" && ! "$BASE_SHA" =~ ^0+$ ]]; then
+            git diff --check "$BASE_SHA...HEAD"
+          else
+            git show --check --format= HEAD
+          fi
+
+      - name: Validate Git LFS pointers
+        run: |
+          git lfs version
+          git lfs fsck --pointers
+
+      - name: Compile Python tooling
+        env:
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/combatforge-pycache
+        run: python -m compileall -q Deploy Scripts
+
+      - name: Parse Bash and macOS shell tooling
+        run: |
+          while IFS= read -r file; do
+            bash -n "$file"
+          done < <(git ls-files "*.sh" "*.command")
+
+      - name: Parse PowerShell tooling
+        shell: pwsh
+        run: |
+          $parseFailures = @()
+          foreach ($file in (git ls-files "*.ps1")) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file), [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            foreach ($error in $errors) {
+              $parseFailures += "${file}: $($error.Message)"
+            }
+          }
+          if ($parseFailures.Count -gt 0) {
+            $parseFailures | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+
+      - name: Enforce release packaging and secret invariants
+        run: python Scripts/ci_release_check.py
