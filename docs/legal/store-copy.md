@@ -77,7 +77,8 @@ kid.
 - **Community maps** — save the arena you built, vote on other people's, and remix the best ones.
 - **Dedicated servers** with an in-game browser, plus LAN and listen-host play.
 - **Bots** to fill out a roster when you're short.
-- **Full crossplay** — everyone plays together regardless of where they got the game.
+- **Shared PC server architecture** — supported Windows storefront builds use the same CombatForge
+  accounts and dedicated-server pool. Publish this claim only after the exact itch/Epic artifacts pass cross-store QA.
 
 ### Beta
 
@@ -85,8 +86,8 @@ CombatForge is in active development and this is a **beta**. Expect rough edges,
 changes, and expect progression to be reset from time to time. The build-and-fight loop is solid and
 playable right now — the polish is still coming.
 
-If you find a bug, the in-game reporter goes straight to the team.
-Come talk to us on Discord: «DISCORD INVITE — discord.gg/f7U2xXxAxc»
+If you find a bug, report it at **report.playcombatforge.com**.
+Come talk to us on Discord: **discord.gg/f7U2xXxAxc**
 
 ---
 
@@ -100,7 +101,7 @@ Epic and itch both want a short scannable list. Use these verbatim:
 - **35+ weapons and five classes**, unlocked as you rank up
 - **Six modes** — Skirmish, Elimination, Domination, Hardpoint, CTF, Free-for-All
 - **Community maps** — build, share, vote, remix
-- **Crossplay** across every platform and storefront
+- **One shared PC server pool** across supported storefronts *(publish after cross-store QA passes)*
 - **Dedicated servers, LAN, and bots** to fill a roster
 
 ---
@@ -141,6 +142,7 @@ Assets you still owe before either page can go live:
 | Age rating | Free IARC questionnaire in the Epic Dev Portal | ☐ |
 | Privacy policy URL | Publicly hosted, linked from the product page — see `privacy-policy.md` | ☐ |
 | EULA URL | Same — see `eula.md` | ☐ |
+| Early Access FAQ | Prepared at `/early-access-faq.html`; deploy and verify | ☐ |
 | Early Access designation | Flag it in the Dev Portal | ☐ |
 
 **Screenshot shot list** — the five that actually sell this game:

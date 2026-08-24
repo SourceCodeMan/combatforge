@@ -67,14 +67,6 @@ echo ""
   -build -cook -stage -pak -iostore -compressed \
   -archive -archivedirectory="$OUT"
 
-# Record the protocol this package shipped at, so PF_REQUIRE_PROTOCOL_BUMP can detect a
-# re-package at the same value next time. `set -e` means we only get here on success. (P2-S4)
-if [ -n "$PROTO" ]; then
-  mkdir -p "$(dirname "$PROTOSTAMP")"
-  printf '%s
-' "$PROTO" > "$PROTOSTAMP"
-fi
-
 # --- PRIVACY SCRUB (mirrors Package-Windows.bat) -----------------------------
 # A packaged Saved/ has leaked real data before: hostname, LAN IP, hardware info
 # in logs — and once, the login session token (the alpha-4/5 incident). Debug
@@ -94,8 +86,13 @@ if find "$OUT" \( -name "*.pdb" -o \( -type d -name "*.dSYM" \) \) | grep -q .; 
 
 echo ""
 if [ -n "$DIRTY" ]; then
-  echo "*** WARNING: Saved/ or debug symbols still present in $OUT - do NOT push until clean. ***"
-else
-  echo "=== Done + scrubbed. App is in $OUT - no Saved/, no symbols - safe to push. ==="
+  echo "*** ERROR: Saved/ or debug symbols still present in $OUT - do NOT push. Failing. ***"
+  exit 1
 fi
+
+if [ -n "$PROTO" ]; then
+  mkdir -p "$(dirname "$PROTOSTAMP")"
+  printf '%s\n' "$PROTO" > "$PROTOSTAMP"
+fi
+echo "=== Done + scrubbed. App is in $OUT - no Saved/, no symbols - safe to push. ==="
 echo "NOTE: it's unsigned — first launch needs right-click > Open (Gatekeeper). See packaging.md."

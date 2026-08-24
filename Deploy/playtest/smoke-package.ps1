@@ -19,6 +19,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
 if (-not $ProjectRoot) {
 	$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
@@ -67,14 +68,19 @@ if (-not $SkipCook) {
 	Write-Host "==> SkipCook: using existing package under $ArchiveDir"
 }
 
-# --- 2) Find client exe ---
-$ClientExe = Get-ChildItem $ArchiveDir -Recurse -Filter "CombatForge.exe" -ErrorAction SilentlyContinue |
-	Select-Object -First 1
-if (-not $ClientExe) {
-	Write-Host "FAIL: no CombatForge.exe under $ArchiveDir"
+# --- 2) Find client exe (Binaries / largest file; reject the 166 KB bootstrap) ---
+$ClientPath = Find-CombatForgeExe $ArchiveDir "CombatForge.exe"
+if (-not $ClientPath) {
+	$Hit = Get-ChildItem $ArchiveDir -Recurse -Filter "CombatForge.exe" -ErrorAction SilentlyContinue |
+		Sort-Object Length -Descending | Select-Object -First 1
+	if ($Hit -and $Hit.Length -ge 10MB) { $ClientPath = $Hit.FullName }
+}
+if (-not $ClientPath) {
+	Write-Host "FAIL: no CombatForge.exe under $ArchiveDir that is at least 10 MB (166 KB bootstrap is not the game)."
 	exit 1
 }
-Write-Host "==> Client: $($ClientExe.FullName)"
+$ClientExe = Get-Item $ClientPath
+Write-Host ("==> Client: {0} ({1:N1} MB)" -f $ClientExe.FullName, ($ClientExe.Length / 1MB))
 
 # --- 3) Boot smoke (nullrhi) ---
 $BootLog = Join-Path $ProjectRoot "Saved\Logs\smoke-package-boot.log"
@@ -115,11 +121,12 @@ $SeedJson = @'
 }
 '@
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-# Arenas moved to the stable per-user dir (the old 3-root Saved\Arenas loop existed because the packaged
-# ProjectSavedDir was ambiguous - moot now).
-$ArenasDir = Join-Path $env:LOCALAPPDATA "CombatForge\Arenas"
+# Seed a smoke-only TEMP dir and pass -ArenaDir so -nullrhi cannot miss the JSON
+# and cannot pollute a live fleet ProgramData map pool.
+$ArenasDir = Join-Path $env:TEMP "CombatForge\SmokeArenas"
 New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
 Set-Content -Path (Join-Path $ArenasDir ("arena_{0}_packagesmoke.json" -f $Stamp)) -Value $SeedJson -Encoding UTF8
+$BootArgs += "-ArenaDir=`"$ArenasDir`""
 
 $Boot = Start-Process -FilePath $ClientExe.FullName -ArgumentList $BootArgs -WorkingDirectory $WorkDir -PassThru
 $Done = $Boot.WaitForExit($BootTimeoutSec * 1000)
@@ -163,12 +170,7 @@ Get-ChildItem $ArchiveDir -Recurse -Filter *.pdb -ErrorAction SilentlyContinue |
 
 Write-Host "==> Scanning boot log: $BootLog"
 if (-not (Test-Path $BootLog)) {
-	# Still a useful landmine check if cook produced an exe that at least started then died.
-	if ($Done -and $Boot.ExitCode -eq 0) {
-		Write-Host "PASS: package cook + clean boot exit (no ABSLOG captured)"
-		exit 0
-	}
-	Write-Host "FAIL: no boot log and no clean exit (exit=$($Boot.ExitCode))"
+	Write-Host "FAIL: no boot log (a real exe must produce ABSLOG; the 166 KB bootstrap does not). exit=$($Boot.ExitCode)"
 	exit 2
 }
 

@@ -13,6 +13,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
+#include "Misc/GuardValue.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWave.h"
 
@@ -102,7 +103,11 @@ void UPFMusicSubsystem::EnsurePlayer()
 void UPFMusicSubsystem::HandleMusicFinished()
 {
 	// Only meaningful when a track is still meant to be playing — StopMusic clears ActiveTrack
-	// first, so a deliberate stop never restarts here.
+	// and latches bStoppingMusic first, so a deliberate Stop() never restarts here.
+	if (bStoppingMusic)
+	{
+		return;
+	}
 	if (ActiveTrack != EPFMusicTrack::None && MusicComp && !MusicComp->IsPlaying())
 	{
 		MusicComp->Play();
@@ -162,12 +167,14 @@ void UPFMusicSubsystem::PlayTrack(EPFMusicTrack Track)
 
 void UPFMusicSubsystem::StopMusic()
 {
-	if (MusicComp)
-	{
-		MusicComp->Stop();
-	}
 	const bool bWasPlaying = (ActiveTrack != EPFMusicTrack::None);
 	ActiveTrack = EPFMusicTrack::None;
+	if (MusicComp)
+	{
+		// Latch before Stop() so a sync OnAudioFinished broadcast cannot Play() the old bed.
+		TGuardValue<bool> StoppingGuard(bStoppingMusic, true);
+		MusicComp->Stop();
+	}
 	// Lobby / vote: restore quiet wind bed on the local pawn if present.
 	if (bWasPlaying)
 	{

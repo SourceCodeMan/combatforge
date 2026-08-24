@@ -25,11 +25,9 @@ $DataDir = Join-Path $env:ProgramData "CombatForge"
 
 function Say($msg, $color = "Gray") { Write-Host $msg -ForegroundColor $color }
 
-# Skipping ServerKey.txt is NOT enough. UE writes the full process command line into the header of
-# every log it opens, and Start-Server-OnBox.ps1 passes the key as -PFServerKey=<key> - so the fleet
-# credential is sitting in the body of server.log itself. That key mints XP via signed match reports
-# and registers servers in the public directory. Redact it out of the STAGED COPY (never touches the
-# original on disk) before anything is zipped or uploaded.
+# Skipping ServerKey.txt is NOT enough for legacy logs: older launchers put -PFServerKey=<key> on
+# argv and UE copied it into the log header. Current Shipping builds use ServerKey.txt only, but
+# redact every STAGED COPY (never the original) so an old log cannot leak the fleet credential.
 function Redact-Secrets([string]$Path) {
     try {
         $text = [System.IO.File]::ReadAllText($Path)

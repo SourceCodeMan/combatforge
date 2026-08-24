@@ -58,7 +58,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="1", ClampMax="255")) uint8 CaptureFlagTarget = 3; // CTF: first team to N captures
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  HardpointRotateInterval = 45.f; // Hardpoint: seconds per slot
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  DominationCaptureSeconds = 15.f; // Dom: solo seconds to capture a NEUTRAL zone (enemy zone = 2x via neutralize; teammates speed it x min(N,3))
-	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="10", ClampMax="1000")) int32 DominationTargetScore = 200; // CoD: 1 pt per owned zone per 5 s -> first to 200
+	UPROPERTY(EditDefaultsOnly, Category="PF|Match", meta=(ClampMin="10", ClampMax="1000")) int32 DominationTargetScore = 150; // CoD: 1 pt per owned zone per 5 s -> first to 150
 	UPROPERTY(EditDefaultsOnly, Category="PF|Match") float  ObjectiveScoreInterval = 1.f;   // Dom/HP: score tick period
 
 	// ---- The only phase mutator in the codebase ----
@@ -99,8 +99,9 @@ public:
 	// Spawn transform for a player in the current round (side swap: even rounds swapped — B1):
 	FTransform GetSpawnTransform(const ACombatForgePlayerState* PS) const;
 
-	// Player-invoked "reset to spawn" (Options menu): full heal + refill, then teleport the pawn to its
-	// current-phase team spawn. Server-authoritative; routed from the owning client via
+	// Player-invoked "reset to spawn" (Options menu): teleport the pawn to its current-phase
+	// team spawn (drop a carried CTF flag first). Heal + refill only outside a live round.
+	// Server-authoritative; routed from the owning client via
 	// ACombatForgeCharacter::ServerRequestResetToSpawn. Safe with a live pawn in any phase.
 	void RequestResetToSpawn(ACombatForgeCharacter* Pawn);
 	/** Per-player last reset-to-spawn time (P2-C1: rate-limits the Options rescue). Weak keys —

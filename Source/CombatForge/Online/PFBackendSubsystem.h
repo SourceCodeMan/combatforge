@@ -16,7 +16,7 @@ struct FPFBackendServerInfo
 	FString ServerId;
 	FString Name;
 	FString Addr;        // Worker-observed public IP
-	FString LanAddr;     // self-reported (same-LAN hairpin fallback); may be empty
+	FString LanAddr;     // self-reported (in-house only when the row also has a distinct public mapping)
 	int32   Port = 7777;
 	FString Map;
 	FString Mode;
@@ -26,7 +26,8 @@ struct FPFBackendServerInfo
 	int32   MaxPlayers = 12;
 	int32   NetProtocol = 0;
 
-	/** "ip:port" ready for `open` — prefers the LAN address when we appear to share its subnet. */
+	/** "ip:port" ready for `open` — LAN only when both ends are RFC1918 on the same parsed /24
+	 *  and the directory row has a distinct public mapping. Matching a private /24 alone is not LAN. */
 	FString JoinAddress() const;
 };
 
@@ -56,14 +57,17 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnBackendStatus, const FString& /*HumanRe
  *
  *  PLAYER (any build): RFC 8628 device-link login — BeginDeviceLogin() fetches a 6-char code the
  *  menu shows next to "approve at playcombatforge.com/link", then polls for the session token.
- *  The token lives in Saved/CombatForge/Auth.json and rides every /v1 call as a Bearer header.
+ *  The token lives in the per-user CombatForge/Auth.json and rides every /v1 call as a Bearer
+ *  header. Windows builds protect it with the current user's DPAPI key before it reaches disk.
  *  NO password ever renders in-game. After login the install GUID is linked (retroactive history).
  *
  *  FLEET (dedicated server with a provisioned key): registers with the directory at boot,
  *  heartbeats every 10 s (a 409 re-registers — the directory row can expire), and HMAC-signs match
  *  reports (SendMatchReport, called by the GAME MODE at EmitMatchReport when the match enters
- *  Results — not by the rating subsystem). Key sources, first hit wins: -PFServerKey= on the command
- *  line, then Saved/CombatForge/ServerKey.txt. No key (every player install) = fleet path is
+ *  Results — not by the rating subsystem). Shipping reads the key only from
+ *  FPFPaths::ServerDataDir()/ServerKey.txt (parent of ArenaDir; on a -NOHOMEDIR / -nullrhi /
+ *  -server box that is %ProgramData%/CombatForge or /var/lib/combatforge). Non-Shipping builds
+ *  additionally accept -PFServerKey= as a local-development override. No key (every player install) = fleet path is
  *  completely inert — a listen host can never grant XP by design (progression-plan §1).
  *
  * Api base: [CombatForge.Backend] ApiBaseUrl in Game.ini, -PFApi= override for local dev.
@@ -150,7 +154,7 @@ private:
 	FPFBackendProfile Profile;
 	FString AuthFilePath() const;
 	void LoadAuthFromDisk();
-	void SaveAuthToDisk() const;
+	bool SaveAuthToDisk() const;
 
 	// ---- device flow ----
 	FString PendingDeviceCode;
@@ -175,11 +179,16 @@ private:
 	bool bFleetRegistered = false;
 	bool bFleetRegisterInFlight = false;
 	FTSTicker::FDelegateHandle HeartbeatTicker;
+	FTSTicker::FDelegateHandle FleetRegisterRetryTicker;
+	float FleetRegisterRetryDelaySec = 10.f;   // 10 → 30 → 60, then stay at 60
+	int32 PendingReplayInFlight = 0;           // drain latch: skip while prior POSTs are out
 	TWeakObjectPtr<ACombatForgeGameState> FleetGS;
 	int32 FleetPort = 7777;
 	void SendHeartbeat();
-	/** Drop out of the directory (POST /unregister + stop the heartbeat). Safe to call anytime. */
+	/** Drop out of the directory (POST /unregister + stop heartbeat and register-retry). Safe anytime. */
 	void FleetUnregister();
+	void ReplayPendingReports();
+	void ArmFleetRegisterRetry();
 
 	// ---- plumbing ----
 	/** Fire an HTTP request. AuthMode: 0 none, 1 Bearer(player token), 2 Bearer(server key). */

@@ -31,9 +31,16 @@ def _catalog_meshes():
         text = fh.read()
     found = {}
     # "/Game/<dirs>/SM_Foo.SM_Foo" - the ObjectPath form the catalog stores in MeshPath.
-    for path in re.findall(r'"(/Game/[^"]*?/(SM_[A-Za-z0-9_]+)\.)"', text):
+    _MESH_RE = r'"(/Game/[^"]*?/(SM_[A-Za-z0-9_]+)\.\2)"'
+    for path in re.findall(_MESH_RE, text):
         full, asset = path
         found.setdefault(asset[3:], full)   # strip the SM_ prefix for a readable key
+    if not found:
+        unreal.log_error(
+            "[WeaponGeom] catalog exists at %s but matched 0 MeshPaths — not falling back"
+            % cat
+        )
+        raise SystemExit(1)
     return found
 
 

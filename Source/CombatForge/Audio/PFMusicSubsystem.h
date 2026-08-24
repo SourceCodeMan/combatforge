@@ -46,7 +46,9 @@ private:
 	enum class EPFMusicTrack : uint8 { None = 0, Build, Combat };
 
 	void EnsurePlayer();
-	/** Restarts the bed if a track ever runs to its end (editor loop backstop — see PlayTrack). */
+	/** Restarts the bed only when a track is still wanted (editor loop backstop — see PlayTrack).
+	 *  StopMusic clears ActiveTrack and latches bStoppingMusic before Stop(), so a deliberate
+	 *  OnAudioFinished from Stop() never Play()s the old bed. */
 	UFUNCTION() void HandleMusicFinished();
 	void PlayTrack(EPFMusicTrack Track);
 	/** Start/stop the wind bed on every pawn owned by THIS game instance's local players. */
@@ -62,6 +64,8 @@ private:
 	UPROPERTY() TObjectPtr<USoundBase> CombatMusic;
 
 	EPFMusicTrack ActiveTrack = EPFMusicTrack::None;
+	/** True while StopMusic is inside Stop() so a sync OnAudioFinished cannot restart. */
+	bool bStoppingMusic = false;
 	/** Final-30s duck latch — cleared whenever a track (re)starts. */
 	bool bMatchEndDucked = false;
 };

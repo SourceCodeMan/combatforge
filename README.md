@@ -148,7 +148,7 @@ This has bitten us more than once, so it's written down.
 | Community maps | `%LOCALAPPDATA%\CombatForge\Arenas` | Survives every reinstall and redeploy |
 | Your settings, classes, keybinds | `%LOCALAPPDATA%\CombatForge\UserPrefs.ini` | Same reason — see below |
 | Server key, pending XP reports | `%ProgramData%\CombatForge` (or `-ArenaDir`) | Must survive a server redeploy |
-| Login token | `%LOCALAPPDATA%\CombatForge\Auth.json` | Per-user, and **never** inside the package |
+| Login token | `%LOCALAPPDATA%\CombatForge\Auth.json` | Per-user, DPAPI-protected on Windows, and **never** inside the package |
 
 **Nothing player-owned may live inside the install folder.** The pre-ship scrub deletes
 `<package>\CombatForge\Saved` on every bake — it has to, because a session token once shipped to
@@ -161,8 +161,12 @@ exactly how player settings used to reset to defaults after each bake.
 
 ```powershell
 # 1. Bump PFBuild::NetProtocol in Source/CombatForge/CombatForge.h
-# 2. Cook + stage + pak (editor must be closed)
+# 2a. Playtest/itch Development package (editor must be closed)
 .\Deploy\playtest\package-playtest.ps1
+
+# 2b. Epic/store Shipping package (clean cook, distribution, IoStore, compressed, prerequisites)
+.\Deploy\playtest\package-playtest.ps1 -Config Shipping
+# Output: Packaged\Release\Windows; includes CombatForge-build.json with commit/protocol/hash
 
 # 3. Push to itch
 butler push "D:\projects\combatforge\Packaged\Playtest\Windows" `

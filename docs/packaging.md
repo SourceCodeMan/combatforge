@@ -10,14 +10,15 @@ The project is already set up for packaging: a **Game target** (`Source/CombatFo
 
 ```
 # Windows (on the PC, editor closed):
-Scripts\Package-Windows.bat            # → Packaged\Windows\  (Development)
-Scripts\Package-Windows.bat Shipping   # → clean release build
+Scripts\Package-Windows.bat            # → Packaged\Playtest\Windows (Development)
+Scripts\Package-Windows.bat Shipping   # → Packaged\Release\Windows (clean store build)
 
 # Mac (ON A MAC with UE 5.6 + Xcode, content synced):
 ./Scripts/Package-Mac.command          # → Packaged/Mac/  (Development)
 ```
 
-Both produce a **self‑contained folder** you can zip and hand to someone. LAN cross‑play (Mac client ↔ PC host) works out of the box; internet play does **not** yet (no online subsystem — see §6).
+Both produce a self-contained archive. The Windows batch file is only a compatibility wrapper around
+`Deploy/playtest/package-playtest.ps1`, which is the single Windows packaging implementation.
 
 ---
 
@@ -25,13 +26,13 @@ Both produce a **self‑contained folder** you can zip and hand to someone. LAN 
 
 **Windows (the PC — already set up, this is what builds today):**
 - UE 5.6 installed, Visual Studio 2022 + the C++ / game‑dev workload (MSVC).
-- The project with all content present, including `Content/Bandits/` (~12 GB, untracked).
+- The project with all paid Fab/LFS content fully hydrated, including `Content/Bandits/`.
 
 **Mac (needed only for the Mac build — UE can't cross‑compile to macOS):**
 - A Mac, ideally Apple Silicon (M‑series). Your MacBook qualifies.
 - UE 5.6 from the Epic Games Launcher.
 - **Xcode** + command‑line tools: `xcode-select --install`.
-- The full project synced over, **including `Content/Bandits/`** (git doesn't track it — copy it manually, e.g. external drive or LAN).
+- The full private project synced with Git LFS, including `Content/Bandits/`.
 - Disk: UE + this project + a cooked Mac build is well over 100 GB. Have room.
 
 ---
@@ -48,11 +49,13 @@ Edit the `UE` / `PROJ` / `OUT` paths at the top of each script if your install d
 
 ## 3. Build config: Development vs Shipping
 
-Default is **Development** (`DefaultGame.ini` → `BuildConfiguration=PPBC_Development`):
+Project Settings defaults to **Shipping/distribution** so an editor-driven store package cannot
+accidentally retain development features. The script defaults explicitly to **Development** for playtests:
 - Keeps the console + all `pf.*` debug cvars (`pf.NavCheck`, `pf.BotSkill`, `pf.WeaponFP`, …). **This is what you want for playtests.**
 
-For a **release** build (smaller, faster, no console/debug):
-- Pass `Shipping` to the script (`Package-Windows.bat Shipping`), and for a real distributable also flip `BuildConfiguration=PPBC_Shipping` + `ForDistribution=True` in `DefaultGame.ini`.
+For a **release** build (clean cook, distribution, IoStore, compression, prerequisites, no debug
+symbols/console), run `Package-Windows.bat Shipping` or
+`Deploy\playtest\package-playtest.ps1 -Config Shipping`. Both enter the same implementation.
 
 ---
 
@@ -77,7 +80,9 @@ The Bandit pack shipped with **4K textures (~8.7 GB)** — overkill for a graybo
 - **Effect:** the **cooked package** uses ≤1K textures (~1/16 the pixels of 4K) → dramatically smaller build. Non‑destructive + reversible (set `max_texture_size` back to `0`).
 - **What it does NOT do:** shrink the dev‑side `.uasset` files. UE keeps the full‑res *source* in the asset to re‑cook per platform, so `Content/Bandits` stays ~12 GB on disk. The cap only bites at cook time.
 
-**Tracking the 12 GB pack — recommendation:** because the sources stay 4K on disk and the pack is **re‑downloadable from Fab**, the pragmatic path is **don't commit it** — keep it local, back it up to the homelab, and re‑download or copy it to the Mac (then re‑run the trim script). It's not gitignored, and there's an LFS rule for `Content/Bandits/**` **as a safety net** (so if it's ever `git add`‑ed it goes to LFS, never bloats regular git). If you'd rather have a one‑clone setup, `git add Content/Bandits` + push tracks it via LFS (~12 GB → check your GitHub LFS data pack has room; you're already ~9 GB in).
+**Tracking/licensing:** paid Fab content is tracked through Git LFS for private collaborator access.
+The repository must remain private, and purchase receipts, tier-at-purchase, and per-pack license
+records must be retained. Never publish source assets or LFS objects as standalone downloads.
 
 ---
 
