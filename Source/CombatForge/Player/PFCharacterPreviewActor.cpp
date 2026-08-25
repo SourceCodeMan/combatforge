@@ -90,17 +90,19 @@ APFCharacterPreviewActor::APFCharacterPreviewActor()
 	Capture->bCaptureOnMovement = false;
 	// Hide the sky/atmosphere/fog so the capture shows the character on a clean dark backdrop, not the level sky.
 	// (ShowOnlyList excludes arena *meshes*, but atmosphere renders as environment and leaks through otherwise.)
-	auto HideFlag = [this](const TCHAR* FlagName)
+	TArray<FEngineShowFlagsSetting> HiddenFlags;
+	auto HideFlag = [&HiddenFlags](const TCHAR* FlagName)
 	{
 		FEngineShowFlagsSetting S;
 		S.ShowFlagName = FlagName;
 		S.Enabled = false;
-		Capture->ShowFlagSettings.Add(S);
+		HiddenFlags.Add(S);
 	};
 	HideFlag(TEXT("Atmosphere"));
 	HideFlag(TEXT("Fog"));
 	HideFlag(TEXT("VolumetricFog"));
 	HideFlag(TEXT("Cloud"));
+	Capture->SetShowFlagSettings(HiddenFlags);
 	// Pin exposure (min == max) so it's stable, then compensate DOWN with a strong negative EV bias — the pin
 	// alone flattened out, so the bias is the real "make it darker" lever (each -1 EV halves the brightness).
 	Capture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;

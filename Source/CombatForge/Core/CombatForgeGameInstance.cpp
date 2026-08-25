@@ -23,11 +23,11 @@ void UCombatForgeGameInstance::Init()
 	Super::Init();
 	LoadOrCreateIdentity();
 
-	// Multiplayer build gate: fold our engine version + game build number (PFBuild::NetProtocol) into the
-	// network version so a client on a DIFFERENT CombatForge build fails the join handshake with a clean
-	// version-mismatch error, instead of connecting and mirroring pieces through stale code (the giant-box /
-	// missing-skin version-skew bug). Same build both ends → same value → compatible. Bound at boot, before
-	// any networking, so the first GetLocalNetworkVersion() computation picks it up.
+	// LAN peer safety gate: fold our engine version + game build number (PFBuild::NetProtocol) into the
+	// network version so two DIFFERENT CombatForge binaries fail the LAN/VPN handshake instead of connecting
+	// and mirroring pieces through stale code (the giant-box / missing-skin version-skew bug). This gate has
+	// no dependency on the official directory and never prevents solo/bot play or hosting a same-build LAN
+	// match. Bound at boot so the first GetLocalNetworkVersion() computation picks it up.
 	if (!FNetworkVersion::GetLocalNetworkVersionOverride.IsBound())
 	{
 		FNetworkVersion::GetLocalNetworkVersionOverride.BindLambda([]() -> uint32

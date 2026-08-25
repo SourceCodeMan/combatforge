@@ -1,6 +1,7 @@
 # CombatForge — store page copy
 
-Draft copy for itch.io and the Epic Games Store. Written 2026-07-26.
+Draft copy for itch.io and the Epic Games Store. Written 2026-07-26; LAN-only Alpha availability
+updated 2026-08-25.
 Unlike the two legal drafts beside this file, **this needs no lawyer — just your eye and your taste.**
 Cut anything that overpromises; everything below describes features that exist today.
 
@@ -23,8 +24,8 @@ Alternates:
 
 **Epic (and itch's tagline field) — keep under ~250 characters:**
 
-> A build-then-battle airsoft shooter. Fortify the arena with your squad for two and a half minutes,
-> then fight through what you built. Next match, you defend the enemy's fort.
+> A build-then-battle airsoft shooter for solo, bots, and LAN/VPN play. Fortify the arena, then fight
+> through what you built. Official servers are an upcoming feature.
 
 **One-liner for social:**
 
@@ -36,8 +37,14 @@ Alternates:
 
 ### Build the fort. Then fight in it.
 
-CombatForge is a multiplayer airsoft shooter built around one idea: **the arena isn't handed to you —
-you make it.**
+CombatForge is an airsoft shooter for solo, bots, and player-hosted LAN/VPN matches, built around one
+idea: **the arena isn't handed to you — you make it.**
+
+### Alpha availability
+
+This Alpha is playable locally with bots or with friends through direct-IP LAN/VPN hosting.
+**No official servers are currently available.** Quick Play, public matchmaking, and the official server
+browser are upcoming features and are not included as playable options in this release.
 
 Every match starts with a build phase. You and your squad have two and a half minutes and a limited
 budget to turn an empty warehouse into something defensible. Walls, floors, ramps, roofs. Doorways and
@@ -71,18 +78,17 @@ kid.
 
 - **Build system** — walls, floors, ramps, roofs, doors, windows, one-way doors, trap floors, and
   cover props, all placed on a grid with a per-player budget and a radial quick-select wheel.
-- **35+ weapons** across rifles, SMGs, shotguns, snipers, LMGs and pistols, unlocked by rank.
-- **Five classes**, each with its own loadout and role.
+- **35+ weapons** across rifles, SMGs, shotguns, snipers, LMGs and pistols.
+- **Five local class slots**, each with its own look and two-weapon loadout.
 - **Game modes** — Skirmish, Elimination, Domination, Hardpoint, Capture the Flag, and Free-for-All.
 - **Community maps** — save the arena you built, vote on other people's, and remix the best ones.
-- **Dedicated servers** with an in-game browser, plus LAN and listen-host play.
+- **LAN/VPN multiplayer** with listen-host and direct-IP joining; no account required.
+- **Official servers are upcoming** and intentionally unavailable in the current Alpha.
 - **Bots** to fill out a roster when you're short.
-- **Shared PC server architecture** — supported Windows storefront builds use the same CombatForge
-  accounts and dedicated-server pool. Publish this claim only after the exact itch/Epic artifacts pass cross-store QA.
 
-### Beta
+### Alpha
 
-CombatForge is in active development and this is a **beta**. Expect rough edges, expect balance
+CombatForge is in active development and this is an **Alpha**. Expect rough edges, expect balance
 changes, and expect progression to be reset from time to time. The build-and-fight loop is solid and
 playable right now — the polish is still coming.
 
@@ -98,11 +104,12 @@ Epic and itch both want a short scannable list. Use these verbatim:
 - **Build then battle** — 2:30 to fortify an empty arena, then fight through what you made
 - **Swap forts with the enemy** — a three-match rotation that hands you your opponent's fortress
 - **Non-lethal airsoft combat** — realistic tactics, marked hits, nobody dies
-- **35+ weapons and five classes**, unlocked as you rank up
+- **35+ weapons and five customizable local classes**
 - **Six modes** — Skirmish, Elimination, Domination, Hardpoint, CTF, Free-for-All
 - **Community maps** — build, share, vote, remix
-- **One shared PC server pool** across supported storefronts *(publish after cross-store QA passes)*
-- **Dedicated servers, LAN, and bots** to fill a roster
+- **LAN/VPN listen-host play** with direct-IP joining
+- **Bots** for solo play and to fill a roster
+- **Official servers and Quick Play are upcoming features**
 
 ---
 
@@ -118,14 +125,14 @@ Epic and itch both want a short scannable list. Use these verbatim:
 - Memory: «FILL IN» GB RAM
 - Graphics: «FILL IN» (DirectX 12 capable)
 - Storage: «~8» GB available
-- Network: Broadband internet connection
+- Network: LAN or VPN connection for multiplayer; internet only for download and updates
 
 **macOS — minimum**
 - OS: macOS 15 (Sequoia) or later
 - Processor: **Apple Silicon M2 or later** — M1 and Intel Macs are not supported
 - Memory: «FILL IN» GB RAM
 - Storage: «~8» GB available
-- Network: Broadband internet connection
+- Network: LAN or VPN connection for multiplayer; internet only for download and updates
 
 ---
 

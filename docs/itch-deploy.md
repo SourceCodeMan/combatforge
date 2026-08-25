@@ -1,17 +1,18 @@
 # CombatForge — itch.io alpha deployment runbook
 
-*Written 2026-07-15. Target: friends-only alpha playtest over Tom's VPN within 24h.*
+*Written 2026-07-15; Shipping/LAN-only release path updated 2026-08-25.*
 
 ## Facts that shaped this plan
 
-- **Package size ≈ 3.1 GB** (after `-nodebuginfo` dropped the 359 MB pdb). The itch.io
+- **Current packaged downloads are about 3.7 GB.** The itch.io
   **1 GB limit applies to the WEB uploader only** — `butler` pushes have no such cap and
   diff-upload future builds (only deltas go over the wire). So: butler, always.
-- **Development config on purpose** for the alpha: keeps the console + `pf.*` cvars for
-  live debugging, and `~` + `open <ip>` as a fallback join path. Shipping config is a
-  post-alpha optimization (see size-trim section).
+- **Public uploads are Shipping builds.** Development remains available for local diagnostics, but
+  the upload scripts refuse it unless the operator explicitly overrides the gate.
 - **Join-by-IP already exists in the menu** (JOIN box + persisted last-IP), so VPN play
   needs zero code: LAN broadcast discovery dies over VPNs, direct IP connect works.
+- **No official servers are available in this Alpha.** Solo, bots, LAN, and VPN work without the
+  backend. The fleet implementation is dormant and no server/client coordinated deployment is needed.
 
 ## One-time setup (Tom — ~10 minutes, cannot be automated)
 
@@ -28,68 +29,34 @@
    - Verify: `butler -V`
 4. **Login** (browser OAuth): `butler login`
 
-## Push a build (repeatable — this is the whole release process)
+## Cook, verify, and push (repeatable)
 
 ```powershell
-# from anywhere; pushes the DIRECTORY, not a zip (butler diffs + compresses on the wire)
-# Do NOT hand-type the version. Save the block below as Scripts\Push-Itch.ps1 and run:
-#   .\Scripts\Push-Itch.ps1 -Channel <ITCH_USERNAME>/combatforge:windows-alpha
-butler status <ITCH_USERNAME>/combatforge:windows-alpha
+# Windows — UE 5.6, editor closed
+.\Deploy\playtest\package-playtest.ps1 -Config Shipping
+.\Scripts\Push-Itch.ps1        # dry run: manifest/hash/privacy/channel checks
+# Launch Packaged\Release\Windows\CombatForge.exe and complete the Shipping smoke first.
+.\Scripts\Push-Itch.ps1 -Push
 ```
 
-### `Scripts\Push-Itch.ps1`
-
-> **Corrected 2026-07-28.** This section described the script for months but it was never
-> actually created, and the `$BuildDir` it named (`Packaged\Windows`, the
-> `Scripts\Package-Windows.bat` output) does not exist on the build machine. alpha-15,
-> alpha-16 and alpha-17 were all cooked by `Deploy\playtest\package-playtest.ps1` into
-> **`Packaged\Playtest\Windows`**, and that is where butler pushes from. The script now
-> exists at `Scripts\Push-Itch.ps1`, defaults to that directory, and is **dry-run by
-> default** — it runs every check and only uploads when you pass `-Push`. It also refuses
-> to push if `CombatForge\Saved` or any `.pdb` survived the scrub.
-
-The alpha number lives in exactly ONE place — `PFBuild::NetProtocol` in
-`Source\CombatForge\CombatForge.h` — because that constant is what the join handshake
-actually gates on. Typing `--userversion` separately is how the itch page and the wire
-protocol drift apart: the page says alpha.11 while the binary is still speaking 10, and
-players see "update needed" on a build they just downloaded. This script derives the
-version from the header and refuses to push a version the channel already has (which
-means the header bump was forgotten).
-
-```powershell
-param(
-  [Parameter(Mandatory=$true)][string]$Channel,
-  [string]$BuildDir = "$PSScriptRoot\..\Packaged\Playtest\Windows"
-)
-$ErrorActionPreference = 'Stop'
-
-# Single source of truth: constexpr int32 NetProtocol = N;
-$Header = Join-Path $PSScriptRoot '..\Source\CombatForge\CombatForge.h'
-$m = Select-String -Path $Header -Pattern 'constexpr\s+int32\s+NetProtocol\s*=\s*(\d+)\s*;'
-if (-not $m) { throw "Could not read NetProtocol from $Header - did the declaration change shape?" }
-$Proto = [int]$m.Matches[0].Groups[1].Value
-$UserVersion = "0.1.0-alpha.$Proto"
-Write-Host "NetProtocol $Proto -> --userversion $UserVersion"
-
-# Refuse to re-push a version already on the channel: that always means the header bump
-# was skipped, and pushing anyway ships a binary that cannot talk to the live servers.
-$existing = (& butler status $Channel) -join "`n"
-if ($existing -match [regex]::Escape($UserVersion)) {
-  throw "$UserVersion is ALREADY on $Channel. Bump PFBuild::NetProtocol in CombatForge.h first."
-}
-
-if (-not (Test-Path $BuildDir)) { throw "No packaged build at $BuildDir - run Deploy\playtest\package-playtest.ps1." }
-if (Test-Path (Join-Path $BuildDir 'CombatForge\Saved')) { throw "Saved\ still present - privacy scrub did not run." }
-
-& butler push $BuildDir $Channel --userversion $UserVersion
-if ($LASTEXITCODE -ne 0) { throw "butler push failed ($LASTEXITCODE)" }
-& butler status $Channel
+```bash
+# macOS — run on the MacBook with UE 5.6 + Xcode
+git lfs install
+git fetch origin release/epic-hardening-2026-08-24
+git switch release/epic-hardening-2026-08-24
+git pull --ff-only
+git lfs pull
+./Scripts/check-mac-env.command
+./Scripts/Package-Mac.command Shipping
+./Scripts/Push-Itch.command       # dry run
+# Right-click the packaged CombatForge app → Open; verify Metal rendering and LAN joining first.
+./Scripts/Push-Itch.command --push
 ```
 
-- Channel name contains `windows` → itch auto-tags it as a Windows executable.
-- First push creates the channel. Bump `--userversion` each push (`0.1.0-alpha.2`, …).
-- **Before every push**: make sure `Packaged\Windows\CombatForge\Saved\` (playtest logs/
-  crash dumps) has been deleted — the packaging step in this repo does this, but check.
+Both upload scripts derive `0.1.0-alpha.N` from `PFBuild::NetProtocol`; never hand-type it. They
+require `CombatForge-build.json`, a matching Shipping configuration/protocol/executable SHA-256,
+no runtime `Saved` data, and no debug symbols. They push directories (not zip files) so butler can
+diff/compress updates. The Windows default channel is `windows-alpha`; macOS is `mac-alpha`.
 
 ## Friends-only visibility (step 5)
 
@@ -102,6 +69,10 @@ Do NOT use Public-unlisted (anyone with the link) and do NOT share the Draft lin
 ## Paste into the itch page description (friend install runbook)
 
 ```
+CURRENT ALPHA AVAILABILITY
+No official servers are available. Play solo with bots, or host/join over LAN or a VPN such as
+Tailscale. Quick Play and public official servers are upcoming features.
+
 HOW TO INSTALL (Windows)
 1. Download + unzip anywhere.
 2. Run the CombatForge.exe in the TOP folder (it installs the VC++ prereq on first run).
@@ -113,6 +84,9 @@ HOW TO PLAY TOGETHER (VPN)
    Find your Tailscale IP: tailscale ip -4  (it's the 100.x.y.z one).
    NOTE: the in-game "friends join" label shows your LAN IP — send friends the 100.x IP instead.
 3. FRIENDS: type that 100.x.y.z IP into the JOIN box on the main menu and click JOIN.
+
+LAN players must use the same Alpha version. A version mismatch blocks that connection to protect
+the match from incompatible replicated game code, but it never blocks solo/bot play.
 ```
 
 ## Post-alpha size trim (deferred on purpose — needs recook + full in-game verification)

@@ -1,6 +1,6 @@
 # Combat Forge — Packaging & Cross‑Platform (Windows + Mac)
 
-*How to produce standalone, playable builds. Written 2026‑07‑14 — stored for when we actually ship a build. Nothing here has been run end‑to‑end yet; the config + scripts are authored and ready.*
+*How to produce standalone, playable builds. Shipping/LAN-only path updated 2026-08-25.*
 
 The project is already set up for packaging: a **Game target** (`Source/CombatForge.Target.cs`), a **Server target**, pak/IoStore on, and a cook list in `Config/DefaultGame.ini`. This doc adds the Mac path, the package scripts, and the gotchas.
 
@@ -14,7 +14,8 @@ Scripts\Package-Windows.bat            # → Packaged\Playtest\Windows (Developm
 Scripts\Package-Windows.bat Shipping   # → Packaged\Release\Windows (clean store build)
 
 # Mac (ON A MAC with UE 5.6 + Xcode, content synced):
-./Scripts/Package-Mac.command          # → Packaged/Mac/  (Development)
+./Scripts/check-mac-env.command
+./Scripts/Package-Mac.command Shipping # → Packaged/Mac/  (clean Shipping app + manifest)
 ```
 
 Both produce a self-contained archive. The Windows batch file is only a compatibility wrapper around
@@ -32,7 +33,7 @@ Both produce a self-contained archive. The Windows batch file is only a compatib
 - A Mac, ideally Apple Silicon (M‑series). Your MacBook qualifies.
 - UE 5.6 from the Epic Games Launcher.
 - **Xcode** + command‑line tools: `xcode-select --install`.
-- The full private project synced with Git LFS, including `Content/Bandits/`.
+- The full private project synced with Git LFS, including `Content/Bandits/`; run `git lfs pull`.
 - Disk: UE + this project + a cooked Mac build is well over 100 GB. Have room.
 
 ---
@@ -43,19 +44,24 @@ Both call `RunUAT BuildCookRun`, which **compiles → cooks content → stages �
 
 - `-build` compile the game target · `-cook` cook content (uses the cook list in `DefaultGame.ini`) · `-stage -pak -iostore -compressed` bundle into compressed pak/IoStore files (matches the project's `bUseIoStore` / `UsePakFile`) · `-archive` copy the finished build out · `-nocompileeditor` skip the editor (not needed for a client build).
 
-Edit the `UE` / `PROJ` / `OUT` paths at the top of each script if your install differs (the **Mac** paths are placeholders — set them on the Mac).
+The Mac script finds the project relative to itself. If UE is not at the default Launcher path, use
+`UE="/path/to/UE_5.6" ./Scripts/Package-Mac.command Shipping`; `PROJ` and `OUT` are also supported.
 
 ---
 
 ## 3. Build config: Development vs Shipping
 
-Project Settings defaults to **Shipping/distribution** so an editor-driven store package cannot
-accidentally retain development features. The script defaults explicitly to **Development** for playtests:
+Project Settings defaults to **Shipping** so an editor-driven store package cannot accidentally
+retain development features. The Windows compatibility wrapper defaults to **Development** for local
+playtests; the Mac package script defaults to **Shipping**:
 - Keeps the console + all `pf.*` debug cvars (`pf.NavCheck`, `pf.BotSkill`, `pf.WeaponFP`, …). **This is what you want for playtests.**
 
 For a **release** build (clean cook, distribution, IoStore, compression, prerequisites, no debug
-symbols/console), run `Package-Windows.bat Shipping` or
-`Deploy\playtest\package-playtest.ps1 -Config Shipping`. Both enter the same implementation.
+symbols/console), run `Package-Windows.bat Shipping`,
+`Deploy\playtest\package-playtest.ps1 -Config Shipping`, or
+`./Scripts/Package-Mac.command Shipping`. The unsigned itch Mac path intentionally omits UAT's
+`-distribution` flag because UE 5.6 otherwise enters the Xcode archive workflow instead of emitting
+the directly distributable `.app`.
 
 ---
 
@@ -94,6 +100,11 @@ The Mac uses **Metal**, not Direct3D. The C++ is engine‑abstracted and should 
 2. **Performance is the real unknown.** This content already stresses the PC (the texture‑streaming pool is bumped to 3 GB, `r.Streaming.PoolSize=3000`). A MacBook — especially a non‑Pro — may need scalability dialed (lower streaming pool, shadow/AA settings, possibly disabling Nanite fallback quirks). Budget time to tune `DefaultDeviceProfiles.ini` for Mac. **Test before assuming it runs well.**
 3. **First C++ build on the Mac is slow** (compiles the whole module under clang). Subsequent builds are incremental.
 4. **Gatekeeper.** The `.app` is **unsigned**, so macOS blocks it ("unidentified developer"). For friends: **right‑click the app → Open** the first time (per‑user unblock). For real distribution: an **Apple Developer Program** membership ($99/yr) to codesign + notarize.
+5. **Run the preflight first.** `Scripts/check-mac-env.command` checks Xcode/UE compatibility,
+   Mac target modules, Metal tools, LFS hydration, and the tracked Metal SM6 config before the cook.
+6. **Archive integrity is gated.** UE 5.6 sometimes copies a pak-less wrapper into the archive;
+   `Package-Mac.command` detects that case, recovers the complete staged app, scrubs it, and emits
+   `CombatForge-build.json` bound to the exact clean Git commit.
 
 ---
 
@@ -104,12 +115,17 @@ The Mac uses **Metal**, not Direct3D. The C++ is engine‑abstracted and should 
 
 ---
 
-## 7. Distributing a build
+## 7. Distributing the LAN-only Alpha
 
-- Zip `Packaged/Windows` (or `Packaged/Mac`) and share it. It's self‑contained.
-- **Size:** expect **12 GB+** because of the Bandit + warehouse content. Big for casual sharing (external drive / large file transfer). Trimming would mean replacing the heavy Megascans/Bandit content with lighter assets — a separate art decision.
+- Windows Shipping output is `Packaged/Release/Windows`; macOS resolves the actual publish directory
+  under `Packaged/Mac`. Each contains `CombatForge-build.json` beside the client artifact.
+- Use `Scripts/Push-Itch.ps1` on Windows or `Scripts/Push-Itch.command` on macOS. Both are dry-run by
+  default and refuse non-Shipping, stale, dirty, or hash-mismatched artifacts.
+- **Size:** current itch downloads are about **3.7 GB** after cooking/compression; the hydrated source
+  checkout is much larger. Butler uploads directories and transfers deltas after the first release.
 - **Licensing (only matters if you go public):** Megascans/Quixel content is free to ship inside a UE game. The **Bandit character pack**'s license should be checked before redistributing it publicly — marketplace character packs sometimes restrict redistribution. Fine for LAN/personal use.
-- Storefronts if it ever gets that far: **itch.io** (simplest, both platforms, no signing enforced) or **Steam** ($100 Steam Direct; handles updates + matchmaking + cross‑play, biggest lift).
+- The current itch release is explicitly **LAN-only**. Official servers, Quick Play, and public
+  matchmaking are upcoming features and must not appear as currently playable store claims.
 
 ---
 
@@ -117,9 +133,9 @@ The Mac uses **Metal**, not Direct3D. The C++ is engine‑abstracted and should 
 
 The cheap way to learn the truth (per the deployment discussion): package **Windows** first, then **Mac**, and check:
 
-- [ ] **Windows package builds** (`Package-Windows.bat`), editor closed.
-- [ ] Launch `Packaged\Windows\...\CombatForge.exe` standalone — characters have **bodies + weapons** (confirms the Bandit cook), the arena builds, a match runs.
-- [ ] **Mac package builds** on the Mac (`Package-Mac.command`) — confirms the C++ compiles under clang and content cooks for Metal.
+- [ ] **Windows Shipping package builds** (`Deploy\playtest\package-playtest.ps1 -Config Shipping`), editor closed.
+- [ ] Launch `Packaged\Release\Windows\CombatForge.exe` standalone — menu says **NO OFFICIAL SERVERS AVAILABLE**, characters have **bodies + weapons**, and a full bot match runs.
+- [ ] **Mac Shipping package builds** on the Mac (`./Scripts/Package-Mac.command Shipping`) — confirms the C++ compiles under clang and content cooks for Metal.
 - [ ] Launch the `.app` (right‑click → Open) — **renders on Metal** (Nanite/VT not black/broken) and is **playable framerate** on the MacBook.
 - [ ] **Cross‑play:** PC hosts a LAN match, Mac joins by IP — both see each other, combat works.
 

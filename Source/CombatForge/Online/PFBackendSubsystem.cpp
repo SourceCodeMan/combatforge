@@ -217,11 +217,22 @@ void UPFBackendSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		ApiBaseUrl.LeftChopInline(1);
 	}
 
+	// The LAN-only public Alpha must never turn a cached player token or an old server-key file into a
+	// hidden dependency. Leave both identities untouched on disk for the future service, but do not load
+	// either one and therefore do not issue account, progression, directory, or fleet requests.
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		AuthToken.Reset();
+		ServerKey.Reset();
+		Profile = FPFBackendProfile();
+		UE_LOG(CombatForgeLog, Log, TEXT("Backend: official service disabled for LAN-only Alpha"));
+		return;
+	}
+
 	// Fleet key (dedicated boxes only): a development-only command-line override, then
 	// <ServerDataDir>/ServerKey.txt. Shipping never accepts the secret via argv because process lists and
-	// UE startup logs expose command lines. ServerDataDir is a
-	// PERSISTENT dir (honors -ArenaDir on the box) — NOT ProjectSavedDir, which is inside the package and gets
-	// wiped on every redeploy, silently disabling XP minting until the key was re-placed (#8, Tom 2026-07-18).
+	// UE startup logs expose command lines. ServerDataDir is a PERSISTENT dir (honors -ArenaDir on the box)
+	// — NOT ProjectSavedDir, which is inside the package and gets wiped on every redeploy.
 #if !UE_BUILD_SHIPPING
 	FParse::Value(FCommandLine::Get(), TEXT("PFServerKey="), ServerKey);
 #endif
@@ -283,12 +294,11 @@ void UPFBackendSubsystem::LoadAuthFromDisk()
 				IFileManager::Get().Delete(*AuthFilePath());
 				return;
 			}
-		}
-		else
-#endif
-		{
-			bLoadedLegacyPlaintext = Root->TryGetStringField(TEXT("token"), AuthToken);
-		}
+			}
+			else
+			{
+				bLoadedLegacyPlaintext = Root->TryGetStringField(TEXT("token"), AuthToken);
+			}
 #else
 		Root->TryGetStringField(TEXT("token"), AuthToken);
 #endif
@@ -379,6 +389,11 @@ void UPFBackendSubsystem::Request(const FString& Verb, const FString& Path, cons
 
 void UPFBackendSubsystem::BeginDeviceLogin()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		OnStatus.Broadcast(TEXT("No official servers are available in this Alpha. LAN play needs no account."));
+		return;
+	}
 	if (IsDeviceLoginActive())
 	{
 		return;   // covers the in-flight window too — a double-click can't start two flows
@@ -562,6 +577,10 @@ void UPFBackendSubsystem::Logout()
 
 void UPFBackendSubsystem::FetchProfile()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		return;
+	}
 	if (!IsLoggedIn())
 	{
 		return;
@@ -628,6 +647,12 @@ void UPFBackendSubsystem::FetchProfile()
 
 bool UPFBackendSubsystem::IsWeaponUnlocked(const FString& WeaponId) const
 {
+	// Public Alpha release contract: local/LAN loadouts never depend on the dormant account service,
+	// including on a machine that still has an Auth.json from an older test build.
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		return true;
+	}
 	// Offline / LAN / pre-backend: fully ungated (spec Stage 5).
 	if (!IsLoggedIn() || Profile.UnlockIds.Num() == 0 || WeaponId.IsEmpty())
 	{
@@ -701,6 +726,11 @@ bool UPFBackendSubsystem::ParseServerInfo(const TSharedPtr<FJsonObject>& Obj, FP
 
 void UPFBackendSubsystem::FetchServers(TFunction<void(bool, const TArray<FPFBackendServerInfo>&)> Done)
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		if (Done) { Done(false, TArray<FPFBackendServerInfo>()); }
+		return;
+	}
 	Request(TEXT("GET"), TEXT("/v1/servers"), FString(), /*AuthMode=*/1,
 		[Done](int32 Code, const FString& Resp)
 		{
@@ -732,6 +762,11 @@ void UPFBackendSubsystem::FetchServers(TFunction<void(bool, const TArray<FPFBack
 
 void UPFBackendSubsystem::RequestQuickPlay(TFunction<void(bool, const FPFBackendServerInfo&)> Done)
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		if (Done) { Done(false, FPFBackendServerInfo()); }
+		return;
+	}
 	const FString Path = FString::Printf(TEXT("/v1/quickplay?netProtocol=%d"), PFBuild::NetProtocol);
 	Request(TEXT("GET"), Path, FString(), /*AuthMode=*/1,
 		[Done](int32 Code, const FString& Resp)
@@ -753,6 +788,11 @@ void UPFBackendSubsystem::RequestQuickPlay(TFunction<void(bool, const FPFBackend
 void UPFBackendSubsystem::RequestJoinByCode(const FString& Code,
 	TFunction<void(bool, const FPFBackendServerInfo&)> Done)
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		if (Done) { Done(false, FPFBackendServerInfo()); }
+		return;
+	}
 	// Join codes are 6-char A-Z0-9 — strip anything else BEFORE the string is Printf'd into a URL path
 	// (a pasted "AB/CD?" would otherwise rewrite the request path; issue #18 ON3).
 	FString Clean;
@@ -787,6 +827,10 @@ void UPFBackendSubsystem::RequestJoinByCode(const FString& Code,
 
 void UPFBackendSubsystem::FleetRegisterIfServer(UWorld* World)
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		return;
+	}
 	// The KEY is the trust boundary, not the net mode: a true dedicated binary and the Phase-0
 	// pilot (game exe + `?listen` + -nullrhi, per Deploy/playtest/run-server.ps1) both qualify —
 	// player installs never have a key, so a random listen host can never register or grant XP.

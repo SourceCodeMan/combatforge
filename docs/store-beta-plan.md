@@ -1,5 +1,9 @@
 # Store beta plan — Mac on itch, then Epic Games Store
 
+> **Historical plan — do not use its branch, protocol, fleet, or upload commands.** The current
+> LAN-only Shipping runbook is [`docs/itch-deploy.md`](itch-deploy.md), and the release branch is
+> `release/epic-hardening-2026-08-24`. This file is retained only as Mac-port troubleshooting history.
+
 Written 2026-07-26. Covers roadmap steps 5 (Mac binaries → itch) and 6 (Epic beta).
 Steps 1–4 (review → fix → push to `mac-port` → review there) are done; see the session notes
 at the top of the `project-paintforge` memory and commits `f85950d` / `2150bb9`.

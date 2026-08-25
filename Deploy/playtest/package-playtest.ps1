@@ -10,7 +10,8 @@ param(
 	[string]$Engine = "C:\Program Files\Epic Games\UE_5.6",
 	[string]$ArchiveDir = "",
 	[switch]$TryServer,
-	[switch]$AllowSameProtocol
+	[switch]$AllowSameProtocol,
+	[switch]$AllowDirtyTree
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +27,23 @@ if (-not $ArchiveDir) {
 
 if (-not (Test-Path $UProject)) { throw "Project not found: $UProject" }
 if (-not (Test-Path $RunUAT)) { throw "RunUAT.bat not found: $RunUAT" }
+
+& git -C $ProjectRoot lfs version | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Git LFS is required. Install it and run 'git lfs pull'." }
+$UnresolvedLfs = @(& git -C $ProjectRoot lfs ls-files | Where-Object { $_ -match '^\S+\s+-\s+' })
+if ($LASTEXITCODE -ne 0) { throw "Could not verify Git LFS hydration." }
+if ($UnresolvedLfs.Count -gt 0) {
+	$Preview = ($UnresolvedLfs | Select-Object -First 10) -join "`n"
+	throw "REFUSING TO COOK: $($UnresolvedLfs.Count) Git LFS asset(s) are unresolved pointer files.`n$Preview`nRun 'git lfs pull' and retry."
+}
+
+if ($Config -eq "Shipping" -and -not $AllowDirtyTree) {
+	$DirtyTracked = (& git -C $ProjectRoot status --porcelain --untracked-files=no) -join "`n"
+	if ($LASTEXITCODE -ne 0) { throw "Could not verify the Git working tree before Shipping cook." }
+	if ($DirtyTracked) {
+		throw "REFUSING SHIPPING COOK: tracked files differ from the commit recorded in the manifest.`n$DirtyTracked`nCommit/stash them, or pass -AllowDirtyTree only for a diagnostic build."
+	}
+}
 
 $ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot)
 $ArchiveDir = [IO.Path]::GetFullPath($ArchiveDir)
@@ -88,7 +106,7 @@ if ($TryServer) {
 # a previous successful package already shipped at. The gate originally went on
 # Scripts\Package-Windows.bat, which turned out NOT to be the path that ships - so it lives here
 # too, on the one that does.
-$ProtoStamp = Join-Path $ProjectRoot "Packaged\.last-packaged-protocol"
+$ProtoStamp = Join-Path $ProjectRoot "Packaged\.last-packaged-protocol-windows"
 $ProtoMatch = Select-String -Path (Join-Path $ProjectRoot "Source\CombatForge\CombatForge.h") `
     -Pattern 'constexpr\s+int32\s+NetProtocol\s*=\s*(\d+)\s*;'
 $Proto = if ($ProtoMatch) { $ProtoMatch.Matches[0].Groups[1].Value } else { "" }
@@ -157,8 +175,10 @@ $Manifest | ConvertTo-Json | Set-Content -Path (Join-Path $ClientDir "CombatForg
 
 # Stamp only after the archive, executable, scrub, and manifest have all passed. A failed build must
 # never consume the protocol number and block the retry.
-New-Item -ItemType Directory -Force -Path (Split-Path $ProtoStamp) | Out-Null
-Set-Content -Path $ProtoStamp -Value $Proto -Encoding ascii
+if ($Config -eq "Shipping" -or $env:PF_REQUIRE_PROTOCOL_BUMP -eq "1") {
+	New-Item -ItemType Directory -Force -Path (Split-Path $ProtoStamp) | Out-Null
+	Set-Content -Path $ProtoStamp -Value $Proto -Encoding ascii
+}
 
 Write-Host "OK: packaged under $ArchiveDir"
 Get-ChildItem $ArchiveDir -Recurse -Filter "CombatForge.exe" -ErrorAction SilentlyContinue |

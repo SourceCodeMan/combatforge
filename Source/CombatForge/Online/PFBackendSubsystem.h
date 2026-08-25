@@ -51,7 +51,10 @@ DECLARE_MULTICAST_DELEGATE(FPFOnBackendAuthChanged);
 DECLARE_MULTICAST_DELEGATE_OneParam(FPFOnBackendStatus, const FString& /*HumanReadableLine*/);
 
 /**
- * Client for combatforge-api (accounts + server directory + progression + fleet reporting).
+ * Dormant client for combatforge-api (accounts + server directory + progression + fleet reporting).
+ * The public LAN-only Alpha keeps this subsystem compiled but inert while
+ * PFBuild::OfficialServersEnabled is false: it loads no player/server credentials and makes no
+ * service requests. Solo, bots, listen-host, and direct-IP LAN/VPN play remain independent.
  * Plain REST over FHttpModule — deliberately no OnlineSubsystem (02 D12 stands; see
  * docs/multiplayer-plan.md). Two hats, both worn by this one subsystem:
  *

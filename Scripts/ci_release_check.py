@@ -37,6 +37,10 @@ require(
 )
 
 header = read("Source/CombatForge/CombatForge.h")
+require(
+    re.search(r"constexpr\s+bool\s+OfficialServersEnabled\s*=\s*false\s*;", header) is not None,
+    "Public Alpha must keep official servers disabled until the service is intentionally released",
+)
 protocol_match = re.search(r"constexpr\s+int32\s+NetProtocol\s*=\s*(\d+)\s*;", header)
 require(protocol_match is not None, "PFBuild::NetProtocol is missing or no longer machine-readable")
 if protocol_match:
@@ -89,8 +93,89 @@ require(
     is not None,
     "Release-only UAT flags are no longer guarded by the Shipping configuration",
 )
+for invariant in ("AllowDirtyTree", ".last-packaged-protocol-windows", "lfs ls-files"):
+    require(invariant in package_script, f"Windows Shipping source/LFS gate is missing {invariant}")
+
+menu = read("Source/CombatForge/UI/PFLoadingMenuWidget.cpp")
+for alpha_copy in (
+    "NO OFFICIAL SERVERS AVAILABLE",
+    "LAN / VPN play is available now",
+    "Official servers are an upcoming feature",
+    "Alpha v%d · LAN only",
+):
+    require(alpha_copy in menu, f"LAN-only Alpha menu copy is missing: {alpha_copy}")
+require(
+    re.search(r"if\s*\(PFBuild::OfficialServersEnabled\).*?QuickPlayBtn", menu, re.DOTALL) is not None,
+    "Official Quick Play/server controls must remain behind OfficialServersEnabled",
+)
+require(
+    "if (PFBuild::OfficialServersEnabled && SaveSlot > 0)" in menu,
+    "LAN-only Alpha must not leave local class slots gated by the hidden account service",
+)
+require(
+    menu.count("if (!PFBuild::OfficialServersEnabled)") >= 7,
+    "Dormant official-server handlers must fail closed even if invoked outside the hidden UI",
+)
+
+windows_push = read("Scripts/Push-Itch.ps1")
+for invariant in (
+    "Packaged\\Release\\Windows",
+    "CombatForge-build.json",
+    "executableSha256",
+    "configuration",
+    "AllowDevelopment",
+):
+    require(invariant in windows_push, f"Windows itch Shipping gate is missing {invariant}")
+
+mac_package = read("Scripts/Package-Mac.command")
+for invariant in (
+    'CONFIG="${1:-Shipping}"',
+    "CombatForge-build.json",
+    "executableSha256",
+    "shasum -a 256",
+    "check-mac-env.command",
+    "CFBundleExecutable",
+    "pak-less wrapper",
+    ".last-packaged-protocol-mac",
+):
+    require(invariant in mac_package, f"Mac Shipping package gate is missing {invariant}")
+
+mac_push = read("Scripts/Push-Itch.command")
+for invariant in (
+    "thathorseslayer/combatforge:mac-alpha",
+    "CombatForge-build.json",
+    "executableSha256",
+    "ALLOW_DEVELOPMENT",
+    "PUSH=0",
+    "gitCommit",
+):
+    require(invariant in mac_push, f"Mac itch Shipping gate is missing {invariant}")
+require("gitCommit" in windows_push, "Windows itch upload must bind the artifact to its Git commit")
+
+require("+TargetedRHIs=SF_METAL_SM6" in engine_ini,
+        "Mac Shipping must target Metal SM6 for the M2+ Nanite build")
+require(ini_value(engine_ini, "MetalLanguageVersion") == "8",
+        "Mac Shipping must target Metal 3 (MetalLanguageVersion=8)")
+
+store_copy = read("docs/legal/store-copy.md")
+require(
+    "No official servers are currently available" in store_copy,
+    "Store copy must disclose that official servers are unavailable",
+)
+require(
+    "Official servers are upcoming" in store_copy,
+    "Store copy must describe official servers as upcoming, not currently playable",
+)
 
 backend = read("Source/CombatForge/Online/PFBackendSubsystem.cpp")
+require(
+    backend.count("!PFBuild::OfficialServersEnabled") >= 6,
+    "LAN-only Alpha must fail closed across backend initialization, unlocks, directory, and fleet paths",
+)
+require(
+    "official service disabled for LAN-only Alpha" in backend,
+    "LAN-only Alpha must make its dormant backend state explicit in logs",
+)
 require(
     re.search(
         r"#if\s+!UE_BUILD_SHIPPING\s+FParse::Value\([^\n]+PFServerKey=.*?#endif",
@@ -116,6 +201,43 @@ for content_dir in ("Bandits", "MarketplaceBlockout", "RifleAnims", "Scene_Wareh
 
 tracked_raw = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT)
 tracked = [Path(item.decode("utf-8", errors="surrogateescape")) for item in tracked_raw.split(b"\0") if item]
+
+# UE compilation is the authoritative C++ gate, but catch structurally invalid conditional-compilation
+# blocks before a Mac/Windows builder spends hours downloading assets and cooking. This would have caught
+# the malformed DPAPI platform branch that the original syntax-only CI missed.
+directive_pattern = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b")
+for relative in tracked:
+    if relative.suffix.lower() not in {".h", ".hpp", ".c", ".cc", ".cpp"}:
+        continue
+    if not relative.parts or relative.parts[0] != "Source":
+        continue
+    stack: list[dict[str, int | bool]] = []
+    for line_number, line in enumerate(read(str(relative)).splitlines(), start=1):
+        match = directive_pattern.match(line)
+        if not match:
+            continue
+        directive = match.group(1)
+        if directive in {"if", "ifdef", "ifndef"}:
+            stack.append({"line": line_number, "else": False})
+        elif directive == "elif":
+            if not stack:
+                FAILURES.append(f"{relative}:{line_number}: #{directive} without matching #if")
+            elif stack[-1]["else"]:
+                FAILURES.append(f"{relative}:{line_number}: #elif after #else")
+        elif directive == "else":
+            if not stack:
+                FAILURES.append(f"{relative}:{line_number}: #else without matching #if")
+            elif stack[-1]["else"]:
+                FAILURES.append(f"{relative}:{line_number}: duplicate #else")
+            else:
+                stack[-1]["else"] = True
+        elif stack:
+            stack.pop()
+        else:
+            FAILURES.append(f"{relative}:{line_number}: #endif without matching #if")
+    for frame in stack:
+        FAILURES.append(f"{relative}:{frame['line']}: conditional block has no matching #endif")
+
 for relative in tracked:
     lowered = [part.lower() for part in relative.parts]
     if relative.name.lower() in {"auth.json", "serverkey.txt", ".env", ".dev.vars"}:
