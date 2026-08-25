@@ -13,7 +13,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
-#include "Misc/GuardValue.h"
+#include "Templates/UnrealTemplate.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWave.h"
 

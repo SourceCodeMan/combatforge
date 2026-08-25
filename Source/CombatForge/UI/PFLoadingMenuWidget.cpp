@@ -2036,9 +2036,10 @@ void UPFLoadingMenuWidget::BuildTree()
 	// Release-mode readout pinned bottom-right. The LAN-only Alpha never compares itself to the dormant
 	// official fleet; LAN peers still use NetProtocol during their normal Unreal connection handshake.
 	VersionText = WidgetTree->ConstructWidget<UTextBlock>();
-	VersionText->SetText(FText::FromString(FString::Printf(
-		PFBuild::OfficialServersEnabled ? TEXT("Client v%d") : TEXT("Alpha v%d · LAN only"),
-		PFBuild::NetProtocol)));
+	const FString VersionLabel = PFBuild::OfficialServersEnabled
+		? FString::Printf(TEXT("Client v%d"), PFBuild::NetProtocol)
+		: FString::Printf(TEXT("Alpha v%d · LAN only"), PFBuild::NetProtocol);
+	VersionText->SetText(FText::FromString(VersionLabel));
 	VersionText->SetFont(PFLoadFont(11, false));
 	VersionText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
 	VersionText->SetJustification(ETextJustify::Right);
