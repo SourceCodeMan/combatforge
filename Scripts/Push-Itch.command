@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-CHANNEL="thathorseslayer/combatforge:mac-alpha"
+CHANNEL="thathorseslayer/combatforge:osx-alpha"
 BUILD_DIR=""
 BUTLER_BIN="${BUTLER:-}"
 PUSH=0
@@ -29,7 +29,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$BUILD_DIR" ]; then
-  APP_PATH=$(find "$PROJECT_ROOT/Packaged/Mac" -type d -name "CombatForge.app" -print -quit 2>/dev/null || true)
+  APP_PATH=$(find "$PROJECT_ROOT/Packaged/Mac" -type d \( -name "CombatForge.app" -o -name "CombatForge-Mac-*.app" \) -print -quit 2>/dev/null || true)
   if [ -n "$APP_PATH" ]; then BUILD_DIR=$(dirname "$APP_PATH"); fi
 fi
 if [ -z "$BUILD_DIR" ] || [ ! -d "$BUILD_DIR" ]; then
