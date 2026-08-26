@@ -142,7 +142,7 @@ for invariant in (
 
 mac_push = read("Scripts/Push-Itch.command")
 for invariant in (
-    "thathorseslayer/combatforge:mac-alpha",
+    "thathorseslayer/combatforge:osx-alpha",
     "CombatForge-build.json",
     "executableSha256",
     "ALLOW_DEVELOPMENT",
