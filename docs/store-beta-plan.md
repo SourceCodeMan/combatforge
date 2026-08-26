@@ -1,5 +1,9 @@
 # Store beta plan — Mac on itch, then Epic Games Store
 
+> **Historical plan — do not use its branch, protocol, fleet, or upload commands.** The current
+> LAN-only Shipping runbook is [`docs/itch-deploy.md`](itch-deploy.md), and the release branch is
+> `release/epic-hardening-2026-08-24`. This file is retained only as Mac-port troubleshooting history.
+
 Written 2026-07-26. Covers roadmap steps 5 (Mac binaries → itch) and 6 (Epic beta).
 Steps 1–4 (review → fix → push to `mac-port` → review there) are done; see the session notes
 at the top of the `project-paintforge` memory and commits `f85950d` / `2150bb9`.
@@ -86,12 +90,15 @@ The one hard *technical* requirement for a multiplayer game is crossplay:
 > free Epic Online Services Crossplay functionality, your own method, or any third-party system**
 > that works across PC storefronts."
 
-**CombatForge already satisfies this.** The game deliberately uses no OnlineSubsystem at all
+**CombatForge is architecturally positioned to satisfy this, but release evidence is still required.**
+The game deliberately uses no OnlineSubsystem at all
 (`CombatForge.Build.cs`: *"NOT needed: OnlineSubsystem (02 D12) — the backend is plain REST"*).
 Accounts, XP, unlocks and the server browser all go through `api.playcombatforge.com`, and every
 client joins the same Vultr fleet regardless of where it was downloaded. An itch Windows player, a
-Mac player and an EGS player are already on the same infrastructure. That architectural decision
-turns Epic's hardest technical gate into a no-op.
+Mac player and an EGS player use the same infrastructure. Before submission, test an itch Windows
+build and the exact Epic artifact together against the same fleet, including account login, server
+browse/quick-play, joining, a full match, and progression. Both artifacts must use the same
+`PFBuild::NetProtocol`.
 
 **Achievements are also not a blocker.** They are required only "if a product supports achievements
 through other PC storefronts". CombatForge has none on itch, so it is exempt — and Early Access
@@ -103,10 +110,10 @@ Only you can do the first four — they need your identity, agreements, and lega
 
 | # | Item | Who | Notes |
 |---|------|-----|-------|
-| 1 | Epic dev account + publishing agreements | **You** | Must be 18+; agreements gate the whole Dev Portal. No per-app fee (unlike Steam's $100). |
+| 1 | Epic dev account + publishing agreements | **You** | Agreements, organization verification, tax/payout setup, and Epic's recoupable US $100 submission fee gate release. |
 | 2 | Create the product in the Dev Portal | **You** | dev.epicgames.com/portal |
 | 3 | IARC age rating | **You** | Free automated questionnaire. Required *before* you can pick distribution regions. A non-lethal airsoft shooter should rate low, but answer honestly about the violence depiction. |
-| 4 | Privacy policy + EULA/ToS, publicly hosted | **You** (I can draft) | Epic: if you require consent to additional terms, you must host them publicly and link from the product home page. You have accounts and store data, so you need these. `playcombatforge.com` can host them. |
+| 4 | Privacy policy + EULA/ToS, publicly hosted | **You** | Release-candidate pages live in `combatforge-site/public`; confirm the operator/contact and obtain legal review before deployment. |
 | 5 | Store page assets | Me + you | Copy, screenshots, trailer, key art. I can write the copy; the capture is yours. |
 | 6 | Early Access designation | **You** | The right lane for a beta — Epic explicitly welcomes it and it relaxes the achievements rule. |
 | 7 | Shipping-config build + min specs | Me | See below. |
@@ -114,13 +121,12 @@ Only you can do the first four — they need your identity, agreements, and lega
 
 ### Why Shipping matters before any store beta
 
-`Deploy/playtest/package-playtest.ps1` defaults to `-clientconfig=Development`. Your live itch build
-therefore has an **open `~` console with every cheat cvar live** — including `pf.SetRank`, whose own
-source comment reads *"⚠️ ALPHA ONLY — DELETE THIS WHOLE BLOCK BEFORE BETA"*, plus 26 `pf.*`
-character-tuning cvars. `ECVF_Cheat` neuters those in Shipping, so building Shipping is sufficient;
-deleting the block is optional belt-and-braces.
+`Deploy/playtest/package-playtest.ps1` defaults to Development for playtests, but it now has one
+authoritative Shipping path with clean/distribution/IoStore/compression/prerequisite flags. Older
+itch builds have an open `~` console and development cvars; the Epic artifact must not.
 
-Before a public storefront build, package Windows with `-Config Shipping` too, not just Mac.
+For the public storefront build, run `Deploy/playtest/package-playtest.ps1 -Config Shipping` and use
+only `Packaged/Release/Windows` as the BuildPatchTool source.
 
 ---
 

@@ -291,8 +291,10 @@ void APFGrenadeProjectile::SpawnFragBurst(const FVector& At, uint32 Seed)
 		if (BB != nullptr)
 		{
 			// Distinct high ShotIndex space so frag hitmarkers don't collide with live-fire indices.
-			BB->InitProjectile(At, Dir, TeamId, /*bAuthoritative=*/true, SrcWeapon, Seed + static_cast<uint32>(i) + 1u);
-			BB->UtilityDamageOverride = 1;   // P2-CB2: frag cloud never inherits the thrower's HitValue
+			// Utility 1 before Init: rescue can resolve a hit inside Init (P3-CB1 / P2-CB2).
+			BB->UtilityDamageOverride = 1;
+			BB->InitProjectile(At, Dir, TeamId, /*bAuthoritative=*/true, SrcWeapon, Seed + static_cast<uint32>(i) + 1u,
+				/*bIgnoreShooter=*/true, /*bPointBlankRescue=*/false);
 		}
 	}
 }

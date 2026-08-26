@@ -1,6 +1,6 @@
 # Smoke-test Improvement build mode (non-interactive).
 #
-# 1) Seeds Saved/Arenas/ with a tiny community fort (both teams)
+# 1) Seeds %TEMP%\CombatForge\SmokeArenas with a tiny community fort (both teams)
 # 2) Launches UnrealEditor -game -nullrhi -SmokeImprovement
 # 3) GameMode configures Improvement, force-starts, asserts CommunityBasePieces > 0
 # 4) Greps the log for SMOKE: Improvement PASS|FAIL
@@ -27,8 +27,8 @@ if (-not (Test-Path $UProject)) { throw "Missing $UProject" }
 $Editor = Join-Path $Engine "Engine\Binaries\Win64\UnrealEditor.exe"
 if (-not (Test-Path $Editor)) { throw "UnrealEditor not found: $Editor" }
 
-# --- Seed a community arena so Improvement has something to load ---
-$ArenasDir = Join-Path $env:LOCALAPPDATA "CombatForge\Arenas"   # stable per-user dir (moved from Saved\Arenas)
+# --- Seed a smoke-only TEMP dir so -nullrhi cannot miss the JSON or pollute live fleets ---
+$ArenasDir = Join-Path $env:TEMP "CombatForge\SmokeArenas"
 New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
 
 # Structural X/Y are cell min-corners in sub-grid units (multiples of 4).
@@ -80,6 +80,7 @@ $ArgList = @(
 	"-log",
 	"-ABSLOG=`"$LogPath`""
 )
+$ArgList += "-ArenaDir=`"$ArenasDir`""
 
 Write-Host "==> Launching smoke Improvement ($TimeoutSec s max)"
 Write-Host "    Editor: $Editor"

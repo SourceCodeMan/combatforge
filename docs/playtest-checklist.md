@@ -1,10 +1,10 @@
 # CombatForge — playtest checklist
 
-Use this for the first human / multiplayer session on **current `main`**.
+Use this for the LAN-only Alpha release candidate.
 
 ## Before
 
-- [ ] `git pull origin main`
+- [ ] Pull the release branch/commit identified in `CombatForge-build.json`
 - [ ] UE 5.6 installed; project opens without missing map errors
 - [ ] `Content/Maps/L_Graybox` loads
 - [ ] Editor closed if you will package
@@ -19,6 +19,14 @@ cd D:\projects\combatforge   # or your clone
 ```
 
 Share LAN/VPN IP + port **7777**.
+
+## Alpha availability gate
+
+- [ ] Standalone menu says **NO OFFICIAL SERVERS AVAILABLE** and **LAN / VPN play is available now**
+- [ ] No LOG IN, QUICK PLAY, SERVERS, match-code, or START NEW MATCH official-service control is visible
+- [ ] QUICK START and START GAME work with the network disconnected
+- [ ] All five local class slots and all local weapon choices remain usable without an account
+- [ ] HOST LAN GAME and direct-IP JOIN remain visible and functional
 
 ## Friends
 
@@ -67,9 +75,9 @@ Share LAN/VPN IP + port **7777**.
 - Full Lobby → (Build) → Combat → Vote → Results without crash  
 - Second player sees team colors, scores, and can tag  
 - Host has a new file under `Saved/Arenas/` after a match with geometry  
+- Solo/bot play remains available after a failed LAN connection attempt
 
 ## Out of scope for this playtest
 
 - Fab assets at project root (not wired)  
-- EOS matchmaking  
-- Shipping store packaging polish  
+- Official servers, public matchmaking, Quick Play, and account progression

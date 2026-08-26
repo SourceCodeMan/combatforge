@@ -143,10 +143,10 @@ private:
 	void OnPerceptionStimulus(AActor* Actor, FAIStimulus Stimulus);
 	void SetFiring(bool bFire);
 	void ApplySkill();          // map Skill → AimErrorDeg / ReactionDelay / EngageRangeUU (called on possess)
-	void MoveToGoal(const FVector& RawGoal, AActor* FallbackActor);   // navmesh MoveTo toward a tactical point (falls back to the enemy if the point is off-mesh)
+	void MoveToGoal(const FVector& RawGoal, AActor* FallbackActor, float AcceptanceOverrideUU = -1.f);   // navmesh MoveTo toward a tactical point (falls back to the enemy if the point is off-mesh)
 	FVector ChooseTacticalPosition(const ACombatForgeCharacter* Target, const FVector* Anchor = nullptr) const;   // EQS-lite: best nearby firing position (Anchor = objective to hold near)
 	bool IsTargetEngageable(const ACombatForgeCharacter* Target) const; // alive + in range + visible (sticky-target gate)
-	bool ComputeObjectiveGoal(FVector& OutGoal);   // Dom/Hardpoint/CTF: where to push (false in fight modes)
+	bool ComputeObjectiveGoal(FVector& OutGoal, bool& bOutMustAdvance);   // Dom/HP/CTF goal; bOutMustAdvance = CTF carrier / even-roster returner
 	void EnsureObjectivesCached();                 // lazily grab the control-point / flag actors (once per match)
 
 	TWeakObjectPtr<ACombatForgeCharacter> CurrentTarget;

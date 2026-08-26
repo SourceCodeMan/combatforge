@@ -37,11 +37,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def _deny_inbox_reads(self):
         """inbox/ is WRITE-ONLY over the tunnel.
 
-        Uploaded server logs contain the fleet ServerKey (UE prints the full command line,
-        including -PFServerKey=..., in every log header). Serving them back over the same
-        unauthenticated public tunnel - with a directory listing, so the timestamped name
-        does not even have to be guessed - would publish the credential that mints XP and
-        registers fleet servers. Read them off the PC's disk instead.
+        Legacy server logs can contain the fleet ServerKey because older launchers put
+        -PFServerKey=... on argv and UE copied it into the log header. Exports are redacted now,
+        but the inbox stays write-only as defense in depth: serving uploads through the same
+        unauthenticated public tunnel could expose credentials or player diagnostics. Read them
+        from the PC's disk instead.
         """
         if self.path.startswith("/inbox"):
             self.send_error(403, "inbox is write-only")

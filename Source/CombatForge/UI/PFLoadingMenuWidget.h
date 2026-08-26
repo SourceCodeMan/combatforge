@@ -262,13 +262,14 @@ private:
 	UPROPERTY() TObjectPtr<UImage> Backdrop;
 	UPROPERTY() TObjectPtr<UTextBlock> TitleText;
 	UPROPERTY() TObjectPtr<UTextBlock> SubtitleText;
-	UPROPERTY() TObjectPtr<UTextBlock> VersionText;   // bottom-right client/server build sync readout
+	UPROPERTY() TObjectPtr<UTextBlock> VersionText;   // bottom-right Alpha version / availability readout
 	UPROPERTY() TObjectPtr<UButton> QuickStartButton;
 	UPROPERTY() TObjectPtr<UButton> HostLanButton;
 	UPROPERTY() TObjectPtr<class UEditableTextBox> JoinIpBox;
 	UPROPERTY() TObjectPtr<UButton> JoinLanButton;
 
-	// ONLINE panel (accounts required for all listed/matchmade play — Tom 2026-07-17)
+	// Dormant official-server panel. It remains compiled for the upcoming service, but the public Alpha
+	// constructs only the LAN-only availability banner while PFBuild::OfficialServersEnabled is false.
 	/** Up to a 10-instance fleet + headroom; the rows live in a ~3.5-row scroll box (Tom 2026-07-24). */
 	static constexpr int32 BrowserRowCount = 12;
 	UPROPERTY() TObjectPtr<UTextBlock> AccountStatusText;

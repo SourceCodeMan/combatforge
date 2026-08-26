@@ -127,7 +127,7 @@ namespace
 		case EPFMatchType::CaptureFlag:
 			return TEXT("Grab their flag · score at your base · first to 3");
 		case EPFMatchType::Domination:
-			return TEXT("Capture & hold A / B / C · first to 200");
+			return TEXT("Capture & hold A / B / C · first to 150");
 		case EPFMatchType::Hardpoint:
 			return TEXT("One rotating point · hold it · score over time");
 		default:
@@ -1014,7 +1014,10 @@ void UPFLoadingMenuWidget::RefreshSaveSlotHighlight()
 	{
 		if (SaveSlotButtons[i] != nullptr)
 		{
-			const bool bLocked = i > 0 && (!bLoggedIn || Rank < RequiredRankForSaveSlot(i));
+			// LAN-only Alpha cannot ask a player to use a hidden account panel. All five local classes
+			// remain usable; the account/rank ladder resumes with the future official service.
+			const bool bLocked = PFBuild::OfficialServersEnabled && i > 0
+				&& (!bLoggedIn || Rank < RequiredRankForSaveSlot(i));
 			SaveSlotButtons[i]->SetBackgroundColor(
 				i == ActiveSaveSlot ? Hot : (bLocked ? Locked : Cold));
 		}
@@ -1027,16 +1030,18 @@ void UPFLoadingMenuWidget::NotifySaveSlotSelected(int32 SaveSlot)
 	{
 		return;
 	}
-	// ACCOUNT GATE (Tom 2026-07-18): slot 0 is the free single soldier everyone gets; the other four classes
-	// require a (free) logged-in account. This is deliberately enforced even offline — the whole point is to
-	// nudge account creation (weapon rank-locks stay ungated offline; classes do NOT). A logged-out click on a
-	// locked class falls back to the free class 0 with a nudge.
+	// FUTURE OFFICIAL-SERVICE ACCOUNT GATE (Tom 2026-07-18): slot 0 is the free single soldier everyone gets;
+	// the other four classes require a (free) logged-in account when the official service is enabled. A
+	// logged-out click on a locked class then falls back to the free class 0 with a nudge. The LAN-only Alpha
+	// bypass below is intentional and keeps all local classes available without a hidden service dependency.
 	// RANK GATE (Tom 2026-07-24, "all classes lock for all people unless they have ranked up"):
 	// on top of the login, class N unlocks at rank N (class 2 = rank 2 … class 5 = rank 5). The
 	// rank ladder is the account Level from the backend profile (EffectiveRank; the alpha-only
 	// pf.SetRank override was removed 2026-07-28). Server-side enforcement rides the per-weapon clamp in
 	// ServerSetKit — the class slot itself is a client-local loadout container.
-	if (SaveSlot > 0)
+	// The LAN-only Alpha deliberately bypasses this backend progression gate. Hiding the login UI while
+	// leaving four local classes locked would make LAN play depend on a service this release does not offer.
+	if (PFBuild::OfficialServersEnabled && SaveSlot > 0)
 	{
 		UPFBackendSubsystem* Backend = GetBackend();
 		if (Backend != nullptr && !Backend->IsLoggedIn())
@@ -1449,7 +1454,7 @@ void UPFLoadingMenuWidget::BuildTree()
 	}
 
 	SubtitleText = WidgetTree->ConstructWidget<UTextBlock>();
-	SubtitleText->SetText(FText::FromString(TEXT("Airsoft arena · multiplayer")));
+	SubtitleText->SetText(FText::FromString(TEXT("Airsoft arena · LAN-only Alpha")));
 	SubtitleText->SetFont(PFLoadFont(16, false));
 	SubtitleText->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.78f, 0.85f)));
 	SubtitleText->SetJustification(ETextJustify::Center);
@@ -1491,8 +1496,8 @@ void UPFLoadingMenuWidget::BuildTree()
 		V->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
 	}
 
-	// ---- LAN multiplayer (no matchmaking yet): HOST turns this PC into a listen server; JOIN connects to a
-	//      host's IP — same network or VPN. State-aware: a fresh boot shows the controls; a hosting session
+	// ---- LAN multiplayer: HOST turns this PC into a listen server; JOIN connects to a host's IP — same
+	//      network or VPN. State-aware: a fresh boot shows the controls; a hosting session
 	//      shows "friends join <ip>"; a joined client shows the connection.
 	{
 		const ENetMode Net = GetWorld() ? GetWorld()->GetNetMode() : NM_Standalone;
@@ -1500,7 +1505,12 @@ void UPFLoadingMenuWidget::BuildTree()
 		UVerticalBox* MpBox = WidgetTree->ConstructWidget<UVerticalBox>();
 		if (Net == NM_Standalone)
 		{
-			// ---- ONLINE (hosted servers via api.playcombatforge.com; account required) ----
+			// Keep the finished official-fleet UI compiled, but do not expose any of its actions in the
+			// LAN-only public Alpha. Re-enabling the future service is one reviewed release flag, not a
+			// destructive reconstruction of the server browser.
+			if (PFBuild::OfficialServersEnabled)
+			{
+			// ---- OFFICIAL SERVERS (future service; account required when enabled) ----
 			AccountStatusText = WidgetTree->ConstructWidget<UTextBlock>();
 			AccountStatusText->SetFont(PFLoadFont(12, false));
 			AccountStatusText->SetJustification(ETextJustify::Center);
@@ -1667,8 +1677,35 @@ void UPFLoadingMenuWidget::BuildTree()
 				V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
 			}
 			RefreshOnlinePanel();
+			}
+			else
+			{
+				UTextBlock* OfflineTitle = WidgetTree->ConstructWidget<UTextBlock>();
+				OfflineTitle->SetText(FText::FromString(TEXT("NO OFFICIAL SERVERS AVAILABLE")));
+				OfflineTitle->SetFont(PFLoadFont(14, true));
+				OfflineTitle->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.72f, 0.22f)));
+				OfflineTitle->SetJustification(ETextJustify::Center);
+				if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(OfflineTitle))
+				{
+					V->SetHorizontalAlignment(HAlign_Fill);
+					V->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+				}
 
-			// ---- LAN (no account needed — offline path stays free) ----
+				UTextBlock* OfflineBody = WidgetTree->ConstructWidget<UTextBlock>();
+				OfflineBody->SetText(FText::FromString(
+					TEXT("LAN / VPN play is available now · Official servers are an upcoming feature")));
+				OfflineBody->SetFont(PFLoadFont(12, false));
+				OfflineBody->SetColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.68f, 0.74f)));
+				OfflineBody->SetJustification(ETextJustify::Center);
+				OfflineBody->SetAutoWrapText(true);
+				if (UVerticalBoxSlot* V = MpBox->AddChildToVerticalBox(OfflineBody))
+				{
+					V->SetHorizontalAlignment(HAlign_Fill);
+					V->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+				}
+			}
+
+			// ---- LAN (no account or official service needed) ----
 			HostLanButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("HostLanBtn"));
 			HostLanButton->SetBackgroundColor(FLinearColor(0.16f, 0.34f, 0.2f, 1.f));
 			HostLanButton->OnClicked.AddDynamic(this, &UPFLoadingMenuWidget::OnHostLanClicked);
@@ -1996,10 +2033,13 @@ void UPFLoadingMenuWidget::BuildTree()
 		S->SetZOrder(2);
 	}
 
-	// Version readout pinned bottom-right: client build vs. the server you're viewing, so a player can tell at
-	// a glance whether they're in sync (a mismatched build can't join — the directory gates on NetProtocol).
+	// Release-mode readout pinned bottom-right. The LAN-only Alpha never compares itself to the dormant
+	// official fleet; LAN peers still use NetProtocol during their normal Unreal connection handshake.
 	VersionText = WidgetTree->ConstructWidget<UTextBlock>();
-	VersionText->SetText(FText::FromString(FString::Printf(TEXT("Client v%d"), PFBuild::NetProtocol)));
+	const FString VersionLabel = PFBuild::OfficialServersEnabled
+		? FString::Printf(TEXT("Client v%d"), PFBuild::NetProtocol)
+		: FString::Printf(TEXT("Alpha v%d · LAN only"), PFBuild::NetProtocol);
+	VersionText->SetText(FText::FromString(VersionLabel));
 	VersionText->SetFont(PFLoadFont(11, false));
 	VersionText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.58f, 0.65f)));
 	VersionText->SetJustification(ETextJustify::Right);
@@ -2111,15 +2151,19 @@ void UPFLoadingMenuWidget::NativeConstruct()
 		PC->bShowMouseCursor = true;
 	}
 
-	// Backend account events → the ONLINE panel (status line + button states).
-	if (UPFBackendSubsystem* Backend = GetBackend())
+	// The public LAN-only Alpha has no account/fleet controls, so backend status must not replace the local
+	// warm-up and play status. Keep this wiring next to the dormant UI for the future service switch-on.
+	if (PFBuild::OfficialServersEnabled)
 	{
-		Backend->OnAuthChanged.AddUObject(this, &UPFLoadingMenuWidget::RefreshOnlinePanel);
-		Backend->OnStatus.AddWeakLambda(this, [this](const FString& Line)
+		if (UPFBackendSubsystem* Backend = GetBackend())
 		{
-			SetStatus(Line);
-			RefreshOnlinePanel();
-		});
+			Backend->OnAuthChanged.AddUObject(this, &UPFLoadingMenuWidget::RefreshOnlinePanel);
+			Backend->OnStatus.AddWeakLambda(this, [this](const FString& Line)
+			{
+				SetStatus(Line);
+				RefreshOnlinePanel();
+			});
+		}
 	}
 
 	SeedFromGameState();
@@ -2774,6 +2818,17 @@ UPFBackendSubsystem* UPFLoadingMenuWidget::GetBackend() const
 
 void UPFLoadingMenuWidget::RefreshOnlinePanel()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		bServerListOpen = false;
+		BrowserRows.Reset();
+		if (VersionText)
+		{
+			VersionText->SetText(FText::FromString(
+				FString::Printf(TEXT("Alpha v%d · LAN only"), PFBuild::NetProtocol)));
+		}
+		return;
+	}
 	UPFBackendSubsystem* Backend = GetBackend();
 	const bool bLoggedIn = Backend && Backend->IsLoggedIn();
 	const bool bLinking = Backend && Backend->IsDeviceLoginActive();
@@ -2837,6 +2892,11 @@ void UPFLoadingMenuWidget::RefreshOnlinePanel()
 
 void UPFLoadingMenuWidget::OnLoginClicked()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		SetStatus(TEXT("No official servers are available in this Alpha. Use HOST LAN GAME or JOIN."));
+		return;
+	}
 	UPFBackendSubsystem* Backend = GetBackend();
 	if (!Backend)
 	{
@@ -2859,6 +2919,11 @@ void UPFLoadingMenuWidget::OnLoginClicked()
 
 void UPFLoadingMenuWidget::OnQuickPlayClicked()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		SetStatus(TEXT("No official servers are available in this Alpha. Use HOST LAN GAME or JOIN."));
+		return;
+	}
 	UPFBackendSubsystem* Backend = GetBackend();
 	if (!Backend || !Backend->IsLoggedIn())
 	{
@@ -2884,6 +2949,11 @@ void UPFLoadingMenuWidget::OnQuickPlayClicked()
 
 void UPFLoadingMenuWidget::OnServerListClicked()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		SetStatus(TEXT("No official servers are available in this Alpha. Use HOST LAN GAME or JOIN."));
+		return;
+	}
 	UPFBackendSubsystem* Backend = GetBackend();
 	if (!Backend || !Backend->IsLoggedIn())
 	{
@@ -2924,6 +2994,24 @@ void UPFLoadingMenuWidget::OnServerListClicked()
 
 void UPFLoadingMenuWidget::RebuildServerRows()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		bServerListOpen = false;
+		BrowserRows.Reset();
+		for (const TObjectPtr<UButton>& Row : ServerRowButtons)
+		{
+			if (Row)
+			{
+				Row->SetVisibility(ESlateVisibility::Collapsed);
+			}
+		}
+		if (VersionText)
+		{
+			VersionText->SetText(FText::FromString(
+				FString::Printf(TEXT("Alpha v%d · LAN only"), PFBuild::NetProtocol)));
+		}
+		return;
+	}
 	for (int32 RowIdx = 0; RowIdx < ServerRowButtons.Num(); ++RowIdx)
 	{
 		UButton* Row = ServerRowButtons[RowIdx];
@@ -3009,6 +3097,11 @@ void UPFLoadingMenuWidget::OnServerRow11Clicked() { JoinBrowserRow(11); }
 
 void UPFLoadingMenuWidget::OnNewMatchClicked()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		SetStatus(TEXT("No official servers are available in this Alpha. Use HOST LAN GAME or JOIN."));
+		return;
+	}
 	UPFBackendSubsystem* Backend = GetBackend();
 	if (!Backend || !Backend->IsLoggedIn())
 	{
@@ -3045,6 +3138,11 @@ void UPFLoadingMenuWidget::OnNewMatchClicked()
 
 void UPFLoadingMenuWidget::JoinBrowserRow(int32 Index)
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		SetStatus(TEXT("No official servers are available in this Alpha. Use HOST LAN GAME or JOIN."));
+		return;
+	}
 	if (BrowserRows.IsValidIndex(Index))
 	{
 		JoinBackendServer(BrowserRows[Index]);
@@ -3053,6 +3151,11 @@ void UPFLoadingMenuWidget::JoinBrowserRow(int32 Index)
 
 void UPFLoadingMenuWidget::JoinBackendServer(const FPFBackendServerInfo& Info)
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		SetStatus(TEXT("No official servers are available in this Alpha. Use HOST LAN GAME or JOIN."));
+		return;
+	}
 	// Quick Play and match-code joins land here WITHOUT the build check the browser rows get (those are
 	// disabled in RebuildServerRows). Without this guard `open` fails the network-version handshake
 	// (PFBuild::NetProtocol is folded into GetLocalNetworkVersionOverride in UCombatForgeGameInstance::Init),
@@ -3078,6 +3181,11 @@ void UPFLoadingMenuWidget::JoinBackendServer(const FPFBackendServerInfo& Info)
 
 void UPFLoadingMenuWidget::OnJoinCodeClicked()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		SetStatus(TEXT("No official servers are available in this Alpha. Use HOST LAN GAME or JOIN."));
+		return;
+	}
 	UPFBackendSubsystem* Backend = GetBackend();
 	if (!Backend || !Backend->IsLoggedIn())
 	{

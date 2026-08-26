@@ -38,6 +38,10 @@ public class CombatForge : ModuleRules
 		{
 			PrivateDependencyModuleNames.Add("UnrealEd");
 		}
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicSystemLibraries.Add("Crypt32.lib"); // DPAPI protection for the cached player bearer token
+		}
 
 		// No private-only deps. NOT needed: OnlineSubsystem (02 D12) — the backend is plain REST
 		// against api.playcombatforge.com (docs/multiplayer-plan.md), GameplayAbilities (overkill).

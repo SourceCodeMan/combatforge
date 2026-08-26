@@ -23,7 +23,19 @@ DECLARE_LOG_CATEGORY_EXTERN(CombatForgeLog, Log, All);
  */
 namespace PFBuild
 {
-	constexpr int32 NetProtocol = 19;  // alpha.19 — 2026-08-06 playtest batch: kit-desync correction RPC,
+	/**
+	 * Public Alpha release mode. The dedicated-fleet implementation stays compiled and ready for a
+	 * future release, but no official-server action is exposed to players while this is false.
+	 * Solo, bots, listen-host, and direct-IP LAN/VPN play never depend on the official directory.
+	 */
+	constexpr bool OfficialServersEnabled = false;
+
+	constexpr int32 NetProtocol = 20;  // alpha.20 — 2026-08-24 Epic release-hardening candidate:
+	                                   // LAN-only public Alpha: Pass-3 gameplay fixes (#52-#61), Shipping
+	                                   // pipeline unification, DPAPI player-token storage, and dormant fleet
+	                                   // hardening. Official servers are intentionally unavailable; protocol
+	                                   // 20 protects LAN peers from incompatible replicated game layouts.
+	                                   // alpha.19 — 2026-08-06 playtest batch: kit-desync correction RPC,
 	                                   // barrel-cooldown RPC, mantle latch in the saved moves, static bases.
 	                                   // Burst tap-to-fire, sprint does not cancel reload, ramp underfill
 	                                   // removed, shotgun recoil, local FP body arms (no gloved viewmodel

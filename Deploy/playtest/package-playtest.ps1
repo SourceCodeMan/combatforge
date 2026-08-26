@@ -5,22 +5,60 @@
 # package the client only; host with run-listen.ps1 / run-server.ps1 using that client.
 param(
 	[string]$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+	[ValidateSet("Development", "Shipping")]
 	[string]$Config = "Development",
 	[string]$Engine = "C:\Program Files\Epic Games\UE_5.6",
 	[string]$ArchiveDir = "",
-	[switch]$TryServer
+	[switch]$TryServer,
+	[switch]$AllowSameProtocol,
+	[switch]$AllowDirtyTree
 )
 
 $ErrorActionPreference = "Stop"
 $UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 $RunUAT = Join-Path $Engine "Engine\Build\BatchFiles\RunUAT.bat"
 if (-not $ArchiveDir) {
-	$ArchiveDir = Join-Path $ProjectRoot "Packaged\Playtest"
+	$ArchiveDir = if ($Config -eq "Shipping") {
+		Join-Path $ProjectRoot "Packaged\Release"
+	} else {
+		Join-Path $ProjectRoot "Packaged\Playtest"
+	}
 }
 
 if (-not (Test-Path $UProject)) { throw "Project not found: $UProject" }
 if (-not (Test-Path $RunUAT)) { throw "RunUAT.bat not found: $RunUAT" }
 
+& git -C $ProjectRoot lfs version | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Git LFS is required. Install it and run 'git lfs pull'." }
+$UnresolvedLfs = @(& git -C $ProjectRoot lfs ls-files | Where-Object { $_ -match '^\S+\s+-\s+' })
+if ($LASTEXITCODE -ne 0) { throw "Could not verify Git LFS hydration." }
+if ($UnresolvedLfs.Count -gt 0) {
+	$Preview = ($UnresolvedLfs | Select-Object -First 10) -join "`n"
+	throw "REFUSING TO COOK: $($UnresolvedLfs.Count) Git LFS asset(s) are unresolved pointer files.`n$Preview`nRun 'git lfs pull' and retry."
+}
+
+if ($Config -eq "Shipping" -and -not $AllowDirtyTree) {
+	$DirtyTracked = (& git -C $ProjectRoot status --porcelain --untracked-files=no) -join "`n"
+	if ($LASTEXITCODE -ne 0) { throw "Could not verify the Git working tree before Shipping cook." }
+	if ($DirtyTracked) {
+		throw "REFUSING SHIPPING COOK: tracked files differ from the commit recorded in the manifest.`n$DirtyTracked`nCommit/stash them, or pass -AllowDirtyTree only for a diagnostic build."
+	}
+}
+
+$ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot)
+$ArchiveDir = [IO.Path]::GetFullPath($ArchiveDir)
+$PackagedRoot = [IO.Path]::GetFullPath((Join-Path $ProjectRoot "Packaged"))
+if (-not $ArchiveDir.StartsWith($PackagedRoot + [IO.Path]::DirectorySeparatorChar,
+	[StringComparison]::OrdinalIgnoreCase)) {
+	throw "ArchiveDir must be a child of $PackagedRoot (got $ArchiveDir)"
+}
+
+# Store packages must never inherit stale files from an older archive. The target is validated above
+# and is intentionally narrow before any recursive deletion occurs.
+if ($Config -eq "Shipping" -and (Test-Path $ArchiveDir)) {
+	Write-Host "==> Removing prior Shipping archive $ArchiveDir"
+	Remove-Item -LiteralPath $ArchiveDir -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $ArchiveDir | Out-Null
 
 $UatArgs = @(
@@ -38,6 +76,17 @@ $UatArgs = @(
 	"-utf8output"
 )
 
+if ($Config -eq "Shipping") {
+	$UatArgs += @(
+		"-clean",
+		"-distribution",
+		"-iostore",
+		"-compressed",
+		"-nodebuginfo",
+		"-prereqs"
+	)
+}
+
 if ($TryServer) {
 	Write-Host "==> Including -server (needs source engine Server target support)"
 	$UatArgs += @("-server", "-serverplatform=Win64", "-serverconfig=$Config")
@@ -50,24 +99,24 @@ if ($TryServer) {
 # Scripts\Package-Windows.bat output) does not even exist on the build machine. The stale
 # "run Scripts\Package-Windows.bat" line in docs/itch-deploy.md is the wrong one, not this.
 #
-# COOK-FLAG DELTA vs Scripts/Package-Windows.bat (P2-D11): the bat adds -iostore -compressed
-# -nodebuginfo -prereqs. Since the shipped build comes from HERE, that delta means shipped builds
-# are NOT iostore/compressed and DO carry debug info (the scrub below still strips *.pdb). If a
-# future release wants the smaller shipping-shaped cook, add those flags to $UatArgs above rather
-# than switching scripts - switching would also change the archive dir butler pushes from.
+# This is the single Windows packaging implementation. Scripts/Package-Windows.bat is now only a
+# compatibility wrapper around this file. Shipping adds clean/distribution/IoStore/compression/
+# prerequisites/no-debug-info above; Development keeps the fast playtest shape.
 # Optional HARD GATE (P2-S4). PF_REQUIRE_PROTOCOL_BUMP=1 refuses to cook at a NetProtocol value
 # a previous successful package already shipped at. The gate originally went on
 # Scripts\Package-Windows.bat, which turned out NOT to be the path that ships - so it lives here
 # too, on the one that does.
-$ProtoStamp = Join-Path $ProjectRoot "Packaged\.last-packaged-protocol"
+$ProtoStamp = Join-Path $ProjectRoot "Packaged\.last-packaged-protocol-windows"
 $ProtoMatch = Select-String -Path (Join-Path $ProjectRoot "Source\CombatForge\CombatForge.h") `
     -Pattern 'constexpr\s+int32\s+NetProtocol\s*=\s*(\d+)\s*;'
 $Proto = if ($ProtoMatch) { $ProtoMatch.Matches[0].Groups[1].Value } else { "" }
+if (-not $Proto) { throw "Could not read PFBuild::NetProtocol; refusing to create an unversioned package." }
 Write-Host "==> NetProtocol $Proto  (itch userversion would be 0.1.0-alpha.$Proto)"
-if ($env:PF_REQUIRE_PROTOCOL_BUMP -eq "1" -and $Proto -and (Test-Path $ProtoStamp)) {
+if (($Config -eq "Shipping" -or $env:PF_REQUIRE_PROTOCOL_BUMP -eq "1") -and
+	-not $AllowSameProtocol -and $Proto -and (Test-Path $ProtoStamp)) {
 	$LastProto = (Get-Content $ProtoStamp -Raw).Trim()
 	if ($Proto -eq $LastProto) {
-		throw "REFUSING TO PACKAGE: NetProtocol is still $Proto, the value already packaged. Bump PFBuild::NetProtocol in Source\CombatForge\CombatForge.h, or unset PF_REQUIRE_PROTOCOL_BUMP."
+		throw "REFUSING TO PACKAGE: NetProtocol is still $Proto, the value already packaged. Bump PFBuild::NetProtocol, or pass -AllowSameProtocol only for an intentional rebuild of the same release."
 	}
 }
 
@@ -78,6 +127,7 @@ Write-Host "    Config=$Config  (editor must be closed)"
 if ($LASTEXITCODE -ne 0) { throw "Package failed ($LASTEXITCODE)" }
 
 $ClientDir = Join-Path $ArchiveDir "Windows"
+if (-not (Test-Path $ClientDir)) { throw "Package completed but Windows archive is missing: $ClientDir" }
 
 # SECURITY SCRUB (durable fix for the 2026-07-17 token leak): a packaged build run from a writable folder
 # writes runtime data into <package>\CombatForge\Saved - INCLUDING a logged-in session token on pre-fix
@@ -87,8 +137,18 @@ $SavedDir = Join-Path $ClientDir "CombatForge\Saved"
 if (Test-Path $SavedDir) { Remove-Item $SavedDir -Recurse -Force -ErrorAction SilentlyContinue; Write-Host "Scrubbed $SavedDir (never ship runtime login/crash data)" }
 Get-ChildItem $ClientDir -Recurse -Filter *.pdb -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
+$Forbidden = @()
+$Forbidden += Get-ChildItem $ClientDir -Recurse -Directory -Filter Saved -ErrorAction SilentlyContinue
+$Forbidden += Get-ChildItem $ClientDir -Recurse -File -Filter Auth.json -ErrorAction SilentlyContinue
+$Forbidden += Get-ChildItem $ClientDir -Recurse -File -Filter ServerKey.txt -ErrorAction SilentlyContinue
+$Forbidden += Get-ChildItem $ClientDir -Recurse -File -Filter *.pdb -ErrorAction SilentlyContinue
+if ($Forbidden.Count -gt 0) {
+	$Forbidden | ForEach-Object { Write-Host "FORBIDDEN: $($_.FullName)" }
+	throw "Release privacy scrub failed; refusing to mark the package complete."
+}
+
 $ConnectSrc = Join-Path $PSScriptRoot "connect.ps1"
-if ((Test-Path $ClientDir) -and (Test-Path $ConnectSrc)) {
+if ($Config -eq "Development" -and (Test-Path $ClientDir) -and (Test-Path $ConnectSrc)) {
 	Copy-Item $ConnectSrc (Join-Path $ClientDir "connect.ps1") -Force
 	# Also copy if nested
 	Get-ChildItem $ClientDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
@@ -97,7 +157,25 @@ if ((Test-Path $ClientDir) -and (Test-Path $ConnectSrc)) {
 	Write-Host "Copied connect.ps1 into client package"
 }
 
-if ($Proto) {
+$ClientExe = Get-ChildItem $ClientDir -Recurse -Filter "CombatForge.exe" -File -ErrorAction SilentlyContinue |
+	Sort-Object Length -Descending | Select-Object -First 1
+if (-not $ClientExe) { throw "No CombatForge.exe found under $ClientDir" }
+$GitSha = (& git -C $ProjectRoot rev-parse HEAD 2>$null)
+$Manifest = [ordered]@{
+	product = "CombatForge"
+	configuration = $Config
+	netProtocol = [int]$Proto
+	gitCommit = if ($LASTEXITCODE -eq 0) { "$GitSha".Trim() } else { "unknown" }
+	createdUtc = [DateTime]::UtcNow.ToString("o")
+	executable = $ClientExe.FullName.Substring($ClientDir.Length).TrimStart(
+		[IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+	executableSha256 = (Get-FileHash -LiteralPath $ClientExe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$Manifest | ConvertTo-Json | Set-Content -Path (Join-Path $ClientDir "CombatForge-build.json") -Encoding utf8
+
+# Stamp only after the archive, executable, scrub, and manifest have all passed. A failed build must
+# never consume the protocol number and block the retry.
+if ($Config -eq "Shipping" -or $env:PF_REQUIRE_PROTOCOL_BUMP -eq "1") {
 	New-Item -ItemType Directory -Force -Path (Split-Path $ProtoStamp) | Out-Null
 	Set-Content -Path $ProtoStamp -Value $Proto -Encoding ascii
 }

@@ -22,5 +22,28 @@ if [[ -z "$BIN" ]]; then
 	exit 1
 fi
 
+mkdir -p /var/lib/combatforge
+if [ -n "${PF_SERVER_KEY:-}" ]; then
+	umask 077
+	printf '%s' "$PF_SERVER_KEY" > /var/lib/combatforge/ServerKey.txt
+fi
+
 echo "Starting $BIN  map=$MAP port=$PORT"
-exec "$BIN" "$MAP" -log -port="$PORT" -NOHOMEDIR "$@"
+delay=3
+while true; do
+	start_ts=$(date +%s)
+	code=0
+	"$BIN" "$MAP" -log -port="$PORT" -NOHOMEDIR "$@" || code=$?
+	end_ts=$(date +%s)
+	runtime=$((end_ts - start_ts))
+	if [ "$runtime" -lt 60 ]; then
+		delay=$((delay * 2))
+		if [ "$delay" -gt 300 ]; then
+			delay=300
+		fi
+	else
+		delay=3
+	fi
+	echo "exited code=$code after ${runtime}s; restarting in ${delay}s"
+	sleep "$delay"
+done

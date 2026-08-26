@@ -41,14 +41,15 @@ public:
 
 	// Single init point; caller applies spread to Dir BEFORE calling (shared stream — B3).
 	// bIgnoreShooter=false for breach bombs so the planter can be tagged by their own charge.
+	// bPointBlankRescue=false for the frag cloud — thrower stays self-immune, no Eye→Origin sweep.
 	void InitProjectile(const FVector& Origin, const FVector& SpreadedDir, uint8 Team,
 	                    bool bAuthoritative, UPFWeaponComponent* SourceWeapon, uint32 ShotIndex,
-	                    bool bIgnoreShooter = true);
+	                    bool bIgnoreShooter = true, bool bPointBlankRescue = true);
 
 	/** P2-CB1/CB2: utility bursts (bomb breach spray, frag cloud) do FIXED per-ball damage —
 	 *  never the planter's per-gun HitValue rank lever (a sniper primary made every burst ball
 	 *  multi-lethal). 0 = live-fire ball: damage comes from SourceWeapon->HitValue as always.
-	 *  Callers set this right after InitProjectile; hits can only resolve on later ticks. */
+	 *  Set before InitProjectile — the point-blank rescue can resolve a hit inside Init. */
 	uint8 UtilityDamageOverride = 0;
 
 	virtual void Tick(float DeltaSeconds) override;

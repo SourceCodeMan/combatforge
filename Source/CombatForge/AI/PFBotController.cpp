@@ -395,9 +395,10 @@ void APFBotController::Tick(float DeltaSeconds)
 
 	// Objective goal (Domination / Hardpoint / CTF): where this bot should push, even with no enemy in sight.
 	FVector ObjGoal;
-	const bool bHasObjective = ComputeObjectiveGoal(ObjGoal);
-	// Hold-ground modes (Domination / Hardpoint): the bot should CONTEST its point — fight its way to it and hold
-	// it — instead of letting a spotted enemy draw it off the objective. (CTF is a carry mode, so it's excluded.)
+	bool bMustAdvance = false;
+	const bool bHasObjective = ComputeObjectiveGoal(ObjGoal, bMustAdvance);
+	// Hold-ground modes (Domination / Hardpoint): contest the point. CTF carrier / even-roster
+	// returner must-advance to the goal instead — hold-radius would park them outside pickup.
 	const bool bHoldGround = bHasObjective
 		&& (GS->MatchType == EPFMatchType::Domination || GS->MatchType == EPFMatchType::Hardpoint);
 
@@ -579,9 +580,19 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 
 	const float SearchReachUU = 250.f;   // within this of a hunt/investigate point counts as "arrived"
+	// Must-advance (CTF carrier / even-roster returner) must reach pickup (140) + capsule; 220
+	// "arrive" + hold/strafe parks them outside the sphere. Hunt-flag keeps 220 + fight-first.
+	const float ObjectiveArriveUU = bMustAdvance ? 100.f : ObjectiveHoldRadiusUU;
 	FVector GoalLoc = BotLoc;
 	bool bMove = false;
-	if (Target != nullptr && bHoldGround && FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU * 2.f)
+	if (Target != nullptr && bMustAdvance)
+	{
+		// Run it in / walk the return. Aim/fire above still tracks Target — do not peel to a
+		// firing position (that parks a carrier outside the 140 pickup).
+		GoalLoc = ObjGoal;
+		bMove = true;
+	}
+	else if (Target != nullptr && bHoldGround && FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU * 2.f)
 	{
 		// FIGHT TOWARD THE OBJECTIVE: we can see an enemy but we're off our point — advance to contest it while
 		// still shooting (aim/fire above tracks the enemy), rather than chasing them away from the objective.
@@ -604,7 +615,7 @@ void APFBotController::Tick(float DeltaSeconds)
 		GoalLoc = TacticalGoal;
 		bMove = true;
 	}
-	else if (bHasObjective && FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveHoldRadiusUU)
+	else if (bHasObjective && FVector::Dist2D(BotLoc, ObjGoal) > ObjectiveArriveUU)
 	{
 		GoalLoc = ObjGoal;   // push the objective
 		bMove = true;
@@ -614,9 +625,10 @@ void APFBotController::Tick(float DeltaSeconds)
 		GoalLoc = SearchPos;   // hunt the last-known-position / investigate a heard noise
 		bMove = true;
 	}
-	else if (bHasObjective)
+	else if (bHasObjective && !bMustAdvance)
 	{
-		// On the objective with nobody in sight: hold + strafe (stay dodgy).
+		// On the objective with nobody in sight: hold + strafe (stay dodgy). Must-advance
+		// skips this — arriving at 220 then strafing never overlaps the 140 pickup.
 		const FVector Flat = FVector(ObjGoal.X - BotLoc.X, ObjGoal.Y - BotLoc.Y, 0.f).GetSafeNormal();
 		const FVector Right = FVector::CrossProduct(FVector::UpVector, Flat);
 		GoalLoc = BotLoc + Right * StrafeSign * GoalProjectUU;
@@ -633,7 +645,7 @@ void APFBotController::Tick(float DeltaSeconds)
 		const bool bIdle = (GetMoveStatus() == EPathFollowingStatus::Idle);
 		if ((RepathTimer <= 0.f && bGoalMoved) || bIdle)
 		{
-			MoveToGoal(GoalLoc, Target);   // Target may be null (search/objective) → MoveToGoal just paths to GoalLoc
+			MoveToGoal(GoalLoc, Target, bMustAdvance ? ObjectiveArriveUU : -1.f);   // Target may be null (search/objective) → MoveToGoal just paths to GoalLoc
 			RepathTimer = RepathInterval;
 		}
 
@@ -713,7 +725,7 @@ void APFBotController::Tick(float DeltaSeconds)
 	}
 }
 
-void APFBotController::MoveToGoal(const FVector& RawGoal, AActor* FallbackActor)
+void APFBotController::MoveToGoal(const FVector& RawGoal, AActor* FallbackActor, float AcceptanceOverrideUU)
 {
 	LastPathedGoal = RawGoal;
 
@@ -763,7 +775,7 @@ void APFBotController::MoveToGoal(const FVector& RawGoal, AActor* FallbackActor)
 	{
 		Req.SetGoalLocation(Goal);
 	}
-	Req.SetAcceptanceRadius(MoveAcceptUU);
+	Req.SetAcceptanceRadius(AcceptanceOverrideUU > 0.f ? AcceptanceOverrideUU : MoveAcceptUU);
 	Req.SetUsePathfinding(true);
 	Req.SetAllowPartialPath(true);      // unreachable goal → walk as far along the route as the mesh allows
 	Req.SetProjectGoalLocation(true);   // belt+braces (we already snapped Goal above)
@@ -1148,8 +1160,9 @@ void APFBotController::EnsureObjectivesCached()
 	for (TActorIterator<APFFlagActor> It(World); It; ++It)          { FlagsCache.Add(*It); }
 }
 
-bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
+bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal, bool& bOutMustAdvance)
 {
+	bOutMustAdvance = false;
 	const ACombatForgeGameState* GS = GetWorld() ? GetWorld()->GetGameState<ACombatForgeGameState>() : nullptr;
 	const ACombatForgePlayerState* MyPS = GetPlayerState<ACombatForgePlayerState>();
 	const ACombatForgeCharacter* Bot = GetBotCharacter();
@@ -1183,6 +1196,7 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 		if (bCarryingEnemyFlag)
 		{
 			OutGoal = MyHome;   // run it home to score
+			bOutMustAdvance = true;
 			return true;
 		}
 		// Our own flag lying in the field used to be returned only if a bot happened to walk over
@@ -1193,6 +1207,7 @@ bool APFBotController::ComputeObjectiveGoal(FVector& OutGoal)
 			&& (MyPS->RosterIndex % 2) == 0)
 		{
 			OutGoal = HomeFlag->GetActorLocation();
+			bOutMustAdvance = true;
 			return true;
 		}
 

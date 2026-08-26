@@ -1,8 +1,8 @@
 # CombatForge - free home pilot server (Path C).
 #
 # Runs the already-compiled Development build as a headless dedicated server on THIS PC, pointed
-# at the LIVE backend (api.playcombatforge.com). The server key is read automatically from
-# Saved\CombatForge\ServerKey.txt (already placed for you) - nothing secret is in this script.
+# at the LIVE backend (api.playcombatforge.com). The server key is read from
+# %ProgramData%\CombatForge\ServerKey.txt (Saved\CombatForge is migrate-only) - nothing secret is in this script.
 #
 # It registers with the live directory + heartbeats, so it shows up in the in-game SERVERS list
 # and QUICK PLAY. Auto-restarts if it ever exits. Close this window (or Ctrl+C) to stop it.
@@ -18,10 +18,25 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $UProject = Join-Path $ProjectRoot "CombatForge.uproject"
 $Exe = Join-Path $ProjectRoot "Binaries\Win64\CombatForge.exe"
-$KeyFile = Join-Path $ProjectRoot "Saved\CombatForge\ServerKey.txt"
+$LegacyKey  = Join-Path $ProjectRoot "Saved\CombatForge\ServerKey.txt"
+$RuntimeKey = Join-Path $env:ProgramData "CombatForge\ServerKey.txt"
 
-if (-not (Test-Path $Exe))     { throw "Missing $Exe - build the game first (open the project and compile)." }
-if (-not (Test-Path $KeyFile)) { throw "Missing $KeyFile - the server key. Ask Claude to re-place it." }
+if (-not (Test-Path $Exe)) { throw "Missing $Exe - build the game first (open the project and compile)." }
+
+if (-not (Test-Path $RuntimeKey)) {
+    if (Test-Path $LegacyKey) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $RuntimeKey) | Out-Null
+        $k = (Get-Content $LegacyKey -Raw).Trim()
+        if ($k.Length -lt 32) { throw "Legacy key at $LegacyKey looks wrong (too short)." }
+        Set-Content -Path $RuntimeKey -Value $k -Encoding ascii -NoNewline
+        Write-Host "Migrated server key to $RuntimeKey" -ForegroundColor Yellow
+    } else {
+        throw "Missing $RuntimeKey - place ServerKey.txt there (or in Saved\CombatForge to migrate)."
+    }
+} else {
+    $k = (Get-Content $RuntimeKey -Raw).Trim()
+    if ($k.Length -lt 32) { throw "ServerKey.txt at $RuntimeKey looks wrong (too short)." }
+}
 
 # Open the Windows Firewall for this port, best-effort. UDP carries gameplay; TCP matches what
 # Deploy/playtest/_common.ps1 opens, so no join path is blocked by a protocol the pilot skipped.
@@ -41,9 +56,9 @@ foreach ($fw in @(@{ Name = $ruleUdp; Proto = "UDP" }, @{ Name = $ruleTcp; Proto
 
 # The map URL MUST carry ?listen so the server actually opens the port (a plain -server boots a
 # non-listening standalone). -nullrhi/-nosound = headless. The server KEY + API base are picked up
-# automatically (ServerKey.txt + the built-in api.playcombatforge.com default).
+# automatically (%ProgramData%\CombatForge\ServerKey.txt + the built-in api.playcombatforge.com default).
 $mapUrl = "$Map`?listen"
-$args = @($mapUrl, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR",
+$LaunchArgs = @($mapUrl, "-server", "-nullrhi", "-nosound", "-log", "-port=$Port", "-NOHOMEDIR",
           "-project=$UProject")
 
 Write-Host ""
@@ -51,6 +66,7 @@ Write-Host "=== CombatForge home pilot server ===" -ForegroundColor Cyan
 Write-Host "  Backend : https://api.playcombatforge.com (LIVE)"
 Write-Host "  Port    : $Port/udp"
 Write-Host "  Map     : $Map"
+Write-Host "  Key     : $RuntimeKey"
 Write-Host "  Watch the log for:  Backend: fleet registered (port $Port)" -ForegroundColor Cyan
 Write-Host "  Then it appears in the game's SERVERS list. Ctrl+C or close this window to stop."
 Write-Host ""
@@ -61,7 +77,7 @@ Write-Host ""
 # exact bug Start-Server-OnBox.ps1 fixed). Same cure: Start-Process -PassThru + WaitForExit,
 # single argument string (an ArgumentList ARRAY drops quotes on space-containing args), plus the
 # OnBox crash-loop backoff so a boot-crash cannot hammer restarts.
-$cmdLine = ($args | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }) -join ' '
+$cmdLine = ($LaunchArgs | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }) -join ' '
 $RestartDelay = 3
 while ($true) {
   Write-Host ("[{0}] launching server..." -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor Green

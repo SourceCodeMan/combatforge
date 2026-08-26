@@ -25,6 +25,30 @@ namespace
 		Action->ValueType = ValueType;
 		return Action;
 	}
+
+	// Non-rebindable live maps. G plant, R rotate, digits wheel-commit, thumb extra melee,
+	// MouseWheelAxis cycle class/piece. A row's own DefaultKey stays legal in SetActionKey
+	// even when it appears here (F Ready+Interact, Q wheel+smoke, R Reload+rotate).
+	bool IsFixedKey(const FKey Key)
+	{
+		static const FKey FixedKeys[] = {
+			EKeys::Escape, EKeys::Tab, EKeys::Enter, EKeys::F,                                         // menu/ready
+			EKeys::LeftMouseButton, EKeys::RightMouseButton, EKeys::MiddleMouseButton,                 // fire/ADS/drag
+			EKeys::ThumbMouseButton, EKeys::MouseWheelAxis,                                            // extra melee / cycle
+			EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::LeftControl, EKeys::C,                      // move/crouch
+			EKeys::F1, EKeys::F2, EKeys::F3, EKeys::F4, EKeys::F5, EKeys::X, EKeys::Q, EKeys::G, EKeys::R, // build kit + plant + rotate
+			EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five,
+			EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine, EKeys::Zero                           // wheel sector commit
+		};
+		for (const FKey& Reserved : FixedKeys)
+		{
+			if (Key == Reserved)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 }
 
 void UPFInputConfig::SetLookSensitivity(float Sens)
@@ -258,17 +282,123 @@ void UPFInputConfig::BuildRebindRegistry()
 	Add(FName(TEXT("Punch")),      TEXT("Punch"),        IA_Melee,      IMC_Combat, EKeys::B);
 }
 
+void UPFInputConfig::RemapEntry(FRebindEntry& E, FKey NewKey)
+{
+	if (E.Context == nullptr || E.Action == nullptr)
+	{
+		return;
+	}
+	E.Context->UnmapKey(E.Action, E.CurrentKey);
+	E.Context->MapKey(E.Action, NewKey);
+	E.CurrentKey = NewKey;
+}
+
 void UPFInputConfig::ApplySavedKeyOverrides()
 {
-	for (FRebindEntry& E : RebindEntries)
+	// Validate the saved Bind_* set as a whole, then RemapEntry accepted rows.
+	// Sequential SetActionKey would reject a legal Bind_Jump=E while Frag still sits on E.
+	const int32 N = RebindEntries.Num();
+	TArray<FKey> Proposed;
+	Proposed.SetNum(N);
+	for (int32 i = 0; i < N; ++i)
 	{
-		const FKey Saved = FPFUserPrefs::GetKeyOverride(E.Id);
-		if (Saved.IsValid() && Saved != E.CurrentKey && E.Context && E.Action)
+		Proposed[i] = RebindEntries[i].CurrentKey;
+	}
+
+	for (int32 i = 0; i < N; ++i)
+	{
+		const FKey Saved = FPFUserPrefs::GetKeyOverride(RebindEntries[i].Id);
+		if (Saved.IsValid() && Saved != RebindEntries[i].DefaultKey)
 		{
-			E.Context->UnmapKey(E.Action, E.CurrentKey);
-			E.Context->MapKey(E.Action, Saved);
-			E.CurrentKey = Saved;
+			Proposed[i] = Saved;
 		}
+	}
+
+	bool bClearedAny = false;
+
+	for (int32 i = 0; i < N; ++i)
+	{
+		if (Proposed[i] != RebindEntries[i].DefaultKey && IsFixedKey(Proposed[i]))
+		{
+			UE_LOG(CombatForgeLog, Warning, TEXT("Saved rebind dropped: %s -> %s is reserved"),
+				*RebindEntries[i].Id.ToString(), *Proposed[i].GetDisplayName().ToString());
+			FPFUserPrefs::ClearKeyOverride(RebindEntries[i].Id);
+			Proposed[i] = RebindEntries[i].DefaultKey;
+			bClearedAny = true;
+		}
+	}
+
+	// Resolve shared keys on the proposed set (not live CurrentKey). Repeat after
+	// a drop so a revert-to-default cannot leave a new pair on the same key.
+	bool bConflictDropped = true;
+	while (bConflictDropped)
+	{
+		bConflictDropped = false;
+		TArray<FKey> GroupKeys;
+		TArray<TArray<int32>> Groups;
+		for (int32 i = 0; i < N; ++i)
+		{
+			const int32 Found = GroupKeys.IndexOfByKey(Proposed[i]);
+			if (Found == INDEX_NONE)
+			{
+				GroupKeys.Add(Proposed[i]);
+				TArray<int32> NewGroup;
+				NewGroup.Add(i);
+				Groups.Add(MoveTemp(NewGroup));
+			}
+			else
+			{
+				Groups[Found].Add(i);
+			}
+		}
+
+		for (const TArray<int32>& Group : Groups)
+		{
+			if (Group.Num() < 2)
+			{
+				continue;
+			}
+			bool bHasDefaultHolder = false;
+			for (const int32 Idx : Group)
+			{
+				if (Proposed[Idx] == RebindEntries[Idx].DefaultKey)
+				{
+					bHasDefaultHolder = true;
+					break;
+				}
+			}
+			for (int32 g = 0; g < Group.Num(); ++g)
+			{
+				const int32 Idx = Group[g];
+				if (Proposed[Idx] == RebindEntries[Idx].DefaultKey)
+				{
+					continue;
+				}
+				if (!bHasDefaultHolder && g == 0)
+				{
+					continue; // keep first registry row when every member is an override
+				}
+				UE_LOG(CombatForgeLog, Warning, TEXT("Saved rebind dropped: %s -> %s conflicts"),
+					*RebindEntries[Idx].Id.ToString(), *Proposed[Idx].GetDisplayName().ToString());
+				FPFUserPrefs::ClearKeyOverride(RebindEntries[Idx].Id);
+				Proposed[Idx] = RebindEntries[Idx].DefaultKey;
+				bClearedAny = true;
+				bConflictDropped = true;
+			}
+		}
+	}
+
+	for (int32 i = 0; i < N; ++i)
+	{
+		if (Proposed[i] != RebindEntries[i].CurrentKey)
+		{
+			RemapEntry(RebindEntries[i], Proposed[i]);
+		}
+	}
+
+	if (bClearedAny)
+	{
+		FPFUserPrefs::Flush();
 	}
 }
 
@@ -312,28 +442,17 @@ bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
 	}
 	// Conflict check (issue #19 I1): without it a duplicate bind silently made two actions fire on one
 	// key (or stole a FIXED key like Escape) with no feedback — the classic "my controls broke" report.
-	// P2-I1: the reserved set now covers EVERY fixed (non-rebindable) mapping — fire/ADS, WASD,
-	// crouch, the build hotkeys, the wheel — not just the old menu four; landing a rebind on any
-	// of them double-fired two actions on one key. P2-I2: a key that is THIS entry's shipped
-	// DEFAULT is always legal — the shipped state itself pairs F (Ready + Interact) and Q (wheel
-	// + smoke) across contexts, and rejecting defaults locked players out of restoring them.
+	// P2-I1 / P3-I1: IsFixedKey covers EVERY fixed (non-rebindable) mapping — fire/ADS, WASD,
+	// crouch, the build hotkeys, plant (G), rotate (R), wheel digits, thumb melee, mouse wheel —
+	// not just the old menu four; landing a rebind on any of them double-fired two actions on one key.
+	// P2-I2: a key that is THIS entry's shipped DEFAULT is always legal — the shipped state itself
+	// pairs F (Ready + Interact) and Q (wheel + smoke) across contexts, and rejecting defaults
+	// locked players out of restoring them.
 	// A key held by ANOTHER rebindable entry is rejected too (predictable beats auto-swap).
-	static const FKey FixedKeys[] = {
-		EKeys::Escape, EKeys::Tab, EKeys::Enter, EKeys::F,                                // menu/ready
-		EKeys::LeftMouseButton, EKeys::RightMouseButton, EKeys::MiddleMouseButton,        // fire/ADS/drag
-		EKeys::W, EKeys::A, EKeys::S, EKeys::D, EKeys::LeftControl, EKeys::C,             // move/crouch
-		EKeys::F1, EKeys::F2, EKeys::F3, EKeys::F4, EKeys::F5, EKeys::X, EKeys::Q         // build kit
-	};
-	if (NewKey != E->DefaultKey)
+	if (NewKey != E->DefaultKey && IsFixedKey(NewKey))
 	{
-		for (const FKey& R : FixedKeys)
-		{
-			if (NewKey == R && E->CurrentKey != R)
-			{
-				UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is reserved"), *NewKey.GetDisplayName().ToString());
-				return false;
-			}
-		}
+		UE_LOG(CombatForgeLog, Warning, TEXT("Rebind rejected: %s is reserved"), *NewKey.GetDisplayName().ToString());
+		return false;
 	}
 	for (const FRebindEntry& Other : RebindEntries)
 	{
@@ -344,9 +463,7 @@ bool UPFInputConfig::SetActionKey(FName Id, FKey NewKey)
 			return false;
 		}
 	}
-	E->Context->UnmapKey(E->Action, E->CurrentKey);
-	E->Context->MapKey(E->Action, NewKey);
-	E->CurrentKey = NewKey;
+	RemapEntry(*E, NewKey);
 	return true;
 }
 
@@ -354,11 +471,6 @@ void UPFInputConfig::ResetActionKeysToDefaults()
 {
 	for (FRebindEntry& E : RebindEntries)
 	{
-		if (E.Context && E.Action)
-		{
-			E.Context->UnmapKey(E.Action, E.CurrentKey);
-			E.Context->MapKey(E.Action, E.DefaultKey);
-			E.CurrentKey = E.DefaultKey;
-		}
+		RemapEntry(E, E.DefaultKey);
 	}
 }

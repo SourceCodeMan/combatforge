@@ -2,7 +2,7 @@
 
 **Build the arena. Fight in it. Judge it.**
 
-CombatForge is a multiplayer first-person **airsoft** shooter for Windows, built on Unreal Engine 5.6.
+CombatForge is a first-person **airsoft** shooter for Windows and macOS, built on Unreal Engine 5.6.
 Nothing is lethal: you tag people and they're *out*, then they respawn. It's built to be played by
 kids and adults in the same lobby.
 
@@ -22,8 +22,9 @@ Every match is three games in one:
 The arena **is** the content. Players make the map; CombatForge's job is to make that fast, fair,
 and rateable.
 
-> **Status: shipping alpha.** Live on itch.io, with accounts, progression, and a dedicated server.
-> This is no longer the graybox milestone the first version of this README described.
+> **Status: LAN-only public Alpha.** Solo play, bots, listen-host LAN/VPN play, and direct-IP joining
+> are available now. **No official servers are available in this Alpha.** The completed fleet code is
+> intentionally dormant and will return as an upcoming feature after a seamless release path is ready.
 
 ---
 
@@ -31,9 +32,9 @@ and rateable.
 
 | Surface | What it is |
 |---|---|
-| **itch.io** | `thathorseslayer/combatforge`, channel `windows-alpha`. Pushed with `butler`. |
-| **Dedicated server** | A Vultr Windows box, port 7777, registered in the public server directory. |
-| **Backend** | `api.playcombatforge.com` — Cloudflare Worker + D1. Accounts, progression, unlocks, server directory, match reports. Separate repo: `combatforge-api`. |
+| **itch.io** | `thathorseslayer/combatforge`, channels `windows-alpha` and `mac-alpha`. Pushed with `butler`. |
+| **Current multiplayer** | Player-hosted LAN/VPN listen servers with direct-IP joining. No official servers in Alpha. |
+| **Future service** | The account, progression, directory, and fleet implementation remains in the codebase but is not a playable Alpha surface. Separate repo: `combatforge-api`. |
 | **Brand** | [playcombatforge.com](https://playcombatforge.com) · [Discord](https://discord.gg/f7U2xXxAxc) · bug reports at `report.playcombatforge.com` |
 
 ### The version gate — read this before shipping anything
@@ -42,16 +43,16 @@ and rateable.
 folded into the engine's network version. Clients on a different number **cannot join** — by design,
 because a stale client silently mis-renders instead of failing loudly.
 
-**Bump it on every itch push, and push the client and the server together.** They are two halves of
-one release. Shipping one without the other means nobody can play, and the symptom (a server that
-looks fine but rejects everyone) costs an hour to diagnose. It has.
+Use the same packaged Alpha on every LAN machine. The gate protects LAN peers from incompatible
+replicated layouts; it does **not** contact an official server and never blocks solo or bot play.
+Every public itch push gets a fresh number so the binary, manifest, and itch userversion agree.
 
 ---
 
 ## Playing and hosting
 
-**Play:** download from itch, run `CombatForge.exe`. Sign in for progression, or play offline —
-everything except XP and unlocks works logged out.
+**Play:** download from itch and run the game. No account or official service is required; all five
+local classes, weapons, bots, and match modes are available in the LAN-only Alpha.
 
 **Host locally** (LAN / VPN, no backend needed):
 
@@ -102,8 +103,8 @@ that can tag you out.
 position, cover and flanking, squad awareness, objective play, and doors they can open. They roll
 their own weapons rather than mirroring yours.
 
-**Progression** — XP, ranks, and rank-gated weapon unlocks, held server-side. The menu shows locked
-weapons in amber and names what you're actually carrying, so it can never disagree with what spawns.
+**Future progression** — the account, XP, rank, and unlock implementation remains dormant with the
+official-server surface. The LAN-only Alpha keeps local loadouts and weapons playable without it.
 
 ---
 
@@ -125,7 +126,7 @@ Source/CombatForge/
                               piece visuals, special piece actors (doors/windows/traps), arena shell
   AI/                         Bot controller — perception, tactics, squad coordination
   Objectives/                 Flag, control point, objective layout
-  Online/                     PFBackendSubsystem — accounts, directory, progression, fleet reporting
+  Online/                     Dormant future service — accounts, directory, progression, fleet reporting
   Voting/                     Rating subsystem — match records, votes, community map catalog
   UI/                         Every widget, procedural C++ UMG. No Blueprints anywhere.
 Deploy/
@@ -148,7 +149,7 @@ This has bitten us more than once, so it's written down.
 | Community maps | `%LOCALAPPDATA%\CombatForge\Arenas` | Survives every reinstall and redeploy |
 | Your settings, classes, keybinds | `%LOCALAPPDATA%\CombatForge\UserPrefs.ini` | Same reason — see below |
 | Server key, pending XP reports | `%ProgramData%\CombatForge` (or `-ArenaDir`) | Must survive a server redeploy |
-| Login token | `%LOCALAPPDATA%\CombatForge\Auth.json` | Per-user, and **never** inside the package |
+| Future-service login token | `%LOCALAPPDATA%\CombatForge\Auth.json` | Dormant in this Alpha; per-user, DPAPI-protected on Windows, and **never** inside the package |
 
 **Nothing player-owned may live inside the install folder.** The pre-ship scrub deletes
 `<package>\CombatForge\Saved` on every bake — it has to, because a session token once shipped to
@@ -160,41 +161,36 @@ exactly how player settings used to reset to defaults after each bake.
 ## Shipping a build
 
 ```powershell
-# 1. Bump PFBuild::NetProtocol in Source/CombatForge/CombatForge.h
-# 2. Cook + stage + pak (editor must be closed)
-.\Deploy\playtest\package-playtest.ps1
+# 1. Windows Shipping package (clean cook, distribution, IoStore, compressed, prerequisites)
+.\Deploy\playtest\package-playtest.ps1 -Config Shipping
+# Output: Packaged\Release\Windows; includes CombatForge-build.json with commit/protocol/hash
 
-# 3. Push to itch
-butler push "D:\projects\combatforge\Packaged\Playtest\Windows" `
-  thathorseslayer/combatforge:windows-alpha --userversion 0.1.0-alpha.N
+# 2. Validate (dry run), launch/smoke locally, then upload the exact verified artifact
+.\Scripts\Push-Itch.ps1
+.\Scripts\Push-Itch.ps1 -Push
 ```
 
-**Then deploy the server in the same sitting.** On the PC, serve the build folder:
+On macOS:
 
-```powershell
-cd D:\projects\combatforge\Deploy\pilot\serve
-python serve-and-receive.py                     # NOT `python -m http.server` — see below
-cloudflared tunnel --url http://localhost:8000  # second window
+```bash
+git lfs pull
+./Scripts/check-mac-env.command
+./Scripts/Package-Mac.command Shipping
+./Scripts/Push-Itch.command
+# After launching the app and completing the Mac + LAN smoke:
+./Scripts/Push-Itch.command --push
 ```
 
-On the box:
+Both upload scripts are dry-run by default and verify Shipping configuration, protocol, package
+manifest, executable path/hash, privacy scrub, and debug-symbol removal before `butler` can publish.
+There is deliberately no fleet-deploy step for the LAN-only Alpha.
 
-```powershell
-cd C:\Users\Administrator\Desktop
-curl.exe -L -o Deploy-OnBox.ps1 "<tunnel-url>/Deploy-OnBox.ps1"   # always re-pull it
-.\Deploy-OnBox.ps1
-```
+### Dormant future-fleet operations
 
-It auto-discovers the zip, protects `ServerKey.txt`, stops the old server, downloads, extracts,
-verifies, and relaunches. Watch for `Found: CombatForge-alphaN.zip`, then
-`Backend: fleet registered (port 7777)`.
+The `Deploy/pilot` scripts remain for future official-server work and are not part of the Alpha
+Shipping gate. Do not advertise or deploy them as a player-facing Alpha option.
 
-**Before shipping, check:** exactly one zip in the serve folder, no `ServerKey.txt` and no
-`GameUserSettings.ini` inside it, and the version tag in the client menu reading
-`Client vN  Server vN (in sync)` afterwards. Every one of those checks exists because its absence
-cost a bad deploy.
-
-### Getting logs off the server
+#### Getting logs off a development server
 
 ```powershell
 # PC (in Deploy\pilot\serve): python serve-and-receive.py  + cloudflared
