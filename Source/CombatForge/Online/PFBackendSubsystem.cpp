@@ -368,17 +368,27 @@ void UPFBackendSubsystem::Request(const FString& Verb, const FString& Path, cons
 		Req->SetContentAsString(BodyJson);
 	}
 	Req->SetTimeout(15.f);
+	// ProcessRequest() == false does NOT mean "nothing happened": UE 5.6's FHttpRequestCommon::
+	// PreProcess calls FinishRequestNotInHttpManager() on a failed PreCheck/SetupRequest, and on the
+	// game thread (the default CompleteOnGameThread policy) that fires OnProcessRequestComplete
+	// SYNCHRONOUSLY before ProcessRequest returns. A bare "if (!ProcessRequest()) Done(0, ...)"
+	// therefore delivers the SAME failure twice — which double-decrements SendMatchReport's
+	// PendingReplayInFlight latch and lets a still-in-flight report be replayed. One shared latch,
+	// so exactly one of the two paths ever calls Done.
+	const TSharedRef<bool> bDelivered = MakeShared<bool>(false);
 	Req->OnProcessRequestComplete().BindLambda(
-		[Done](FHttpRequestPtr /*R*/, FHttpResponsePtr Resp, bool bOk)
+		[Done, bDelivered](FHttpRequestPtr /*R*/, FHttpResponsePtr Resp, bool bOk)
 		{
-			if (Done)
+			if (Done && !*bDelivered)
 			{
+				*bDelivered = true;
 				Done(bOk && Resp.IsValid() ? Resp->GetResponseCode() : 0,
 					bOk && Resp.IsValid() ? Resp->GetContentAsString() : FString());
 			}
 		});
-	if (!Req->ProcessRequest() && Done)
+	if (!Req->ProcessRequest() && Done && !*bDelivered)
 	{
+		*bDelivered = true;
 		Done(0, FString());
 	}
 }

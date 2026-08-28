@@ -112,7 +112,7 @@ fi
 echo "Build:   $BUILD_DIR"
 echo "Channel: $CHANNEL"
 echo "Version: $USER_VERSION (LAN-only Alpha)"
-STATUS=$($BUTLER_BIN status "$CHANNEL")
+STATUS=$("$BUTLER_BIN" status "$CHANNEL")
 echo "$STATUS"
 if printf '%s\n' "$STATUS" | grep -Fq "$USER_VERSION"; then
   echo "$USER_VERSION is already on $CHANNEL. Bump PFBuild::NetProtocol for the next public build."
@@ -124,6 +124,6 @@ if [ "$PUSH" -ne 1 ]; then
   exit 0
 fi
 
-$BUTLER_BIN push "$BUILD_DIR" "$CHANNEL" --userversion "$USER_VERSION"
-$BUTLER_BIN status "$CHANNEL"
+"$BUTLER_BIN" push "$BUILD_DIR" "$CHANNEL" --userversion "$USER_VERSION"
+"$BUTLER_BIN" status "$CHANNEL"
 echo "macOS LAN-only Alpha is live at $USER_VERSION."
