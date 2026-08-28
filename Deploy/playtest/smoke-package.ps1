@@ -15,6 +15,9 @@ param(
 	[string]$ArchiveDir = "",
 	[string]$Map = "/Game/Maps/L_Graybox",
 	[int]$BootTimeoutSec = 90,
+	# Shipping has no log to scan, so its smoke is "did it stay up": how long the process must
+	# survive to count as booted rather than crashed on startup.
+	[int]$ShipDwellSec = 45,
 	[switch]$SkipCook
 )
 
@@ -24,7 +27,12 @@ if (-not $ProjectRoot) {
 	$ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
 if (-not $ArchiveDir) {
-	$ArchiveDir = Join-Path $ProjectRoot "Packaged\Playtest"
+	# Match package-playtest.ps1: Shipping archives land in Packaged\Release, not Packaged\Playtest.
+	$ArchiveDir = if ($Config -eq "Shipping") {
+		Join-Path $ProjectRoot "Packaged\Release"
+	} else {
+		Join-Path $ProjectRoot "Packaged\Playtest"
+	}
 }
 
 $UProject = Join-Path $ProjectRoot "CombatForge.uproject"
@@ -68,19 +76,32 @@ if (-not $SkipCook) {
 	Write-Host "==> SkipCook: using existing package under $ArchiveDir"
 }
 
-# --- 2) Find client exe (Binaries / largest file; reject the 166 KB bootstrap) ---
+# --- 2) Find client exe (config-suffix aware; rejects the ~166 KB launcher stub) ---
+# No local fallback here on purpose: the duplicated copy of this search is exactly how the two
+# drifted apart. Find-CombatForgeExe in _common.ps1 is the single implementation.
 $ClientPath = Find-CombatForgeExe $ArchiveDir "CombatForge.exe"
 if (-not $ClientPath) {
-	$Hit = Get-ChildItem $ArchiveDir -Recurse -Filter "CombatForge.exe" -ErrorAction SilentlyContinue |
-		Sort-Object Length -Descending | Select-Object -First 1
-	if ($Hit -and $Hit.Length -ge 10MB) { $ClientPath = $Hit.FullName }
-}
-if (-not $ClientPath) {
-	Write-Host "FAIL: no CombatForge.exe under $ArchiveDir that is at least 10 MB (166 KB bootstrap is not the game)."
+	Write-Host "FAIL: no CombatForge game binary of at least 10 MB under $ArchiveDir."
+	Write-Host "      A Shipping stage names it CombatForge-Win64-Shipping.exe; the ~166 KB CombatForge.exe"
+	Write-Host "      at the archive root is only a launcher stub, not the game."
 	exit 1
 }
 $ClientExe = Get-Item $ClientPath
 Write-Host ("==> Client: {0} ({1:N1} MB)" -f $ClientExe.FullName, ($ClientExe.Length / 1MB))
+
+# What the archive actually contains beats the -Config parameter, which is meaningless under
+# -SkipCook against a package someone else built.
+$ManifestPath = Join-Path $ArchiveDir "Windows\CombatForge-build.json"
+if (-not (Test-Path $ManifestPath)) { $ManifestPath = Join-Path $ArchiveDir "CombatForge-build.json" }
+if (Test-Path $ManifestPath) {
+	try {
+		$FromManifest = "$((Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json).configuration)"
+		if ($FromManifest) { $Config = $FromManifest }
+	} catch { }
+} elseif ($ClientExe.Name -match '-Win64-(\w+)\.exe$') {
+	$Config = $Matches[1]
+}
+Write-Host "==> Package configuration: $Config"
 
 # --- 3) Boot smoke (nullrhi) ---
 $BootLog = Join-Path $ProjectRoot "Saved\Logs\smoke-package-boot.log"
@@ -93,13 +114,19 @@ $BootArgs = @(
 	"-unattended",
 	"-nosound",
 	"-NoPause",
-	"-NoLoadingScreen",
-	"-SmokeImprovement",
-	"-log",
-	"-ABSLOG=`"$BootLog`""
+	"-NoLoadingScreen"
 )
-
-Write-Host "==> Boot smoke ($BootTimeoutSec s max) with -SmokeImprovement"
+# Shipping compiles logging out - CombatForge.Target.cs sets no bUseLoggingInShipping, so UE's
+# default USE_LOGGING_IN_SHIPPING=0 applies - and TickSmokeImprovement is inside
+# #if !UE_BUILD_SHIPPING. Measured against the alpha.21 package: the binary boots and keeps
+# running, and -ABSLOG writes no file at all. Asking a Shipping build for log markers can only
+# ever produce a FAIL, so it gets a liveness check instead.
+if ($Config -ne "Shipping") {
+	$BootArgs += @("-SmokeImprovement", "-log", "-ABSLOG=`"$BootLog`"")
+	Write-Host "==> Boot smoke ($BootTimeoutSec s max) with -SmokeImprovement"
+} else {
+	Write-Host "==> Shipping liveness smoke (must stay up $ShipDwellSec s; no log exists to scan)"
+}
 $WorkDir = $ClientExe.DirectoryName
 
 # Seed arenas for packaged ProjectSavedDir (usually <package>/Windows/.../Saved).
@@ -128,22 +155,49 @@ New-Item -ItemType Directory -Force -Path $ArenasDir | Out-Null
 Set-Content -Path (Join-Path $ArenasDir ("arena_{0}_packagesmoke.json" -f $Stamp)) -Value $SeedJson -Encoding UTF8
 $BootArgs += "-ArenaDir=`"$ArenasDir`""
 
+$BootStart = Get-Date
 $Boot = Start-Process -FilePath $ClientExe.FullName -ArgumentList $BootArgs -WorkingDirectory $WorkDir -PassThru
-$Done = $Boot.WaitForExit($BootTimeoutSec * 1000)
-if (-not $Done) {
-	Write-Host "==> Boot timeout - killing packaged process"
-	try { Stop-Process -Id $Boot.Id -Force -ErrorAction SilentlyContinue } catch {}
-	Start-Sleep -Seconds 2
+$ShipSurvived = $false
+$ShipExitCode = $null
+if ($Config -eq "Shipping") {
+	# Inverted sense: here an EXIT inside the dwell is the failure. A packaged game that boots keeps
+	# running, so surviving the window is what "it did not crash on startup" looks like.
+	$ExitedEarly = $Boot.WaitForExit($ShipDwellSec * 1000)
+	$ShipSurvived = -not $ExitedEarly
+	if ($ExitedEarly) { $ShipExitCode = $Boot.ExitCode }
+	if ($ShipSurvived) {
+		Write-Host "==> Still running after $ShipDwellSec s - stopping it"
+		try { Stop-Process -Id $Boot.Id -Force -ErrorAction SilentlyContinue } catch {}
+		Start-Sleep -Seconds 2
+	}
+	$Done = $true
+} else {
+	$Done = $Boot.WaitForExit($BootTimeoutSec * 1000)
+	if (-not $Done) {
+		Write-Host "==> Boot timeout - killing packaged process"
+		try { Stop-Process -Id $Boot.Id -Force -ErrorAction SilentlyContinue } catch {}
+		Start-Sleep -Seconds 2
+	}
 }
 
 if (-not (Test-Path $BootLog)) {
-	# Packaged builds often write next to the exe or under Saved relative to cwd
+	# Packaged builds often write next to the exe or under Saved relative to cwd.
+	#
+	# The freshness filter is load-bearing, not defensive: ProjectRoot\Saved\Logs\CombatForge.log is
+	# the EDITOR's log path and is almost always present from some unrelated run. Without the
+	# timestamp check this scanned that stale file and reported a verdict about it - and a stale log
+	# still holding "SMOKE: Improvement PASS" from an earlier session would have been read as a PASS
+	# for a package that never booted. Only a log written after this boot started can describe it.
 	$Alt = @(
 		(Join-Path $WorkDir "CombatForge.log"),
 		(Join-Path $WorkDir "Saved\Logs\CombatForge.log"),
 		(Join-Path $ProjectRoot "Saved\Logs\CombatForge.log")
-	) | Where-Object { Test-Path $_ } | Select-Object -First 1
-	if ($Alt) { $BootLog = $Alt }
+	) | Where-Object { (Test-Path $_) -and ((Get-Item $_).LastWriteTime -ge $BootStart) } | Select-Object -First 1
+	if ($Alt) {
+		$BootLog = $Alt
+	} else {
+		Write-Host "==> No log written since the boot started - ignoring any pre-existing CombatForge.log"
+	}
 }
 
 # --- 3b) SECURITY SCRUB, after the boot ---
@@ -167,6 +221,21 @@ Get-ChildItem $ArchiveDir -Recurse -Directory -Filter "Saved" -ErrorAction Silen
 	}
 Get-ChildItem $ArchiveDir -Recurse -Filter *.pdb -ErrorAction SilentlyContinue |
 	Remove-Item -Force -ErrorAction SilentlyContinue
+
+# --- 3c) Shipping verdict: liveness only, decided before any log scan ---
+if ($Config -eq "Shipping") {
+	if ($ShipSurvived) {
+		Write-Host "PASS: Shipping package booted headless and was still running after $ShipDwellSec s."
+		Write-Host "      LIVENESS ONLY - it proves the exe, its DLLs and the pak/IoStore mount reach a"
+		Write-Host "      running game loop. It does NOT prove content loaded; Shipping has no log to check."
+		Write-Host "      Cook a Development package for the Improvement content smoke."
+		exit 0
+	}
+	Write-Host "FAIL: Shipping package exited after less than $ShipDwellSec s (exit code $ShipExitCode)."
+	Write-Host "      A packaged game that boots keeps running - an early exit means it died on startup"
+	Write-Host "      (missing DLL, missing or corrupt pak, or a fatal during init). No log says which."
+	exit 1
+}
 
 Write-Host "==> Scanning boot log: $BootLog"
 if (-not (Test-Path $BootLog)) {

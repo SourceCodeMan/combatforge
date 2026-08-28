@@ -7,41 +7,67 @@ function Get-ProjectRoot {
 
 function Find-CombatForgeExe {
 	param([string]$Root, [string]$Name = "CombatForge.exe")
-	# Binaries before the 166 KB bootstrap at Packaged\Playtest\Windows\$Name.
-	$Rels = @(
-		"Binaries\Win64\$Name",
-		"Packaged\Playtest\Windows\CombatForge\Binaries\Win64\$Name"
-	)
-	if ($Name -eq "CombatForgeServer.exe") {
-		$Rels += "Packaged\Playtest\WindowsServer\CombatForgeServer.exe"
+	# Two traps, both of which made this return the wrong file or nothing at all:
+	#
+	#  1. A SHIPPING stage names the binary with its config suffix - CombatForge-Win64-Shipping.exe -
+	#     while Development keeps the bare CombatForge.exe. Matching only the bare name found no
+	#     Shipping binary anywhere, so a release package could not be located or smoke-booted.
+	#  2. Every staged archive has a ~166 KB launcher STUB called CombatForge.exe at its root. It
+	#     must be rejected at EVERY step, not just on the final winner: testing only at the end made
+	#     a stub hit early in the list return $null outright, hiding a real binary found later.
+	#
+	# "$Base-Win64-*" rather than "$Base*": the latter would let a CombatForge.exe lookup return
+	# CombatForgeServer.exe out of an archive that contains both.
+	$Base = [IO.Path]::GetFileNameWithoutExtension($Name)
+	$Patterns = @("$Base.exe", "$Base-Win64-*.exe")
+	$IsClient = ($Base -eq "CombatForge")
+
+	$Pick = {
+		param($Items)
+		$Items | Where-Object { $_ -and (-not $IsClient -or $_.Length -ge 10MB) } |
+			Sort-Object Length -Descending | Select-Object -First 1
 	}
-	$Rels += @(
-		"Saved\StagedBuilds\Windows\CombatForge\Binaries\Win64\$Name",
-		"Packaged\Playtest\Windows\$Name",
-		"Saved\StagedBuilds\Windows\$Name"
+
+	# Real Binaries\Win64 locations first; archive roots (where the stub lives) last.
+	$Dirs = @(
+		"Binaries\Win64",
+		"Packaged\Release\Windows\CombatForge\Binaries\Win64",
+		"Packaged\Playtest\Windows\CombatForge\Binaries\Win64",
+		"Packaged\Playtest\WindowsServer\CombatForge\Binaries\Win64",
+		"Saved\StagedBuilds\Windows\CombatForge\Binaries\Win64",
+		"Packaged\Release\Windows",
+		"Packaged\Playtest\Windows",
+		"Packaged\Playtest\WindowsServer",
+		"Saved\StagedBuilds\Windows"
 	)
-	$Winner = $null
-	foreach ($Rel in $Rels) {
-		$P = Join-Path $Root $Rel
-		if (Test-Path $P) { $Winner = (Resolve-Path $P).Path; break }
-	}
-	if (-not $Winner) {
-		foreach ($Scan in @(
-			(Join-Path $Root "Packaged\Playtest"),
-			(Join-Path $Root "Saved\StagedBuilds"),
-			(Join-Path $Root "Binaries")
-		)) {
-			if (Test-Path $Scan) {
-				$F = Get-ChildItem $Scan -Recurse -Filter $Name -ErrorAction SilentlyContinue |
-					Sort-Object Length -Descending | Select-Object -First 1
-				if ($F) { $Winner = $F.FullName; break }
-			}
+	foreach ($Rel in $Dirs) {
+		$D = Join-Path $Root $Rel
+		if (-not (Test-Path $D)) { continue }
+		$Hits = @()
+		foreach ($Pat in $Patterns) {
+			$Hits += @(Get-ChildItem $D -Filter $Pat -File -ErrorAction SilentlyContinue)
 		}
+		$Win = & $Pick $Hits
+		if ($Win) { return $Win.FullName }
 	}
-	if ($Winner -and $Name -eq "CombatForge.exe") {
-		if ((Get-Item $Winner).Length -lt 10MB) { return $null }
+
+	# $Root last: callers such as smoke-package.ps1 pass an archive dir directly, so none of the
+	# project-relative paths above exist under it.
+	foreach ($Scan in @(
+		(Join-Path $Root "Packaged"),
+		(Join-Path $Root "Saved\StagedBuilds"),
+		(Join-Path $Root "Binaries"),
+		$Root
+	)) {
+		if (-not (Test-Path $Scan)) { continue }
+		$Hits = @()
+		foreach ($Pat in $Patterns) {
+			$Hits += @(Get-ChildItem $Scan -Recurse -Filter $Pat -File -ErrorAction SilentlyContinue)
+		}
+		$Win = & $Pick $Hits
+		if ($Win) { return $Win.FullName }
 	}
-	return $Winner
+	return $null
 }
 
 function Get-UnrealEditor {

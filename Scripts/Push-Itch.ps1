@@ -28,13 +28,25 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $BuildDir) { $BuildDir = Join-Path $ProjectRoot "Packaged\Release\Windows" }
 
-# butler: the itch app's copy first, then the standalone download.
+# butler: the itch app's copy first, then PATH, then the standalone download.
+#
+# The app auto-updates butler, so the version directory is a moving target. Pinning it to 15.29.0
+# meant that the moment the app moved to 15.30.0 this candidate silently stopped matching and the
+# hardcoded D:\projects path was the only thing keeping releases working - on any other machine
+# the script would just report "butler not found". Glob the versions directory and take the
+# newest, sorting numerically so 15.9.0 cannot outrank 15.30.0 the way a string sort would.
 if (-not $Butler) {
-    $Candidates = @(
-        (Join-Path $env:APPDATA "itch\broth\butler\versions\15.29.0\butler.exe"),
-        "D:\projects\butler-windows-amd64\butler.exe"
-    )
-    $Butler = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+	$Candidates = @()
+	$BrothRoot = Join-Path $env:APPDATA "itch\broth\butler\versions"
+	if (Test-Path $BrothRoot) {
+		$Candidates += Get-ChildItem $BrothRoot -Directory -ErrorAction SilentlyContinue |
+			Sort-Object -Property @{ Expression = { try { [version]$_.Name } catch { [version]"0.0.0" } } } -Descending |
+			ForEach-Object { Join-Path $_.FullName "butler.exe" }
+	}
+	$OnPath = Get-Command butler -ErrorAction SilentlyContinue
+	if ($OnPath) { $Candidates += $OnPath.Source }
+	$Candidates += "D:\projects\butler-windows-amd64\butler.exe"
+	$Butler = $Candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 }
 if (-not $Butler -or -not (Test-Path $Butler)) {
     throw "butler.exe not found. Pass -Butler <path>."
