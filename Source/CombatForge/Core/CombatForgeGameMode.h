@@ -298,6 +298,12 @@ protected:
 	float BuildPhaseFullEndTime = 0.f;       // restore point if early-end ready count drops
 
 	bool  bSuddenDeathRoundActive = false;   // current round is the sudden-death round
+	/** True only while a DELIBERATE bot removal is destroying controllers — TrimOneBotFromTeam
+	 *  freeing a slot for an incoming human, or RemoveAllBots tearing the roster down. Logout
+	 *  consults this instead of "the leaver was a bot": a trim must not resolve the match, but a
+	 *  bot that disappears for any OTHER reason still has to be able to complete an elimination or
+	 *  abandon condition, rather than leaving the round to time out. (P3-C2) */
+	bool  bBotRemovalInProgress = false;
 	bool  bSuddenDeathPlayed = false;
 	bool  bPendingSuddenDeath = false;       // next round is sudden death
 	bool  bPendingMatchOver = false;         // decided during intermission

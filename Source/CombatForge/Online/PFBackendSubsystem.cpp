@@ -285,8 +285,10 @@ void UPFBackendSubsystem::LoadAuthFromDisk()
 #if PLATFORM_WINDOWS
 		bool bLoadedLegacyPlaintext = false;
 		FString ProtectedToken;
-		if (Root->TryGetStringField(TEXT("protectedToken"), ProtectedToken))
+		const bool bHasProtectedField = Root->TryGetStringField(TEXT("protectedToken"), ProtectedToken);
+		if (bHasProtectedField && !ProtectedToken.IsEmpty())
 		{
+			// A blob that will not decrypt is a corrupt file or another user's — fail closed.
 			if (!UnprotectPlayerToken(ProtectedToken, AuthToken))
 			{
 				UE_LOG(CombatForgeLog, Warning, TEXT("Backend: stored player session could not be decrypted; deleting it"));
@@ -294,11 +296,13 @@ void UPFBackendSubsystem::LoadAuthFromDisk()
 				IFileManager::Get().Delete(*AuthFilePath());
 				return;
 			}
-			}
-			else
-			{
-				bLoadedLegacyPlaintext = Root->TryGetStringField(TEXT("token"), AuthToken);
-			}
+		}
+		else if (!bHasProtectedField)
+		{
+			bLoadedLegacyPlaintext = Root->TryGetStringField(TEXT("token"), AuthToken);
+		}
+		// Present but EMPTY is a schema-2 file written while signed out: no session to load, nothing
+		// to migrate, and emphatically not a reason to delete the file and the display name with it.
 #else
 		Root->TryGetStringField(TEXT("token"), AuthToken);
 #endif
@@ -326,7 +330,12 @@ bool UPFBackendSubsystem::SaveAuthToDisk() const
 		return false;
 	}
 	Root->SetNumberField(TEXT("schema"), 2);
-	Root->SetStringField(TEXT("protectedToken"), ProtectedToken);
+	// Only write the field when there IS a session. An empty "protectedToken" reads back as a blob
+	// that cannot be decrypted, and the fail-closed path above would then delete the whole file.
+	if (!ProtectedToken.IsEmpty())
+	{
+		Root->SetStringField(TEXT("protectedToken"), ProtectedToken);
+	}
 #else
 	Root->SetNumberField(TEXT("schema"), 1);
 	Root->SetStringField(TEXT("token"), AuthToken);
@@ -700,6 +709,10 @@ bool UPFBackendSubsystem::IsWeaponUnlocked(const FString& WeaponId) const
 
 void UPFBackendSubsystem::LinkInstallGuid()
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		return;
+	}
 	const UCombatForgeGameInstance* GI = Cast<UCombatForgeGameInstance>(GetGameInstance());
 	if (!GI || !IsLoggedIn())
 	{
@@ -1181,6 +1194,10 @@ void UPFBackendSubsystem::SendMatchReport(const FString& ReportJson, const FStri
 void UPFBackendSubsystem::SendCasualReport(const FString& MatchId, const FString& Mode, const FString& Map,
 	int32 DurationSec, int32 Elims, int32 Tags, int32 Objective, int32 Builder, bool bCompleted, bool bWon)
 {
+	if (!PFBuild::OfficialServersEnabled)
+	{
+		return;
+	}
 	if (!IsLoggedIn())
 	{
 		return;   // casual XP credits THIS account only — nothing to credit when logged out

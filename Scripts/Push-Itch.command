@@ -114,7 +114,12 @@ echo "Channel: $CHANNEL"
 echo "Version: $USER_VERSION (LAN-only Alpha)"
 STATUS=$("$BUTLER_BIN" status "$CHANNEL")
 echo "$STATUS"
-if printf '%s\n' "$STATUS" | grep -Fq "$USER_VERSION"; then
+# A plain substring test calls 0.1.0-alpha.2 "already pushed" the moment alpha.20 exists, so the
+# match must not be followed by another digit. Escaped with bash substitution rather than sed: the
+# version is 0.1.0-alpha.N so only '.' needs escaping, and there is no second quoting layer for a
+# backslash to get lost in. Still fails SAFE - an ambiguous match refuses to push, never duplicates.
+USER_VERSION_RE=${USER_VERSION//./\\.}
+if printf '%s\n' "$STATUS" | grep -Eq "${USER_VERSION_RE}([^0-9]|\$)"; then
   echo "$USER_VERSION is already on $CHANNEL. Bump PFBuild::NetProtocol for the next public build."
   exit 1
 fi

@@ -25,6 +25,7 @@
 #include "Online/PFBackendSubsystem.h"
 #include "Voting/PFRatingSubsystem.h"
 
+#include "Templates/UnrealTemplate.h"   // TGuardValue (bot-removal latch)
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -574,11 +575,13 @@ void ACombatForgeGameMode::Logout(AController* Exiting)
 
 	// A leaver can complete an elimination victory, an all-ready condition, or an all-voted
 	// condition. Their PlayerState may still sit in PlayerArray here, so the ready/vote scans
-	// take it as an explicit exclusion. Bot Logout in Combat/Live is a format-trim
-	// (TrimOneBotFromTeam) — do not resolve the match on that destroy. A human leave still
-	// resolves BEFORE backfill so a replacement bot cannot mask a real abandon. (P3-C2)
+	// take it as an explicit exclusion. A DELIBERATE bot removal (format trim / roster teardown)
+	// must not resolve the match on that destroy, so it latches bBotRemovalInProgress. Keying off
+	// "the leaver was a bot" instead swallowed EVERY other bot departure — including one that took
+	// the last alive enemy with it, which then left the round to time out rather than end. A human
+	// leave still resolves BEFORE backfill so a replacement bot cannot mask a real abandon. (P3-C2)
 	RecountAlive();
-	if (!bLeaverWasBot)
+	if (!bBotRemovalInProgress)
 	{
 		CheckElimVictory();
 		CheckSkirmishAbandon();   // Skirmish: a whole team leaving ends the match (CheckElimVictory no-ops here)
@@ -2278,6 +2281,9 @@ void ACombatForgeGameMode::TrimOneBotFromTeam(uint8 Team)
 	{
 		return;
 	}
+	// Destroying the controller runs Logout; latch so freeing a slot for an incoming human cannot
+	// resolve the match out from under them.
+	TGuardValue<bool> TrimGuard(bBotRemovalInProgress, true);
 
 	auto DestroyOwnedBot = [](const ACombatForgePlayerState* PS) -> bool
 	{
@@ -2354,6 +2360,8 @@ void ACombatForgeGameMode::RemoveAllBots()
 			}
 		}
 	}
+	// Same latch as the trim: a roster teardown is not a match result.
+	TGuardValue<bool> RemovalGuard(bBotRemovalInProgress, true);
 	for (APFBotController* Bot : Bots)
 	{
 		if (!Bot)

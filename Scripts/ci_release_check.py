@@ -283,6 +283,8 @@ require_guarded(
         "void UPFBackendSubsystem::RequestQuickPlay(",
         "void UPFBackendSubsystem::RequestJoinByCode(",
         "void UPFBackendSubsystem::FleetRegisterIfServer(",
+        "void UPFBackendSubsystem::LinkInstallGuid()",
+        "void UPFBackendSubsystem::SendCasualReport(",
     ),
     "!PFBuild::OfficialServersEnabled",
 )

@@ -117,7 +117,8 @@ Write-Host "Channel: $Channel" -ForegroundColor Cyan
 $Status = (& $Butler status $Channel) -join "`n"
 Write-Host ""
 Write-Host $Status
-if ($Status -match [regex]::Escape($UserVersion)) {
+# (?!\d): a bare substring test makes 0.1.0-alpha.2 "already pushed" the moment alpha.20 exists.
+if ($Status -match ([regex]::Escape($UserVersion) + '(?!\d)')) {
     throw "$UserVersion is ALREADY on $Channel. Bump PFBuild::NetProtocol in CombatForge.h first."
 }
 

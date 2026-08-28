@@ -160,7 +160,10 @@ if ($Config -eq "Development" -and (Test-Path $ClientDir) -and (Test-Path $Conne
 $ClientExe = Get-ChildItem $ClientDir -Recurse -Filter "CombatForge.exe" -File -ErrorAction SilentlyContinue |
 	Sort-Object Length -Descending | Select-Object -First 1
 if (-not $ClientExe) { throw "No CombatForge.exe found under $ClientDir" }
-$GitSha = (& git -C $ProjectRoot rev-parse HEAD 2>$null)
+# No 2>$null here: redirecting a native command's stderr in Windows PowerShell 5.1 wraps each
+# line in a NativeCommandError, which $ErrorActionPreference='Stop' turns into a throw — making
+# the "unknown" fallback below unreachable. Let git print to the console and read its exit code.
+$GitSha = (& git -C $ProjectRoot rev-parse HEAD)
 $Manifest = [ordered]@{
 	product = "CombatForge"
 	configuration = $Config

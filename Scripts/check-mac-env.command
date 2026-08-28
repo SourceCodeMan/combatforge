@@ -172,8 +172,12 @@ else
 fi
 
 # ------------------------------------------------------------------ 6. project Metal target
-if grep -Fqx '+TargetedRHIs=SF_METAL_SM6' "$ENGINE_INI" 2>/dev/null \
-	&& grep -Fqx 'MetalLanguageVersion=8' "$ENGINE_INI" 2>/dev/null; then
+# Tolerate leading/trailing whitespace: -Fqx (exact whole line) disagreed with the substring test
+# in Scripts/ci_release_check.py, so one trailing space or an indented line failed HERE while CI
+# stayed green. (GNU grep also strips a trailing CR; BSD grep on macOS does not, so the anchored
+# form covers a CRLF checkout too - that half is reasoned, not measured on this machine.)
+if grep -Eq '^[[:space:]]*\+TargetedRHIs=SF_METAL_SM6[[:space:]]*$' "$ENGINE_INI" 2>/dev/null \
+	&& grep -Eq '^[[:space:]]*MetalLanguageVersion=8[[:space:]]*$' "$ENGINE_INI" 2>/dev/null; then
 	pass "6/6" "project targets Metal SM6 / Metal 3 for the M2+ Nanite build"
 else
 	fail "6/6" "project is not pinned to Metal SM6 / Metal 3"

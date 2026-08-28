@@ -310,6 +310,11 @@ struct COMBATFORGE_API FPFGridMath
 		{
 			return 0;
 		}
+		// NumLevels-1, deliberately ONE LOWER than WorldToCell's plate cap. A plate is legal at
+		// Level == NumLevels (it crowns flush at HeightCap), but a prop standing on that plate puts
+		// its own AABB 100-220 uu ABOVE the cap and QueryPlacement's height test always denies it.
+		// Snapping the ghost up there would only ever preview an unplaceable piece, so a hit on the
+		// top plate is skipped and the search keeps falling to the highest support a prop can use.
 		const int32 MaxLevel = FMath::Max(0, NumLevels - 1);
 		constexpr double LevelTopToleranceUU = 8.0;   // same slack the height-cap check uses
 		for (const FHitResult& Hit : Hits)   // ordered from Start (highest) downward
