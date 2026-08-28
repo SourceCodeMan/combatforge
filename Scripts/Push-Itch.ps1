@@ -103,6 +103,15 @@ if (-not $Exe.StartsWith($BuildDir + [IO.Path]::DirectorySeparatorChar,
 if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
 	throw "Manifest executable is missing: $Exe"
 }
+# Independent of what the packager chose: a manifest pointing at the ~166 KB staged launcher stub
+# makes the SHA check below verify nothing that matters. alpha.21 shipped with exactly that
+# manifest. Refuse it here too, so an old or hand-edited manifest cannot re-introduce the hole.
+$ExeSize = (Get-Item -LiteralPath $Exe).Length
+if ($ExeSize -lt 10MB) {
+	# Parens around the concatenation: -f binds tighter than +.
+	throw (("Manifest executable is only {0:N1} MB ($ExeRelative) - that is the launcher stub, not the " +
+	        "game binary, so its hash proves nothing. Repackage with a current package-playtest.ps1.") -f ($ExeSize / 1MB))
+}
 $ActualExeHash = (Get-FileHash -LiteralPath $Exe -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($ActualExeHash -ne "$($Manifest.executableSha256)".ToLowerInvariant()) {
 	throw "Executable SHA-256 does not match CombatForge-build.json; refusing a partial/stale upload."

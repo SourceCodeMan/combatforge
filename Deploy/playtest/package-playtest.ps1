@@ -157,9 +157,26 @@ if ($Config -eq "Development" -and (Test-Path $ClientDir) -and (Test-Path $Conne
 	Write-Host "Copied connect.ps1 into client package"
 }
 
-$ClientExe = Get-ChildItem $ClientDir -Recurse -Filter "CombatForge.exe" -File -ErrorAction SilentlyContinue |
+# The archive ROOT CombatForge.exe is a ~166 KB launcher stub. The real game binary lives under
+# CombatForge\Binaries\Win64 and in Shipping carries the config suffix (CombatForge-Win64-Shipping.exe),
+# so a -Filter "CombatForge.exe" recursive search matched ONLY the stub — and the manifest then
+# recorded the stub's hash. That made Push-Itch's "refusing a partial/stale upload" check verify
+# 166 KB of launcher and none of the 151 MB game: a truncated or swapped binary would have sailed
+# through. Prefer Binaries\Win64, take the largest CombatForge*.exe, and refuse a stub outright.
+$BinDir = Join-Path $ClientDir "CombatForge\Binaries\Win64"
+$ClientExe = Get-ChildItem $BinDir -Filter "CombatForge*.exe" -File -ErrorAction SilentlyContinue |
 	Sort-Object Length -Descending | Select-Object -First 1
-if (-not $ClientExe) { throw "No CombatForge.exe found under $ClientDir" }
+if (-not $ClientExe) {
+	$ClientExe = Get-ChildItem $ClientDir -Recurse -Filter "CombatForge*.exe" -File -ErrorAction SilentlyContinue |
+		Sort-Object Length -Descending | Select-Object -First 1
+}
+if (-not $ClientExe) { throw "No CombatForge*.exe found under $ClientDir" }
+if ($ClientExe.Length -lt 10MB) {
+	# Parens around the concatenation: -f binds tighter than +, so ("a{0}" + "b" -f $x) would format
+	# only "b", silently printing a literal {0:N1} and dropping the size.
+	throw (("Largest CombatForge*.exe under $ClientDir is only {0:N1} MB ($($ClientExe.Name)) - that is " +
+	        "the launcher stub, not the game binary. The staged build is incomplete; do not publish it.") -f ($ClientExe.Length / 1MB))
+}
 # No 2>$null here: redirecting a native command's stderr in Windows PowerShell 5.1 wraps each
 # line in a NativeCommandError, which $ErrorActionPreference='Stop' turns into a throw — making
 # the "unknown" fallback below unreachable. Let git print to the console and read its exit code.
