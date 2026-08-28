@@ -8,6 +8,10 @@ Use this for the LAN-only Alpha release candidate.
 - [ ] UE 5.6 installed; project opens without missing map errors
 - [ ] `Content/Maps/L_Graybox` loads
 - [ ] Editor closed if you will package
+- [ ] `python Scripts\ci_release_check.py` passes (same gate CI runs)
+- [ ] `.\Scripts\run-tests.ps1` passes — module build + C++ automation tests. **CI cannot run
+      this**: GitHub's runners have no Unreal install, so compiling and the `CombatForge.*` tests
+      only ever happen on a machine with the engine. A green PR is not a green build.
 
 ## Host (this PC)
 

@@ -1209,3 +1209,161 @@ void UPFBackendSubsystem::SendCasualReport(const FString& MatchId, const FString
 			UE_LOG(CombatForgeLog, Log, TEXT("Backend: casual-report -> %d %s"), Code, *Resp);
 		});
 }
+
+// ---------------------------------------------------------------------------
+// Tests — dev/editor only (WITH_DEV_AUTOMATION_TESTS is 0 in Shipping).
+//
+// These live in this .cpp because ParseIpv4Host / IsRfc1918 / ProtectPlayerToken /
+// UnprotectPlayerToken are deliberately file-local; exporting them purely so a separate test TU
+// could see them would widen the module surface for no runtime benefit.
+//
+// They assert the CONTRACT stated in the comments above — "four 0..255 octets, nothing else",
+// the /24 rule, the RFC1918 ranges, and the DPAPI round-trip/fail-closed promise — NOT whatever
+// the implementation happens to return today. JoinAddress() itself is deliberately untested:
+// it reads the machine's own adapter address, so any assertion about it would pass or fail
+// depending on which network the build agent is on.
+// ---------------------------------------------------------------------------
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "Misc/AutomationTest.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPFBackendIpv4ParsingTest,
+	"CombatForge.Backend.Ipv4HostParsing",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FPFBackendIpv4ParsingTest::RunTest(const FString&)
+{
+	uint32 Out = 0;
+
+	// "Four 0..255 octets, nothing else."
+	TestTrue(TEXT("192.168.1.5 parses"), ParseIpv4Host(TEXT("192.168.1.5"), Out));
+	TestTrue(TEXT("192.168.1.5 == 0xC0A80105"), Out == 0xC0A80105u);
+	TestTrue(TEXT("0.0.0.0 parses"), ParseIpv4Host(TEXT("0.0.0.0"), Out) && Out == 0u);
+	TestTrue(TEXT("255.255.255.255 parses"), ParseIpv4Host(TEXT("255.255.255.255"), Out) && Out == 0xFFFFFFFFu);
+
+	// Everything a directory row could realistically carry that is NOT a bare IPv4 host.
+	const TCHAR* Rejects[] = {
+		TEXT(""),                  // empty row
+		TEXT("192.168.1.5:7777"),  // host:port
+		TEXT("2001:db8::1"),       // IPv6
+		TEXT("box.local"),         // hostname
+		TEXT("1.2.3"),             // too few octets
+		TEXT("1.2.3.4.5"),         // too many
+		TEXT("1.2.3."),            // trailing dot -> empty octet
+		TEXT(".1.2.3"),            // leading dot -> empty octet
+		TEXT("256.0.0.1"),         // octet out of range
+		TEXT("1.2.3.4 "),          // trailing space
+		TEXT(" 1.2.3.4"),          // leading space
+		TEXT("1.2.3.-4"),          // sign
+		TEXT("1.2.3.4a"),          // trailing garbage
+		TEXT("1.2.3.0x4"),         // hex
+	};
+	for (const TCHAR* Reject : Rejects)
+	{
+		TestFalse(FString::Printf(TEXT("rejects '%s'"), Reject), ParseIpv4Host(Reject, Out));
+	}
+
+	// The LAN check compares /24s, not "everything before the last dot" — the bug the
+	// rewritten JoinAddress exists to fix. These two share a last-dot prefix under the old
+	// string rule but are different /24s.
+	uint32 A = 0, B = 0;
+	TestTrue(TEXT("both parse"), ParseIpv4Host(TEXT("192.168.1.5"), A) && ParseIpv4Host(TEXT("192.168.10.5"), B));
+	TestTrue(TEXT("192.168.1.x and 192.168.10.x are different /24s"), (A >> 8) != (B >> 8));
+	TestTrue(TEXT("192.168.1.5 and 192.168.1.200 share a /24"),
+		ParseIpv4Host(TEXT("192.168.1.200"), B) && (A >> 8) == (B >> 8));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPFBackendRfc1918Test,
+	"CombatForge.Backend.Rfc1918Ranges",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FPFBackendRfc1918Test::RunTest(const FString&)
+{
+	auto Is1918 = [this](const TCHAR* Text) -> bool
+	{
+		uint32 Ip = 0;
+		if (!ParseIpv4Host(Text, Ip))
+		{
+			AddError(FString::Printf(TEXT("test input '%s' does not parse"), Text));
+			return false;
+		}
+		return IsRfc1918(Ip);
+	};
+
+	// 10/8, 172.16/12, 192.168/16 — and the addresses just outside each, which is where an
+	// off-by-one turns a public row into a "same LAN" row (or vice versa).
+	TestTrue (TEXT("10.0.0.0 private"),        Is1918(TEXT("10.0.0.0")));
+	TestTrue (TEXT("10.255.255.255 private"),  Is1918(TEXT("10.255.255.255")));
+	TestFalse(TEXT("9.255.255.255 public"),    Is1918(TEXT("9.255.255.255")));
+	TestFalse(TEXT("11.0.0.0 public"),         Is1918(TEXT("11.0.0.0")));
+
+	TestTrue (TEXT("172.16.0.0 private"),      Is1918(TEXT("172.16.0.0")));
+	TestTrue (TEXT("172.31.255.255 private"),  Is1918(TEXT("172.31.255.255")));
+	TestFalse(TEXT("172.15.255.255 public"),   Is1918(TEXT("172.15.255.255")));
+	TestFalse(TEXT("172.32.0.0 public"),       Is1918(TEXT("172.32.0.0")));
+
+	TestTrue (TEXT("192.168.0.0 private"),     Is1918(TEXT("192.168.0.0")));
+	TestTrue (TEXT("192.168.255.255 private"), Is1918(TEXT("192.168.255.255")));
+	TestFalse(TEXT("192.167.255.255 public"),  Is1918(TEXT("192.167.255.255")));
+	TestFalse(TEXT("192.169.0.0 public"),      Is1918(TEXT("192.169.0.0")));
+
+	TestFalse(TEXT("203.0.113.5 public"),      Is1918(TEXT("203.0.113.5")));
+	TestFalse(TEXT("8.8.8.8 public"),          Is1918(TEXT("8.8.8.8")));
+	return true;
+}
+
+#if PLATFORM_WINDOWS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPFBackendTokenAtRestTest,
+	"CombatForge.Backend.PlayerTokenAtRest",
+	EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FPFBackendTokenAtRestTest::RunTest(const FString&)
+{
+	// Round-trip, including a token with non-ASCII in it (the pair goes through UTF-8, so a
+	// byte-length/char-length mix-up would truncate exactly here and nowhere else).
+	const TCHAR* Tokens[] = {
+		TEXT("cf_sess_0123456789abcdef"),
+		TEXT("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJl"),
+		TEXT("tökén-wíth-nön-ascii-éüñ"),
+	};
+	for (const TCHAR* Token : Tokens)
+	{
+		FString Protected;
+		if (!TestTrue(FString::Printf(TEXT("protect '%s'"), Token), ProtectPlayerToken(Token, Protected)))
+		{
+			continue;
+		}
+		TestFalse(TEXT("protected form does not contain the plaintext"), Protected.Contains(Token));
+
+		FString RoundTripped;
+		TestTrue(TEXT("unprotect succeeds"), UnprotectPlayerToken(Protected, RoundTripped));
+		TestEqual(TEXT("round-trips byte-for-byte"), RoundTripped, FString(Token));
+	}
+
+	// Fail closed. LoadAuthFromDisk deletes the stored session on a false return, so every one of
+	// these has to be false rather than a crash or a silent empty-string "success".
+	FString Ignored;
+	TestFalse(TEXT("empty string"),        UnprotectPlayerToken(FString(), Ignored));
+	TestFalse(TEXT("not base64"),          UnprotectPlayerToken(TEXT("!!!not-base64!!!"), Ignored));
+	TestFalse(TEXT("base64 of non-blob"),  UnprotectPlayerToken(FBase64::Encode(TEXT("hello world")), Ignored));
+
+	// A tampered ciphertext must not decrypt: DPAPI authenticates the blob, and a build that
+	// silently accepted edits would let anyone swap in another account's session.
+	FString Good;
+	if (ProtectPlayerToken(TEXT("cf_sess_tamper_probe"), Good))
+	{
+		TArray<uint8> Bytes;
+		if (FBase64::Decode(Good, Bytes) && Bytes.Num() > 8)
+		{
+			Bytes[Bytes.Num() / 2] ^= 0xFF;
+			TestFalse(TEXT("tampered blob is rejected"),
+				UnprotectPlayerToken(FBase64::Encode(Bytes.GetData(), static_cast<uint32>(Bytes.Num())), Ignored));
+		}
+	}
+	return true;
+}
+#endif   // PLATFORM_WINDOWS
+
+#endif   // WITH_DEV_AUTOMATION_TESTS

@@ -1,3 +1,7 @@
+# STATIC checks only. GitHub's runners have no Unreal install, so nothing here compiles C++ or
+# runs the CombatForge.* automation tests — a green run means the text-level invariants hold, not
+# that the build works. The compile/test gate is `.\Scripts\run-tests.ps1` on a machine with the
+# engine, and it is on the release checklist (docs/playtest-checklist.md) for that reason.
 name: Release static checks
 
 on:

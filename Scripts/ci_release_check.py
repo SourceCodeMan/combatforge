@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import subprocess
@@ -26,6 +27,37 @@ def require(condition: bool, message: str) -> None:
 def ini_value(text: str, key: str) -> str | None:
     match = re.search(rf"^{re.escape(key)}[ \t]*=[ \t]*(.*?)[ \t]*$", text, re.MULTILINE)
     return match.group(1) if match else None
+
+
+def function_body(source: str, signature: str) -> str | None:
+    """The function starting at `signature`, up to the first closing brace in column 0.
+
+    Leans on this codebase's UE brace style (a function's final `}` is unindented). That is
+    enough to ask "does THIS entry point carry the guard", which an occurrence count cannot:
+    a count of >= N passes just as happily when a guard is deleted from one handler and
+    duplicated into another, and it never names the one that regressed.
+
+    Returns None when the signature is gone, so a rename fails the gate loudly instead of
+    quietly checking nothing.
+    """
+    start = source.find(signature)
+    if start == -1:
+        return None
+    end = source.find("\n}", start)
+    return source[start:end] if end != -1 else source[start:]
+
+
+def require_guarded(source: str, source_name: str, signatures: tuple[str, ...], guard: str) -> None:
+    for signature in signatures:
+        body = function_body(source, signature)
+        short = signature.split("(")[0]
+        if body is None:
+            FAILURES.append(
+                f"{source_name} no longer defines {short} - rename it in this gate or the guard "
+                f"stops being checked"
+            )
+        elif guard not in body:
+            FAILURES.append(f"{source_name}: {short} must fail closed on {guard}")
 
 
 uproject = json.loads(read("CombatForge.uproject"))
@@ -112,9 +144,23 @@ require(
     "if (PFBuild::OfficialServersEnabled && SaveSlot > 0)" in menu,
     "LAN-only Alpha must not leave local class slots gated by the hidden account service",
 )
-require(
-    menu.count("if (!PFBuild::OfficialServersEnabled)") >= 7,
-    "Dormant official-server handlers must fail closed even if invoked outside the hidden UI",
+# Every dormant handler is still reachable from a stale widget binding, so each has to refuse on
+# its own — checked by name rather than by counting guards file-wide.
+require_guarded(
+    menu,
+    "PFLoadingMenuWidget.cpp",
+    (
+        "void UPFLoadingMenuWidget::RefreshOnlinePanel()",
+        "void UPFLoadingMenuWidget::RebuildServerRows()",
+        "void UPFLoadingMenuWidget::OnLoginClicked()",
+        "void UPFLoadingMenuWidget::OnQuickPlayClicked()",
+        "void UPFLoadingMenuWidget::OnServerListClicked()",
+        "void UPFLoadingMenuWidget::OnNewMatchClicked()",
+        "void UPFLoadingMenuWidget::OnJoinCodeClicked()",
+        "void UPFLoadingMenuWidget::JoinBrowserRow(",
+        "void UPFLoadingMenuWidget::JoinBackendServer(",
+    ),
+    "!PFBuild::OfficialServersEnabled",
 )
 
 windows_push = read("Scripts/Push-Itch.ps1")
@@ -152,6 +198,63 @@ for invariant in (
     require(invariant in mac_push, f"Mac itch Shipping gate is missing {invariant}")
 require("gitCommit" in windows_push, "Windows itch upload must bind the artifact to its Git commit")
 
+# ---------------------------------------------------------------------------
+# Cross-file agreement.
+#
+# Asserting a literal in one file only proves the literal is there. It cannot catch the failure
+# that actually shipped on this branch: Push-Itch.command looked for "CombatForge.app" while
+# Package-Mac.command had started producing "CombatForge-Mac-Shipping.app", and CI was green the
+# whole time because it asserted the same wrong constant the script did. These checks compare two
+# files to each other, so a value can only drift by breaking the pair.
+# ---------------------------------------------------------------------------
+
+# Every .app name Package-Mac.command can emit must be findable by Push-Itch.command's search.
+mac_app_names = set()
+for template in re.findall(r'^[ \t]*APP_NAME="([^"]+)"', mac_package, re.MULTILINE):
+    if "$CONFIG" in template:
+        mac_app_names.update(template.replace("$CONFIG", config) for config in ("Development", "Shipping"))
+    elif "$" not in template:
+        mac_app_names.add(template)
+require(bool(mac_app_names), "Package-Mac.command no longer assigns a literal APP_NAME")
+push_app_patterns = re.findall(r'-name "([^"]+\.app)"', mac_push)
+require(bool(push_app_patterns), "Push-Itch.command no longer searches for a packaged .app")
+for app_name in sorted(mac_app_names):
+    require(
+        any(fnmatch.fnmatchcase(app_name, pattern) for pattern in push_app_patterns),
+        f"Push-Itch.command cannot find {app_name}, which Package-Mac.command produces "
+        f"(its search patterns are {push_app_patterns})",
+    )
+
+# Both push scripts must publish to the same itch project. Which CHANNEL is correct is only
+# knowable from the live itch page, so that stays a human check — see docs/itch-deploy.md.
+push_projects = {
+    label: re.search(r'"([A-Za-z0-9_-]+/[A-Za-z0-9_-]+):[A-Za-z0-9_-]+"', text)
+    for label, text in (("Push-Itch.ps1", windows_push), ("Push-Itch.command", mac_push))
+}
+for label, match in push_projects.items():
+    require(match is not None, f"{label} has no owner/game:channel target")
+if all(push_projects.values()):
+    projects = {label: match.group(1) for label, match in push_projects.items()}
+    require(
+        len(set(projects.values())) == 1,
+        f"the two itch push scripts target different projects: {projects}",
+    )
+
+# The Domination target lives in the GameMode and is repeated as player-facing copy in two
+# widgets. It has already drifted once (200 -> 150), which is the kind of thing players report
+# as a scoring bug rather than a typo.
+domination_match = re.search(r"int32 DominationTargetScore\s*=\s*(\d+)\s*;",
+                             read("Source/CombatForge/Core/CombatForgeGameMode.h"))
+require(domination_match is not None, "DominationTargetScore is no longer machine-readable")
+if domination_match:
+    target = domination_match.group(1)
+    for widget in ("Source/CombatForge/UI/PFLoadingMenuWidget.cpp", "Source/CombatForge/UI/PFLobbyWidget.cpp"):
+        require(
+            f"first to {target}" in read(widget),
+            f"{widget} does not tell the player 'first to {target}' - it disagrees with "
+            f"DominationTargetScore",
+        )
+
 require("+TargetedRHIs=SF_METAL_SM6" in engine_ini,
         "Mac Shipping must target Metal SM6 for the M2+ Nanite build")
 require(ini_value(engine_ini, "MetalLanguageVersion") == "8",
@@ -168,9 +271,20 @@ require(
 )
 
 backend = read("Source/CombatForge/Online/PFBackendSubsystem.cpp")
-require(
-    backend.count("!PFBuild::OfficialServersEnabled") >= 6,
-    "LAN-only Alpha must fail closed across backend initialization, unlocks, directory, and fleet paths",
+require_guarded(
+    backend,
+    "PFBackendSubsystem.cpp",
+    (
+        "void UPFBackendSubsystem::Initialize(",
+        "void UPFBackendSubsystem::BeginDeviceLogin()",
+        "void UPFBackendSubsystem::FetchProfile()",
+        "bool UPFBackendSubsystem::IsWeaponUnlocked(",
+        "void UPFBackendSubsystem::FetchServers(",
+        "void UPFBackendSubsystem::RequestQuickPlay(",
+        "void UPFBackendSubsystem::RequestJoinByCode(",
+        "void UPFBackendSubsystem::FleetRegisterIfServer(",
+    ),
+    "!PFBuild::OfficialServersEnabled",
 )
 require(
     "official service disabled for LAN-only Alpha" in backend,
@@ -202,9 +316,16 @@ for content_dir in ("Bandits", "MarketplaceBlockout", "RifleAnims", "Scene_Wareh
 tracked_raw = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT)
 tracked = [Path(item.decode("utf-8", errors="surrogateescape")) for item in tracked_raw.split(b"\0") if item]
 
-# UE compilation is the authoritative C++ gate, but catch structurally invalid conditional-compilation
-# blocks before a Mac/Windows builder spends hours downloading assets and cooking. This would have caught
-# the malformed DPAPI platform branch that the original syntax-only CI missed.
+# Unbalanced conditional-compilation blocks, caught before a builder spends hours downloading
+# assets and cooking only to fail at the compiler.
+#
+# What this does NOT catch, despite an earlier version of this comment claiming it: the malformed
+# DPAPI branch in LoadAuthFromDisk. That block's #if/#else/#endif nesting is valid and its braces
+# do balance — it is only mis-INDENTED — so no directive checker could ever have flagged it, and a
+# linear brace counter would false-positive on any function whose braces span an #if/#else.
+# Compiling is the only gate that proves C++ correct and GitHub's runners have no engine, so the
+# real check is Scripts/run-tests.ps1 (module build + automation tests) run locally before a
+# release is tagged. Treat this loop as a cheap pre-filter, not as C++ coverage.
 directive_pattern = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b")
 for relative in tracked:
     if relative.suffix.lower() not in {".h", ".hpp", ".c", ".cc", ".cpp"}:
@@ -212,7 +333,10 @@ for relative in tracked:
     if not relative.parts or relative.parts[0] != "Source":
         continue
     stack: list[dict[str, int | bool]] = []
-    for line_number, line in enumerate(read(str(relative)).splitlines(), start=1):
+    # errors="replace": only '#' directives matter here, and one stray non-UTF-8 byte in an
+    # unrelated source file should not take the whole gate down with a decode traceback.
+    source_text = (ROOT / relative).read_text(encoding="utf-8", errors="replace")
+    for line_number, line in enumerate(source_text.splitlines(), start=1):
         match = directive_pattern.match(line)
         if not match:
             continue
