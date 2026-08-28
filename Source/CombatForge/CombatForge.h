@@ -30,7 +30,14 @@ namespace PFBuild
 	 */
 	constexpr bool OfficialServersEnabled = false;
 
-	constexpr int32 NetProtocol = 20;  // alpha.20 — 2026-08-24 Epic release-hardening candidate:
+	constexpr int32 NetProtocol = 21;  // alpha.21 — 2026-08-28 bug-check remediation. No new RPCs and no
+	                                   // replicated layout change; the bump is ship discipline so a player
+	                                   // on alpha.20 cannot LAN into an alpha.21 host. Container SIGTERM
+	                                   // forwarding, single-delivery HTTP failure callback, bot-removal
+	                                   // latch so a bot leaver can still resolve a round, signed-out
+	                                   // Auth.json no longer self-deletes, and the first C++ automation
+	                                   // tests (Scripts/run-tests.ps1). Windows + macOS ship together.
+	                                   // alpha.20 — 2026-08-24 Epic release-hardening candidate:
 	                                   // LAN-only public Alpha: Pass-3 gameplay fixes (#52-#61), Shipping
 	                                   // pipeline unification, DPAPI player-token storage, and dormant fleet
 	                                   // hardening. Official servers are intentionally unavailable; protocol
